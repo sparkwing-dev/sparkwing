@@ -25,6 +25,10 @@ type nativeHostState struct {
 	ClaimStore
 }
 
+func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+	return s.ClaimStore.RenewNodeClaim(ctx, ref, actor)
+}
+
 func (s nativeHostState) ReadSnapshot(ctx context.Context, runID string) (store.RunSnapshot, error) {
 	return s.ClaimStore.ReadSnapshot(ctx, runID)
 }

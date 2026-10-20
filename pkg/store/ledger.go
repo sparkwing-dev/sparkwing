@@ -11,7 +11,10 @@ import (
 
 var ledgerDollarQuote = regexp.MustCompile(`(?i)^\$(?:[a-z_][a-z_0-9]*)?\$`)
 
-var ledgerWrite = regexp.MustCompile(`(?is)\b(insert(?:\s+or\s+\w+)?\s+into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from|merge\s+into|truncate(?:\s+table)?)\s+(?:only\s*)?\(?\s*(?:[a-z_][a-z_0-9$]*\s*\.\s*)?(credit_grants|credit_charges)\b`)
+var ledgerWrite = regexp.MustCompile(`(?is)\b(insert(?:\s+or\s+\w+)?\s+into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from|merge\s+into)\s+(?:only\s*)?\(?\s*(?:[a-z_][a-z_0-9$]*\s*\.\s*)?(credit_grants|credit_charges)\b`)
+
+// TRUNCATE can reach the ledger through another target's CASCADE.
+var ledgerTruncate = regexp.MustCompile(`(?i)(?:^|;)\s*truncate\b`)
 
 type refusedLedgerRow struct{ err error }
 
@@ -19,7 +22,12 @@ func (r refusedLedgerRow) Scan(...any) error { return r.err }
 
 // safety: inspect assembled SQL before execution so a ledger mutation cannot skip its team's lock.
 func refuseLedgerWrite(q string) error {
-	if strings.Contains(strings.ToLower(q), "credit_") && ledgerWrite.MatchString(ledgerSQL(q)) {
+	lower := strings.ToLower(q)
+	if !strings.Contains(lower, "credit_") && !strings.Contains(lower, "truncate") {
+		return nil
+	}
+	statement := ledgerSQL(q)
+	if ledgerWrite.MatchString(statement) || ledgerTruncate.MatchString(statement) {
 		return errors.New("ledger: credit_grants and credit_charges are written only through ledgerTx")
 	}
 	return nil

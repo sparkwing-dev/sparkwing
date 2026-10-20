@@ -25,7 +25,6 @@ type ClaimStore interface {
 }
 
 // ClaimedNodeHost owns source and lease lifetime for an awarded remote job.
-// The owner executes self-claimed jobs directly because its renewal covers them.
 // Source contains the captured process base and live source authority;
 // it must be built by the placement before entry acquisition starts.
 type ClaimedNodeHost struct {
@@ -68,15 +67,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	}
 	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
 	ref := store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}
-	keeper := h.Lease
-	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
-		beat, err := h.Store.RenewNodeClaim(ctx, ref, actor)
-		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
-	}
-	ctx, stop := parent, func() {}
-	if !lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: actor.Generation}, func() bool { return true }) {
-		ctx, stop = startHostKeeper(parent, keeper)
-	}
+	ctx, stop := keepNode(parent, h.Lease, h.Store, ref, actor)
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return h.setupFailure(ctx, input, err)
@@ -221,6 +212,20 @@ func startHostKeeper(parent context.Context, keeper lease.Keeper) (context.Conte
 	case <-ready:
 	}
 	return ctx, stop
+}
+
+func keepNode(parent context.Context, keeper lease.Keeper, state interface {
+	RenewNodeClaim(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
+}, ref store.NodeRef, actor store.Actor,
+) (context.Context, func()) {
+	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: actor.Generation}, func() bool { return true }) {
+		return parent, func() {}
+	}
+	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
+		beat, err := state.RenewNodeClaim(ctx, ref, actor)
+		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
+	}
+	return startHostKeeper(parent, keeper)
 }
 
 var (

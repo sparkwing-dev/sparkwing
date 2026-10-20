@@ -450,7 +450,13 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 		}
 	}
 	input.Entry, input.Storage = entry, run.Storage
-	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: h.Executor.Execute(ctx, input)})
+	workCtx, stop := keepNode(ctx, h.Lease, h.Store, result.Node.Ref, executorActor(input))
+	defer stop()
+	if err := context.Cause(workCtx); err != nil {
+		return err
+	}
+	err = h.Executor.Execute(workCtx, input)
+	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: errors.Join(err, context.Cause(workCtx))})
 }
 
 func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) EvaluationInput {

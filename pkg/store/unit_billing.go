@@ -333,7 +333,7 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	if actor.CapabilityPrefix == "" {
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' AND lease_expires_at>? ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder, now.UnixNano())
+	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,lease_expires_at FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
 	if err != nil {
 		return nil, err
 	}
@@ -344,8 +344,12 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	var awards []held
 	for rows.Next() {
 		var award held
-		if err := rows.Scan(&award.node, &award.generation); err != nil {
+		var expiry int64
+		if err := rows.Scan(&award.node, &award.generation, &expiry); err != nil {
 			return nil, errors.Join(err, rows.Close())
+		}
+		if expiry <= now.UnixNano() {
+			return nil, errors.Join(holderRefusal(), rows.Close())
 		}
 		awards = append(awards, award)
 	}

@@ -33,6 +33,7 @@ type ownerFixture struct {
 	finishErr error
 	acceptErr error
 	renewErr  error
+	nodeRenew func(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
 	accepted  store.PlanAcceptance
 	finished  store.FinishRunRequest
 	changed   chan struct{}
@@ -47,6 +48,14 @@ func (f *ownerFixture) record(value string) {
 func (f *ownerFixture) RenewOwner(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
 	f.record("renew")
 	return store.LeaseBeat{}, f.renewErr
+}
+
+func (f *ownerFixture) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+	if f.nodeRenew != nil {
+		return f.nodeRenew(ctx, ref, actor)
+	}
+	f.record("node_renew")
+	return store.LeaseBeat{}, nil
 }
 
 func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
@@ -447,7 +456,7 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "memo", "admission", "ready", "claim", "execute", "success", "finish"}
+	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "memo", "admission", "ready", "claim", "node_renew", "execute", "success", "finish"}
 	if !reflect.DeepEqual(f.trace, want) {
 		t.Fatalf("trace=%v", f.trace)
 	}
@@ -478,7 +487,7 @@ func TestOwnerHostRetainsIntakeSecretClassifications(t *testing.T) {
 	}
 }
 
-// Self-claimed jobs share the owner's keeper, including cancellation and a lost controller's funded deadline.
+// Self-claimed jobs retain their own funded deadline before the controller can disappear.
 func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 	for _, lost := range []bool{true, false} {
 		name := "funding refused"
@@ -500,40 +509,41 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 				h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 					return OwnerLayerResult{}, nil
 				}
-				var bound atomic.Pointer[time.Time]
+				deadline := time.Now().Add(time.Minute)
 				started := make(chan struct{})
 				stopped := make(chan time.Duration, 1)
 				h.Executor = ownerNodeFunc(func(ctx context.Context, _ NodeInput) error {
-					deadline := time.Now().Add(time.Minute)
-					bound.Store(&deadline)
 					close(started)
 					<-ctx.Done()
 					stopped <- time.Until(deadline)
-					return context.Cause(ctx)
+					return nil
 				})
-				var announced bool
+				var renewed bool
 				h.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
-					deadline := bound.Load()
-					if deadline == nil {
-						return store.LeaseBeat{}, nil
-					}
-					if lost && announced {
+					return store.LeaseBeat{ExpiresAt: time.Now().Add(3 * time.Minute)}, nil
+				}
+				f.nodeRenew = func(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error) {
+					if lost && renewed {
 						return store.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
 					}
-					announced = true
-					return store.LeaseBeat{ExpiresAt: *deadline, CancelRequested: !lost, CancelReason: "out of credits"}, nil
+					cancelled := !lost && renewed
+					renewed = true
+					return store.LeaseBeat{ExpiresAt: deadline, CancelRequested: cancelled, CancelReason: "out of credits"}, nil
 				}
+				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+				defer cancel()
 				done := make(chan error, 1)
-				go func() { _, err := h.Run(t.Context(), in); done <- err }()
+				go func() { _, err := h.Run(ctx, in); done <- err }()
 				<-started
 				left := <-stopped
+				err := <-done
 				if lost && (left > 0 || left < -time.Second) {
 					t.Fatalf("self-claimed job stopped %v before its funded deadline", left)
 				}
 				if !lost && left < 59*time.Second {
 					t.Fatalf("scheduling delayed cancellation by %v", time.Minute-left)
 				}
-				if err := <-done; err == nil {
+				if err == nil {
 					t.Fatal("owner finished normally after its execution stopped")
 				}
 			})

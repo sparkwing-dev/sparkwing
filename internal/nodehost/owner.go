@@ -25,6 +25,7 @@ type OwnerStore interface {
 	Reconciler
 	ExpansionStore
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	RenewNodeClaim(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
