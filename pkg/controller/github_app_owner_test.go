@@ -20,7 +20,7 @@ func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testi
 	})
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
-	want := map[string]runspec.Dispatch{"cloud-build": runspec.DispatchController, "actions-build": runspec.DispatchHost, "pool-build": runspec.DispatchHost}
+	want := map[string]runspec.Dispatch{"cloud-build": runspec.DispatchController, "actions-build": runspec.DispatchHost, "pool-build": runspec.DispatchController}
 	for pipeline, runner := range map[string]string{"cloud-build": "", "actions-build": "github-actions", "pool-build": "pool=prod"} {
 		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"runner": runner}); code != http.StatusOK {
 			t.Fatalf("subscribe %s runner=%q: %d", pipeline, runner, code)
@@ -144,7 +144,7 @@ func TestGitHubAppPoolScheduleReachesItsReservedRunner(t *testing.T) {
 		t.Fatalf("run App schedule = %d %+v", code, started)
 	}
 	var claimed controllerwire.ClaimResponse
-	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+minted.Capability, githubClaimBody(capability.UnitTrigger, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != started.RunID {
+	if code := f.call("POST", "/api/v1/runners/claim", "Bearer "+minted.Capability, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim == nil || claimed.Claim.RunID != started.RunID || claimed.Claim.Unit != capability.UnitPlan {
 		t.Fatalf("prod runner claim of the pool schedule = %d, claimed=%v", code, claimed.Claim != nil)
 	}
 }

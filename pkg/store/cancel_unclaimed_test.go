@@ -133,6 +133,9 @@ func TestRunCancellationReachesClaimedOwner(t *testing.T) {
 				}
 				prefix = issued.Capability.Prefix
 			}
+			if _, err := s.RenewUnit(t.Context(), prefix, true); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := tenant.TransitionRun(t.Context(), change); err != nil {
 				t.Fatal(err)
 			}
