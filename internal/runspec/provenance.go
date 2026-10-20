@@ -54,7 +54,7 @@ func AppProvenance(app AppFacts, pr Optional[PullRequest], pipeline string) (Pro
 		return Provenance{}, errors.New("provenance requires a verified App delivery")
 	}
 	if app.Event == "pull_request" && pr.Set && pr.Value.BaseRef != "" {
-		p.base = NormalizeBranch(pr.Value.BaseRef)
+		p.base = normalizeBranch(pr.Value.BaseRef)
 	}
 	if app.DefaultBranchPush && app.Event == "push" && app.DefaultBranch != "" && app.Ref == "refs/heads/"+app.DefaultBranch {
 		p.trust = TrustVerifiedDefault
@@ -136,9 +136,6 @@ func (p Provenance) Verified() bool {
 	return p.trust == TrustVerified || p.trust == TrustVerifiedDefault
 }
 
-// RepositoryID is GitHub's repository ID for verified provenance and zero otherwise.
-func (p Provenance) RepositoryID() int64 { return p.repositoryID }
-
 // Ref is the ref the run speaks for. Only verified, actions and schedule refs are
 // established by the controller; an asserted ref is the submitter's text.
 func (p Provenance) Ref() string { return p.ref }
@@ -148,9 +145,6 @@ func (p Provenance) SHA() string { return p.sha }
 
 // Pipeline is the pipeline the run speaks for. A child speaks for its parent's pipeline.
 func (p Provenance) Pipeline() string { return p.pipeline }
-
-// Event is the verified GitHub event, empty for every unverified class.
-func (p Provenance) Event() string { return p.event }
 
 // DefaultBranch is the repository's default branch name from a verified delivery.
 func (p Provenance) DefaultBranch() string { return p.defaultBranch }
@@ -217,8 +211,8 @@ func (p *Provenance) UnmarshalJSON(raw []byte) error {
 // same branch. An empty selector matches every branch.
 type BranchSelector []string
 
-// NormalizeBranch strips the refs/heads/ prefix every branch selector compares without.
-func NormalizeBranch(branch string) string {
+// normalizeBranch strips the refs/heads/ prefix every branch selector compares without.
+func normalizeBranch(branch string) string {
 	return strings.TrimPrefix(strings.TrimSpace(branch), "refs/heads/")
 }
 
@@ -226,7 +220,7 @@ func NormalizeBranch(branch string) string {
 func ParseBranchSelector(patterns []string) (BranchSelector, error) {
 	out := make(BranchSelector, 0, len(patterns))
 	for _, pattern := range patterns {
-		pattern = NormalizeBranch(pattern)
+		pattern = normalizeBranch(pattern)
 		if pattern == "" {
 			return nil, errors.New("branch pattern is empty")
 		}
@@ -243,9 +237,9 @@ func (s BranchSelector) Matches(branch string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	branch = NormalizeBranch(branch)
+	branch = normalizeBranch(branch)
 	for _, pattern := range s {
-		if matched, err := path.Match(NormalizeBranch(pattern), branch); err == nil && matched {
+		if matched, err := path.Match(normalizeBranch(pattern), branch); err == nil && matched {
 			return true
 		}
 	}
