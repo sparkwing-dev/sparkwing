@@ -108,11 +108,21 @@ func TestNamespacesAndKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key.Ref.Verified = false
+	key.Ref = blob.RefScope{Ref: "main", Writer: "account/a"}
 	manual, err := blob.MemoNamespace(key)
 	if err != nil || manual == trusted {
 		t.Fatalf("manual/trusted collision: %s, %v", manual, err)
 	}
+	key.Ref.Writer = "account/b"
+	other, err := blob.MemoNamespace(key)
+	if err != nil || other == manual {
+		t.Fatalf("one writer's scope reached another's: %s, %v", other, err)
+	}
+	key.Ref.Writer = ""
+	if _, err := blob.MemoNamespace(key); err == nil {
+		t.Fatal("an unverified scope with no writer is the shared bucket")
+	}
+	key.Ref.Writer = "account/a"
 	key.Ref = blob.RefScope{Ref: "manual:main", Verified: true}
 	literal, err := blob.MemoNamespace(key)
 	if err != nil || literal == manual {
@@ -160,7 +170,7 @@ func TestBinaryProvenance(t *testing.T) {
 
 func TestResolveWriteKeyUsesSealedRef(t *testing.T) {
 	i := identity()
-	a := blob.Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}}
+	a := blob.Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Writer: "account/a"}}}
 	intent := blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: "build", Job: "job", Key: string(digest("input"))}
 	manual, err := blob.ResolveWriteKey(a, intent)
 	if err != nil {
@@ -169,7 +179,7 @@ func TestResolveWriteKeyUsesSealedRef(t *testing.T) {
 	if manual.Team != "team" || manual.Scope.Repo != "gh:123" || manual.Scope.Ref.Verified {
 		t.Fatalf("write key=%+v", manual)
 	}
-	a.Ref.Scope.Verified = true
+	a.Ref.Scope = blob.RefScope{Ref: "main", Verified: true}
 	if _, err := blob.ResolveWriteKey(a, intent); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatal("typed main gained verified authority")
 	}
@@ -226,17 +236,20 @@ func FuzzDepcacheNamespaceKeepsAbsentRefDistinct(f *testing.F) {
 	f.Add("manual:")
 	f.Add("../manual:%2F")
 	f.Fuzz(func(t *testing.T, name string) {
-		key := blob.DepcacheKey{Repo: "local:checkout", Name: "modules", Key: "key"}
+		key := blob.DepcacheKey{Repo: "local:checkout", Name: "modules", Key: "key", Ref: blob.RefScope{Writer: "account/a"}}
 		absent, err := blob.DepcacheNamespace(key)
 		if err != nil {
 			t.Fatal(err)
 		}
-		key.Ref.Verified = true
+		key.Ref = blob.RefScope{Verified: true}
 		if _, err := blob.DepcacheNamespace(key); err == nil {
 			t.Fatal("empty verified ref accepted")
 		}
 		for _, verified := range []bool{true, false} {
 			key.Ref = blob.RefScope{Ref: name, Verified: verified}
+			if !verified {
+				key.Ref.Writer = "account/a"
+			}
 			named, err := blob.DepcacheNamespace(key)
 			if err == nil && (name != "" || verified) && named == absent {
 				t.Fatal("named ref collided with absent ref")

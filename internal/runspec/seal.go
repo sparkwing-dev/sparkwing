@@ -61,7 +61,7 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	if err := ValidateRepoUse(request.Git.Repository.Key, RepoMachineStore); err != nil {
 		return SealedRequest{}, err
 	}
-	sealed, err := clone(SealedRequest{Version: 1, Request: request, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt.UTC(), AllowedPools: facts.AllowedPools, AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings})
+	sealed, err := clone(SealedRequest{Version: 1, Request: request, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt.UTC(), AllowedPools: facts.AllowedPools, AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings, Provenance: facts.Provenance})
 	if err != nil {
 		return SealedRequest{}, err
 	}
