@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -34,5 +35,12 @@ func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, s
 
 type executionLineage struct {
 	runspec.Lineage
+	admissionIdentity
 	Retry *RetrySelection `json:"retry,omitempty"`
+}
+
+// admissionIdentity stays outside source seals and public display lineage.
+type admissionIdentity struct {
+	AdmissionSubject capability.Subject `json:"admission_subject,omitzero"`
+	AdmissionKey     string             `json:"admission_key,omitempty"`
 }

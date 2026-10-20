@@ -31,7 +31,7 @@ func ChildAdmissionKey(ctx context.Context, resolver capability.AuthorityResolve
 		return "", authorityError(apierr.Unavailable, "child root requires the admission transaction")
 	}
 	run, err := readRunTx(ctx, tx, team, parent)
-	return run.Lineage.AdmissionKey, err
+	return run.admission.AdmissionKey, err
 }
 
 func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error) {

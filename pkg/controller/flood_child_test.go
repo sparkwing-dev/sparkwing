@@ -120,11 +120,19 @@ func TestRetryRecordsAdmissionIdentitySeparatelyFromSource(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if retry.Lineage.AdmissionSubject != retrier.Subject {
-				t.Fatalf("retry charged subject = %+v", retry.Lineage.AdmissionSubject)
+			var lineage []byte
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT lineage_json FROM runs WHERE team='a' AND id=?`, retry.ID).Scan(&lineage); err != nil {
+				t.Fatal(err)
 			}
-			if retry.Lineage.AdmissionKey != "capability:"+retrier.Prefix {
-				t.Fatalf("retry admission identity = %q", retry.Lineage.AdmissionKey)
+			var charged struct {
+				Subject capability.Subject `json:"admission_subject"`
+				Key     string             `json:"admission_key"`
+			}
+			if err := json.Unmarshal(lineage, &charged); err != nil {
+				t.Fatal(err)
+			}
+			if charged.Subject != retrier.Subject || charged.Key != "capability:"+retrier.Prefix {
+				t.Fatalf("retry charged another identity: %+v", charged)
 			}
 			if retry.Request.AuthorityRef != source.Request.AuthorityRef || retry.Request.Request.Origin != origin {
 				t.Fatal("retry changed original provenance")

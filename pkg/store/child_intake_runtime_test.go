@@ -37,7 +37,7 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 func TestChildIntakePersistsLineageAndInvocationReplay(t *testing.T) {
 	tenant, request := childIntakeFixture(t)
 	first, err := tenant.AdmitRun(t.Context(), request)
-	if err != nil || first.Replayed || first.OwnerUnit == nil || first.Request.Request.Origin != runspec.OriginChild || first.Request.Request.Lineage != (runspec.Lineage{ParentRunID: "run", ParentJobID: "job", RootRunID: "run", AdmissionSubject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}}) {
+	if err != nil || first.Replayed || first.OwnerUnit == nil || first.Request.Request.Origin != runspec.OriginChild || first.Request.Request.Lineage != (runspec.Lineage{ParentRunID: "run", ParentJobID: "job", RootRunID: "run"}) {
 		t.Fatalf("child admission %q replayed=%t: %v", first.RunID, first.Replayed, err)
 	}
 	for range 2 {
@@ -177,8 +177,8 @@ func TestAppAndScheduleAdmissionRecordTeamBucket(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if run.Lineage.AdmissionKey != "team:a" || run.Lineage.AdmissionSubject != (capability.Subject{Kind: capability.SubjectService, ID: "team:a"}) {
-				t.Fatalf("team admission charged another identity: %+v", run.Lineage)
+			if run.admission.AdmissionKey != "team:a" || run.admission.AdmissionSubject != (capability.Subject{Kind: capability.SubjectService, ID: "team:a"}) {
+				t.Fatalf("team admission charged another identity: %+v", run.admission)
 			}
 		})
 	}

@@ -129,20 +129,22 @@ func (c childRecorderTransport) RoundTrip(r *http.Request) (*http.Response, erro
 
 func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
 	t.Helper()
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	var body []byte
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT lineage_json FROM runs WHERE team='a' AND id=?`, id).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	lineage := map[string]any{}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &lineage); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lineage["parent_run_id"] = parent
+	body, err := json.Marshal(lineage)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := tenant.ReadRun(t.Context(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	run.Lineage.ParentRunID = parent
-	lineage, err := json.Marshal(run.Lineage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id=?`, lineage, id)
+	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id=?`, body, id)
 }
 
 // The same pipeline name in another authorized repository is not a cycle and
