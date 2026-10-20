@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -115,7 +116,7 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 		for _, name := range []string{"ci-token", "deploy-token", "team-token"} {
 			if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, name, row.Request.Provenance.Pipeline(), true); err == nil {
 				out.Secrets = append(out.Secrets, name)
-			} else if err != ErrNotFound {
+			} else if !errors.Is(err, ErrNotFound) {
 				return err
 			}
 		}

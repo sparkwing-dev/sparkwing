@@ -178,7 +178,9 @@ func githubAppRerunIntake(anchor *store.RunRow, user string) githubAppIntake {
 		pr = &sparkwing.PullRequest{Number: int(p.Number), Action: p.Action, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA}
 		branch, env["GITHUB_BASE_REF"] = p.HeadRef, p.BaseRef
 		if id, ok := strings.CutPrefix(string(p.HeadRepo), "gh:"); ok {
-			head, _ = strconv.ParseInt(id, 10, 64)
+			if parsed, err := strconv.ParseInt(id, 10, 64); err == nil {
+				head = parsed
+			}
 		}
 		env["GITHUB_LABEL"] = p.Label
 		if p.Merged.Set {
