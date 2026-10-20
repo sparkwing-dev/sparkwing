@@ -887,3 +887,9 @@ Assigned to an Opus implementer (env 1087).
 - A store has exactly one active controller. The controller holds a PostgreSQL session advisory lock on a dedicated connection for its whole life; if that connection drops or the lock is lost, the process exits immediately (fail-stop) and its supervisor restarts it. A second controller blocks waiting for the lock as a standby. SQLite stores are single-process by construction.
 - In-process state (webhook ordering, storage measurement, rate and flood budgets, live log tails) may assume a single active controller. High availability with several active controllers is a later, separately reviewed project.
 - Supersedes the deleted serve lease and the "concurrent controllers are safe" documentation in WS3.
+
+## 2026-10-19 Korey decision 30: one pod per claim for Kubernetes pools that hold secrets
+
+- On Kubernetes, a self-hosted pool whose trust class is verified-default-only (pools holding reserved secrets) runs every claim in a fresh pod through the existing launcher machinery (the Cloud job pod shape, admission policy and per-claim bootstrap exchange), the way GitHub's Actions Runner Controller runs ephemeral runners. No pool root credential is reachable from job code and nothing persists between claims.
+- Runners on plain machines (VMs, bare metal) keep the same-uid residual, documented plainly as GitHub documents it for self-hosted runners; an ephemeral machine mode may come later.
+- The separate-job-uid option is dropped.
