@@ -61,11 +61,9 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 			paused++
 			reset()
 			mu.Unlock()
-			resumeAdmission := awaitChildAdmission(ctx)
 			var once sync.Once
 			return func() {
 				once.Do(func() {
-					resumeAdmission()
 					mu.Lock()
 					defer mu.Unlock()
 					paused--

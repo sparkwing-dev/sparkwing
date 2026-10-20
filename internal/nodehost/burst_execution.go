@@ -98,7 +98,7 @@ func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, r
 		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
 		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
-	return a.hold(ctx, row.Ref, request, false, func(ctx context.Context, held Lease) error {
+	return a.hold(ctx, row.Ref, request, func(ctx context.Context, held Lease) error {
 		stop()
 		err := <-changed
 		joined = true

@@ -113,12 +113,7 @@ func TestStandaloneParentAwaitsItsChildRun(t *testing.T) {
 	}
 	home, repo := t.TempDir(), initSnapshotRepo(t)
 	t.Setenv("SPARKWING_HOME", home)
-	// One core of machine capacity: the child can start only if its waiting parent hands the slot back.
-	config := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(config, []byte("admission:\n  budget: 1,ignore-external\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SPARKWING_CONFIG", config)
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: ci\n  - name: child\n    entrypoint: child\n", 0o600)
 	writeSDKFixture(t, filepath.Join(repo, ".sparkwing"), `package main

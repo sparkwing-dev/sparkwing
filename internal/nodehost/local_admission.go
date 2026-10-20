@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -69,7 +68,7 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 		Semaphores:   claims, SemaphoresOnly: !parent.resources, Resources: resources,
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
-	err = a.hold(ctx, store.NodeRef{RunID: accepted.RunID}, request, false, func(ctx context.Context, held Lease) error {
+	err = a.hold(ctx, store.NodeRef{RunID: accepted.RunID}, request, func(ctx context.Context, held Lease) error {
 		parent.token = held.Token()
 		completion, err = body(context.WithValue(ctx, localRunLease{}, parent))
 		return err
@@ -105,7 +104,7 @@ func (a *LocalAdmission) ClaimedNode(ctx context.Context, accepted AcceptedRun, 
 		Semaphores: claims, Resources: localResources(row.Execution.Resources.Value),
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
-	return a.hold(ctx, row.Ref, request, len(claims) == 0, func(ctx context.Context, _ Lease) error { return body(ctx) })
+	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }
 
 func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, local bool, body func(context.Context) error) error {
@@ -142,7 +141,7 @@ func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row sto
 	} else {
 		request.RunID = wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID)
 	}
-	return a.hold(ctx, row.Ref, request, !semaphoresOnly && len(claims) == 0, func(ctx context.Context, _ Lease) error { return body(ctx) })
+	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }
 
 func admissionSpec(accepted AcceptedRun) (runspec.Spec, error) {
@@ -187,10 +186,7 @@ func (a *LocalAdmission) holderRunID(run string) string {
 	return string(wingwire.RemoteRunID(a.Controller, run))
 }
 
-// hold keeps request's lease for body. A yieldable lease is one job's machine
-// capacity with no concurrency claims: body may hand it back while the job
-// waits on a child run, which otherwise could never be admitted beside it.
-func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request wingwire.AdmissionRequest, yieldable bool, body func(context.Context, Lease) error) (err error) {
+func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request wingwire.AdmissionRequest, body func(context.Context, Lease) error) (err error) {
 	if err := context.Cause(parent); err != nil {
 		return err
 	}
@@ -206,162 +202,31 @@ func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request
 		}
 		return localAdmissionFailure(errors.Join(context.Cause(ctx), err))
 	}
-	lease := &heldAdmission{admission: a, ref: ref, request: request, cancel: cancel}
-	lease.attach(held)
-	defer func() {
-		err = errors.Join(err, localAdmissionFailure(context.Cause(ctx)), lease.close())
-	}()
-	if err == nil && context.Cause(ctx) == nil {
-		bodyCtx := ctx
-		if yieldable {
-			bodyCtx = context.WithValue(ctx, heldAdmissionKey{}, lease)
-		}
-		err = body(bodyCtx, held)
-	}
-	return err
-}
-
-type heldAdmissionKey struct{}
-
-// resumePriority puts a job returning from a child wait ahead of every new
-// request, so the parent is not starved by work queued while it waited.
-const resumePriority = math.MaxInt32
-
-// heldAdmission is one job's lease, which it hands back while waiting on child runs.
-type heldAdmission struct {
-	admission *LocalAdmission
-	ref       store.NodeRef
-	request   wingwire.AdmissionRequest
-	cancel    context.CancelCauseFunc
-
-	mu      sync.Mutex
-	held    Lease
-	joined  chan error
-	waiting int
-	errs    []error
-}
-
-func (h *heldAdmission) attach(held Lease) {
 	joined := make(chan error, 1)
-	h.held, h.joined = held, joined
 	go func() {
 		err := held.Watch(func(evicted wingwire.Evicted) {
-			h.lost(held, &AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
+			cancel(&AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
 		}, func(stopped wingwire.Cancel) {
-			h.lost(held, &lease.CancelError{Reason: stopped.Reason})
+			cancel(&lease.CancelError{Reason: stopped.Reason})
 		})
 		if err != nil {
 			if errors.Is(err, wingdclient.ErrReattachRejected) {
-				h.lost(held, &AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
+				cancel(&AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
 			} else {
-				h.lost(held, err)
+				cancel(err)
 			}
 		}
 		joined <- err
 	}()
-}
-
-// lost cancels the job only for the lease it still holds; a lease handed
-// back for a child wait ends its watch without taking authority away.
-func (h *heldAdmission) lost(held Lease, cause error) {
-	h.mu.Lock()
-	current := h.held == held
-	h.mu.Unlock()
-	if current {
-		h.cancel(cause)
+	defer func() {
+		releaseErr := held.Release()
+		watchErr := <-joined
+		err = errors.Join(err, localAdmissionFailure(context.Cause(ctx)), releaseErr, watchErr)
+	}()
+	if err == nil && context.Cause(ctx) == nil {
+		err = body(ctx, held)
 	}
-}
-
-// release hands back held outside h.mu, because its watch reports through lost.
-func (h *heldAdmission) release() error {
-	h.mu.Lock()
-	held, joined := h.held, h.joined
-	h.held, h.joined = nil, nil
-	h.mu.Unlock()
-	if held == nil {
-		return nil
-	}
-	releaseErr := held.Release()
-	return errors.Join(releaseErr, <-joined)
-}
-
-// wait hands the lease back until the returned resume, which takes it back
-// ahead of new work. Concurrent waits share one release.
-func (h *heldAdmission) wait() (resume func(context.Context)) {
-	h.mu.Lock()
-	h.waiting++
-	first := h.waiting == 1
-	h.mu.Unlock()
-	if first {
-		if err := h.release(); err != nil {
-			h.mu.Lock()
-			h.errs = append(h.errs, err)
-			h.mu.Unlock()
-		}
-	}
-	var once sync.Once
-	return func(ctx context.Context) {
-		once.Do(func() { h.resume(ctx) })
-	}
-}
-
-func (h *heldAdmission) resume(ctx context.Context) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.waiting--
-	if h.held != nil {
-		return
-	}
-	request := h.request
-	request.Priority = resumePriority
-	held, err := h.admission.acquire(ctx, h.cancel, h.ref, request)
-	// The daemon applies a release on its own connection, so the lease handed
-	// back moments ago can still hold this participant's name.
-	for attempt := 0; held == nil && releasePending(err) && attempt < resumeRetries; attempt++ {
-		timer := time.NewTimer(resumeRetryDelay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			err = context.Cause(ctx)
-		case <-timer.C:
-			held, err = h.admission.acquire(ctx, h.cancel, h.ref, request)
-		}
-	}
-	if held == nil {
-		if err == nil {
-			err = errors.New("local admission returned no lease")
-		}
-		h.cancel(localAdmissionFailure(errors.Join(context.Cause(ctx), err)))
-		return
-	}
-	h.attach(held)
-}
-
-const (
-	resumeRetries    = 100
-	resumeRetryDelay = 10 * time.Millisecond
-)
-
-func releasePending(err error) bool {
-	var refused *wingdclient.AdmissionError
-	return errors.As(err, &refused) && refused.Key == "duplicate"
-}
-
-func (h *heldAdmission) close() error {
-	err := h.release()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return errors.Join(append(h.errs, err)...)
-}
-
-// awaitChildAdmission hands a yieldable job lease back while ctx's job waits on a child run.
-func awaitChildAdmission(ctx context.Context) func() {
-	held, ok := ctx.Value(heldAdmissionKey{}).(*heldAdmission)
-	if !ok {
-		return func() {}
-	}
-	resume := held.wait()
-	return func() { resume(ctx) }
+	return err
 }
 
 func localAdmissionFailure(err error) error {
