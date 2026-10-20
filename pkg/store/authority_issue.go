@@ -248,7 +248,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant lacks the award grant")
 	}
 	launcher := claimant.Capability.Subject.Kind == capability.SubjectService && claimant.Capability.Binding.Kind == capability.BindingNone && slices.Contains(claimant.Capability.Grants, capability.ClaimsLaunch)
-	if spec.Delivery == capability.DeliveryBootstrap && (!launcher || !slices.Contains(capability.BootstrapUnits, spec.Unit)) {
+	if spec.Delivery == capability.DeliveryBootstrap && (!launcher || !slices.Contains(capability.BootstrapUnits(), spec.Unit)) {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "bootstrap requires launcher authority")
 	}
 	row, err := loadAwardRowTx(ctx, tx, spec)
@@ -364,7 +364,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	}
 	c.Data = awardDataScope(row, c)
 	if spec.Delivery == capability.DeliveryBootstrap {
-		c.Grants = slices.Clone(capability.BootstrapGrants)
+		c.Grants = slices.Clone(capability.BootstrapGrants())
 	}
 	reservation, err := newCreditID("award")
 	if err != nil {

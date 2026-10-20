@@ -18,11 +18,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func credentialSessionServer(t *testing.T) (*Server, string) {
+func credentialSessionServer(t *testing.T, opts ...store.Option) (*Server, string) {
 	t.Helper()
-	e, _ := engineRuntimeStore(t)
+	e, _ := engineRuntimeStore(t, opts...)
 	s := e.Store
 	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
@@ -132,7 +133,7 @@ func TestCredentialIssuanceRechecksMembershipInTransaction(t *testing.T) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}
 			var count int
-			if err := s.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 0 {
+			if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("issued=%d err=%v", count, err)
 			}
 		})
@@ -142,7 +143,7 @@ func TestCredentialIssuanceRechecksMembershipInTransaction(t *testing.T) {
 func TestCredentialIssuanceValidatesEveryGrant(t *testing.T) {
 	s, raw := credentialSessionServer(t)
 	h := s.Handler()
-	for _, grant := range capability.Grants {
+	for _, grant := range capability.Grants() {
 		t.Run(string(grant), func(t *testing.T) {
 			body, err := json.Marshal(credentialRequest{Grants: []capability.Grant{grant}})
 			if err != nil {
@@ -187,7 +188,7 @@ func TestCredentialIssuanceRefusedGrantProperty(t *testing.T) {
 		}
 		w := credentialRequestHTTP(t, h, raw, string(body), false)
 		var count int
-		if err := s.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil {
+		if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		var failure apierr.Envelope

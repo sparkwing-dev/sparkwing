@@ -95,7 +95,7 @@ func TestStandingRequestFromBillingToOperatorDecision(t *testing.T) {
 		t.Fatalf("grant = %d", code)
 	}
 	var approved teamStanding
-	if code := f.call("GET", "/api/v1/team/billing", owner.auth, nil, &approved); code != http.StatusOK || approved.Standing.Tier != "High" || approved.Standing.Request == nil || approved.Standing.Request.ID != made.ID || approved.Standing.Request.State != "approved" || approved.Standing.CanRequest {
+	if code := f.call("GET", "/api/v1/team/billing", owner.auth, nil, &approved); code != http.StatusOK || approved.Standing.Tier != "High" || approved.Standing.Request == nil || approved.Standing.Request.ID != made.ID || approved.Standing.Request.State != "approved" || !approved.Standing.CanRequest {
 		t.Fatalf("requester view after the grant = %d %+v", code, approved.Standing)
 	}
 	if code := f.call("GET", queue, operator.auth, nil, &listed); code != http.StatusOK || len(listed.Requests) != 0 {

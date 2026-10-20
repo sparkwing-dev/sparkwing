@@ -48,6 +48,10 @@ func claimCardTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fin
 	if err != nil || warning != "" {
 		return cardRefusal{reason: CardRefusedWarning, warning: warning}, err
 	}
+	return claimCardPinTx(ctx, tx, team, paymentIntent, fingerprint, now)
+}
+
+func claimCardPinTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, fingerprint string, now time.Time) (cardRefusal, error) {
 	if fingerprint == "" {
 		return cardRefusal{}, nil
 	}

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestIdentityFixtureUsesPersistedSessionAuthority(t *testing.T) {
@@ -18,10 +20,10 @@ func TestIdentityFixtureUsesPersistedSessionAuthority(t *testing.T) {
 		if owner {
 			role = "owner"
 		}
-		if _, err := b.st.DB().Exec(`DELETE FROM memberships WHERE team='default' AND account_id='alice'`); err != nil {
+		if _, err := teststore.SQL(t, b.st).Exec(`DELETE FROM memberships WHERE team='default' AND account_id='alice'`); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.st.DB().Exec(`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice',?,1)`, role); err != nil {
+		if _, err := teststore.SQL(t, b.st).Exec(`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice',?,1)`, role); err != nil {
 			t.Fatal(err)
 		}
 		code := f.call("POST", "/api/v1/team/invitations", sessionAuth(b.sessID), map[string]string{"email": "invalid", "role": "reader"}, nil)
@@ -33,7 +35,7 @@ func TestIdentityFixtureUsesPersistedSessionAuthority(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.st.DB().Exec(`DELETE FROM memberships WHERE team='default' AND account_id='alice'`); err != nil {
+	if _, err := teststore.SQL(t, b.st).Exec(`DELETE FROM memberships WHERE team='default' AND account_id='alice'`); err != nil {
 		t.Fatal(err)
 	}
 	if w := b.serve(b.cookieRequest("GET", "/api/v1/team/members", "")); w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {

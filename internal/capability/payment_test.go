@@ -62,6 +62,7 @@ func TestPaymentProof(t *testing.T) {
 			want := PaymentEvent{EventID: "evt_fixture", CheckoutID: "cs_fixture", PaymentID: "pi_fixture", Currency: "usd", AmountMinor: 1200, Mode: PaymentTest, Kind: tc.want}
 			if tc.want == PaymentCheckoutPaid {
 				want.ThreeDS, want.Fingerprint = "authenticated", "fp_ch_fixture"
+				want.LiabilityShift = true
 			}
 			if proof == nil || proof.Event() != want {
 				t.Fatalf("proof=%+v want=%+v", proof, want)
@@ -158,9 +159,10 @@ func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) 
 		proof, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, testPaymentScope)
 		return proof, headers.version, err
 	}
-	for _, result := range []string{"authenticated", "attempt_acknowledged", ""} {
+	for _, result := range []string{"authenticated", "attempt_acknowledged", "failed", "processing_error", "exempted", "not_supported", ""} {
 		proof, versions, err := verify(paymenttest.Provider{}.SettledCheckout("pi_fixture", false, result))
-		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().Fingerprint != "fp_ch_fixture" {
+		shifted := result == "authenticated" || result == "attempt_acknowledged"
+		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted || proof.Event().Fingerprint != "fp_ch_fixture" {
 			t.Fatalf("%q: proof=%+v err=%v", result, proof, err)
 		}
 		if len(versions) != 2 || versions[0] != PaymentProviderAPIVersion || versions[1] != PaymentProviderAPIVersion {

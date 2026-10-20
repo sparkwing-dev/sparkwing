@@ -132,7 +132,7 @@ function StandingQueue() {
   return (
     <Panel
       title="Standing requests"
-      hint="Oldest first. Approving grants the team High standing; declining sends the reason to its owners."
+      hint="Requests for higher tiers, higher limits or larger payments, oldest first. Contact the requester about payment needs. Granting High standing does not raise the maximum per payment; declining sends the reason to its owners."
     >
       {error ? (
         <p role="alert" className="px-4 pt-3 text-sm text-red-400">

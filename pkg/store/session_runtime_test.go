@@ -217,7 +217,7 @@ func TestSessionMembershipChangesApplyWithoutCachedGrantsProperty(t *testing.T) 
 				}
 				grants := got.Authorities[0].Principal.Capability.Grants
 				for _, grant := range grants {
-					if !slices.Contains(capability.Grants, grant) {
+					if !slices.Contains(capability.Grants(), grant) {
 						t.Fatalf("session acquired an unknown grant: %s", grant)
 					}
 				}

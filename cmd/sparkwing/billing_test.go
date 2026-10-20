@@ -38,14 +38,12 @@ func billingCLIConnect(t *testing.T, role string, grants ...capability.Grant) (f
 			t.Error(err)
 		}
 	})
-	if err := state.AsOperator().CreateTeam(t.Context(), "billing-test"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, state, "billing-test")
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('billing-test','member','` + role + `',1)`,
 	} {
-		if _, err := state.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -162,7 +160,7 @@ func TestBillingCLIRefillChangesOnlyTheGivenSettings(t *testing.T) {
 		}
 		return r
 	}
-	if r := read(); r.Enabled || r.MinAmountCents != 1000 || r.MaxAmountCents != 500_000 || r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10_000 {
+	if r := read(); r.Enabled || r.MinAmountCents != 1000 || r.MaxAmountCents != 100_000 || r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10_000 {
 		t.Fatalf("default refill: %+v", r)
 	}
 	var out bytes.Buffer
@@ -171,7 +169,7 @@ func TestBillingCLIRefillChangesOnlyTheGivenSettings(t *testing.T) {
 	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || refusal.Details["reason"] != "no_card" {
 		t.Fatalf("refill without a card: %v", err)
 	}
-	if _, err := state.DB().ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1', card_payment_method='pm_1', card_fingerprint='fp_1' WHERE name='billing-test'`); err != nil {
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1', card_payment_method='pm_1', card_fingerprint='fp_1' WHERE name='billing-test'`); err != nil {
 		t.Fatal(err)
 	}
 	if r := read("--enable", "--threshold", "$10", "--amount", "25.50", "--week-limit", "1,000"); !r.Enabled || r.ThresholdCents != 1000 || r.AmountCents != 2550 || r.WeekLimitCents != 100_000 || r.MonthLimitCents != 0 {
@@ -192,7 +190,7 @@ func TestBillingCLIRefillChangesOnlyTheGivenSettings(t *testing.T) {
 		t.Fatal("parsed --enable with --disable")
 	}
 	out.Reset()
-	if err := runBillingArgs(t.Context(), []string{"refill", "--profile", "work", "-o", "pretty"}, &out, connect); err != nil || !strings.Contains(out.String(), "Automatic refill: off\nThreshold: $10\nAmount: $25.50 ($10 to $5000)\nTeam limits: $1000 a week, none a month\nRefill caps: $50 per refill, 1 a day, $100 a week\n") {
+	if err := runBillingArgs(t.Context(), []string{"refill", "--profile", "work", "-o", "pretty"}, &out, connect); err != nil || !strings.Contains(out.String(), "Automatic refill: off\nThreshold: $10\nAmount: $25.50 ($10 to $1000)\nTeam limits: $1000 a week, none a month\nRefill caps: $50 per refill, 1 a day, $100 a week\n") {
 		t.Fatalf("pretty refill: %q %v", out.String(), err)
 	}
 }
@@ -204,5 +202,20 @@ func TestBillingCLIRefillRefusesMembers(t *testing.T) {
 	var refusal *apierr.Error
 	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || out.Len() != 0 {
 		t.Fatalf("editor refill: %q %v", out.String(), err)
+	}
+}
+
+func TestBillingCLIHighTeamRequestsLargerPayments(t *testing.T) {
+	connect, state := billingCLIConnect(t, "owner", capability.RunsRead, capability.TeamAdmin)
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE teams SET billing_trust='granted' WHERE name='billing-test'`); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runBillingArgs(t.Context(), []string{"request-tier", "--tier", "high", "--message", "We need $2,000 payments.", "--profile", "work", "-o", "json"}, &out, connect); err != nil {
+		t.Fatal(err)
+	}
+	open, err := state.OpenStandingRequests(t.Context(), 10)
+	if err != nil || len(open) != 1 || open[0].Message != "We need $2,000 payments." {
+		t.Fatalf("High team's contact queue=%+v: %v", open, err)
 	}
 }

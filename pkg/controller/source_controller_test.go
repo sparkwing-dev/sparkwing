@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type auditedSourceCipher struct {
@@ -22,7 +23,7 @@ type auditedSourceCipher struct {
 func (c *auditedSourceCipher) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	c.opens++
 	var count int
-	if err := c.store.DB().QueryRow(`SELECT COUNT(*) FROM git_credential_releases WHERE team=?`, team).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(c.t, c.store).QueryRow(`SELECT COUNT(*) FROM git_credential_releases WHERE team=?`, team).Scan(&count); err != nil || count != 1 {
 		c.t.Fatalf("decrypted before audit commit: count=%d err=%v", count, err)
 	}
 	return c.Cipher.OpenBound(purpose, team, name, scope, shared, masked, envelope)

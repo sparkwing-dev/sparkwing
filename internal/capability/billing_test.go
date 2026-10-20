@@ -13,7 +13,7 @@ func TestOperationalBillingClassification(t *testing.T) {
 		capability.UnitPlan:    capability.BillingPlan,
 		capability.UnitEval:    capability.BillingEval,
 	}
-	for _, mapping := range capability.UnitBillingMappings {
+	for _, mapping := range capability.UnitBillingMappings() {
 		billing, ok := want[mapping.Operational]
 		if !ok || billing != mapping.Billing {
 			t.Errorf("invalid or duplicate billing mapping: %+v", mapping)
@@ -24,4 +24,3 @@ func TestOperationalBillingClassification(t *testing.T) {
 		t.Fatalf("unmapped operational units: %v", want)
 	}
 }
-

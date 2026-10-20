@@ -4,6 +4,7 @@ package storetest
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,13 +142,13 @@ func (tg *Target) TryOpen() (*store.Store, error) {
 
 func (tg *Target) open() (*store.Store, error) {
 	if tg.dialect == store.DialectPostgres {
-		st, err := store.OpenPostgres(context.Background(), tg.dsn)
+		st, err := teststore.OpenPostgres(context.Background(), tg.dsn)
 		if err == nil {
 			err = configure(st)
 		}
 		return st, err
 	}
-	st, err := store.Open(tg.path)
+	st, err := teststore.OpenExisting(tg.path)
 	if err == nil {
 		err = configure(st)
 	}
@@ -160,11 +161,11 @@ func newSchema(t *testing.T, baseDSN string) string {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	admin, err := store.OpenPostgres(ctx, baseDSN)
+	admin, err := sql.Open("pgx", baseDSN)
 	if err != nil {
 		t.Fatalf("open admin postgres: %v", err)
 	}
-	if _, err := admin.DB().ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
+	if _, err := admin.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
 		if closeErr := admin.Close(); closeErr != nil {
 			t.Logf("close admin postgres: %v", closeErr)
 		}
@@ -177,12 +178,12 @@ func newSchema(t *testing.T, baseDSN string) string {
 	t.Cleanup(func() {
 		// safety: t.Context is cancelled before Cleanup runs, so the drop
 		// needs a context of its own.
-		cleanup, err := store.OpenPostgres(context.Background(), baseDSN)
+		cleanup, err := sql.Open("pgx", baseDSN)
 		if err != nil {
 			t.Errorf("open postgres to drop schema %s: %v", schema, err)
 			return
 		}
-		if _, err := cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`); err != nil {
+		if _, err := cleanup.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`); err != nil {
 			t.Errorf("drop schema %s: %v", schema, err)
 		}
 		if err := cleanup.Close(); err != nil {
@@ -265,6 +266,6 @@ func configure(st *store.Store) error {
 		return err
 	}
 	st.SetSessionKeyCipher(cipher)
-	_, err = st.DB().Exec(Rebind(st, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`), []byte(`"test"`))
+	_, err = teststore.Exec(context.Background(), st, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`))
 	return err
 }

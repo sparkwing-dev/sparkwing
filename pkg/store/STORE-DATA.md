@@ -358,8 +358,7 @@ Allowance-driven physical eviction still requires the final record/log adapter.
 models and `DefaultStorageReservationTTL` are removed. Tenant blob tickets own
 public reserve, verified commit and abort. The controller's log-retention probe
 uses `StorageStanding` and slot availability without mutating storage rows.
-Legacy direct-upload and node-log reservation writers are removed. The pod log
-sink consumes `logseg.Data` through `SubjectUploader`. The old segment-signing
+Legacy direct-upload and node-log reservation writers are removed. The old segment-signing
 client, upload wire types and unused engine-log wrapper are removed. Missing
 authenticated bindings report an error while pod stdout remains available.
 Production signing, verification and recording adapters remain with the controller,
@@ -444,9 +443,17 @@ Refill reservations persist amount, customer, payment method and receipt email.
 Unbound reservations may expire or be explicitly replaced. A bound payment
 keeps the team's single refill slot until its signed outcome arrives. Every
 bound payment counts against refill limits, including refusals and refunds.
+Resolved outcomes enter their spending windows when recorded, so delayed
+settlement cannot age a new charge out of its limits.
 `credit_checkouts.refill_blocked` records an active failure independently of
 its historical decline text. An accepted card save or successful Add funds
 clears that marker in the same transaction. Settings changes leave it blocked.
+
+`credit_checkouts.liability_shift` snapshots the first verified paid outcome,
+including a refused payment, and later deliveries cannot change it. A fraud
+warning keeps protected credit under a payment-specific team hold. Without
+protection, it reverses the credit and queues a refund. Both paths block the
+card deployment-wide. Held credit cannot fund storage growth or retention.
 
 The unused `ErrMeteredInProcessNodes`, `LiveLogOffsetHeader`,
 `LiveLogAttemptHeader` and `LogWatchHeader` exports are removed. Tagged log

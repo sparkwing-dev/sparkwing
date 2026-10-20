@@ -13,7 +13,7 @@ import (
 func TestHoldReasonsSurvivePersistenceAsValidText(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()
-	if err := s.AsOperator().CreateTeam(ctx, "acme"); err != nil {
+	if err := s.AsOperator().TestOnlyCreateTeam(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	acme, err := s.ForTeam(ctx, "acme")

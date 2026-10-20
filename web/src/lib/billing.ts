@@ -38,6 +38,7 @@ export interface Billing {
   credits_per_dollar: number;
   slice_seconds: number;
   purchase_min_cents: number;
+  purchase_max_cents: number;
   trusted: boolean;
   rate_table: RateRow[];
   storage_rate_micro_per_gb_day: number;
@@ -90,10 +91,10 @@ export function standingRequestLength(message: string): number {
   return [...message.trim()].length;
 }
 
-// standingRequestProblem says why a tier request cannot be sent yet, or "".
+// standingRequestProblem says why a billing request cannot be sent yet, or "".
 export function standingRequestProblem(message: string): string {
   const text = message.trim();
-  if (text === "") return "Tell us what the team runs and why it needs more capacity.";
+  if (text === "") return "Tell us about the higher limits or larger payments the team needs.";
   if (standingRequestLength(text) > standingMessageLimit)
     return `Keep the message to ${standingMessageLimit} characters.`;
   return "";
@@ -146,7 +147,7 @@ export interface SpendLimits {
 }
 
 // RefillCaps are the stolen-card brake on refills, set by payment history alone; a zero
-// field is no cap, which leaves only the team's own limits.
+// field leaves the maximum per payment and the team's own limits.
 export interface RefillCaps {
   amount_cents: number;
   per_day: number;
@@ -198,6 +199,8 @@ export function holdNotice(cause: string | undefined): string {
 // refillLimitReason says which limit stops the next automatic refill.
 export function refillLimitReason(r: Refill): string {
   switch (r.limit) {
+    case "payment_size":
+      return `Each payment is at most ${fmtCents(r.max_amount_cents)}. Contact us through the billing request form for larger payments.`;
     case "standing_size":
       return `The refill amount is above the ${fmtCents(r.caps.amount_cents)} per-refill cap of this team's payment history.`;
     case "standing_daily":
@@ -231,12 +234,13 @@ export function refillProblem(
   s: { enabled: boolean; threshold: number | null; amount: number | null; week: number | null; month: number | null },
   r: Pick<Refill, "min_amount_cents" | "max_amount_cents">,
 ): string | null {
+  if (r.max_amount_cents <= 0) return "Payment limits are unavailable. Reload billing before changing refills.";
   if (s.threshold === null) return "Enter the balance that starts a refill in dollars.";
   if (s.week === null || s.month === null) return "Enter limits in dollars, or 0 for none.";
   if (s.amount === null) return "Enter the refill amount in dollars.";
   if (s.enabled || s.amount !== 0) {
     if (s.amount < r.min_amount_cents) return `A refill is at least ${fmtCents(r.min_amount_cents)}.`;
-    if (s.amount > r.max_amount_cents) return `A refill is at most ${fmtCents(r.max_amount_cents)}.`;
+    if (s.amount > r.max_amount_cents) return `Each payment is at most ${fmtCents(r.max_amount_cents)}. Contact us through the billing request form for larger payments.`;
   }
   return null;
 }
@@ -420,10 +424,12 @@ export function creditsForCents(cents: number, u: Units): number {
   return Math.floor((cents * u.credits_per_dollar) / 100);
 }
 
-export function purchaseProblem(cents: number | null,b: Pick<Billing,"purchase_min_cents">): string | null {
- if (cents===null || !Number.isSafeInteger(cents)) return "Enter a dollar amount.";
- if (cents<b.purchase_min_cents) return `Minimum purchase ${fmtCents(b.purchase_min_cents)}.`;
- return null;
+export function purchaseProblem(cents: number | null, b: Pick<Billing, "purchase_min_cents" | "purchase_max_cents">): string | null {
+  if (b.purchase_max_cents <= 0) return "Payment limits are unavailable. Reload billing before buying credits.";
+  if (cents === null || !Number.isSafeInteger(cents)) return "Enter a dollar amount.";
+  if (cents < b.purchase_min_cents) return `Minimum purchase ${fmtCents(b.purchase_min_cents)}.`;
+  if (cents > b.purchase_max_cents) return `Each payment is at most ${fmtCents(b.purchase_max_cents)}. Contact us through the billing request form for larger payments.`;
+  return null;
 }
 
 export class BillingApiError extends Error {
@@ -493,7 +499,7 @@ const emptyRefill: Refill = {
   week_limit_cents: 0,
   month_limit_cents: 0,
   min_amount_cents: 1_000,
-  max_amount_cents: 500_000,
+  max_amount_cents: 0,
   caps: { amount_cents: 0, per_day: 0, week_cents: 0 },
   open: false,
   day_count: 0,
@@ -504,6 +510,7 @@ const emptyRefill: Refill = {
 function normalize(body: Partial<Billing>): Billing {
   return {
     ...(body as Billing),
+    purchase_max_cents: body.purchase_max_cents ?? 0,
     rate_table: body.rate_table ?? [],
     usage: body.usage ?? [],
     grants: body.grants ?? [],

@@ -14,14 +14,6 @@ type Completeness struct {
 	Message      string
 }
 func (c Completeness) SyntheticLine() string
-type Data struct {
-	Subject    blob.LogSubject
-	Transport  blob.LogTransport
-	HTTPClient blob.HTTPClient
-	Records    SegmentRecorder
-	Actor      store.Actor
-}
-func (d Data) Read(ctx context.Context, offset int64, follow bool) (io.ReadCloser, error)
 type End struct {
 	Stopped bool
 }
@@ -54,7 +46,6 @@ func (m Manifest) Marshal() ([]byte, error)
 const ManifestVersion = 1
 const MaxNodeBytes int64 = 64 << 20
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
-func NewSubjectUploader(data Data) (*SubjectUploader, error)
 type Options struct {
 	Subject blob.LogSubject
 
@@ -102,9 +93,6 @@ type SegmentLookup interface {
 type SegmentObjects interface {
 	Get(context.Context, string) (io.ReadCloser, error)
 }
-type SegmentRecorder interface {
-	RecordSegments(context.Context, store.SegmentCommit) error
-}
 type Signer struct {
 	Objects    LogPutSigner
 	ClassReady func(context.Context, string) error
@@ -125,10 +113,6 @@ const StateUnknown = "unknown"
 const StatusComplete = "complete"
 const StatusCutOff = "cut_off"
 const StatusIncomplete = "incomplete"
-type SubjectUploader struct {
-}
-func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error
-func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []byte) error
 const TruncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
 type UploadVerifier struct{ Objects SegmentObjects }
 func (v UploadVerifier) Verify(ctx context.Context, check blob.LogUploadCheck, class string) error

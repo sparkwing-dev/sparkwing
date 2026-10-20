@@ -711,6 +711,7 @@ CREATE TABLE credit_checkouts (
     closed_at BIGINT,
     grant_id TEXT UNIQUE,
     three_d_secure TEXT NOT NULL DEFAULT '',
+    liability_shift INTEGER CHECK(liability_shift IN (0,1)),
     kind TEXT NOT NULL DEFAULT 'checkout' CHECK(kind IN ('checkout','refill')),
     customer_id TEXT NOT NULL DEFAULT '',
     payment_method TEXT NOT NULL DEFAULT '',

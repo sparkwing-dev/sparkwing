@@ -62,7 +62,7 @@ type PaymentEventPolicy struct {
 
 // PaymentEventPolicies is the complete accepted Stripe settlement-event inventory.
 // Completed sessions without paid status remain pending until an asynchronous success event.
-var PaymentEventPolicies = []PaymentEventPolicy{
+var paymentEventPolicies = []PaymentEventPolicy{
 	{"checkout.session.completed", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_succeeded", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_failed", PaymentCheckoutFailed, false},
@@ -81,33 +81,35 @@ var PaymentEventPolicies = []PaymentEventPolicy{
 
 // PaymentEvent carries provider facts whose team and ledger effect come from committed records.
 type PaymentEvent struct {
-	EventID     string
-	CheckoutID  string
-	PaymentID   string
-	Currency    string
-	AmountMinor int64
-	Mode        PaymentMode
-	Kind        PaymentEventKind
-	ObjectID    string
-	CustomerID  string
-	MethodID    string
-	ChargeID    string
-	Status      string
-	Reason      string
-	DeclineCode string
-	Fingerprint string
-	Brand       string
-	Last4       string
-	ThreeDS     string
-	IntentID    string
-	Created     int64
-	Actionable  bool
+	EventID        string
+	CheckoutID     string
+	PaymentID      string
+	Currency       string
+	AmountMinor    int64
+	Mode           PaymentMode
+	Kind           PaymentEventKind
+	ObjectID       string
+	CustomerID     string
+	MethodID       string
+	ChargeID       string
+	Status         string
+	Reason         string
+	DeclineCode    string
+	Fingerprint    string
+	Brand          string
+	Last4          string
+	ThreeDS        string
+	LiabilityShift bool
+	IntentID       string
+	Created        int64
+	Actionable     bool
 }
 
-// Identity is the event as Stripe signed it. Fingerprint, Brand, Last4 and ThreeDS come from provider reads made
+// Identity is the event as Stripe signed it. Card facts and liability shift come from provider reads made
 // after verification, so a replay identifies the event without them.
 func (e PaymentEvent) Identity() PaymentEvent {
 	e.Fingerprint, e.Brand, e.Last4, e.ThreeDS = "", "", "", ""
+	e.LiabilityShift = false
 	return e
 }
 
@@ -209,7 +211,7 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 	if event.LiveMode == nil || *event.LiveMode != (a.mode == PaymentLive) {
 		return nil, forbidden(apierr.ReasonBinding)
 	}
-	for _, policy := range PaymentEventPolicies {
+	for _, policy := range paymentEventPolicies {
 		if policy.ProviderType != event.Type {
 			continue
 		}
@@ -329,10 +331,7 @@ func (a *paymentAuthenticator) paidCard(ctx context.Context, event *PaymentEvent
 	if string(charge.PaymentIntent) != event.PaymentID {
 		return invalidPaymentEvent()
 	}
-	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
-	if secure := charge.PaymentMethodDetails.Card.ThreeDSecure; secure != nil {
-		event.ThreeDS = secure.Result
-	}
+	event.setPaidCardFacts(charge)
 	return nil
 }
 

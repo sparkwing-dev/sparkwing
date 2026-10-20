@@ -151,7 +151,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 		return capability.IssueRequest{}, authorityError(apierr.IntegrityFailure, "credential provisioning origin is unavailable")
 	}
 	origin := record.Origin
-	spec := capability.ProvisionSpec{Personal: origin.Personal, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
+	spec := capability.ProvisionSpec{Personal: origin.Personal, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Trust: c.Trust, Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
 	return capability.IssueRequest{Kind: capability.Delegate, Provision: &spec}, nil
 }
 
@@ -198,5 +198,5 @@ func validCapabilityOrigin(c capability.Capability, origin CapabilityOrigin) boo
 }
 
 func sameRotationScope(old, next capability.Capability) bool {
-	return old.Team == next.Team && old.Subject == next.Subject && old.Audience == next.Audience && old.RootMetered == next.RootMetered && old.Binding == next.Binding && reflect.DeepEqual(old.Parent, next.Parent) && slices.Equal(old.Grants, next.Grants) && slices.Equal(old.Repositories, next.Repositories) && slices.Equal(old.ReservedPools, next.ReservedPools) && reflect.DeepEqual(old.Data, next.Data)
+	return old.Team == next.Team && old.Subject == next.Subject && old.Audience == next.Audience && old.RootMetered == next.RootMetered && old.Binding == next.Binding && reflect.DeepEqual(old.Parent, next.Parent) && slices.Equal(old.Grants, next.Grants) && slices.Equal(old.Repositories, next.Repositories) && slices.Equal(old.ReservedPools, next.ReservedPools) && old.Trust == next.Trust && reflect.DeepEqual(old.Data, next.Data)
 }

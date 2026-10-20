@@ -2,6 +2,7 @@ package nodeproto
 
 import (
 	"fmt"
+	"path/filepath"
 )
 
 func (v *planValidator) validateJob(job JobSpec, path string) error {
@@ -98,6 +99,9 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 		if cacheNames[cache.Name] {
 			return planInvalid(at+".name", "duplicate cache name")
+		}
+		if cache.Resolver == "" && cache.Path != "" && !filepath.IsLocal(filepath.FromSlash(cache.Path)) {
+			return planInvalid(at+".path", "cache path must be relative and stay inside the workspace")
 		}
 		cacheNames[cache.Name] = true
 	}

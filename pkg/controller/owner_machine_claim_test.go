@@ -21,7 +21,7 @@ func TestClaimMarksOnlyTheRequestersPersonalMachineAsOwnerMachine(t *testing.T) 
 	}{{"run-personal", true}, {"run-shared", false}} {
 		ctx := context.Background()
 		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701)
-		if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, olga.id, olga.team, tc.run); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, olga.id, olga.team, tc.run); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: tc.run, NodeID: "compile", Status: "pending"}); err != nil {
@@ -58,7 +58,7 @@ func TestChildOfAPersonalMachineJobStaysOnItsOwnersMachines(t *testing.T) {
 		{"child-shared-runner", "olga-laptop", "team-runner", false, http.StatusOK},
 	} {
 		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701)
-		if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='machine' WHERE team=? AND id=?`, tc.submitter, olga.team, tc.run); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='machine' WHERE team=? AND id=?`, tc.submitter, olga.team, tc.run); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: tc.run, NodeID: "compile", Status: "pending"}); err != nil {

@@ -142,9 +142,7 @@ func TestCycleDetect_ParentNotFound(t *testing.T) {
 
 func TestChildCycleWalkStaysInsideItsTeamProperty(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
-	if err := e.Store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, e.Store, "foreign")
 	if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: "private-root", Pipeline: "private-pipeline", Status: "success"}); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +188,7 @@ func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {
 	setChildAncestor(t, e, "run", "root")
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "fresh", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), 409)
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("cyclic lineage persisted a child: %d: %v", count, err)
 	}
 }

@@ -288,19 +288,32 @@ func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin Pin, name 
 	}
 	command.Dir = dir
 	masker := secrets.NewMasker()
-	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
+	base := procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}
+	environment, err := procenv.Build(procenv.Install, base, procenv.Runtime{})
 	if err != nil {
 		return err
 	}
-	environment = append(environment, "GOWORK=off")
 	if name == "go" {
-		qa, err := QAModuleEnvironment(ctx, dir, pin, environment)
+		qa, err := QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
+			probe := exec.Command("go", args...)
+			var stdout, stderr bytes.Buffer
+			probe.Dir, probe.Env, probe.Stdout, probe.Stderr = dir, append(environment, "GOWORK=off"), &stdout, &stderr
+			if err := gotoolchain.Run(ctx, probe); err != nil {
+				return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(masker.Mask(stderr.String())))
+			}
+			return stdout.Bytes(), nil
+		})
 		if err != nil {
 			return err
 		}
-		environment = append(environment, qa...)
+		if len(qa) > 0 {
+			base.Captured = append(base.Captured, qa...)
+			if environment, err = procenv.Build(procenv.Install, base, procenv.Runtime{}); err != nil {
+				return err
+			}
+		}
 	}
-	command.Env = environment
+	command.Env = append(environment, "GOWORK=off")
 	var output bytes.Buffer
 	command.Stdout, command.Stderr = &output, &output
 	if err := gotoolchain.Run(ctx, command); err != nil {

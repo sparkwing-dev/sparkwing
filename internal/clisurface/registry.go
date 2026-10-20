@@ -303,17 +303,17 @@ func Registry() []Command {
 		{Path: "sparkwing billing standing", Authority: TeamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing billing request-tier", Authority: TeamCredential, Rules: []string{"Ask the Sparkwing operators to grant High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
+		{Path: "sparkwing billing request-tier", Authority: TeamCredential, Rules: []string{"Contact the Sparkwing operators for High standing, higher limits or payments above $1,000. Describe what you need in the message, including if the team already has High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "tier", Argument: "TIER", Values: []string{"high"}, Required: true},
 			{Name: "message", Argument: "TEXT", Required: true},
 		}},
-		{Path: "sparkwing billing refill", Authority: TeamCredential, Rules: []string{"Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the refill caps its payment history allows, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $5,000. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off."}, Flags: []Flag{
+		{Path: "sparkwing billing refill", Authority: TeamCredential, Rules: []string{"Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the refill caps its payment history allows, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $1,000 at every standing tier. Contact us through sparkwing billing request-tier for larger payments. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "enable", Conflicts: []string{"disable"}, Meaning: "Turn automatic refill on; the team needs a saved card."},
 			{Name: "disable", Conflicts: []string{"enable"}, Meaning: "Turn automatic refill off, keeping its settings."},
 			{Name: "threshold", Argument: "DOLLARS", Meaning: "Refill when the balance falls below this many dollars."},
-			{Name: "amount", Argument: "DOLLARS", Meaning: "Dollars added by each refill, $10 to $5,000."},
+			{Name: "amount", Argument: "DOLLARS", Meaning: "Dollars added by each refill, $10 to $1,000."},
 			{Name: "week-limit", Argument: "DOLLARS", Meaning: "Most dollars refilled in any 7 days; 0 is no limit."},
 			{Name: "month-limit", Argument: "DOLLARS", Meaning: "Most dollars refilled in any 30 days; 0 is no limit."},
 		}},
@@ -420,7 +420,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
@@ -433,6 +433,7 @@ func Registry() []Command {
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
+			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
 		}},
 		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
@@ -876,6 +877,7 @@ func Registry() []Command {
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
 			{Name: "repos", Argument: "REPO", Repeatable: true, CommaList: true},
 			{Name: "credentials-dir", Argument: "PATH"},
+			{Name: "submit-env-allow", Argument: "NAME", Repeatable: true, CommaList: true},
 		}},
 	}
 }

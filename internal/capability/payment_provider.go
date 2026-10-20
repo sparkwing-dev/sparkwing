@@ -177,7 +177,18 @@ func (a *paymentAuthenticator) chargeFingerprint(ctx context.Context, event *Pay
 		return invalidPaymentEvent()
 	}
 	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
+	if event.Kind == PaymentCardPaid {
+		event.setPaidCardFacts(charge)
+	}
 	return nil
+}
+
+func (event *PaymentEvent) setPaidCardFacts(charge paymentObject) {
+	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
+	if secure := charge.PaymentMethodDetails.Card.ThreeDSecure; secure != nil {
+		event.ThreeDS = secure.Result
+		event.LiabilityShift = secure.Result == "authenticated" || secure.Result == "attempt_acknowledged"
+	}
 }
 
 // PaymentProviderAPIVersion is the Stripe API version the controller reads provider objects at.

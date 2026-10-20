@@ -80,7 +80,9 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
-	qa, err := engine.QAModuleEnvironment(ctx, dir, pin, environment)
+	qa, err := engine.QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
+		return installTool(ctx, dir, environment, "go", args...)
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -140,20 +142,11 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	if uncached {
 		return []string{path}, "", nil
 	}
-	source, err := os.Open(lease.Path())
+	binary, err := lease.Install(path)
 	if err != nil {
 		return nil, "", err
 	}
-	defer func() { result = errors.Join(result, source.Close()) }()
-	destination, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
-	if err != nil {
-		return nil, "", err
-	}
-	_, copyErr := io.Copy(destination, source)
-	if err := errors.Join(copyErr, destination.Close()); err != nil {
-		return nil, "", err
-	}
-	return []string{path}, lease.Path(), nil
+	return []string{binary.Path()}, lease.CachedPath(), nil
 }
 
 func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
@@ -207,7 +200,7 @@ func installTool(ctx context.Context, dir string, environment []string, name str
 	if err := gotoolchain.Run(ctx, command); err != nil {
 		return append(stdout.Bytes(), stderr.Bytes()...), fmt.Errorf("SDK dependency tool %s: %w", name, err)
 	}
-	if name == "go" && len(args) > 0 && args[0] == "list" {
+	if name == "go" && len(args) > 0 && (args[0] == "list" || args[0] == "env") {
 		return stdout.Bytes(), nil
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil

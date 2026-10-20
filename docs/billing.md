@@ -44,8 +44,9 @@ launcher passes over teams without standing capacity so other teams can
 receive work. Local and self-hosted placement does not consume Cloud standing
 capacity or receive a standing deadline.
 
-A team owner can ask for High standing from the billing page or with
-`sparkwing billing request-tier --tier high --message <text>`, with a message of
+A team owner can contact us for High standing, higher limits or larger payments
+from the billing page or with
+`sparkwing billing request-tier --profile cloud --tier high --message <text>`, with a message of
 up to 1,000 characters (Unicode code points). A team has at most one open
 request. The request reaches the operator console's standing
 queue with the team's standing, payment history and message. The operator
@@ -53,7 +54,9 @@ approves it by granting standing or declines it with a reason. Each decision
 names the request it reviewed and is refused once that request is no longer
 open, so a stale or retried decision never resolves a later request. Both decisions
 are audited, and the billing page and `sparkwing billing standing` show the
-outcome.
+outcome. High-standing teams can also send requests. Describe the payment size
+or limits needed in the message so the operator can contact you. Granting High
+standing does not raise the maximum per payment.
 
 New accounts receive no automatic free credits. Operators retain the per-account
 credit grant action.
@@ -64,6 +67,11 @@ Team owners buy credits from the console billing page. Add funds opens a Stripe
 Checkout page, and the credits land when the controller receives Stripe's
 signed webhook for the paid checkout. The billing page also saves a card through
 a Stripe setup page; a saved card is what automatic refill charges.
+
+Each Add funds payment and automatic refill is at most $1,000, at every standing
+tier including High. Larger amounts are refused before a payment starts. Use
+the billing page contact request, or `sparkwing billing request-tier --profile cloud --tier high --message <text>`, to ask about larger payments. The request reaches the
+operator console queue.
 
 Every Add funds checkout asks Stripe to request 3-D Secure. Stripe can still
 complete a payment without authentication, for example when the card or issuer
@@ -82,7 +90,7 @@ Automatic refill is off until an owner turns it on, and turning it on needs a
 saved card. The owner sets a threshold and a refill amount: when the balance
 falls below the threshold, the controller charges the saved card the refill
 amount. A refill is at least $10, so card fees stay a small share of it, and at
-most $5,000. The owner can also set a weekly and a monthly limit on refills;
+most $1,000. The owner can also set a weekly and a monthly limit on refills;
 zero means no limit.
 
 Set refills on the console billing page, with `sparkwing billing refill`
@@ -96,7 +104,8 @@ much compute before its owner disputes the charge. The prepaid balance never
 raises these caps, and a history tier counts for refills only once the team's
 first payment is 7 days old with no hold since; until then a team has the New
 caps, whatever its balance or capacity tier. An operator grant of standing
-gives the High caps. Teams that outgrow these caps ask for the next tier.
+gives the High caps. Teams that outgrow these caps use the contact request for
+higher limits.
 
 | Refill history | Largest refill | Refills per day | Refill total per week |
 | --- | ---: | ---: | ---: |
@@ -104,7 +113,8 @@ gives the High caps. Teams that outgrow these caps ask for the next tier.
 | Established | $200 | 2 | $500 |
 | Trusted | $1,000 | 3 | $3,000 |
 
-High uses only the team's own weekly and monthly limits.
+High still has the $1,000 maximum per payment and uses the team's own weekly
+and monthly limits.
 
 The controller checks for due refills every 30 seconds and keeps at most one
 refill in flight per team. A refill fixes its amount, card, customer and receipt
@@ -212,12 +222,18 @@ The controller is the only consumer of Stripe events, so it also answers stolen
 cards. A card is pinned, by its Stripe fingerprint, to the team whose payment it
 first funds. A payment by that card for another team, through Add funds or a
 refill, grants nothing and is queued for a full refund, and the card cannot be
-saved on another team. An actionable early fraud warning on a payment this
-controller settled holds the team, takes back the credit the payment granted
-even when that leaves the balance negative, and queues a full refund unless
-Stripe's refunds already returned it. The warning also blocks the card: it is
-removed wherever it is saved and cannot be saved again. A later payment by a
-blocked card holds its team and is refunded. A refused payment raises the
+saved on another team.
+
+An actionable early fraud warning on a payment this controller settled always
+holds the team and blocks the card: it is removed wherever it is saved and
+cannot be saved again. If Stripe verified liability shift at settlement through
+a 3-D Secure result of `authenticated` or `attempt_acknowledged`, the warning
+leaves the payment's credits frozen under its hold and queues no refund. Without
+that protection, it takes back the credit even when that leaves the balance
+negative and queues a full refund unless Stripe already returned it. The
+controller persists `liability_shift` with the paid charge and does not read it
+again when a warning arrives. A later payment by a blocked card holds its team
+and is refunded. A refused payment raises the
 `card_payment_refused` alert, and each refund made raises `card_refund`.
 
 A refund and a fraud warning are kept against their payment whatever order Stripe

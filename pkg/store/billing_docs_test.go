@@ -18,6 +18,11 @@ func TestBillingModelDocumentationTracksPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := strings.ReplaceAll(string(raw), ",", "")
+	for _, term := range []string{fmt.Sprintf("at most $%d", MaxCardPaymentCents/100), "including High", "larger payments", "operator console queue", "authenticated", "attempt_acknowledged", "liability_shift", "frozen"} {
+		if !strings.Contains(body, term) {
+			t.Errorf("billing documentation omits %q", term)
+		}
+	}
 	for _, row := range billingPolicy {
 		prefix := fmt.Sprintf("| %s | %d | %d hours |", row.tier, row.vCPU, int(row.duration.Hours()))
 		if !strings.Contains(body, prefix) {

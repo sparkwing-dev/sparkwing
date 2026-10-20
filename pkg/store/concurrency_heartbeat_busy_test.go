@@ -40,7 +40,7 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	}
 	_ = seed.Close()
 
-	hb, err := openSQL(context.Background(), "sqlite", busyProneDSN(path), DialectSQLite, "delete "+path)
+	hb, err := openSQL(context.Background(), "sqlite", busyProneDSN(path), DialectSQLite, "delete "+path, nil)
 	if err != nil {
 		t.Fatalf("busy-prone open: %v", err)
 	}

@@ -1,30 +1,26 @@
 package paths
 
 import (
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
-func TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest(t *testing.T) {
+func TestDefaultPaths_FollowsHomeWithoutSparkwingHome(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
 	t.Setenv("SPARKWING_HOME", "")
 
 	p, err := DefaultPaths()
 	if err != nil {
 		t.Fatalf("DefaultPaths: %v", err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("resolve home: %v", err)
+	if want := filepath.Join(home, ".sparkwing"); p.Root != want {
+		t.Errorf("DefaultPaths root = %q, want %q", p.Root, want)
 	}
-	if p.Root == filepath.Join(home, ".sparkwing") {
-		t.Fatalf("DefaultPaths resolved to the developer's own home %s", p.Root)
-	}
-	if !strings.HasPrefix(p.Root, os.TempDir()) {
-		t.Errorf("DefaultPaths root = %q, want a path under %s", p.Root, os.TempDir())
+	if root, ok := SandboxHome(); ok {
+		t.Errorf("SandboxHome() = %q, true for the home's own ~/.sparkwing", root)
 	}
 }
 
@@ -38,32 +34,7 @@ func TestDefaultPaths_StillHonorsSparkwingHome(t *testing.T) {
 	if p.Root != want {
 		t.Errorf("DefaultPaths root = %q, want the SPARKWING_HOME value %q", p.Root, want)
 	}
-}
-
-func TestDefaultPaths_RefusesTheOperatorHomeUnderTest(t *testing.T) {
-	if operatorHome == "" {
-		t.Skip("no home directory to refuse")
-	}
-	real := filepath.Join(operatorHome, ".sparkwing")
-	testhome.Set(t, t.TempDir())
-	t.Setenv("SPARKWING_HOME", real)
-
-	p, err := DefaultPaths()
-	if err == nil {
-		t.Fatalf("DefaultPaths resolved the operator's own home %s from a test binary", p.Root)
-	}
-	for _, want := range []string{real, "SPARKWING_HOME", "t.TempDir()"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal %q omits %q, so it does not name the fix", err.Error(), want)
-		}
-	}
-}
-
-func TestUnderTest(t *testing.T) {
-	if !UnderTest() {
-		t.Fatalf("UnderTest() is false inside a test binary; os.Args[0] = %q", os.Args[0])
-	}
-	if !strings.Contains(TestSandbox(), "sparkwing-test-home-") {
-		t.Errorf("TestSandbox() = %q, want a pid-keyed sparkwing sandbox", TestSandbox())
+	if root, ok := SandboxHome(); !ok || root != want {
+		t.Errorf("SandboxHome() = %q, %v; want %q, true for a redirected home", root, ok, want)
 	}
 }

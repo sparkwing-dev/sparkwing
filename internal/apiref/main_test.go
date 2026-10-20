@@ -36,10 +36,10 @@ func TestReferenceKeepsCompleteAuthorizationAlternatives(t *testing.T) {
 
 func TestReferenceIncludesEveryFinalRouteOnce(t *testing.T) {
 	var out bytes.Buffer
-	if err := writeReference(&out, capability.Routes); err != nil {
+	if err := writeReference(&out, capability.Routes()); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range capability.Routes {
+	for _, route := range capability.Routes() {
 		selector := "| `" + route.Method + "` | `" + route.Path + "` |"
 		if strings.Count(out.String(), selector) != 1 {
 			t.Fatalf("route count for %s", selector)
@@ -54,7 +54,7 @@ func TestReferenceIncludesEveryFinalRouteOnce(t *testing.T) {
 
 func TestReferenceMatchesPublishedDocument(t *testing.T) {
 	var out bytes.Buffer
-	if err := writeReference(&out, capability.Routes); err != nil {
+	if err := writeReference(&out, capability.Routes()); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join("..", "..", "docs", "api-reference.md")
@@ -72,7 +72,7 @@ type failedReferenceWriter struct{}
 func (failedReferenceWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func TestReferenceReturnsOutputFailure(t *testing.T) {
-	if err := writeReference(failedReferenceWriter{}, capability.Routes); err == nil {
+	if err := writeReference(failedReferenceWriter{}, capability.Routes()); err == nil {
 		t.Fatal("lost output error")
 	}
 }

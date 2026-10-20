@@ -4,12 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"net/http/httptest"
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )

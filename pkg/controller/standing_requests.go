@@ -46,7 +46,7 @@ func teamStandingBody(ctx context.Context, t *store.Tenant, b store.BillingStand
 		body := standingRequestBody(latest)
 		out.Request = &body
 	}
-	out.CanRequest = admin && b.Tier != "High" && (!found || latest.State != store.StandingRequestOpen)
+	out.CanRequest = admin && (!found || latest.State != store.StandingRequestOpen)
 	return out, nil
 }
 

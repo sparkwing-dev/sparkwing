@@ -113,10 +113,3 @@ pkg/controller/storage.go	AsOperator
 pkg/controller/storage_standing.go	ForTeam
 pkg/controller/team_storage.go	AsOperator
 pkg/controller/tenant_scope.go	ForTeam
-pkg/store/github_app.go	ForTeam
-pkg/store/teststore/concurrency.go	AsOperator
-pkg/store/teststore/concurrency.go	AsOperator
-pkg/store/teststore/reaper.go	AsOperator
-pkg/store/teststore/run.go	ForTeam
-pkg/store/teststore/store.go	ForTeam
-pkg/store/unit_unpriced.go	AsOperator

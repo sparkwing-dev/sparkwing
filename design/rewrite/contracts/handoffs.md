@@ -881,3 +881,35 @@ Assigned to an Opus implementer (env 1087).
 
 - Korey approved every recommendation in /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/simplicity/PLAN.md §4 (decisions 1-6 and 9-21 as recommended; 7-9 amended by §7 for prepaid), including moving pkg/store and pkg/controller under internal/, Sol's six cuts, GitHub-model provenance and cache trust, withdrawing the pool-runner residual, declared deployment kind, the 5-minute cancel drain deadline, Cloud fair shares, child-run limits (depth 10, 50 per root), CLI token limits, team-owned shared runners, append-only audit, the durable webhook inbox and declared restore.
 - Feature freeze: no new ranking, launcher or billing features beyond the plan until its §5 stop rule is met. Work proceeds in the plan's waves; every workstream deletes the old path and lands with its guard.
+
+## 2026-10-19 Korey decision 29: one active controller per database for v0.68
+
+- A store has exactly one active controller. The controller holds a PostgreSQL session advisory lock on a dedicated connection for its whole life; if that connection drops or the lock is lost, the process exits immediately (fail-stop) and its supervisor restarts it. A second controller blocks waiting for the lock as a standby. SQLite stores are single-process by construction.
+- In-process state (webhook ordering, storage measurement, rate and flood budgets, live log tails) may assume a single active controller. High availability with several active controllers is a later, separately reviewed project.
+- Supersedes the deleted serve lease and the "concurrent controllers are safe" documentation in WS3.
+
+## 2026-10-19 Korey decision 30: one pod per claim for Kubernetes pools that hold secrets
+
+- On Kubernetes, a self-hosted pool whose trust class is verified-default-only (pools holding reserved secrets) runs every claim in a fresh pod through the existing launcher machinery (the Cloud job pod shape, admission policy and per-claim bootstrap exchange), the way GitHub's Actions Runner Controller runs ephemeral runners. No pool root credential is reachable from job code and nothing persists between claims.
+- Runners on plain machines (VMs, bare metal) keep the same-uid residual, documented plainly as GitHub documents it for self-hosted runners; an ephemeral machine mode may come later.
+- The separate-job-uid option is dropped.
+
+## 2026-10-19 Korey decision 31: admin-armed default-branch schedules are verified
+
+- A schedule armed by a team admin, on the repository's default branch, with no argument or timing overrides, whose commit is resolved through the GitHub App at fire time, is sealed with verified trust: it can use verified-default-only pools and reads the default branch's cache. Schedules armed by non-admins, any overridden schedule, and manual runs stay unverified.
+
+## 2026-10-19 Korey decision 32: $1,000 maximum per payment
+
+- The largest single payment is $1,000 for now, for both automatic refills and manual Add funds (it will likely rise later). It applies to every standing tier, including High; the per-standing refill caps below it still apply.
+- Anyone wanting a larger payment or higher limits uses the "contact us" request (decision 11's request flow), which reaches Korey as an operator task.
+
+## 2026-10-19 Korey decision 33: early fraud warnings respect the 3-D Secure liability shift
+
+- A payment that passed 3-D Secure with liability shift (Stripe's three_d_secure result authenticated/attempt with liability shifted) is not refunded on an early fraud warning: the team is held, the card is blocked deployment-wide, and the payment's unspent credit is frozen. A later chargeback is the issuer's liability; if none arrives within the dispute window an operator may release the hold.
+- A payment without that protection (off-session refills, Add funds where 3-D Secure was not completed) is refunded automatically as before, its credit reversed, the team held and the card blocked.
+
+## 2026-10-19 Korey decision 34: child identity and branch-pinned secrets (ratified)
+
+- A child run inherits its parent's verified identity, and the parent pipeline's secrets and OIDC, only when it runs the parent's exact commit; otherwise it is asserted (trigger:manual, no ref or sha claims). Children may start only pipelines their parent's accepted plan declares (decision 28 item 11). This matches GitHub reusable workflows.
+- A pipeline whose `source:` pins a branch is unverified but still receives that pipeline's secrets, matching GitHub repository secrets. Both rules are documented plainly for launch.
+- Protected secrets (released only to verified default-branch runs, including decision 31 schedules) are a post-launch feature.

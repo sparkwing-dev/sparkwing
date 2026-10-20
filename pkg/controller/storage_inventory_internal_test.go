@@ -12,10 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,14 +29,17 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 10_000_000, Reference: "inventory-funding", CreatedBy: "operator"}); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	old := now.Add(-24 * time.Hour).UnixNano()
 	const size = 2 * store.StorageBytesPerGB
-	if _, err := s.DB().ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat("a", 64), size, old); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat("a", 64), size, old); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
-		if _, err := s.DB().ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,committed_bytes,storage_charged_through,updated_at) VALUES (?,?,999999,999999,?,?)", store.DefaultTeam, kind, old, old); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,committed_bytes,storage_charged_through,updated_at) VALUES (?,?,999999,999999,?,?)", store.DefaultTeam, kind, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}

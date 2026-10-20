@@ -6,7 +6,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 
 ## Command groups
 
-- [`sparkwing billing`](cli-billing.md) -- Inspect Cloud standing, request a higher tier and set automatic refill
+- [`sparkwing billing`](cli-billing.md) -- Inspect Cloud standing, contact operators and set automatic refill
 - [`sparkwing cache`](cli-cache.md) -- Inspect or trim the compiled pipeline binary cache
 - [`sparkwing commands`](cli-commands.md) -- Search the command index or export the CLI reference
 - [`sparkwing completion`](cli-completion.md) -- Emit a shell completion script

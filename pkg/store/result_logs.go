@@ -109,10 +109,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if _, err := resolveActorTx(ctx, tx, commit.Actor); err != nil {
-		return err
-	}
-	if err := lockStateRunTx(ctx, tx, t.team, commit.Subject.RunID); err != nil {
+	if err := lockAuthorityThenRunTx(ctx, tx, t.team, commit.Subject.RunID, commit.Actor); err != nil {
 		return err
 	}
 	var retention string

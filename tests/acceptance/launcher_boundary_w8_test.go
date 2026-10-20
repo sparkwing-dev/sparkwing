@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -208,6 +209,6 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 	return restarted
 }
 
-func (c *cloudControlW8) Prepare(ctx context.Context, _ []capability.LeaseRef) error {
-	return context.Cause(ctx)
+func (c *cloudControlW8) Prepare(ctx context.Context, _ []capability.LeaseRef) (time.Time, error) {
+	return time.Now().Add(time.Minute), context.Cause(ctx)
 }

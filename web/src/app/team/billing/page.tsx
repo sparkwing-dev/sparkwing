@@ -252,6 +252,10 @@ function BuyPanel({ billing }: { billing: Billing }) {
           </p>
         ) : null}
         <p className="text-xs text-[var(--muted)]">
+          {billing.purchase_max_cents > 0 ? `Each payment is at most ${fmtCents(billing.purchase_max_cents)}.` : "Payment limits are unavailable. Reload billing."}{" "}
+          <a href="#standing-message" className="underline">Contact us for larger payments.</a>{" "}
+        </p>
+        <p className="text-xs text-[var(--muted)]">
           Purchases are final. Credits never expire.
         </p>
       </form>
@@ -661,7 +665,7 @@ function RefillPanel({
         <p className="text-[var(--muted)]">
           {capped
             ? `${billing.standing.tier} standing allows at most ${fmtCents(caps.amount_cents)} per refill, ${caps.per_day} refill${caps.per_day === 1 ? "" : "s"} a day and ${fmtCents(caps.week_cents)} a week.`
-            : `${billing.standing.tier} standing leaves refills to the team's own limits.`}{" "}
+            : `${billing.standing.tier} standing retains the ${fmtCents(r.max_amount_cents)} maximum per payment and the team's weekly and monthly limits.`}{" "}
           A refill a limit stops is not made, and Cloud work stops when the
           credits run out.
         </p>
@@ -715,7 +719,7 @@ function StandingPanel({
   return (
     <Panel
       title="Standing"
-      hint="Payment history and prepaid funds set standing, which limits Cloud concurrency, job length and refills. Operators can grant higher tiers."
+      hint="Payment history and prepaid funds set standing, which limits Cloud concurrency, job length and refills. Contact us for higher tiers, higher limits or larger payments."
     >
       <div className="p-4 space-y-2 text-sm">
         <p>
@@ -733,18 +737,18 @@ function StandingPanel({
         {s.can_request ? (
           <form onSubmit={send} className="space-y-2">
             <label htmlFor="standing-message" className={labelClass}>
-              Contact us to unlock higher tiers
+              Contact us for higher tiers, higher limits or larger payments
             </label>
             <textarea
               id="standing-message"
               className={`${inputClass} w-full`}
               rows={3}
-              placeholder="What the team runs and the capacity it needs"
+              placeholder="What higher limits or larger payments does the team need?"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
             <button type="submit" className={buttonClass} disabled={busy}>
-              Request High standing
+              Send request
             </button>
           </form>
         ) : null}

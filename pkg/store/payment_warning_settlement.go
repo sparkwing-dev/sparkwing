@@ -7,8 +7,8 @@ import (
 )
 
 // safety: an actionable warning blocks its card everywhere, and on a payment this deployment settled it holds the
-// team, takes back the credit the payment granted even when that leaves the balance negative, and queues a full
-// refund unless recorded refunds already returned it, so the payer is repaid before a dispute can open.
+// team. Liability-shifted payments keep their credit frozen by that hold; unprotected payments reverse their
+// credit and queue a full refund unless recorded refunds already returned it.
 func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, now time.Time) (Team, error) {
 	if w.WarningID == "" || w.PaymentIntent == "" {
 		return "", fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
@@ -49,9 +49,16 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if err != nil {
 		return "", err
 	}
-	// safety: an unfunded payment has nothing to take back here; if it is still in flight, its paid event meets this
-	// warning and is refused and refunded then, and a payment already refused was queued for refund when it was.
+	// An in-flight payment has no credit to reverse; its paid event verifies protection before choosing a frozen
+	// grant or a refund. A payment already refused was queued for refund when it was.
 	if !funded {
+		return team, nil
+	}
+	var shifted int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(liability_shift,0) FROM credit_checkouts WHERE team = ? AND payment_id = ? AND paid_at IS NOT NULL`, string(team), payment).Scan(&shifted); err != nil {
+		return "", err
+	}
+	if shifted == 1 {
 		return team, nil
 	}
 	if _, err := reversePaymentTx(ctx, tx, payment, "fraud_warning:"+w.WarningID, "payment_provider", 0); err != nil {

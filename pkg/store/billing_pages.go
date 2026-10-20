@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"reflect"
 	"strings"
@@ -36,6 +37,9 @@ func (t *Tenant) billingMutationTx(ctx context.Context, a capability.Authorized,
 func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error) {
 	var page capability.BillingPage
 	err := t.billingMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+		if kind == capability.BillingPageCredits && amount > MaxCardPaymentCents {
+			return fmt.Errorf("%w: each payment is at most $%d; contact us through the billing request form or sparkwing billing request-tier for larger payments", ErrInvalidInput, MaxCardPaymentCents/100)
+		}
 		if strings.TrimSpace(key) == "" {
 			return ErrInvalidInput
 		}
@@ -70,7 +74,7 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		}
 		switch kind {
 		case capability.BillingPageCredits:
-			if amount < MinCardChargeCents || amount > MaxCreditGrantMicro/MicroCreditsPerCent {
+			if amount < MinCardChargeCents {
 				return ErrInvalidInput
 			}
 			page.AmountCents = amount

@@ -1,6 +1,6 @@
 package controllerwire
 
-// StandingRequestWrite asks an operator to grant the team a standing tier.
+// StandingRequestWrite contacts operators for a standing tier, higher limits or larger payments.
 type StandingRequestWrite struct {
 	Tier    string `json:"tier"`
 	Message string `json:"message"`

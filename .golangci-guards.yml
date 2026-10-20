@@ -226,6 +226,11 @@ linters:
         text: "F1: widening"
         linters:
           - forbidigo
+      # teststore is test-only fixture code; it moves under internal/ with the store.
+      - path: ^pkg/store/teststore/
+        text: "F1: widening"
+        linters:
+          - forbidigo
 
 issues:
   max-issues-per-linter: 0

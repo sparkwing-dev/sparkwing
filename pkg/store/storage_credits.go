@@ -56,6 +56,11 @@ func validStorageFreeAllowance(bytes int64) error {
 func refuseStorageGrowthOnEmptyBalanceTx(
 	ctx context.Context, tx *storeTx, team Team, bytes int64,
 ) error {
+	if cause, err := teamHoldTx(ctx, tx, team); err != nil {
+		return err
+	} else if cause != "" {
+		return &InsufficientCreditsError{Hold: cause}
+	}
 	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil || balance > 0 {
 		return err

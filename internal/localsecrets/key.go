@@ -23,7 +23,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -54,11 +53,6 @@ var ErrNoKey = errors.New("no local secrets key")
 func KeyPath() (string, error) {
 	if v := os.Getenv(KeyFileEnv); v != "" {
 		return v, nil
-	}
-	// safety: a test binary that sets neither variable would otherwise mint a
-	// key in the developer's own config directory.
-	if os.Getenv("XDG_CONFIG_HOME") == "" && paths.UnderTest() {
-		return filepath.Join(paths.TestSandbox(), "config", "sparkwing", keyFileName), nil
 	}
 	return fssecure.ConfigFile(keyFileName)
 }

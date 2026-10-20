@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type githubRunnerRegistry struct {
@@ -37,12 +38,14 @@ func (f *githubRunnerRegistry) GitHubRunnerBindings(context.Context) ([]store.Gi
 	f.reads++
 	return f.rows, f.err
 }
+
 func (f *githubRunnerRegistry) RegisterGitHubRunner(_ context.Context, a capability.Authorized, b store.GitHubRunnerBinding) (store.GitHubRunnerBinding, error) {
 	f.actor, f.written = a, b
 	f.writes++
 	b.CreatedAt = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	return b, f.err
 }
+
 func (f *githubRunnerRegistry) RevokeGitHubRunner(_ context.Context, a capability.Authorized, id int64) error {
 	f.actor, f.removed = a, id
 	f.writes++
@@ -169,7 +172,7 @@ func TestGitHubRunnerAdminHTTPInputAndMethods(t *testing.T) {
 }
 
 func TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "bindings.db"))
+	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "bindings.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,10 +182,7 @@ func TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter(t *testing.T) {
 		}
 	})
 	for _, team := range []store.Team{"team", "foreign"} {
-		if err := st.AsOperator().CreateTeam(t.Context(), team); err != nil {
-			t.Fatal(err)
-		}
-
+		teststore.SeedTeam(t, st, team)
 	}
 	b := authorityMember()
 	h := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithExternalURL("https://controller.invalid").WithAuthorization(consoleAuthorization(b)).Handler()

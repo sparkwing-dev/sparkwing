@@ -3,8 +3,8 @@ package procenv
 import (
 	"reflect"
 	"runtime"
-	"strconv"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -208,6 +208,9 @@ func TestInstallReceivesOnlyBase(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := map[string]string{"CUSTOM": "", "PATH": "/bin"}
+		if !local {
+			want["GOENV"] = "off"
+		}
 		if !reflect.DeepEqual(envMap(env), want) {
 			t.Fatal(env)
 		}

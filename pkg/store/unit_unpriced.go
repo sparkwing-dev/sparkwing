@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Store) failUnpricedClaim(ctx context.Context, demand UnitDemand, refusal *UnpricedCPUClassError) error {
-	team, err := s.AsOperator().RunTeam(ctx, refusal.RunID)
+	team, err := s.runTeam(ctx, refusal.RunID)
 	if err != nil {
 		return err
 	}

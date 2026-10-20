@@ -101,20 +101,6 @@ func scanGitHubAppInstallation(row interface{ Scan(...any) error }) (GitHubAppIn
 	return in, nil
 }
 
-// TestOnlySeedGitHubInstallation inserts an installation for fixtures.
-func (t *Tenant) TestOnlySeedGitHubInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
-	var out GitHubAppInstallation
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		out, err = t.bindGitHubInstallationTx(ctx, tx, in, now)
-		return err
-	})
-	if err != nil {
-		return GitHubAppInstallation{}, err
-	}
-	return out, nil
-}
-
 func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
 	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || (in.AccountType != "User" && in.AccountType != "Organization") {
 		return GitHubAppInstallation{}, fmt.Errorf("%w: a binding needs the installation and its account", ErrInvalidInput)
@@ -199,7 +185,7 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 	if err != nil {
 		return "", err
 	}
-	t, err := o.s.ForTeam(ctx, in.Team)
+	t, err := o.s.forTeam(ctx, in.Team)
 	if err != nil {
 		return "", err
 	}

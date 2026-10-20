@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,7 +146,7 @@ func TestRefillSettingsAndFailure(t *testing.T) {
 	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 999}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("a $9.99 refill = %v", err)
 	}
-	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: MaxRefillCents + 1}); !errors.Is(err, ErrInvalidInput) {
+	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: MaxCardPaymentCents + 1}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("an oversized refill = %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('cardless',1,1)`)
@@ -549,6 +550,60 @@ func TestARefusedAddFundsDisablesOnlyItsSavedCard(t *testing.T) {
 			st, err := tenant.SpendStanding(t.Context(), now)
 			if err != nil || (st.Card.PaymentMethod != "") != replaced || st.Refill.Enabled != replaced {
 				t.Fatalf("after the refused Add funds: card %+v refill %+v, %v", st.Card, st.Refill, err)
+			}
+		})
+	}
+}
+
+func TestRefillGlobalMaximumAppliesWithAndWithoutStandingCaps(t *testing.T) {
+	for _, high := range []bool{false, true} {
+		t.Run(map[bool]string{false: "New", true: "High"}[high], func(t *testing.T) {
+			s, tenant, now := refillFixture(t, high)
+			settings := RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: MaxCardPaymentCents}
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			settings.AmountCents++
+			if err := setRefill(t, s, "a", settings); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "contact us") {
+				t.Fatalf("oversized refill: %v", err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE teams SET refill_amount_cents=? WHERE name='a'`, MaxCardPaymentCents+1)
+			st, err := tenant.SpendStanding(t.Context(), now)
+			if err != nil || st.Refill.Limit != RefillLimitPaymentSize {
+				t.Fatalf("legacy refill=%+v: %v", st.Refill, err)
+			}
+			if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+				t.Fatalf("oversized refill charged: %+v", due)
+			}
+		})
+	}
+}
+
+func TestRefillDoesNotConfirmOversizedReservations(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unbound", true: "bound"}[bound], func(t *testing.T) {
+			s, _, _ := refillFixture(t, true)
+			if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 1000}); err != nil {
+				t.Fatal(err)
+			}
+			first := dueRefillsFor(t, s, "a")
+			if len(first) != 1 {
+				t.Fatalf("first refill=%+v", first)
+			}
+			if bound {
+				if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", first[0].ID, "pi_legacy"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET amount_minor=?,amount_micro=? WHERE id=?`, MaxCardPaymentCents+1, (MaxCardPaymentCents+1)*MicroCreditsPerCent, first[0].ID)
+			due := dueRefillsFor(t, s, "a")
+			if bound && len(due) != 0 {
+				t.Fatalf("bound oversized refill returned for confirmation: %+v", due)
+			}
+			for _, refill := range due {
+				if refill.AmountCents > MaxCardPaymentCents || refill.ID == first[0].ID {
+					t.Fatalf("oversized reservation retried: %+v", refill)
+				}
 			}
 		})
 	}

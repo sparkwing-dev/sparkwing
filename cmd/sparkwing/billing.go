@@ -65,7 +65,7 @@ func manageBilling(ctx context.Context, inv clisurface.Invocation, manager contr
 			_, err = fmt.Fprintln(out, made.ID)
 			return err
 		}
-		_, err = fmt.Fprintf(out, "Requested %s standing (%s). An operator approves by granting standing or declines with a reason; check with sparkwing billing standing.\n", made.Tier, made.ID)
+		_, err = fmt.Fprintf(out, "Sent your request for %s standing, higher limits or larger payments (%s). An operator will review your message; check with sparkwing billing standing.\n", made.Tier, made.ID)
 		return err
 	case "sparkwing billing refill":
 		return manageRefill(ctx, inv, manager, out, format)
@@ -163,6 +163,7 @@ func fmtDollars(cents int64) string {
 }
 
 var refillLimitNames = map[string]string{
+	"payment_size":    "the maximum per payment; contact us through sparkwing billing request-tier for larger payments",
 	"standing_size":   "the standing's per-refill cap",
 	"standing_daily":  "the standing's refills per day",
 	"standing_weekly": "the standing's weekly cap",
@@ -190,7 +191,7 @@ func writeRefill(out io.Writer, format string, r controllerwire.TeamRefill) erro
 	fmt.Fprintf(&b, "Threshold: %s\nAmount: %s (%s to %s)\n", fmtDollars(r.ThresholdCents), fmtDollars(r.AmountCents), fmtDollars(r.MinAmountCents), fmtDollars(r.MaxAmountCents))
 	fmt.Fprintf(&b, "Team limits: %s a week, %s a month\n", limit(r.WeekLimitCents), limit(r.MonthLimitCents))
 	if r.Caps == (controllerwire.RefillCaps{}) {
-		b.WriteString("Refill caps: none, the team's limits apply\n")
+		b.WriteString("Standing refill caps: none; maximum per payment and team limits apply\n")
 	} else {
 		fmt.Fprintf(&b, "Refill caps: %s per refill, %d a day, %s a week\n", fmtDollars(r.Caps.AmountCents), r.Caps.PerDay, fmtDollars(r.Caps.WeekCents))
 	}

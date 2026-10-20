@@ -1,8 +1,10 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -239,5 +241,28 @@ func TestBillingPaymentModeRefusesInvalidConfigurationProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBillingPagesCapEachPaymentIncludingHighStanding(t *testing.T) {
+	for _, high := range []bool{false, true} {
+		t.Run(fmt.Sprint("High=", high), func(t *testing.T) {
+			_, tenant, a := billingPageFixture(t)
+			if high {
+				if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "ops", Reason: "reviewed"}, tenant.s.now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, MaxCardPaymentCents, "max"); err != nil {
+				t.Fatalf("maximum payment refused: %v", err)
+			}
+			if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, MaxCardPaymentCents+1, "above"); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "contact us") || !strings.Contains(err.Error(), "larger payments") {
+				t.Fatalf("oversized payment: %v", err)
+			}
+			var n int
+			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team='a'`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("checkout count=%d: %v", n, err)
+			}
+		})
 	}
 }

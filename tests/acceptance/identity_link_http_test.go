@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type identityLinkHTTP struct{ oauthHTTP }
@@ -34,14 +35,14 @@ func newIdentityLinkHTTP(t *testing.T) identityLinkHTTP {
 
 func (f *identityLinkHTTP) exec(t *testing.T, statement string, args ...any) {
 	t.Helper()
-	if _, err := f.store.DB().ExecContext(t.Context(), statement, args...); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement, args...); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (f *identityLinkHTTP) links(t *testing.T) (consumed, committed int) {
 	t.Helper()
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*),COUNT(completed_at) FROM flow_nonces WHERE kind='identity_link'`).Scan(&consumed, &committed); err != nil {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*),COUNT(completed_at) FROM flow_nonces WHERE kind='identity_link'`).Scan(&consumed, &committed); err != nil {
 		t.Fatal(err)
 	}
 	return consumed, committed
@@ -50,7 +51,7 @@ func (f *identityLinkHTTP) links(t *testing.T) (consumed, committed int) {
 func (f *identityLinkHTTP) linkedSubject(t *testing.T) string {
 	t.Helper()
 	var subject string
-	err := f.store.DB().QueryRowContext(t.Context(), `SELECT subject FROM identities WHERE provider='github' AND account_id='member' AND linked=1`).Scan(&subject)
+	err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT subject FROM identities WHERE provider='github' AND account_id='member' AND linked=1`).Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ""
 	}
@@ -109,7 +110,7 @@ func otherLinkAccount(t *testing.T, f *identityLinkHTTP) (string, string) {
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('stranger','stranger@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','stranger','reader',1)`,
 	} {
-		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -128,11 +129,11 @@ func TestIdentityLinkHTTPCommitsVerifiedIdentityOnce(t *testing.T) {
 	digest := sha256.Sum256([]byte(f.raw))
 	var binding string
 	var expiry int64
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT binding,expires_at FROM flow_nonces WHERE kind='identity_link' AND completed_at IS NOT NULL`).Scan(&binding, &expiry); err != nil {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT binding,expires_at FROM flow_nonces WHERE kind='identity_link' AND completed_at IS NOT NULL`).Scan(&binding, &expiry); err != nil {
 		t.Fatalf("HTTP %d %s: %v", w.Code, w.Body.String(), err)
 	}
 	var email string
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT email FROM accounts WHERE id='member'`).Scan(&email); err != nil {
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT email FROM accounts WHERE id='member'`).Scan(&email); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 303 || w.Header().Get("Location") != "/account/sign-ins?linked=github" || f.linkedSubject(t) != "123" || email != "member@example.test" ||
@@ -290,7 +291,7 @@ func TestIdentityLinkHTTPStartLimitsAndExistingProvider(t *testing.T) {
 	}
 
 	g := newIdentityLinkHTTP(t)
-	if _, err := g.store.DB().ExecContext(t.Context(), `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','123','member','member@example.test',1,1)`); err != nil {
+	if _, err := teststore.SQL(t, g.store).ExecContext(t.Context(), `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','123','member','member@example.test',1,1)`); err != nil {
 		t.Fatal(err)
 	}
 	w = httptest.NewRecorder()

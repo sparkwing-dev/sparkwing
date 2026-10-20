@@ -25,7 +25,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 			err = errors.Join(err, s.Close())
 		}
 	}()
-	if err := s.AsOperator().CreateTeam(ctx, "other"); err != nil {
+	if err := s.AsOperator().TestOnlyCreateTeam(ctx, "other"); err != nil {
 		return err
 	}
 	now := time.Unix(1700000000, 83).UTC()

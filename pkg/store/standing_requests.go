@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -65,7 +64,7 @@ func scanStandingRequest(row rowScanner) (StandingRequest, error) {
 	return r, nil
 }
 
-// RequestAuthorizedStanding records an open High standing request under current team administration.
+// RequestAuthorizedStanding records a request for High standing, higher limits or larger payments under current team administration.
 func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Authorized, tier, message string) (StandingRequest, error) {
 	message = strings.TrimSpace(message)
 	if tier != "High" || message == "" || utf8.RuneCountInString(message) > StandingRequestMessageLimit {
@@ -77,9 +76,6 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 		standing, err := trustStandingTx(ctx, tx, t.team, tx.now())
 		if err != nil {
 			return err
-		}
-		if standing.Tier == "High" {
-			return authorityError(apierr.Conflict, "the team already has High standing")
 		}
 		open, err := rowPresentTx(ctx, tx, `SELECT 1 FROM standing_requests WHERE team=? AND state=?`, t.team, StandingRequestOpen)
 		if err != nil {

@@ -35,6 +35,7 @@ type teamBillingJSON struct {
 	CreditsPerDollar          int64                  `json:"credits_per_dollar"`
 	SliceSeconds              int64                  `json:"slice_seconds"`
 	PurchaseMinCents          int64                  `json:"purchase_min_cents"`
+	PurchaseMaxCents          int64                  `json:"purchase_max_cents"`
 	RateTable                 []creditRateJSON       `json:"rate_table"`
 	StorageRateMicroPerGBDay  int64                  `json:"storage_rate_micro_per_gb_day"`
 	StorageFreeAllowanceBytes int64                  `json:"storage_free_allowance_bytes"`
@@ -87,7 +88,7 @@ func teamRefillBody(r store.RefillState) teamRefillJSON {
 	out := teamRefillJSON{
 		Enabled: r.Enabled, ThresholdCents: r.ThresholdCents, AmountCents: r.AmountCents,
 		WeekLimitCents: r.WeekLimitCents, MonthLimitCents: r.MonthLimitCents,
-		MinAmountCents: store.MinRefillCents, MaxAmountCents: store.MaxRefillCents,
+		MinAmountCents: store.MinRefillCents, MaxAmountCents: store.MaxCardPaymentCents,
 		Caps:    teamRefillCapsJSON{AmountCents: r.Caps.AmountCents, PerDay: r.Caps.PerDay, WeekCents: r.Caps.WeekCents},
 		Failure: r.Failure, Open: r.Open, DayCount: r.DayCount, WeekCents: r.WeekCents, MonthCents: r.MonthCents, Limit: r.Limit,
 	}
@@ -149,6 +150,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		CreditsPerDollar:          store.CreditsPerDollar,
 		SliceSeconds:              store.SliceSeconds,
 		PurchaseMinCents:          store.MinCardChargeCents,
+		PurchaseMaxCents:          store.MaxCardPaymentCents,
 		RateTable:                 creditRateTableToJSON(state.RateTable),
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,

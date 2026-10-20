@@ -34,7 +34,7 @@ type UnitBilling struct {
 }
 
 // UnitBillingMappings survives here issuance and bootstrap exchange unchanged.
-var UnitBillingMappings = []UnitBilling{
+var unitBillingMappings = []UnitBilling{
 	{UnitTrigger, BillingHost},
 	{UnitNode, BillingJob},
 	{UnitPlan, BillingPlan},

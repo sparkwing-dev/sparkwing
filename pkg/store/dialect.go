@@ -49,13 +49,6 @@ func (s *Store) greatest() string {
 	return "max"
 }
 
-func (s *Store) forUpdate() string {
-	if s.dialect == DialectPostgres {
-		return " FOR UPDATE"
-	}
-	return ""
-}
-
 func rewritePh(dialect Dialect, q string) string {
 	if dialect != DialectPostgres {
 		return q
@@ -142,13 +135,6 @@ type storeTx struct {
 	matchingRuns         map[matchingRunKey]*matchingRun
 }
 
-// SetTestClock overrides the SQLite store clock until the test ends.
-func (s *Store) SetTestClock(t interface{ Cleanup(func()) }, clock func() time.Time) {
-	original := s.clock
-	t.Cleanup(func() { s.clock = original })
-	s.clock = clock
-}
-
 func (s *Store) now() time.Time {
 	if s.clock != nil {
 		return s.clock().UTC()
@@ -223,37 +209,6 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 		return nil, err
 	}
 	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
-}
-
-func (t *storeTx) forUpdate() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR UPDATE"
-	}
-	return ""
-}
-
-func (t *storeTx) forKeyShare() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR KEY SHARE"
-	}
-	return ""
-}
-
-func (t *storeTx) forShare() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR SHARE"
-	}
-	return ""
-}
-
-// safety: FOR UPDATE also blocks the key-share lock an event insert's foreign
-// key takes on its run while holding the run's sequence lock, so a transaction
-// that locks its run and then appends an event deadlocks with that insert.
-func (t *storeTx) forNoKeyUpdate() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR NO KEY UPDATE"
-	}
-	return ""
 }
 
 func (t *storeTx) Commit() error {

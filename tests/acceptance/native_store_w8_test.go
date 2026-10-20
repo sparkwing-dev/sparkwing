@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -55,11 +57,11 @@ func prepareNativeStoreW8(t *testing.T, s *store.Store, kind capability.UnitKind
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(t.Context(), `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
 		t.Fatal(err)
 	}
 	if kind == capability.UnitNode {
-		if _, err := s.DB().ExecContext(t.Context(), `UPDATE nodes SET spec_hash='job-hash' WHERE run_id='run'`); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `UPDATE nodes SET spec_hash='job-hash' WHERE run_id='run'`); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -261,6 +263,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	} else {
 		cfg := localcontroller.Config{Bind: func(_ context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 			s = binding.Store
+			teststore.RegisterSQLite(s, filepath.Join(binding.Home, "state.db"))
 			server, root = seedStoredRunnerW8(t, s, capability.UnitTrigger)
 			prepareNativeStoreW8(t, s, capability.UnitTrigger)
 			binding.Controller.RunnerPolicy = server.RunnerPolicy

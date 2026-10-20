@@ -8,10 +8,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestLocalClaimantW8UsesPersistedPeerAuthority(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

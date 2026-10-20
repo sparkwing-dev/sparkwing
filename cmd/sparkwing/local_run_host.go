@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -100,8 +101,8 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
 	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-		SubmittedEnv: award.SubmittedEnv,
-		Home:         home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
+		SubmittedEnv: award.SubmittedEnv, SubmitAccept: procenv.SubmitAcceptAll(),
+		Home: home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
 		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),
 		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 			return state.RenewOwner(ctx, store.Actor{}, computing)

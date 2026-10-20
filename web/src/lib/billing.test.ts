@@ -64,6 +64,7 @@ const billing = {
   credits_per_dollar: 1_000,
   slice_seconds: 60,
   purchase_min_cents: 50,
+  purchase_max_cents: 100_000,
   trusted: true,
   rate_table: [
     { cores: 8, micro_per_second: 33_000 },
@@ -321,8 +322,10 @@ describe("startCheckout", () => {
   });
 });
 
-it("decision 112 permits prepaid funds above the retired dollar caps", () => {
- assert.equal(lib.purchaseProblem(600_000,billing),null);
+it("refuses payments above $1,000 and points to the contact request", () => {
+  assert.equal(lib.purchaseProblem(100_000, billing), null);
+  assert.match(lib.purchaseProblem(50, { ...billing, purchase_max_cents: 0 }) ?? "", /limits are unavailable/);
+  assert.match(lib.purchaseProblem(100_001, billing) ?? "", /at most \$1,000.*Contact us.*larger payments/);
 });
 
 it("prepay accepts the provider minimum and refuses smaller amounts", () => {
@@ -398,7 +401,7 @@ describe("automatic refill", () => {
     week_limit_cents: 0,
     month_limit_cents: 0,
     min_amount_cents: 1_000,
-    max_amount_cents: 500_000,
+    max_amount_cents: 100_000,
     caps: { amount_cents: 5_000, per_day: 1, week_cents: 10_000 },
     open: false,
     day_count: 0,
@@ -410,7 +413,7 @@ describe("automatic refill", () => {
     const ok = { enabled: true, threshold: 1_000, amount: 5_000, week: 0, month: 0 };
     assert.equal(lib.refillProblem(ok, refill), null);
     assert.match(lib.refillProblem({ ...ok, amount: 999 }, refill) ?? "", /at least \$10/);
-    assert.match(lib.refillProblem({ ...ok, amount: 500_001 }, refill) ?? "", /at most \$5,000/);
+    assert.match(lib.refillProblem({ ...ok, amount: 100_001 }, refill) ?? "", /at most \$1,000/);
     assert.match(lib.refillProblem({ ...ok, threshold: null }, refill) ?? "", /balance that starts a refill/);
     assert.match(lib.refillProblem({ ...ok, week: null }, refill) ?? "", /0 for none/);
     assert.equal(lib.refillProblem({ ...ok, enabled: false, amount: 0 }, refill), null);
@@ -420,6 +423,7 @@ describe("automatic refill", () => {
   it("names the limit that stops the next refill", () => {
     assert.equal(lib.refillStatus(refill), "");
     assert.equal(lib.refillStatus({ ...refill, enabled: false, limit: "team_weekly" }), "");
+    assert.match(lib.refillStatus({ ...refill, limit: "payment_size" }), /at most \$1,000.*Contact us.*larger payments/);
     assert.match(lib.refillStatus({ ...refill, limit: "standing_size" }), /\$50 per-refill cap/);
     assert.match(lib.refillStatus({ ...refill, limit: "standing_daily" }), /1 refill a day/);
     assert.match(lib.refillStatus({ ...refill, limit: "standing_weekly" }), /\$100 weekly cap/);
@@ -436,6 +440,8 @@ describe("automatic refill", () => {
     const b = await lib.getBilling();
     assert.equal(b.refill.enabled, false);
     assert.equal(b.refill.min_amount_cents, 1_000);
+    assert.equal(b.refill.max_amount_cents, 0);
+    assert.match(lib.refillProblem({ enabled: false, threshold: 0, amount: 0, week: 0, month: 0 }, b.refill) ?? "", /limits are unavailable/);
     assert.equal(b.refill.caps.per_day, 0);
   });
 

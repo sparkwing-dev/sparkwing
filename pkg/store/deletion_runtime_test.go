@@ -16,7 +16,7 @@ func TestTeamPurgeIsolationProperty(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s := authorityStore(t)
 			teams := []Team{"a", "b", Team(fmt.Sprintf("tenant-'\";--%x", random.Uint64()))}
-			if err := s.AsOperator().CreateTeam(t.Context(), teams[2]); err != nil {
+			if err := s.AsOperator().TestOnlyCreateTeam(t.Context(), teams[2]); err != nil {
 				t.Fatal(err)
 			}
 			root := authorityRoot("deployment", "")

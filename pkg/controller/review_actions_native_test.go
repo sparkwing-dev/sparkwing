@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
 	"github.com/sparkwing-dev/sparkwing/internal/jwks/jwkstest"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestReviewNativeActionsRootIssuance(t *testing.T) {
@@ -89,18 +90,19 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 		t.Fatalf("transaction accepted stale binding facts: %v", err)
 	}
 	var count int
-	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("issuance count=%d %v", count, err)
 	}
 }
 
 func TestActionsExpiryFitsStoreClockProperty(t *testing.T) {
 	property := func(input uint32) bool {
-		e, _ := engineRuntimeStore(t)
+		clock := &testClock{}
+		e, _ := engineRuntimeStore(t, clock.option())
 		engineSQL(t, e.Store, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES ('a',42,7,'acme/repo','member',1,'gh:42')`)
 		server := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		var databaseNow time.Time
-		e.Store.SetTestClock(t, func() time.Time { return databaseNow })
+		clock.pin(func() time.Time { return databaseNow })
 
 		spec, err := server.actionsProvision(t.Context(), "a", githuboidc.Claims{RepositoryID: 42, RepositoryOwnerID: 7, Ref: "refs/heads/main", SHA: fmt.Sprintf("%040x", input), RunID: fmt.Sprint(input)})
 		if err != nil {

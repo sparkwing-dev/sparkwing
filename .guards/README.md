@@ -15,7 +15,7 @@ applies, so both judge the whole tree.
 | File | Guard | Line format |
 |---|---|---|
 | `depguard-<rule>.allow` | the depguard rule of that name in `.golangci-guards.yml` | `<importing package dir><TAB><imported package>` |
-| `forbidigo-f1.allow` | F1: `(*store.Store).ForTeam`, `AsOperator` or `SetTestClock` outside `cmd/` and `internal/wingd/localcontroller`, and `TestOnly*` outside `_test.go` | `<file><TAB><method>`, one line per call |
+| `forbidigo-f1.allow` | F1: `(*store.Store).ForTeam`, `AsOperator` or `SetTestClock` outside `cmd/`, `internal/wingd/localcontroller` and the test-only `pkg/store/teststore`, and `TestOnly*` outside `_test.go` | `<file><TAB><method>`, one line per call |
 | `unexport.allow` | exported identifiers in an `internal/` package that no other package uses, that satisfy no interface and that no used type exposes | `<package><TAB><count>` |
 | `acceptance-skips.allow` | required acceptance cells that skip rather than execute; `tests/acceptance` enforces it on linux | `<scenario>/<target>` |
 

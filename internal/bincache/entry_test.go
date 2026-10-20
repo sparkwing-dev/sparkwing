@@ -20,12 +20,21 @@ func TestCacheDiscoveryRejectsEffectivelyUnboundedCallerLimits(t *testing.T) {
 	}
 }
 
+const seededRecordBytes = 64
+
 func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(entry.binaryPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(entry.binaryPath(), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := fileDigest(entry.binaryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entry.recordPath(), []byte(digest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(filepath.Dir(entry.binaryPath()), modTime, modTime); err != nil {
@@ -106,7 +115,7 @@ func TestPruneIsBoundedAndUsesStableQueueOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if result.ExaminedEntries != 1 || result.ReclaimedEntries != 1 || result.ObservedBytes != 1 {
+	if result.ExaminedEntries != 1 || result.ReclaimedEntries != 1 || result.ObservedBytes != 1+seededRecordBytes {
 		t.Fatalf("unexpected bounded accounting: %+v", result)
 	}
 	if !result.WorkBoundExhausted || result.GoalSatisfied {
@@ -289,7 +298,7 @@ func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
 			t.Errorf("Prune error %q lacks %q", err, diagnostic)
 		}
 	}
-	if result.ObservedBytes != 11 || result.LogicalRemovedBytes != 0 || result.ObservedCapacityGainedBytes != 0 || result.ReclaimedEntries != 0 {
+	if result.ObservedBytes != 11+2*seededRecordBytes || result.LogicalRemovedBytes != 0 || result.ObservedCapacityGainedBytes != 0 || result.ReclaimedEntries != 0 {
 		t.Fatalf("failed removal accounting: %+v", result)
 	}
 }
@@ -466,7 +475,7 @@ func TestStatusMeasuresCurrentCacheLiveness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if status.ObservedBytes != 8 || status.EntryCount != 2 || status.ActiveEntries != 1 || status.ActiveBytes != 3 {
+	if status.ObservedBytes != 8+2*seededRecordBytes || status.EntryCount != 2 || status.ActiveEntries != 1 || status.ActiveBytes != 3+seededRecordBytes {
 		t.Fatalf("managed status: %+v", status)
 	}
 }
@@ -492,7 +501,7 @@ func TestPruneOnlyCurrentCacheLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ReclaimedEntries != 1 || result.ExaminedEntries != 1 || result.ObservedBytes != int64(len("current")) {
+	if result.ReclaimedEntries != 1 || result.ExaminedEntries != 1 || result.ObservedBytes != int64(len("current"))+seededRecordBytes {
 		t.Fatalf("prune = %+v", result)
 	}
 	for _, path := range paths {
@@ -540,5 +549,71 @@ func TestAcquireOrMaterializeRefusesABrokenCeilingOnEveryPath(t *testing.T) {
 		return nil
 	}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
 		t.Fatalf("cache-hit error = %v, want the broken ceiling named", err)
+	}
+}
+
+func TestLeaseRefusesAnExecutableChangedAfterPublication(t *testing.T) {
+	entry := testEntry(t, t.TempDir(), "33333333-33333333")
+	seedEntry(t, entry, "published", time.Unix(1, 0))
+	lease, found, err := entry.Acquire(context.Background())
+	if err != nil || !found {
+		t.Fatalf("acquire published entry: found=%t err=%v", found, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	out := t.TempDir()
+	binary, err := lease.Install(filepath.Join(out, "verified"))
+	if err != nil {
+		t.Fatalf("published executable not verified: %v", err)
+	}
+	if body, err := os.ReadFile(binary.Path()); err != nil || string(body) != "published" {
+		t.Fatalf("verified copy = %q, %v", body, err)
+	}
+	if err := os.WriteFile(entry.binaryPath(), []byte("planted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(binary.Path()); err != nil || string(body) != "published" {
+		t.Fatalf("rewriting the cache changed the verified copy: %q, %v", body, err)
+	}
+	tampered := filepath.Join(out, "tampered")
+	if _, err := lease.Install(tampered); err == nil {
+		t.Fatal("a cached executable rewritten after publication was handed out")
+	}
+	if _, err := os.Stat(tampered); !os.IsNotExist(err) {
+		t.Fatalf("a refused copy was left behind: %v", err)
+	}
+}
+
+func TestEntryWithoutPublicationRecordIsAMiss(t *testing.T) {
+	entry := testEntry(t, t.TempDir(), "44444444-44444444")
+	if err := os.MkdirAll(entry.entryDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entry.binaryPath(), []byte("planted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := entry.Acquire(context.Background()); err != nil || found {
+		t.Fatalf("unrecorded executable served as a hit: found=%t err=%v", found, err)
+	}
+	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(path string) error {
+		return os.WriteFile(path, []byte("compiled"), 0o755)
+	})
+	if err != nil || !published {
+		t.Fatalf("unrecorded entry not replaced: published=%t err=%v", published, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	binary, err := lease.Install(filepath.Join(t.TempDir(), "verified"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(binary.Path()); err != nil || string(body) != "compiled" {
+		t.Fatalf("published executable = %q, %v", body, err)
 	}
 }

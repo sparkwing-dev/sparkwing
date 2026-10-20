@@ -10,6 +10,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestOAuthHTTPGitHubPrimaryEmailProperty(t *testing.T) {
@@ -54,7 +55,7 @@ func TestOAuthHTTPGitHubUsesNumericIdentityProperty(t *testing.T) {
 				`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','other','reader',1)`,
 				`INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','124','other','other@example.test',1,1)`,
 			} {
-				if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), statement); err != nil {
 					t.Fatal(err)
 				}
 			}

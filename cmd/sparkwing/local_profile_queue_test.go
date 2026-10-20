@@ -55,7 +55,7 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := owned.DB().ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE id='run'`, raw); err != nil {
+			if _, err := teststore.SQL(t, owned).ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE id='run'`, raw); err != nil {
 				t.Fatal(err)
 			}
 			config := filepath.Join(home, "config.yaml")

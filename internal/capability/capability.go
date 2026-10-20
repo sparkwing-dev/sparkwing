@@ -104,6 +104,7 @@ type Capability struct {
 	Delivery      DeliveryPurpose    `json:"delivery,omitempty"`
 	Parent        *AuthorityRef      `json:"parent,omitempty"`
 	ReservedPools []string           `json:"reserved_pools"`
+	Trust         Trust              `json:"trust,omitempty"`
 	Repositories  []string           `json:"repositories"`
 	Data          *DataScope         `json:"data,omitempty"`
 	Billing       *BillingProvenance `json:"billing,omitempty"`
@@ -145,3 +146,16 @@ type Issued struct {
 	Raw        string     `json:"capability"`
 	Capability Capability `json:"-"`
 }
+
+// Trust is the runs a machine root accepts work from, set by a team admin at registration.
+// The empty value takes the controller default: verified default-branch work only when the
+// root holds a pool that a secret is reserved to, and any run otherwise.
+type Trust string
+
+const (
+	TrustVerifiedDefault Trust = "verified-default"
+	TrustAny             Trust = "any"
+)
+
+// Valid reports whether t is the controller default or a named class.
+func (t Trust) Valid() bool { return t == "" || t == TrustVerifiedDefault || t == TrustAny }

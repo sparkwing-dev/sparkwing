@@ -27,7 +27,7 @@ Manage runners
 
 Register a runner
 
-Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name.
+Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name.
 
 ### Flags
 
@@ -49,6 +49,7 @@ Shared runner registration requires team administration. --personal registers ca
 | `--no-service` | no service |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 | `--reserved-for POOL` | reserved for Repeatable; comma-separated values are accepted. |
+| `--trust CLASS` | trust Values: verified-default, any. |
 
 ## `sparkwing runners list`
 

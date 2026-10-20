@@ -100,10 +100,11 @@ func TestStandingRequestDecisionsResolveOnlyTheReviewedRequest(t *testing.T) {
 	if b := billingStandingOf(t, f.tenant); b.Tier != "High" || f.state(t, successor.ID) != StandingRequestApproved {
 		t.Fatalf("approval: tier=%s state=%s", b.Tier, f.state(t, successor.ID))
 	}
-	if _, err := f.tenant.RequestAuthorizedStanding(ctx, f.owner, "High", "more"); err == nil || !strings.Contains(err.Error(), "already has High standing") {
-		t.Fatalf("request at High: %v", err)
+	more := f.request(t, "We need to make payments larger than $1,000.")
+	if open, err := f.s.OpenStandingRequests(ctx, 50); err != nil || len(open) != 1 || open[0].ID != more.ID || open[0].Message != more.Message {
+		t.Fatalf("High team payment request queue=%+v: %v", open, err)
 	}
-	standingRequestEvents(t, f.s, map[string]int{BusinessEventStandingRequested: 2, BusinessEventStandingRequestDecided: 2, BusinessEventBillingTrustChanged: 1})
+	standingRequestEvents(t, f.s, map[string]int{BusinessEventStandingRequested: 3, BusinessEventStandingRequestDecided: 2, BusinessEventBillingTrustChanged: 1})
 }
 
 func TestStandingGrantWithoutRequestLeavesRequestsOpen(t *testing.T) {

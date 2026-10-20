@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func billingNativeServer(t *testing.T) (*Server, string, string) {
@@ -82,6 +83,7 @@ func TestBillingModelProductionPages(t *testing.T) {
 	call("POST", "checkout", `{"amount_cents":2000}`, 200)
 	call("POST", "checkout", `{"amount_cents":2000}`, 200)
 	call("POST", "checkout", `{"amount_cents":2001}`, 409)
+	call("POST", "checkout", `{"amount_cents":100001}`, 400)
 	if calls != 1 {
 		t.Fatalf("provider calls=%d", calls)
 	}
@@ -296,12 +298,12 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				call(403)
 			}
 			var n int
-			if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team='a'`).Scan(&n); err != nil || n != 1 {
+			if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team='a'`).Scan(&n); err != nil || n != 1 {
 				t.Fatalf("checkouts=%d: %v", n, err)
 			}
 			if phase == "revoked" {
 				var data []byte
-				if err := s.store.DB().QueryRow(`SELECT page_json FROM billing_pages WHERE team='a'`).Scan(&data); err != nil {
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT page_json FROM billing_pages WHERE team='a'`).Scan(&data); err != nil {
 					t.Fatal(err)
 				}
 				var page capability.BillingPage
@@ -336,7 +338,7 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 	}
 	settings := func(team string) (enabled bool, threshold, amount int64) {
 		t.Helper()
-		if err := s.store.DB().QueryRow(`SELECT refill_enabled,refill_threshold_cents,refill_amount_cents FROM teams WHERE name=?`, team).Scan(&enabled, &threshold, &amount); err != nil {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT refill_enabled,refill_threshold_cents,refill_amount_cents FROM teams WHERE name=?`, team).Scan(&enabled, &threshold, &amount); err != nil {
 			t.Fatal(err)
 		}
 		return enabled, threshold, amount
@@ -386,13 +388,13 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 	}
 	r := answer.Refill
 	if !r.Enabled || r.ThresholdCents != 500 || r.AmountCents != 2000 || r.WeekLimitCents != 6000 || r.MonthLimitCents != 0 ||
-		r.MinAmountCents != store.MinRefillCents || r.MaxAmountCents != store.MaxRefillCents || r.Open || r.Limit != "" ||
+		r.MinAmountCents != store.MinRefillCents || r.MaxAmountCents != store.MaxCardPaymentCents || r.Open || r.Limit != "" ||
 		r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10000 {
 		t.Fatalf("refill block=%+v", r)
 	}
 	for _, body := range []string{
 		`{"enabled":true,"threshold_cents":500,"amount_cents":999}`,
-		fmt.Sprintf(`{"enabled":true,"threshold_cents":500,"amount_cents":%d}`, store.MaxRefillCents+1),
+		fmt.Sprintf(`{"enabled":true,"threshold_cents":500,"amount_cents":%d}`, store.MaxCardPaymentCents+1),
 		`{"enabled":true,"threshold_cents":-1,"amount_cents":2000}`,
 	} {
 		call("PUT", body, 400)

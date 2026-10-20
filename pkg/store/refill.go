@@ -21,13 +21,14 @@ const (
 
 	// MinRefillCents keeps a refill's card fee reasonable.
 	MinRefillCents = 1000
-	// MaxRefillCents bounds the amount an owner can enable for automatic refill.
-	MaxRefillCents = 500_000
+	// MaxCardPaymentCents bounds each Add funds payment and automatic refill, at every standing tier.
+	MaxCardPaymentCents = 100_000
 )
 
 // Refill limits a refill can be stopped by. A team's own weekly and monthly limits come from its settings; the
 // standing limits are the decision 27 stolen-card caps its paid history earns.
 const (
+	RefillLimitPaymentSize    = "payment_size"
 	RefillLimitStandingSize   = "standing_size"
 	RefillLimitStandingDaily  = "standing_daily"
 	RefillLimitStandingWeekly = "standing_weekly"
@@ -66,7 +67,7 @@ type RefillSettings struct {
 	MonthLimitCents int64
 }
 
-// RefillCaps are the refill caps the team's paid history earns; zero leaves only the team's own limits.
+// RefillCaps are the refill caps the team's paid history earns; zero leaves the maximum per payment and the team's own limits.
 type RefillCaps struct {
 	AmountCents int64
 	PerDay      int64
@@ -83,8 +84,8 @@ type RefillState struct {
 	Failure  string
 	// Open reports a refill in flight.
 	Open bool
-	// DayCount, WeekCents and MonthCents are the refills charged or in flight in the last day, 7 days and 30 days,
-	// whether granted, refused, refunded or declined.
+	// DayCount, WeekCents and MonthCents count in-flight reservations from opening and resolved payments from
+	// their outcome, whether granted, refused, refunded or declined. Delayed outcomes start fresh limit windows.
 	DayCount   int64
 	WeekCents  int64
 	MonthCents int64
@@ -130,10 +131,10 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	var open int64
 	if err := q.QueryRowContext(ctx, `SELECT
 	    COALESCE(SUM(CASE WHEN closed_at IS NULL THEN 1 ELSE 0 END), 0),
-	    COALESCE(SUM(CASE WHEN opened_at >= `+window(refillDay)+` THEN 1 ELSE 0 END), 0),
-	    COALESCE(SUM(CASE WHEN opened_at >= `+window(refillWeek)+` THEN amount_minor ELSE 0 END), 0),
-	    COALESCE(SUM(CASE WHEN opened_at >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
-	  FROM credit_checkouts WHERE team = ? AND kind = ? AND (opened_at >= ? OR closed_at IS NULL)
+	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillDay)+` THEN 1 ELSE 0 END), 0),
+	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillWeek)+` THEN amount_minor ELSE 0 END), 0),
+	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
+	  FROM credit_checkouts WHERE team = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
 	    AND NOT (payment_id = '' AND closed_at IS NOT NULL)`,
 		string(team), CheckoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
 		return s, err
@@ -166,6 +167,8 @@ func refillCaps(b BillingStanding, now time.Time) RefillCaps {
 func (s RefillState) limit() string {
 	next := s.AmountCents
 	switch {
+	case next > MaxCardPaymentCents:
+		return RefillLimitPaymentSize
 	case s.Caps.AmountCents > 0 && next > s.Caps.AmountCents:
 		return RefillLimitStandingSize
 	case s.Caps.PerDay > 0 && s.DayCount+1 > s.Caps.PerDay:
@@ -186,10 +189,10 @@ func (s RefillSettings) validate() error {
 		return fmt.Errorf("%w: refill amounts and limits are not negative", ErrInvalidInput)
 	case s.ThresholdCents > MaxCreditGrantMicro/MicroCreditsPerCent || s.WeekLimitCents > MaxCreditGrantMicro/MicroCreditsPerCent || s.MonthLimitCents > MaxCreditGrantMicro/MicroCreditsPerCent:
 		return fmt.Errorf("%w: a refill threshold or limit is at most $%d", ErrInvalidInput, MaxCreditGrantMicro/MicroCreditsPerCent/100)
-	case s.Enabled && (s.AmountCents < MinRefillCents || s.AmountCents > MaxRefillCents):
-		return fmt.Errorf("%w: a refill is between $%d and $%d", ErrInvalidInput, MinRefillCents/100, MaxRefillCents/100)
-	case !s.Enabled && s.AmountCents != 0 && (s.AmountCents < MinRefillCents || s.AmountCents > MaxRefillCents):
-		return fmt.Errorf("%w: a refill is between $%d and $%d", ErrInvalidInput, MinRefillCents/100, MaxRefillCents/100)
+	case s.AmountCents > MaxCardPaymentCents:
+		return fmt.Errorf("%w: each payment is at most $%d; contact us through the billing request form or sparkwing billing request-tier for larger payments", ErrInvalidInput, MaxCardPaymentCents/100)
+	case (s.Enabled || s.AmountCents != 0) && s.AmountCents < MinRefillCents:
+		return fmt.Errorf("%w: a refill is at least $%d", ErrInvalidInput, MinRefillCents/100)
 	}
 	return nil
 }
@@ -283,8 +286,11 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	case err != nil:
 		return nil, err
 	case r.PaymentIntent != "":
+		if r.AmountCents > MaxCardPaymentCents {
+			return nil, nil
+		}
 		return &r, nil
-	case !st.Refill.Enabled || !st.Refill.FailedAt.IsZero() || st.Billing.HoldCause != "":
+	case r.AmountCents > MaxCardPaymentCents || !st.Refill.Enabled || !st.Refill.FailedAt.IsZero() || st.Billing.HoldCause != "":
 		closed = refillReplaced
 	case now.Sub(time.Unix(0, opened)) < refillKeyLife && r.PaymentMethod == st.Card.PaymentMethod && r.Customer == st.Card.Customer:
 		refusal, err := cardRefusalTx(ctx, tx, team, "", st.Card.Fingerprint)

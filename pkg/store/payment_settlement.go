@@ -214,9 +214,36 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		}
 		return closeUnpaidTx(ctx, tx, event, checkout)
 	}
+	// A paid outcome replaces any earlier failed outcome and starts its spending windows. Later deliveries
+	// cannot change the protection facts or restart those windows.
+	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET three_d_secure = ?, liability_shift = ?, closed_at = ?
+	    WHERE team = ? AND id = ? AND payment_mode = ? AND liability_shift IS NULL`, event.ThreeDS, boolInt(event.LiabilityShift), now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+		return err
+	}
+	var shifted int
+	if err := tx.QueryRowContext(ctx, `SELECT three_d_secure,liability_shift FROM credit_checkouts WHERE team = ? AND id = ? AND payment_mode = ?`, string(team), checkout.result.CheckoutID, string(event.Mode)).Scan(&event.ThreeDS, &shifted); err != nil {
+		return err
+	}
+	event.LiabilityShift = shifted == 1
 	refusal, err := claimCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
 	if err != nil {
 		return err
+	}
+	if refusal.warning != "" && event.LiabilityShift {
+		var warnedPayment string
+		if err := tx.QueryRowContext(ctx, `SELECT payment_intent FROM payment_warnings WHERE warning_id = ?`, refusal.warning).Scan(&warnedPayment); err != nil {
+			return err
+		}
+		// A warning can precede its paid event; protect that payment while keeping the team held.
+		if warnedPayment == event.PaymentID {
+			if err := holdForWarningTx(ctx, tx, team, refusal.warning, event.PaymentID, now); err != nil {
+				return err
+			}
+			refusal, err = claimCardPinTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	if refusal.reason != "" {
 		return refuseCheckoutTx(ctx, tx, event, checkout, refusal)
@@ -229,7 +256,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	if err := l.insertGrant(ctx, grant); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), three_d_secure = ?, failure = '', refill_blocked = 0 WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), event.ThreeDS, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), failure = '', refill_blocked = 0 WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
 	if checkout.kind == CheckoutKindCheckout {
@@ -241,7 +268,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	if err := applyPaymentRefundsTx(ctx, tx, event.PaymentID); err != nil {
 		return err
 	}
-	return recordGrantEventTx(tx, grant, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS, "refill": checkout.kind == CheckoutKindRefill})
+	return recordGrantEventTx(tx, grant, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS, "liability_shift": event.LiabilityShift, "refill": checkout.kind == CheckoutKindRefill})
 }
 
 func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {

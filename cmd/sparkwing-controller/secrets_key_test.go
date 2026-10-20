@@ -24,7 +24,7 @@ import (
 
 func secretsTestServer(t *testing.T, features ...string) (*controller.Server, *store.Store) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

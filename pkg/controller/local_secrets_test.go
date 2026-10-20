@@ -19,7 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
@@ -77,13 +77,13 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatal("private direct award lost submitted environment")
 	}
 	masker := secrets.NewMasker()
-	base, err := procenv.WithSubmitted(procenv.Base{Ambient: []string{"BUILD_REGION=runner-value", "UNLISTED=runner-private"}, Masker: masker}, award.SubmittedEnv)
+	base, err := procenv.WithSubmitted(procenv.Base{Ambient: []string{"UNLISTED=runner-private"}, Masker: masker}, award.SubmittedEnv, procenv.SubmitAcceptAll())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []procenv.Kind{procenv.Install, procenv.Plan, procenv.Attempt, procenv.Eval} {
 		environment, err := procenv.Build(kind, base, procenv.Runtime{})
-		if err != nil || !strings.Contains(strings.Join(environment, "\n"), "BUILD_REGION="+submittedValue) || strings.Contains(strings.Join(environment, "\n"), "UNLISTED=") {
+		if err != nil || strings.Contains(strings.Join(environment, "\n"), "BUILD_REGION="+submittedValue) == (kind == procenv.Install) || strings.Contains(strings.Join(environment, "\n"), "UNLISTED=") {
 			t.Fatal("remote process lost submitted values or inherited unlisted input", err)
 		}
 	}
@@ -191,7 +191,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	var sequence int
 	var database, databasePath string
-	if err := s.store.DB().QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &databasePath); err != nil || databasePath == "" {
+	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &databasePath); err != nil || databasePath == "" {
 		t.Fatalf("SQLite database path unavailable: %v", err)
 	}
 	for _, suffix := range []string{"", "-wal"} {
@@ -203,7 +203,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 			t.Fatalf("requester secret reached SQLite%s: %v", suffix, err)
 		}
 	}
-	other, err := store.Open(databasePath)
+	other, err := teststore.OpenExisting(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,10 +321,10 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 	send(s.Handler(), changed, http.StatusConflict)
 	var sequence int
 	var database, path string
-	if err := s.store.DB().QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
+	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
 		t.Fatal(err)
 	}
-	other, err := store.Open(path)
+	other, err := teststore.OpenExisting(path)
 	if err != nil {
 		t.Fatal(err)
 	}

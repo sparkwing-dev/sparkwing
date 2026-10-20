@@ -133,7 +133,7 @@ type cloudResourcePolicy func(context.Context, string) error
 func (f cloudResourcePolicy) CheckRunner(ctx context.Context, v string) error { return f(ctx, v) }
 func cloudResourceSQL(t *testing.T, s *store.Store, q string, args ...any) {
 	t.Helper()
-	if _, err := s.DB().ExecContext(t.Context(), q, args...); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), q, args...); err != nil {
 		t.Fatal(err)
 	}
 }

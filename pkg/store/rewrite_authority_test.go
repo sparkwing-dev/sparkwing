@@ -90,7 +90,7 @@ VALUES (?,?,'a','machine','machine','controller',?,'award',1,?,?,?,?,?,?,?,'node
 func TestRewriteSchemaBillingClassifications(t *testing.T) {
 	db := rewriteSchemaDB(t)
 	rewriteSchemaExec(t, db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
-	for _, mapping := range capability.UnitBillingMappings {
+	for _, mapping := range capability.UnitBillingMappings() {
 		key := string(mapping.Operational)
 		rewriteSchemaExec(t, db, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at)
 VALUES ('a',?,?,'retained-run',1,'a',1,'cloud','at_start',?,?,1)`, key, key, mapping.Operational, mapping.Billing)

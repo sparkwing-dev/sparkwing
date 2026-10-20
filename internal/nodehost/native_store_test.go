@@ -30,6 +30,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestNativeHostFromIntakeThroughSDKAndPersistedCompletion(t *testing.T) {
@@ -162,7 +163,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	completion, err := host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" {
 		var failure []byte
-		readErr := f.Store.DB().QueryRowContext(ctx, "SELECT failure_json FROM nodes WHERE run_id=? AND node_id='output'", f.Input.RunID).Scan(&failure)
+		readErr := teststore.SQL(t, f.Store).QueryRowContext(ctx, "SELECT failure_json FROM nodes WHERE run_id=? AND node_id='output'", f.Input.RunID).Scan(&failure)
 		t.Fatalf("completion=%+v error=%v failure=%s read=%v logs=%v", completion, err, failure, readErr, logs)
 	}
 	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)

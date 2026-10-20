@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func operatorFixture(t *testing.T) (f *identityFixture, operator, owner signedIn) {
@@ -187,7 +188,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Fatalf("committed revocation = %d %+v", code, team.Billing)
 	}
 
-	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
 		t.Fatalf("dispute hold: %v", err)
 	}
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse"}, nil); code != http.StatusOK {
@@ -283,7 +284,7 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 		// safety: a host clock sync can step the wall clock back between two
 		// sign-ups, so the order this test reads is pinned rather than taken
 		// from the stamps the sign-ups wrote.
-		res, err := f.store.DB().Exec(`UPDATE accounts SET waitlisted_at = ? WHERE id = ?`, int64(i+1), ids[name])
+		res, err := teststore.SQL(t, f.store).Exec(`UPDATE accounts SET waitlisted_at = ? WHERE id = ?`, int64(i+1), ids[name])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +339,7 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 	}
 
 	admitted := map[string]string{}
-	rows, err := f.store.DB().Query(`SELECT account, actor, attrs FROM business_events WHERE kind = ?`, store.BusinessEventAccountAdmitted)
+	rows, err := teststore.SQL(t, f.store).Query(`SELECT account, actor, attrs FROM business_events WHERE kind = ?`, store.BusinessEventAccountAdmitted)
 	if err != nil {
 		t.Fatal(err)
 	}

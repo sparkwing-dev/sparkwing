@@ -26,11 +26,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func sourceUploadFixture(t *testing.T) (*Server, client.EngineOptions, runspec.Request, string) {
+func sourceUploadFixture(t *testing.T, opts ...store.Option) (*Server, client.EngineOptions, runspec.Request, string) {
 	t.Helper()
-	s, session := credentialSessionServer(t)
+	s, session := credentialSessionServer(t, opts...)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 		t.Fatalf("replay: %+v %v", replay, err)
 	}
 	var count int
-	if err := s.store.DB().QueryRow("SELECT COUNT(*) FROM blob_records WHERE team='a' AND run_id=? AND kind='source_bundle' AND provenance='local' AND verified_ref=0", created.RunID).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT COUNT(*) FROM blob_records WHERE team='a' AND run_id=? AND kind='source_bundle' AND provenance='local' AND verified_ref=0", created.RunID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("source roots=%d: %v", count, err)
 	}
 	info, err := os.Stat(path)
@@ -94,7 +95,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 		t.Fatal(err)
 	}
 	var used, objects int64
-	if err := s.store.DB().QueryRow("SELECT bytes,objects FROM storage_run_usage WHERE team='a' AND run_id=?", created.RunID).Scan(&used, &objects); err != nil || used != info.Size() || objects != 1 {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT bytes,objects FROM storage_run_usage WHERE team='a' AND run_id=?", created.RunID).Scan(&used, &objects); err != nil || used != info.Size() || objects != 1 {
 		t.Fatalf("run storage: bytes=%d objects=%d %v", used, objects, err)
 	}
 	runner := engineHTTPRoot(t, &EngineController{Store: s.store}, "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim})
@@ -120,7 +121,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err := entry.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM git_credential_releases WHERE team='a' AND run_id=?`, created.RunID).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM git_credential_releases WHERE team='a' AND run_id=?`, created.RunID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("complete bundle released a source credential: audits=%d: %v", count, err)
 	}
 	engineClaimHTTP(t, s.Handler(), runner, "POST", "/api/v1/data/download", `{"digest":"`+digest+`"}`, 403)
@@ -136,7 +137,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.DB().QueryRow("SELECT COUNT(*) FROM storage_run_usage WHERE team='a' AND run_id=?", second.RunID).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT COUNT(*) FROM storage_run_usage WHERE team='a' AND run_id=?", second.RunID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("duplicate source charged run: %d %v", count, err)
 	}
 	engineClaimHTTP(t, s.Handler(), raw, "POST", "/api/v1/data/download", `{"digest":"`+digest+`"}`, 403)
@@ -222,7 +223,7 @@ func TestSourceSnapshotRevokedBeforeCommitExpiresPhysicalStaging(t *testing.T) {
 		t.Fatal("revoked member committed source")
 	}
 	var id string
-	if err := s.store.DB().QueryRow("SELECT id FROM source_uploads WHERE committed_at=0").Scan(&id); err != nil {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT id FROM source_uploads WHERE committed_at=0").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	stage := filepath.Join(directory, "teams", "a", "pending", id)
@@ -242,7 +243,7 @@ func TestSourceSnapshotRevokedBeforeCommitExpiresPhysicalStaging(t *testing.T) {
 		t.Fatalf("staged source survived expiry: %v", err)
 	}
 	var state string
-	if err := s.store.DB().QueryRow("SELECT state FROM quota_reservations WHERE id=?", "upload:"+id).Scan(&state); err != nil || state != "released" {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT state FROM quota_reservations WHERE id=?", "upload:"+id).Scan(&state); err != nil || state != "released" {
 		t.Fatalf("source reservation state=%s %v", state, err)
 	}
 }
@@ -264,10 +265,10 @@ func TestSourceSnapshotSigningFailureReleasesReservation(t *testing.T) {
 		t.Fatal("signer failure was hidden")
 	}
 	var reserved, count int64
-	if err := s.store.DB().QueryRow("SELECT reserved FROM quota_admission WHERE team='a' AND quota='storage'").Scan(&reserved); err != nil || reserved != 0 {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT reserved FROM quota_admission WHERE team='a' AND quota='storage'").Scan(&reserved); err != nil || reserved != 0 {
 		t.Fatalf("failed signing held quota=%d %v", reserved, err)
 	}
-	if err := s.store.DB().QueryRow("SELECT COUNT(*) FROM source_uploads").Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, s.store).QueryRow("SELECT COUNT(*) FROM source_uploads").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("failed signing retained tickets=%d %v", count, err)
 	}
 }

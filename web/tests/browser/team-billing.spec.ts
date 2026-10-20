@@ -8,6 +8,7 @@ const billing = {
   credits_per_dollar: 1_000,
   slice_seconds: 60,
   purchase_min_cents: 50,
+  purchase_max_cents: 100_000,
   trusted: true,
   rate_table: [
     { cores: 2, micro_per_second: 9_000 },
@@ -35,7 +36,7 @@ const billing = {
     week_limit_cents: 0,
     month_limit_cents: 0,
     min_amount_cents: 1_000,
-    max_amount_cents: 500_000,
+    max_amount_cents: 100_000,
     caps: { amount_cents: 20_000, per_day: 2, week_cents: 50_000 },
     open: false,
     day_count: 0,
@@ -159,8 +160,11 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   await amount.fill("0.49");
   await expect(page.getByText("Minimum purchase $0.50.",{exact:true})).toBeVisible();
   await expect(buy).toBeDisabled();
-  await amount.fill("6000");
+  await amount.fill("1000");
   await expect(buy).toBeEnabled();
+  await amount.fill("1000.01");
+  await expect(buy).toBeDisabled();
+  await expect(page.getByText("Each payment is at most $1,000. Contact us through the billing request form for larger payments.")).toBeVisible();
 
   await amount.fill("25");
   await expect(page.getByText("Buys 25,000 credits.")).toBeVisible();
@@ -296,17 +300,17 @@ test("a failed refill tells the owner to update the card", async ({ page }) => {
   await expect(page.getByText(/The last refill failed \(card_declined\)\. Update your card/)).toBeVisible();
 });
 
-test("an owner asks the operators for High standing", async ({ page }) => {
+test("an owner contacts the operators for higher limits or larger payments", async ({ page }) => {
   const seen = await mockController(page);
   await page.goto("/team/billing");
   await expect(
     page.getByText(/Prepaid funds can raise standing to Trusted\. High needs \$500 paid/),
   ).toBeVisible();
-  const message = page.getByLabel("Contact us to unlock higher tiers");
-  await page.getByRole("button", { name: "Request High standing" }).click();
-  await expect(page.getByText(/Tell us what the team runs/)).toBeVisible();
+  const message = page.getByLabel("Contact us for higher tiers, higher limits or larger payments");
+  await page.getByRole("button", { name: "Send request" }).click();
+  await expect(page.getByText(/Tell us about the higher limits or larger payments/)).toBeVisible();
   await message.fill("Release builds need 256 vCPU.");
-  await page.getByRole("button", { name: "Request High standing" }).click();
+  await page.getByRole("button", { name: "Send request" }).click();
   await expect.poll(() => seen.standingBodies.map((b) => JSON.parse(b))).toEqual([
     { tier: "high", message: "Release builds need 256 vCPU." },
   ]);
@@ -326,4 +330,16 @@ test("a declined request shows the operator's reason", async ({ page }) => {
   await expect(
     page.getByText("An operator declined the request for High standing: Pay for 30 days first."),
   ).toBeVisible();
+});
+
+test("a High-standing owner requests larger payments", async ({ page }) => {
+  const seen = await mockController(page, {
+    billing: { standing: { ...billing.standing, tier: "High", can_request: true } },
+  });
+  await page.goto("/team/billing");
+  await page.getByLabel("Contact us for higher tiers, higher limits or larger payments").fill("We need a $2,000 payment for our release builds.");
+  await page.getByRole("button", { name: "Send request" }).click();
+  await expect.poll(() => seen.standingBodies.map((b) => JSON.parse(b))).toEqual([
+    { tier: "high", message: "We need a $2,000 payment for our release builds." },
+  ]);
 });

@@ -133,12 +133,12 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/team/repo','host','execute',?,'fixture',?,'r30',30,?,'spec',?,?,'plan')`, []any{store.DefaultTeam, request, now.UnixNano(), []byte(`[]`), now.UnixNano(), spec, now.UnixNano(), plan}},
 		{`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES (?,'run','trigger',?,?,?,?,?)`, []any{store.DefaultTeam, now.UnixNano(), now.UnixNano(), now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)}},
 	} {
-		if _, err := s.DB().ExecContext(t.Context(), statement.query, statement.args...); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if kind == capability.UnitNode {
-		if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,'run','job','pending',?,?,?)`, store.DefaultTeam, now.UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,'run','job','pending',?,?,?)`, store.DefaultTeam, now.UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -161,7 +161,7 @@ func revokeStoredRunnerW8(t *testing.T, s *store.Store, target capability.Author
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','runner-admin','owner',1)`,
 		`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('runner-admin','runner-admin','runs.read,team.admin',1,4102444800000000000,'default','runner-admin')`,
 	} {
-		if _, err := s.DB().ExecContext(t.Context(), query); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)
 		}
 	}

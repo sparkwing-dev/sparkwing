@@ -11,7 +11,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -59,7 +61,7 @@ func TestRunnerRejectsRemovedVerbsAndFlagsBeforeComposition(t *testing.T) {
 }
 
 func TestRunnerInvalidExplicitValuesNeverReachFactory(t *testing.T) {
-	for _, option := range []string{"--max-concurrent=0", "--poll=0s", "--heartbeat=0s", "--lease=0s", "--heartbeat=3m", "--idle-exit=-1s", "--max-claims-before-restart=-1", "--repos=bad", "--warm-module=example.com/a@bad", "--keep-free=nonsense", "--cpu-ceiling=-1", "--memory-ceiling=9223372036854775808", "--memory-ceiling=0"} {
+	for _, option := range []string{"--max-concurrent=0", "--poll=0s", "--heartbeat=0s", "--lease=0s", "--heartbeat=3m", "--idle-exit=-1s", "--max-claims-before-restart=-1", "--repos=bad", "--warm-module=example.com/a@bad", "--keep-free=nonsense", "--submit-env-allow=*", "--cpu-ceiling=-1", "--memory-ceiling=9223372036854775808", "--memory-ceiling=0"} {
 		t.Run(option, func(t *testing.T) {
 			cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 				t.Error("invalid config reached factory")
@@ -189,5 +191,21 @@ func TestRunnerRejectsSelectorsMissingFromControllerContract(t *testing.T) {
 		if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", option}, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "claim contract") {
 			t.Fatalf("%s: %v", option, err)
 		}
+	}
+}
+
+func TestWarmCarriesTheOperatorSubmitAllowList(t *testing.T) {
+	boundary := errors.New("runtime boundary")
+	credentials := runnerCredentials(t)
+	cli := RunnerCLI{Factory: func(_ context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
+		base, err := procenv.WithSubmitted(procenv.Base{Masker: secrets.NewMasker()}, map[string][]byte{"BUILD_REGION": []byte("eu"), "DEPLOY_TARGET": []byte("prod")}, options.SubmitAccept)
+		if err != nil || !reflect.DeepEqual(base.Ambient, []string{"BUILD_REGION=eu"}) {
+			t.Errorf("operator allow-list admitted %v: %v", base.Ambient, err)
+		}
+		return runners.RuntimeConfig{}, boundary
+	}}
+	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + credentials, "--submit-env-allow=BUILD_*"}, "v1.2.3")
+	if !errors.Is(err, boundary) {
+		t.Fatalf("Run = %v", err)
 	}
 }

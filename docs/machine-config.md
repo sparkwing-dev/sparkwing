@@ -67,6 +67,12 @@ values. Planning, installation and execution use them, and values of at least
 12 characters are masked before processes start. Public run views show only
 names and an environment digest.
 
+On a machine that runs other people's work, the same `run.submit_env_allow`
+is the operator's list of submitted names it accepts. A submitted value under
+any other name is dropped before a process starts; an empty list accepts none.
+Cloud Jobs, here-hosted runs and the requester's own personal machines accept every submittable name. Go toolchain and
+network base names cannot be submitted at all.
+
 Connections come only from this machine file. A project can name a profile but
 cannot define one. A controller observation uses a profile only when selected
 with `--profile`. See [Controller connections](backends.md).

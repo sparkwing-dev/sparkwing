@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestHostLifecycleEvents(t *testing.T) {
@@ -36,7 +37,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 			input = storedExecutionInput(t, fixture, host)
 			row := store.NodeRow{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}}
 			if mode == "result_refused" {
-				if _, err := fixture.Store.DB().ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
+				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -126,7 +127,7 @@ func TestHostStepPersistence(t *testing.T) {
 					}
 					if log.Event == "step_start" || log.Event == "step_end" || log.Event == "step_skipped" {
 						var state string
-						err := fixture.Store.DB().QueryRowContext(ctx, `SELECT status FROM node_steps WHERE team=? AND run_id=? AND node_id='job' AND attempt=? AND generation=? AND step_id=?`, store.DefaultTeam, in.Accepted.RunID, in.Attempt, in.Generation, log.Step).Scan(&state)
+						err := teststore.SQL(t, fixture.Store).QueryRowContext(ctx, `SELECT status FROM node_steps WHERE team=? AND run_id=? AND node_id='job' AND attempt=? AND generation=? AND step_id=?`, store.DefaultTeam, in.Accepted.RunID, in.Attempt, in.Generation, log.Step).Scan(&state)
 						if err != nil || log.Event == "step_start" && state != "running" || log.Event == "step_end" && state == "running" || log.Event == "step_skipped" && state != "skipped" {
 							t.Fatalf("diagnostic preceded its step commit: %+v, state=%s, error=%v", log, state, err)
 						}
@@ -141,7 +142,7 @@ func TestHostStepPersistence(t *testing.T) {
 			input = storedExecutionInput(t, fixture, host)
 			host.Store, host.Mask = fixture.Tenant, func(text string) string { return text }
 			if mode == "step_write_refused" {
-				if _, err := fixture.Store.DB().ExecContext(ctx, `CREATE TRIGGER refuse_step BEFORE UPDATE OF status ON node_steps WHEN NEW.status='passed' BEGIN SELECT RAISE(ABORT,'step transaction refused'); END`); err != nil {
+				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_step BEFORE UPDATE OF status ON node_steps WHEN NEW.status='passed' BEGIN SELECT RAISE(ABORT,'step transaction refused'); END`); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -149,7 +150,7 @@ func TestHostStepPersistence(t *testing.T) {
 			if (err != nil) != (mode == "before_refused" || mode == "step_write_refused" || mode == "diagnostic_refused") {
 				t.Fatalf("execution=%v trace=%v", err, trace)
 			}
-			rows, err := fixture.Store.DB().QueryContext(ctx, `SELECT attempt,generation,step_id,status,started_at,finished_at FROM node_steps WHERE team=? AND run_id=? AND node_id='job' ORDER BY attempt,step_id`, store.DefaultTeam, input.Accepted.RunID)
+			rows, err := teststore.SQL(t, fixture.Store).QueryContext(ctx, `SELECT attempt,generation,step_id,status,started_at,finished_at FROM node_steps WHERE team=? AND run_id=? AND node_id='job' ORDER BY attempt,step_id`, store.DefaultTeam, input.Accepted.RunID)
 			if err != nil {
 				t.Fatal(err)
 			}

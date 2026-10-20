@@ -36,9 +36,9 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	}
 	provider := paymenttest.Provider{}
 	for _, payment := range []string{"pi_a", "pi_b", "pi_again"} {
-		provider.Charge(payment, false, "authenticated", "fp_stolen")
+		provider.Charge(payment, false, "", "fp_stolen")
 	}
-	provider.Charge("pi_returned", false, "authenticated", "fp_returned")
+	provider.Charge("pi_returned", false, "", "fp_returned")
 	var logs bytes.Buffer
 	_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server {
 		s.logger = slog.New(slog.NewJSONHandler(&logs, nil))

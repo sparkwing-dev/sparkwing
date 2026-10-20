@@ -41,6 +41,10 @@ func NormalizeTeam(team Team) Team {
 
 // ForTeam returns a tenant handle for a registered team without a pending deletion.
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
+	return s.forTeam(ctx, team)
+}
+
+func (s *Store) forTeam(ctx context.Context, team Team) (*Tenant, error) {
 	team = NormalizeTeam(team)
 	if team == "" {
 		return nil, ErrNoTeam
@@ -81,8 +85,12 @@ func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
 // id across teams and has to act on it through that team's handle.
 // [ErrNotFound] when no run carries the id.
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
+	return o.s.runTeam(ctx, runID)
+}
+
+func (s *Store) runTeam(ctx context.Context, runID string) (Team, error) {
 	var team string
-	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
+	err := s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", notFound("run", runID)
 	}
@@ -132,17 +140,6 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	return err
-}
-
-// CreateTeam registers a team. Registering is idempotent, because
-// provisioning retries the whole team-creation path rather than half
-// of it.
-func (o *Operator) CreateTeam(ctx context.Context, team Team) error {
-	team = NormalizeTeam(team)
-	if team == "" {
-		return ErrNoTeam
-	}
-	return o.s.inTx(ctx, func(tx *storeTx) error { return registerTeamTx(ctx, tx, team) })
 }
 
 // ListTeams returns every registered team, name order.

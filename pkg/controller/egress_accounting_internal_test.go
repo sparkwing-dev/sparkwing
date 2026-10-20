@@ -12,15 +12,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
 	engine, _ := engineRuntimeStore(t)
-	if err := engine.Store.AsOperator().CreateTeam(t.Context(), "b"); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedTeam(t, engine.Store, "b")
 	first := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{}))
 	second := New(engine.Store, nil)
 	for _, server := range []*Server{first, second} {
@@ -35,7 +34,7 @@ func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
 			}
 		}
 		var bytes int64
-		if err := engine.Store.DB().QueryRow("SELECT SUM(bytes) FROM egress_usage WHERE team='a' AND replica_id=?", server.leaseHolder).Scan(&bytes); err != nil || bytes != 15 {
+		if err := teststore.SQL(t, engine.Store).QueryRow("SELECT SUM(bytes) FROM egress_usage WHERE team='a' AND replica_id=?", server.leaseHolder).Scan(&bytes); err != nil || bytes != 15 {
 			t.Fatalf("replica=%s bytes=%d: %v", server.leaseHolder, bytes, err)
 		}
 	}
@@ -103,7 +102,7 @@ func TestControllerEgressFailuresAreLoud(t *testing.T) {
 	s := New(engine.Store, nil)
 	var logs strings.Builder
 	s.logger = slog.New(slog.NewTextHandler(&logs, nil))
-	if _, err := engine.Store.DB().Exec("CREATE TRIGGER refuse_egress BEFORE INSERT ON egress_usage BEGIN SELECT RAISE(ABORT,'storage unavailable'); END"); err != nil {
+	if _, err := teststore.SQL(t, engine.Store).Exec("CREATE TRIGGER refuse_egress BEFORE INSERT ON egress_usage BEGIN SELECT RAISE(ABORT,'storage unavailable'); END"); err != nil {
 		t.Fatal(err)
 	}
 	r := httptest.NewRequest(http.MethodGet, "/logs", nil)
@@ -114,7 +113,7 @@ func TestControllerEgressFailuresAreLoud(t *testing.T) {
 		t.Fatalf("missing accounting failure: %s", logs.String())
 	}
 	var rows int
-	if err := engine.Store.DB().QueryRow("SELECT COUNT(*) FROM egress_usage").Scan(&rows); err != nil || rows != 0 {
+	if err := teststore.SQL(t, engine.Store).QueryRow("SELECT COUNT(*) FROM egress_usage").Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("failed counter left %d rows: %v", rows, err)
 	}
 }
@@ -122,10 +121,10 @@ func TestControllerEgressFailuresAreLoud(t *testing.T) {
 func TestControllerEgressRestoresTotalsBeyondMeterCardinality(t *testing.T) {
 	engine, _ := engineRuntimeStore(t)
 	count := egress.MaxPrincipals + 2
-	if _, err := engine.Store.DB().Exec(`WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<?) INSERT INTO teams(name,created_at,updated_at) SELECT 'egress-'||n,1,1 FROM numbers`, count); err != nil {
+	if _, err := teststore.SQL(t, engine.Store).Exec(`WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<?) INSERT INTO teams(name,created_at,updated_at) SELECT 'egress-'||n,1,1 FROM numbers`, count); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.Store.DB().Exec("INSERT INTO egress_usage(team,period,replica_id,bytes,updated_at) SELECT name,?,'replica',1,1 FROM teams WHERE name LIKE 'egress-%'", time.Now().UTC().Format("2006-01-02")); err != nil {
+	if _, err := teststore.SQL(t, engine.Store).Exec("INSERT INTO egress_usage(team,period,replica_id,bytes,updated_at) SELECT name,?,'replica',1,1 FROM teams WHERE name LIKE 'egress-%'", time.Now().UTC().Format("2006-01-02")); err != nil {
 		t.Fatal(err)
 	}
 	s := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{GlobalDailyAlarmBytes: int64(count)}))

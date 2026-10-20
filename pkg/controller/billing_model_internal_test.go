@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type billingCloudProfile struct{}
@@ -209,7 +210,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 		intent, _ := body["payment_intent"].(string)
 		if len(calls) == 1 {
 			var recorded string
-			if err := e.Store.DB().QueryRow(`SELECT payment_id FROM credit_checkouts WHERE team='a' AND kind='refill'`).Scan(&recorded); err != nil || recorded != "pi_refill" {
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT payment_id FROM credit_checkouts WHERE team='a' AND kind='refill'`).Scan(&recorded); err != nil || recorded != "pi_refill" {
 				t.Fatalf("confirmed before the intent was recorded: %q %v", recorded, err)
 			}
 		}
@@ -447,7 +448,7 @@ func TestPaymentOwnershipFollowsTheStoredIdentityNotTheHost(t *testing.T) {
 	}
 	grants := func() int {
 		var n int
-		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM credit_grants WHERE kind='paid'`).Scan(&n); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM credit_grants WHERE kind='paid'`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n

@@ -1,9 +1,10 @@
 package store
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestLogSigningProjectionRequiresTheExactCurrentWriter(t *testing.T) {

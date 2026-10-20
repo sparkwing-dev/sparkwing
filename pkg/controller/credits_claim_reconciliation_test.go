@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type creditClaimProfile struct{ cores float64 }
@@ -56,7 +57,7 @@ func TestCredits_AClaimAboveTheLargestClassIsRefusedAtomically(t *testing.T) {
 	}
 	for _, table := range []string{"credit_charges", "billing_awards", "node_attempts"} {
 		var count int
-		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s rows=%d: %v", table, count, err)
 		}
 	}

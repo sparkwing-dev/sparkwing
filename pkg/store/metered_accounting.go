@@ -57,7 +57,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		return authorityError(apierr.BadRequest, "invalid billing award")
 	}
 	mapping := false
-	for _, m := range capability.UnitBillingMappings {
+	for _, m := range capability.UnitBillingMappings() {
 		if m.Operational == c.Unit && m.Billing == b.Unit {
 			mapping = true
 		}

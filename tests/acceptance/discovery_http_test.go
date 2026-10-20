@@ -111,7 +111,7 @@ func TestDiscoveryHTTPRefusesInvalidAuthorityBeforeAvailability(t *testing.T) {
 						b.snapshot.Binding.Current.Generation++
 					case "bootstrap":
 						b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
-						b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants
+						b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants()
 						code = apierr.Forbidden
 					case "teamless":
 						b = deploymentBoundary(capability.OperatorTokens)

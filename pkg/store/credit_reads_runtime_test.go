@@ -104,15 +104,18 @@ func TestStoreDataCreditStateUsesOneSnapshotProperty(t *testing.T) {
 		after := before + 1
 		rewriteSchemaExec(t, s.db, "INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('snapshot','a','','','','storage',0,?,?)", before, now.UnixNano())
 		rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES (?,?)", metaKeyCreditRateMicro, []byte("1"))
-		reader, err := OpenReadOnly(path)
+		// safety: a deferred-lock, query-only connection reads one snapshot
+		// while the writer commits between the reader's statements.
+		readDB, err := sql.Open("sqlite", sqliteURI(path)+"?_pragma=busy_timeout(30000)&_pragma=query_only(true)")
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			if err := reader.Close(); err != nil {
+			if err := readDB.Close(); err != nil {
 				t.Error(err)
 			}
 		})
+		reader := &Store{db: readDB, dialect: DialectSQLite}
 		changed := false
 		reader.clock = func() time.Time {
 			if !changed {

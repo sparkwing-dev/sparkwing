@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, client.EngineOptions, string, store.RunRow) {
@@ -106,7 +107,7 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 					t.Fatalf("retry replay: %+v %v", replay, err)
 				}
 				var unitKind, unitState string
-				if err := s.store.DB().QueryRow(`SELECT unit_kind,status FROM triggers WHERE team='a' AND id=?`, row.ID).Scan(&unitKind, &unitState); err != nil || unitKind != "trigger" || unitState != "pending" {
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT unit_kind,status FROM triggers WHERE team='a' AND id=?`, row.ID).Scan(&unitKind, &unitState); err != nil || unitKind != "trigger" || unitState != "pending" {
 					t.Fatalf("retry has no pending executable owner: %s %s %v", unitKind, unitState, err)
 				}
 				selector, parent = result.RunID, result.RunID
@@ -214,10 +215,10 @@ func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
 			wantRows++
 		}
 		var rows, foreign int
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&rows); err != nil || rows != wantRows {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&rows); err != nil || rows != wantRows {
 			t.Fatalf("retry committed after refusal: %d %v", rows, err)
 		}
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='b'`).Scan(&foreign); err != nil || foreign != 1 {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='b'`).Scan(&foreign); err != nil || foreign != 1 {
 			t.Fatalf("retry wrote into another team: %d %v", foreign, err)
 		}
 	})
@@ -244,7 +245,7 @@ func TestRetryActionRechecksAuthorityBeforeReplay(t *testing.T) {
 				t.Fatal("retry replay survived removal of its current authority")
 			}
 			var count int
-			if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
+			if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != 2 {
 				t.Fatalf("dead retry authority wrote another execution: %d %v", count, err)
 			}
 		})
@@ -312,7 +313,7 @@ func FuzzRetryActionValidatesBeforeAdmission(f *testing.F) {
 			rows++
 		}
 		var count int
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != rows {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil || count != rows {
 			t.Fatalf("invalid retry committed: %d %v", count, err)
 		}
 	})

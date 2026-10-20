@@ -245,7 +245,8 @@ controller credential, including to the controller's own origin.
 Every record edge checks authority, integrity and existence. An unrelated
 same-team or same-run receipt cannot authorize another job's manifest. A remote
 cache profile permits only the user's authorized verified-default-branch memo,
-artifact and dependency-cache reads. It exposes no write or binary-fetch method.
+artifact and dependency-cache reads, and needs the editor role, because
+dependency-cache archives are not checked for secrets. It exposes no write or binary-fetch method.
 Publication is separate, labels provenance as local and creates no execution
 claim. A publication failure does not change the completed local verdict.
 

@@ -20,7 +20,6 @@ internal/clisurface	11
 internal/cluster	3
 internal/configguard	2
 internal/crons	39
-internal/depcache	2
 internal/discovery	4
 internal/diskspace	1
 internal/egress	22
@@ -67,7 +66,7 @@ internal/runners	3
 internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
-internal/runspec	8
+internal/runspec	5
 internal/secrets	7
 internal/secretsource	2
 internal/sessionledger	8

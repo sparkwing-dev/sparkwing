@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestAdminNeedsATeamAndAReason(t *testing.T) {
@@ -46,7 +47,7 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	ctx := context.Background()
 	st := openState(t)
-	if _, err := st.DB().ExecContext(ctx, "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", store.DefaultTeam, "", "chargeback", time.Now().UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(ctx, "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", store.DefaultTeam, "", "chargeback", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -204,5 +205,6 @@ func openState(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	teststore.RegisterSQLite(st, p.StateDB())
 	return st
 }

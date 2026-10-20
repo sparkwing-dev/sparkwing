@@ -13,7 +13,7 @@ import (
 func teamHandle(t *testing.T, s *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	ctx := context.Background()
-	if err := s.AsOperator().CreateTeam(ctx, team); err != nil {
+	if err := s.AsOperator().TestOnlyCreateTeam(ctx, team); err != nil {
 		t.Fatalf("register %s: %v", team, err)
 	}
 	tenant, err := s.ForTeam(ctx, team)

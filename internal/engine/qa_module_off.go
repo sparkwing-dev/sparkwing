@@ -2,9 +2,7 @@
 
 package engine
 
-import "context"
-
 // QAModuleEnvironment returns nothing outside a qatrust build.
-func QAModuleEnvironment(context.Context, string, Pin, []string) ([]string, error) {
+func QAModuleEnvironment(Pin, func(args ...string) ([]byte, error)) ([]string, error) {
 	return nil, nil
 }

@@ -42,7 +42,7 @@ const (
 )
 
 // Grants is the complete vocabulary.
-var Grants = []Grant{
+var grants = []Grant{
 	RunsRead, RunsWrite, RunsControl, RunsState, NodesClaim, TriggersClaim, ClaimsLaunch,
 	LogsRead, SecretsRead, ApprovalsWrite, TeamAdmin, SecretsRelease, SourceRead,
 	DataRead, DataWrite, OIDCMint, NodeReport, NodeResult, LogTail, RefsRead,
@@ -100,10 +100,10 @@ type AwardPolicy struct {
 }
 
 // BootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
-var BootstrapGrants = []Grant{SourceRead, ClaimExchange}
+var bootstrapGrants = []Grant{SourceRead, ClaimExchange}
 
 // BootstrapUnits confines pod delivery to units accepted by the launcher.
-var BootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
+var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
 // ParentRule controls revocation ancestry independently of grant inheritance.
 // ParentClaimantRoot stops at the nearest here Award, otherwise at the registered claimant root.
@@ -119,7 +119,7 @@ const (
 
 // AwardPolicies is exhaustive for execution grants, including the here trigger-Award case.
 // Eval receives only expansion submission and source-output read authority.
-var AwardPolicies = []AwardPolicy{
+var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,
@@ -194,6 +194,7 @@ type ProvisionSpec struct {
 	Grants         []Grant
 	Binding        Binding
 	ReservedPools  []string
+	Trust          Trust
 	Repositories   []string
 	Data           *DataScope
 	Metered        bool
@@ -224,7 +225,7 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 		return forbidden(apierr.ReasonAudience)
 	}
 	accountData := accountDataDelegation(parent, child)
-	if !subset(child.Grants, Grants) || !subset(child.Grants, p.Grants) && !accountData {
+	if !subset(child.Grants, grants) || !subset(child.Grants, p.Grants) && !accountData {
 		return forbidden(apierr.ReasonMissingGrant)
 	}
 	ownerExpansion := narrowOwnerExpansion(parent, child)
@@ -251,7 +252,8 @@ func accountDataDelegation(parent Principal, child DelegateSpec) bool {
 	}
 	switch d.Use {
 	case DataRemoteCache:
-		return slices.Contains(p.Grants, RunsRead) && slices.Equal(child.Grants, []Grant{DataRead}) &&
+		// safety: dependency-cache archives are not mask-checked, so remote cache reads need the role that runs code.
+		return slices.Contains(p.Grants, RunsWrite) && slices.Equal(child.Grants, []Grant{DataRead}) &&
 			child.Binding == (Binding{Kind: BindingNone}) && d.VerifiedDefaultOnly && d.WriteRef == "" && d.RunID == "" && len(d.ReadRefs) > 0
 	case DataPublish:
 		return slices.Contains(p.Grants, RunsWrite) && slices.Equal(child.Grants, []Grant{DataWrite}) &&

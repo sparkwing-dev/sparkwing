@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func FuzzDebugResumeClientRequiresCurrentAuthority(f *testing.F) {
@@ -76,12 +77,12 @@ func FuzzDebugResumeClientRequiresCurrentAuthority(f *testing.F) {
 		if state%5 == 0 {
 			wantEvents = 1
 		}
-		if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM events WHERE kind='debug.resumed'`).Scan(&events); err != nil || events != wantEvents {
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM events WHERE kind='debug.resumed'`).Scan(&events); err != nil || events != wantEvents {
 			t.Fatalf("release events: %d %v", events, err)
 		}
 		if state%5 == 4 {
 			var released int
-			if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM debug_pauses WHERE team='b' AND released_at IS NOT NULL`).Scan(&released); err != nil || released != 0 {
+			if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM debug_pauses WHERE team='b' AND released_at IS NOT NULL`).Scan(&released); err != nil || released != 0 {
 				t.Fatalf("foreign releases: %d %v", released, err)
 			}
 		}

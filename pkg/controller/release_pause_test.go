@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func pauseHTTPFixture(t *testing.T) (*Server, string) {
@@ -54,7 +55,7 @@ func TestResumeDebugPauseCommitsPrincipalAndReplays(t *testing.T) {
 		t.Fatalf("job=%+v err=%v", node, err)
 	}
 	var count int
-	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM events WHERE kind='debug.resumed'`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM events WHERE kind='debug.resumed'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("events=%d err=%v", count, err)
 	}
 }

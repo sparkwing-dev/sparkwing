@@ -21,9 +21,7 @@ func TestSQLiteDSNEscapesURIMetacharactersInPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rw := sqliteDSN(tc.path)
-			ro := sqliteReadOnlyDSN(tc.path)
-			for _, dsn := range []string{rw, ro} {
+			for _, dsn := range []string{sqliteDSN(tc.path)} {
 				filename, params, ok := strings.Cut(dsn, "?")
 				if !ok {
 					t.Fatalf("DSN %q has no query string", dsn)

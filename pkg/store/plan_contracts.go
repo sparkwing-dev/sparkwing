@@ -67,7 +67,7 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 			return nil, err
 		}
 		masker := secrets.NewMasker()
-		if _, err := procenv.WithSubmitted(procenv.Base{Masker: masker}, submitted); err != nil {
+		if err := procenv.CheckSubmitted(submitted, masker); err != nil {
 			return nil, err
 		}
 		values = append(values, masker.Values()...)

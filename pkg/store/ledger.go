@@ -164,6 +164,9 @@ func (l *ledgerTx) debitFunded(ctx context.Context, c CreditCharge) (*CreditChar
 	if c.Team != l.team {
 		return nil, fmt.Errorf("ledger: charge for %q under %q's lock", c.Team, l.team)
 	}
+	if cause, err := teamHoldTx(ctx, l.storeTx, l.team); err != nil || cause != "" {
+		return nil, err
+	}
 	balance, err := l.balance(ctx)
 	if err != nil {
 		return nil, err
