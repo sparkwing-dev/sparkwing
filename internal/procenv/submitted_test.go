@@ -56,6 +56,37 @@ func TestSubmittedEnvironmentRejectsDuplicateProcessNames(t *testing.T) {
 	}
 }
 
+func TestAcceptedSubmittedNameAlreadySetByHostReachesPipeline(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		t.Run(fmt.Sprint(allowed), func(t *testing.T) {
+			var patterns []string
+			if allowed {
+				patterns = []string{"BUILD_*"}
+			}
+			accept, err := OperatorSubmitAccept(patterns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base, err := WithSubmitted(Base{Ambient: []string{"BUILD_NOTE=host-value"}, Masker: secrets.NewMasker()}, map[string][]byte{"BUILD_NOTE": []byte("requester-value")}, accept)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
+				env, err := Build(kind, base, Runtime{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, want := slices.Contains(env, "BUILD_NOTE=host-value"), allowed && kind != Install; got != want {
+					t.Errorf("kind %d: host value present = %v, want %v", kind, got, want)
+				}
+				if slices.Contains(env, "BUILD_NOTE=requester-value") {
+					t.Errorf("kind %d: submitted value replaced the host value", kind)
+				}
+			}
+		})
+	}
+}
+
 // Property: for any operator allow-list and any submitted names, a submitted value reaches a
 // remote pipeline process only under a name the operator lists, and never under a Go-tool or
 // remote-base name, whatever the requester's own allow-list said.
