@@ -61,3 +61,20 @@ func TestCompareCountsAsksForTheCountToFallWithTheCode(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyRefusesAFindingFromAnotherWorktree(t *testing.T) {
+	for _, file := range []string{"../../1086/sparkwing/pkg/store/a.go", "/elsewhere/pkg/store/a.go"} {
+		i := lintIssue{FromLinter: "depguard", Text: "import 'x' is not allowed from list 'wire-is-leaf': why"}
+		i.Pos.Filename = file
+		if _, err := classify([]lintIssue{i}); err == nil {
+			t.Errorf("finding at %s was judged; a path outside the checked tree must fail the run", file)
+		}
+	}
+}
+
+func TestLintCacheBelongsToTheCheckedWorktree(t *testing.T) {
+	a, b := lintCacheDir("/envs/1087/sparkwing"), lintCacheDir("/envs/1088/sparkwing")
+	if a == b || !strings.HasPrefix(a, "/envs/1087/sparkwing/") {
+		t.Errorf("lint caches %q and %q; each worktree needs its own, inside itself", a, b)
+	}
+}
