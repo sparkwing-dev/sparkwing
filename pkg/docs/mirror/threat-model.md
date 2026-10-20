@@ -32,7 +32,14 @@ forwards controller operations under the corresponding claim authority.
 Secret release requires an accepted declaration and current bound authority.
 A declaration does not widen the secret's pipeline/shared or pool scope. An
 authorized branch can declare and use its permitted secrets, so everyone who
-can change and run that code must be trusted with those secrets.
+can change and run that code must be trusted with those secrets. A child run
+reads the pipeline-scoped secrets of its parent's pipeline, not its own.
+
+The teammate's run is sealed as asserted: its OIDC token claims
+`trigger:manual` with no `ref` or `sha`, and its memo, dependency-cache and
+output records land in a scope keyed by the teammate. Your runs, other members'
+runs and App, schedule or Actions builds of `main` never read them. See
+[caching](caching.md#who-shares-a-cache).
 
 Source credentials require a live authorized claim. Naming a private repository
 grants no fetch access. Team Git credentials additionally require Cloud work or a

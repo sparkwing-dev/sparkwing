@@ -490,7 +490,7 @@ for a secret it could have named at the start.
 
 - **On a controller,** the run's plan is refused when a required secret is
   neither set for the run's pipeline nor set team-wide and shared with
-  runs. The run fails before any of its nodes runs. Its error names the
+  runs. A child run reads its parent pipeline's secrets. The run fails before any of its nodes runs. Its error names the
   declared secrets the run cannot read, and `sparkwing runs status --run
   RUN_ID --profile PROFILE` shows the team which scope each is missing from
   and the command that fixes it: `sparkwing secrets set --secret NAME --file

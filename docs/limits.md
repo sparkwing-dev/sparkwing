@@ -52,6 +52,9 @@ These grants do not confer operator-console powers.
 | Annotation or summary | Masked UTF-8, bounded to 128 KiB. Storage also refuses an oversized raw record. |
 | Memo lifetime | Seven-day default, at most thirty days. |
 | Schedule catch-up | At most twenty-four hours. |
+| Child-run depth | At most ten levels, counting the root run. A deeper child is refused with `409`, conflict detail `limit: max_child_depth`. GitHub reusable workflows also nest ten levels. |
+| Children per root | At most fifty child runs under one root run at every depth; retries do not count. More is refused with `409`, `limit: max_children_per_root`. GitHub allows fifty unique reusable workflows per run. |
+| Child run budget | A child spends the hourly run budget (`max_runs_per_hour`) of whoever created its root, not the runner holding the parent's claim. |
 | Cloud scratch | Fixed aggregate 20 GiB, including Docker-in-Docker. |
 | Cloud Docker | `docker build`, `docker run`, Compose and `--memory` work; privileged and host-level features do not. |
 

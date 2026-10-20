@@ -61,6 +61,13 @@ may contain `=`. Duplicate argument names fail. Arguments replace the declared
 argument map. `--arg=` alone replaces it with an empty map. `--reset` drops the override. Pin, unpin and reset each require
 a separate invocation from cadence edits.
 
+Only an unmodified fire speaks for the schedule: its OIDC token claims
+`trigger:cron` with the schedule's ref and commit, and it shares a cache scope
+with the schedule's other fires. An immediate `run` speaks for the principal who
+asked, and a fire whose arguments are overridden speaks only for itself; both
+claim `trigger:manual` with no `ref` or `sha` and write their own cache scope.
+See [OIDC](oidc.md#what-each-value-proves).
+
 Mutation JSON reports the confirmed result. Plain output emits schedule IDs,
 or the new run ID for `run`. A deletion
 result distinguishes removal from an already absent row.

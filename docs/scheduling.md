@@ -47,6 +47,13 @@ server facts. Neither a pipeline declaration nor a caller's label grants them.
 Pool-restricted secrets check the reservation at acceptance and release. Here
 execution cannot use those secrets. See [authentication](auth.md).
 
+An access rule may name a branch with `sparkwing pools allow --branch`. The
+branch is stored without `refs/heads/`, so `main` and `refs/heads/main` are the
+same rule, and it matches as a Go `path.Match` glob, the matcher App
+subscriptions use. Only a run a signed GitHub App delivery started on that
+branch, or a child or retry that inherits that run's identity, matches a branch
+rule. CLI, API, schedule and GitHub Actions runs never do.
+
 ## Job modifiers
 
 ```go

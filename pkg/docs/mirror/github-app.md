@@ -127,17 +127,17 @@ run's request; webhook payloads cannot change it. Retries keep it. Changing
 
 ### Manual subscriptions
 
-The **Advanced** section retains explicit subscriptions. A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, runner, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly. Each additional option defaults to `false`:
+The **Advanced** section retains explicit subscriptions. A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, runner, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tag pushes and no releases. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly. Each additional option defaults to `false`:
 
 | Option | Event |
 | --- | --- |
-| `pull_request_closed` | PR closed, whether merged or not |
+| `pull_request_closed` | PR closed after a merge; the run executes the merge commit, not the head. A PR closed without merging starts nothing |
 | `pull_request_labeled` with nonempty `pull_request_labels: ["ship", ...]` | PR labeled with one of the listed labels, compared without case |
 | `pull_request_ready_for_review` | Draft PR marked ready |
-| `release_published`, `release_prereleased` | Release action at its tag's commit |
+| `release_published`, `release_prereleased` | Release action at its tag's commit, only when the tag matches the subscription's `tags` |
 | `branch_create`, `branch_delete` | Branch creation or deletion; deletion runs at the current commit of the delivery's `repository.default_branch` |
 
-`branches` filters branch pushes and branch creation and deletion by the branch name; it does not apply to tag pushes, which `tags` alone selects, or to releases. `base_branches` filters every pull request event by the pull request's base branch. Both are arrays of up to 10 glob patterns, each at most 128 bytes, matched with Go `path.Match` against the branch name. An empty list matches every branch, including for subscriptions written before these fields existed. For example, `{"repository":"acme/widgets","pipeline":"deploy","push":true,"branches":["main","release/*"]}` runs deploy on `main` or a one-level `release/` branch. Set `branches` on every deploy pipeline subscribed to push or branch creation so feature branches cannot deploy. The controller applies these filters before creating a run; pipeline YAML in the pushed commit cannot change them.
+`branches` filters branch pushes and branch creation and deletion by the branch name; it does not apply to tag pushes or releases, which `tags` alone selects. Anyone who can push a tag can publish a release on it, so protect the tags `tags` names. `base_branches` filters every pull request event by the pull request's base branch. Both are arrays of up to 10 glob patterns, each at most 128 bytes, matched with Go `path.Match` against the branch name. A pattern or branch may carry `refs/heads/`: `main` and `refs/heads/main` select the same branch. An empty list matches every branch, including for subscriptions written before these fields existed. For example, `{"repository":"acme/widgets","pipeline":"deploy","push":true,"branches":["main","release/*"]}` runs deploy on `main` or a one-level `release/` branch. Set `branches` on every deploy pipeline subscribed to push or branch creation so feature branches cannot deploy. The controller applies these filters before creating a run; pipeline YAML in the pushed commit cannot change them.
 
 The subscription follows GitHub's repository id across a rename. A `repository` `renamed` or `transferred` delivery updates its displayed name and installation when the new installation belongs to the same team and covers the repository. No pipeline runs from the repository event itself.
 
@@ -149,7 +149,8 @@ A delivery starts nothing, and is acknowledged with the reason, when:
 
 - it is a pull request from a fork (see below);
 - it is a push of no commit: a deleted branch or tag, or an `after` of all zeros;
-- no subscribed pipeline matches the push branch, pushed tag or pull request base branch;
+- no subscribed pipeline matches the push branch, pushed tag, release tag or pull request base branch;
+- it closes a pull request without merging it, or names no merge commit for a merged one;
 - the event is older than the team's binding of the installation, going by the push's `repository.pushed_at` or the pull request's `updated_at`, so an event meant for the installation's previous team does not run in the next one;
 - the event carries no such time, or one the controller cannot read, since nothing then shows it is not older than the binding; release uses `published_at`, and branch events use the repository's `pushed_at` or `updated_at`;
 - GitHub no longer reports the installation as covering the repository. The controller asks GitHub on every delivery that would start a run, never from a cached answer.
@@ -168,7 +169,7 @@ A run an App-armed schedule starts seals its repository as `owner/name`, the sam
 
 ### Pull requests from forks
 
-A pull request whose head repository is not its base repository, or whose head repository was deleted, is not run. The controller logs it and acknowledges the delivery as ignored; no subscription setting changes this. A fork's code would run on the team's runner with the runner's token in reach, and that token can claim the team's other work and read its secrets. If your team needs pull requests from forks built, contact support.
+A pull request whose head repository is not its base repository, or whose head repository was deleted, is not run. The webhook refuses it, and seals the head repository GitHub reports into every pull request run so intake refuses a fork again on its own. The controller logs it and acknowledges the delivery as ignored; no subscription setting changes this. A fork's code would run on the team's runner with the runner's token in reach, and that token can claim the team's other work and read its secrets. If your team needs pull requests from forks built, contact support.
 
 ## Source for cloud runners
 

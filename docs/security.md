@@ -91,6 +91,37 @@ public run details keep secret arguments redacted. Admission checks ancestor
 pipeline and repository identities within the same team. Re-entering one returns
 `409`; a missing ancestor returns `404` without disclosing foreign run facts.
 
+### Sealed run identity
+
+Intake seals each run with the identity it speaks for, derived from facts the
+admission transaction verified and never from the request body: a trust class,
+the ref, commit, event and pipeline, and GitHub's repository ID for a verified
+run. The classes are `verified-default` (a signed App push to the default
+branch), `verified` (any other signed App delivery), `actions` (a run bound to a
+GitHub Actions push), `schedule` (an unmodified schedule fire) and `asserted`
+(every run whose ref, commit or inputs a principal chose). OIDC claims, data and
+cache scopes, pool access rules and pipeline-scoped secret release read only
+this value.
+
+A child either runs its parent's exact revision (same repository, ref, commit
+and code commit) and inherits the parent's identity whole, or names a branch
+that the controller resolves and is sealed `asserted`. A request that pairs
+another ref or code commit with its own commit is refused with `403`, as is a
+child naming another repository. A child always speaks for its parent's
+pipeline, so its OIDC `pipeline` claim and the pipeline-scoped secrets it may
+read are the parent's. A retry copies its source run's identity whole.
+
+A `source:` code pin that is a full commit ID keeps the run's class. A branch or
+tag pin that does not resolve to the execution commit demotes the run to
+`asserted`, because whoever can push that ref chooses the code.
+
+Child runs nest at most 10 levels deep counting the root, and one root run
+starts at most 50 children at every depth, retries excluded. Either bound
+refuses with `409` and conflict detail `limit` set to `max_child_depth` or
+`max_children_per_root`. A child spends the hourly run budget
+(`max_runs_per_hour`) of whoever created its root, not the runner holding the
+parent's claim. See [limits](limits.md#execution-and-records).
+
 ### Request audit log
 
 Audit records identify the route, operation, team, subject and public credential
@@ -243,7 +274,10 @@ Signed-object clients receive only signed headers and never attach a reusable
 controller credential, including to the controller's own origin.
 
 Every record edge checks authority, integrity and existence. An unrelated
-same-team or same-run receipt cannot authorize another job's manifest. A remote
+same-team or same-run receipt cannot authorize another job's manifest. Each
+unverified writer keeps its own data scope, so a member's manual run cannot feed
+memo or cache entries to another member or to App, schedule or Actions builds;
+see [caching](caching.md#who-shares-a-cache). A remote
 cache profile permits only the user's authorized verified-default-branch memo,
 artifact and dependency-cache reads. It exposes no write or binary-fetch method.
 Publication is separate, labels provenance as local and creates no execution

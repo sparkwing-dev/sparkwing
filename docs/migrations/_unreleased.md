@@ -2792,3 +2792,63 @@ The duplicate-trigger sentinel errors, `controller.CronIdempotencyKey` and
 `store.WithCreatingPrincipal` are removed. Ordinary run intake derives its
 principal from live authority. The sealed request's authority ID identifies a
 scheduled run's cadence without the legacy trigger environment column.
+
+## Sealed run provenance
+
+Intake seals every run with the identity it speaks for: a trust class
+(`verified-default`, `verified`, `actions`, `schedule` or `asserted`), the ref,
+commit, event and pipeline, and GitHub's repository ID for a verified run. OIDC
+claims, data and cache scopes, pool access rules and pipeline-scoped secret
+release read only that value. Check each of these before upgrading:
+
+- **Trust policies that accept `trigger:cron`.** A schedule's "run now" and a
+  fire whose arguments were overridden now mint `trigger:manual` with no
+  `repository_id`, `ref` or `sha`. Only an unmodified fire mints `trigger:cron`,
+  with the schedule's ref. Move deployments that relied on "run now" to an App
+  push or an unmodified fire.
+- **Trust policies that read a manual run's `ref` or `sha`.** CLI, API and
+  dashboard runs, children that name their own branch and runs demoted by a
+  `source:` pin omit both claims, so their subject ends in `ref:`. A policy that
+  names a ref now admits only verified App runs, unmodified schedule fires and
+  GitHub Actions-bound runs, which keep `trigger:manual` with the push's ref and
+  sha.
+- **Trust policies that name a child run's pipeline.** A child's `pipeline`
+  claim and subject segment are now its parent's. Name the parent pipeline.
+- **Pipeline-scoped secrets read by child runs.** A child reads its parent
+  pipeline's secrets. Scope the secret to the parent pipeline, or make it shared.
+- **Child requests.** A child either runs its parent's exact revision or names
+  a branch the controller resolves; pairing another ref or code commit with an
+  explicit commit answers `403`, as does another repository. Children nest at
+  most 10 levels deep counting the root and one root starts at most 50 children,
+  retries excluded; past either bound intake answers `409` with `limit`
+  `max_child_depth` or `max_children_per_root`. A child spends the hourly run
+  budget of whoever created its root.
+- **Release subscriptions without `tags`.** A `release_published` or
+  `release_prereleased` subscription now starts a run only when the release tag
+  matches its `tags` patterns, so one with no patterns starts nothing. Add
+  patterns such as `["v*"]` and protect those tags in GitHub.
+- **Closed pull request subscriptions.** `pull_request_closed` now runs only a
+  merged pull request, at its merge commit. A pull request closed without
+  merging starts nothing. Pipelines that cleaned up after abandoned pull
+  requests need another trigger.
+- **`source:` branch or tag pins.** A pin that is not a full commit ID, unless
+  it resolves to the execution commit, demotes App, schedule and Actions runs
+  to asserted: `trigger:manual` with no `ref` or `sha`, and a cache scope of
+  their own. Pin a full commit ID to keep the run's identity.
+- **Shared manual caches.** Records an unverified run writes now land in
+  `manual:<writer>:<ref>`, keyed by the submitting principal, the schedule and
+  its armer, the parent or demoted run, or `actions`. Manual runs by different
+  members no longer share memo, dependency-cache or output entries, and expect
+  cold caches after the upgrade. An unverified run reads only its own scope; a
+  verified App run also reads verified records of the default branch and, for
+  a pull request, its base. Selectors that named `manual:<ref>` must name
+  the writer. See [caching](../caching.md#who-shares-a-cache).
+- **Pool rules with `--branch`.** Branches are normalized and matched as globs,
+  and only verified App runs on that branch, with children and retries that
+  inherit them, match. Manual, schedule and Actions runs no longer match a
+  branch rule.
+
+A run admitted before the upgrade has no sealed provenance, so its OIDC mints,
+data grants, children and pipeline-scoped secret reads are refused. A retry
+copies that missing identity, so let in-flight runs finish before upgrading and
+start any that fail this way as new runs.

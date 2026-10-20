@@ -47,9 +47,15 @@ reader requires it without receiving delivery keys, source SHAs or uploader fact
 It grants no byte access; each download rechecks the current credential and edges.
 Misses omit the observation. With no ref selector, the store selects from the
 credential's authorized refs and accepts only persisted verified-default evidence.
-The `ref` selector and response metadata use `manual:<ref>` for submitter-vouched
-records and the plain ref for verified records. Each lookup requires the matching
-read grant. Selecting a plain ref never inherits a manual write's scope.
+The `ref` selector and response metadata use `manual:<writer>:<ref>` for
+records an unverified run wrote and the plain ref for records a verified GitHub
+App run wrote. The writer is the submitting principal, the schedule and its
+armer, the parent or demoted run, or `actions`, as
+[caching](caching.md#who-shares-a-cache) lists. Each lookup requires the
+matching read grant. A verified App run holds grants for its own scope, the
+verified default branch and a verified pull request's base; every other run
+holds a grant only for its own writer scope. Selecting a plain ref never
+inherits a manual write's scope.
 
 `POST /api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
 RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`
@@ -73,7 +79,7 @@ Depcache hits carry public `record` metadata and the winning restore `source`.
 Read-set snapshots and uploader identities stay private.
 
 Write requests cannot choose a team, repository, ref verification flag or
-provenance. Submitter-vouched writes use the sealed manual ref namespace.
+provenance. Unverified writes use the writer's sealed manual scope.
 Remote-cache credentials always require verified default-branch records and
 cannot write. See [Data downloads](api.md#data-downloads) for byte reads and
 presence queries.

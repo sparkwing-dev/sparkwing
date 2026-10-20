@@ -90,6 +90,34 @@ Attached and detached local runs use the checkout's origin default branch as a
 lookup hint. The controller verifies the producing run's default-branch trust.
 Local pipeline binaries stay on the machine that builds them.
 
+### Who shares a cache
+
+Memo, dependency-cache, output and pipeline-reference records are written
+under the scope of the identity the run was sealed with at intake. A run
+started by a signed GitHub App delivery writes under its verified ref. Every
+other run writes under its own scope, `manual:<writer>:<ref>`:
+
+| Run | Writer |
+| --- | --- |
+| CLI, API or dashboard run, and a schedule's "run now" | The submitting principal, for example `account/<id>` |
+| Child that names its own branch under a manual parent | The parent's writer |
+| Child that names its own branch under any other parent | The parent run, `run/<id>` |
+| App, schedule or Actions run demoted by a branch or tag `source:` pin, and a schedule fire with overridden arguments | That run alone |
+| Unmodified schedule fire | The schedule and the account that armed it |
+| Run bound to a GitHub Actions push | `actions`, shared per ref |
+
+A child that runs its parent's exact revision, and a retry, write under the
+scope of the run they inherit from. A verified App run, and a child that
+inherits its identity, reads its own scope, verified records from the
+repository's default branch and, for a verified pull request, verified records
+from its base branch. Every other run, including manual, schedule and GitHub
+Actions runs, reads only its own writer scope. One member's manual run therefore
+cannot feed memo or cache entries to another member's runs or to scheduled,
+Actions or App builds of `main`, and manual runs by different members do not
+share a cache. GitHub Actions restores from the current branch, the default
+branch and a pull request's base, never a sibling branch; CircleCI shares
+caches across a project.
+
 ## Pipeline binary cache
 
 Sparkwing compiles the pipeline module and stores the binary under

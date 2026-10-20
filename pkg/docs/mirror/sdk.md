@@ -175,6 +175,12 @@ waits for its output. Options include `sw.WithFreshInputs(in)`,
 submission, authorization, cancellation and cycle checks. Call it inside an
 execution callback. Compose reusable job types into a plan when the work belongs
 in the same run.
+A child runs its parent's exact revision and inherits the parent's identity, or
+names a branch the controller resolves and runs as an asserted manual run. It
+always uses the parent's repository and speaks for the parent's pipeline in
+OIDC claims and pipeline-scoped secrets. Children nest at most 10 levels deep
+counting the root, and one root starts at most 50; see
+[limits](limits.md#execution-and-records).
 The creating job reads the child's committed output under its live claim.
 Missing output, missing bytes and failed digest verification fail the await.
 An explicit JSON `null` remains a valid output.
