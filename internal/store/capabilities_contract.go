@@ -298,9 +298,10 @@ func equalProjection(a, b any) bool {
 type authorityNode struct {
 	principal   capability.Principal
 	requirement *authorityRequirement
+	memberToken bool
 }
 
-func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, sessionTeam ...string) (authorityNode, error) {
+func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, sessionChild ...authorityNode) (authorityNode, error) {
 	if !validAuthorityRef(ref) {
 		return authorityNode{}, authorityError(apierr.Unauthenticated, "invalid authority reference")
 	}
@@ -314,6 +315,7 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 		node.principal.Capability = record.Value
 		if record.Origin != nil {
 			node.requirement = record.Origin.Requirement
+			node.memberToken = record.Origin.Kind == capability.ProvisionMember
 		}
 		node.principal.Class = capability.CredentialBearer
 	} else {
@@ -322,8 +324,8 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
 		var team any
-		if len(sessionTeam) != 0 {
-			team = sessionTeam[0]
+		if len(sessionChild) != 0 {
+			team = sessionChild[0].principal.Capability.Team
 		}
 		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(?,team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,COALESCE((SELECT epoch FROM session_membership_epochs WHERE session_hash=sessions.hash AND team=COALESCE(?,sessions.team)),-1) FROM sessions WHERE hash = ?", team, team, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
 		if err != nil {
@@ -336,6 +338,11 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 		c.IssuedAt = time.Unix(0, created).UTC()
 		expiry := time.Unix(0, expires).UTC()
 		c.ExpiresAt = &expiry
+		// A member token keeps its own lifetime. The session still supplies
+		// explicit revocation and the immutable membership fence.
+		if len(sessionChild) != 0 && sessionChild[0].memberToken {
+			c.ExpiresAt = nil
+		}
 		if revoked.Valid {
 			at := time.Unix(0, revoked.Int64).UTC()
 			c.RevokedAt = &at
@@ -354,13 +361,13 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 	return node, nil
 }
 
-func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, sessionTeam ...string) (authorityNode, error) {
+func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, sessionChild ...authorityNode) (authorityNode, error) {
 	if lock {
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}); err != nil {
 			return authorityNode{}, err
 		}
 	}
-	node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, sessionTeam...)
+	node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, sessionChild...)
 	if err != nil {
 		return node, err
 	}
@@ -431,7 +438,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := tx.operator.readAuthorityTx(ctx, tx, ref, false, ancestrySessionTeam(ref, chain)...)
+		node, err := tx.operator.readAuthorityTx(ctx, tx, ref, false, ancestrySessionChild(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
 		}
@@ -476,7 +483,7 @@ func discoverAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.A
 			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, ancestrySessionTeam(ref, chain)...)
+		node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, ancestrySessionChild(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
 		}
@@ -513,9 +520,9 @@ func authorityMembershipKeys(chain []authorityNode) []storeLockKey {
 
 // A descendant keeps the team authenticated when it was minted, even if its
 // session later selects another team. The per-team epoch is immutable.
-func ancestrySessionTeam(ref capability.AuthorityRef, chain []authorityNode) []string {
+func ancestrySessionChild(ref capability.AuthorityRef, chain []authorityNode) []authorityNode {
 	if ref.Kind == capability.AuthoritySession && len(chain) != 0 {
-		return []string{chain[len(chain)-1].principal.Capability.Team}
+		return chain[len(chain)-1:]
 	}
 	return nil
 }

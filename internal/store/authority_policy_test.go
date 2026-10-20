@@ -127,3 +127,50 @@ func TestOIDCCeilingIncludesEveryAncestorGraceAndDeadline(t *testing.T) {
 		})
 	}
 }
+
+func TestMemberTokenDemotionPermanentlyFencesAuthorityAfterSessionTimeout(t *testing.T) {
+	s, _, now := sessionRuntimeStore(t)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	member := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "member"}}
+	rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, now.Add(time.Hour).UnixNano(), member.Authority.ID)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(2 * time.Hour)
+	if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+		t.Fatalf("timeout expired token: %v", err)
+	}
+	tenant := &Tenant{s: s, team: "a"}
+	for _, role := range []Role{RoleReader, RoleEditor} {
+		if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err == nil {
+			t.Fatalf("old token retained authority after role change to %s", role)
+		}
+	}
+}
+
+func TestMemberTokenRotationEnforcesExpiryCeiling(t *testing.T) {
+	for _, excess := range []time.Duration{0, time.Nanosecond} {
+		t.Run(excess.String(), func(t *testing.T) {
+			s, _, now := sessionRuntimeStore(t)
+			member := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "member"}}
+			old := inventoryMemberRoot(t, s, member)
+			expiry := now.Add(90*24*time.Hour + excess)
+			tenant := &Tenant{s: s, team: "a"}
+			rotation, err := tenant.RotateCapability(t.Context(), inventoryAuthorization(t, s, member, "a", old.Capability.Prefix), 0, &expiry)
+			if excess == 0 {
+				if err != nil || rotation.Issued.Capability.ExpiresAt == nil || !rotation.Issued.Capability.ExpiresAt.Equal(expiry) {
+					t.Fatalf("expiry at ceiling: %+v %v", rotation.Issued.Capability, err)
+				}
+			} else {
+				if err == nil || rotation.Issued.Raw != "" {
+					t.Fatal("rotation exceeded member expiry ceiling")
+				}
+				rewriteSchemaCount(t, s.db, "capabilities", 1)
+			}
+		})
+	}
+}

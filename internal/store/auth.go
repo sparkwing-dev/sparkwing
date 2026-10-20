@@ -139,7 +139,7 @@ func (o *Operator) LookupSession(ctx context.Context, rawSession string) (*Sessi
 
 // LookupSessionAndRenew resolves a live session and extends its expiry from
 // this use. A row past maxLifetime is returned without renewal for its caller
-// to revoke.
+// to reject. Member tokens retain the session as a revocation parent.
 func (o *Operator) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
 	if ttl <= 0 {
 		return nil, errors.New("sessions: ttl must be positive")

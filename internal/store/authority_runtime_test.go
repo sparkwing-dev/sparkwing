@@ -117,12 +117,8 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(after.Capability.Grants, capability.RunsWrite) {
-		t.Fatal("demoted member retained run write authority")
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
+		t.Fatal("demoted member retained descendant authority")
 	}
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "owner", Role: &role}); !errors.Is(err, ErrLastOwner) {
 		t.Fatalf("last owner demotion: %v", err)

@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
+
 - **auth:** Switching teams preserves each session's original membership fence, so removal and a later rejoin cannot revive an old session's access.
 - **github:** A verified current GitHub administrator can reclaim an App installation for their active team. Both teams receive an audit event, and the former team's owners receive an email notification. Its former subscriptions, automation consent and schedules are withdrawn.
 - **charts:** Runner bundle 0.1.17 and full chart 0.3.2 ship the launcher's generated admission policy, including Kubernetes' default failure tolerations.

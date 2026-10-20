@@ -14,7 +14,7 @@ type MembershipUpdate struct {
 	Role      *Role
 }
 
-// UpdateMembership preserves the last owner and fences removed membership authority atomically.
+// UpdateMembership preserves the last owner and fences removed or demoted membership authority atomically.
 func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error {
 	if change.AccountID == "" || (change.Role != nil && !change.Role.Valid()) {
 		return ErrInvalidInput
@@ -62,10 +62,12 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 				return err
 			}
 		}
-		if change.Role == nil {
+		if change.Role == nil || !change.Role.AtLeast(current) {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO membership_epochs(team,account_id,epoch) VALUES (?,?,1) ON CONFLICT(team,account_id) DO UPDATE SET epoch=membership_epochs.epoch+1`, t.team, change.AccountID); err != nil {
 				return err
 			}
+		}
+		if change.Role == nil {
 			_, err = tx.ExecContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
 		} else {
 			_, err = tx.ExecContext(ctx, "UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?", string(*change.Role), string(t.team), change.AccountID)

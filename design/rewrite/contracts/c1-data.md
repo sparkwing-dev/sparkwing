@@ -1331,7 +1331,14 @@ These declarations leave transaction implementation with W1.
   Member capabilities retain the issuing session as their parent, so logout
   ends their authority. Membership also governs account authority at use time.
   Here awards retain the requester's session/token ancestry and current runs.write.
-  Member capabilities have an expiry bounded by their parent session.
+  `memberIssuancePolicy` owns the expiry for issuance and rotation. Member tokens
+  default to and expire within 90 days. Explicit `team.admin` tokens retain the
+  tighter 30-day ceiling. Their minting session is a revocation parent only.
+  Idle or absolute session timeout cannot shorten the token's stored or reported
+  expiry. Ancestry projects that session without an expiry only when its child
+  has a validated member-token origin. Logout, admin revocation and membership
+  removal or demotion still end authority through the same ancestry and epoch
+  checks. Ordinary delegation retains its parent-expiry bounds.
 - `provision_contract.go` declares the transaction-owned checks for trusted
   bootstrap, Actions origin and enrollment. Machine/service enrollment
   uses the existing capability rows and their persisted `CapabilityRecord.Origin`.
@@ -2278,8 +2285,10 @@ minting team's context through every ancestor. When ancestry reaches a session,
 it resolves that session in the child's team and checks that team's recorded
 epoch against current membership. The session's active team still controls direct
 session use. Switching it cannot change an existing descendant's team or grants.
-Removal followed by rejoining through a fresh session cannot revive descendants
-of the old session.
+Removal and demotion advance the team's membership epoch in the membership
+transaction. Rejoining or promotion cannot revive descendants of an old session.
+Session timeout validation preserves the session row because live member tokens
+still depend on its explicit revocation state. Retention keeps referenced sessions.
 
 `Store.SettlePayment` accepts C2's opaque verified event and looks up the committed
 checkout by provider session ID and configured test/live mode. The checkout supplies

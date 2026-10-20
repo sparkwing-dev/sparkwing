@@ -318,10 +318,13 @@ Every use checks them again. Removing and re-adding the member cannot revive
 an old credential. Shared runners belong to the team and survive the
 registrar's demotion or removal. Revoke a departing registrar's shared runners if they still control the machines or bearer credentials.
 
-Member tokens expire within 90 days and remain children of the minting session,
-so logout ends their authority. `team.admin` requires `--allow-team-admin`
-(`allow_team_admin` in the API) and expires within 30 days. Omitted expiry uses
-the applicable ceiling. A requested expiry beyond that ceiling is refused.
+Member tokens default to and expire within 90 days. They retain their reported
+expiry when the minting session reaches its idle or absolute timeout. Logout,
+admin revocation, membership removal or demotion ends them immediately.
+Rejoining or promotion cannot revive them. `team.admin` requires
+`--allow-team-admin` (`allow_team_admin` in the API) and expires within 30 days.
+Omitted expiry uses the applicable ceiling. A requested expiry beyond that
+ceiling is refused, including during rotation.
 Invitation acceptance checks that the inviter still holds team administration.
 
 `GET /api/v1/team/settings` returns `members_can_add_machines` and
@@ -404,13 +407,14 @@ deletion failure returns `503` and leaves the cookies in place.
 
 A session renewal extends expiry by seven days, but never past 30 days from
 creation. Ordinary policy reads and writes check that lifetime without
-renewing. The renewal endpoint refuses an over-age session and removes its row.
+renewing. The renewal endpoint refuses an over-age session and retains its row
+while member tokens depend on its revocation state.
 Future-created sessions are refused before renewal and remain unchanged.
 An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
 
 Token sign-in ends the browser's prior session unless that session is an ancestor
-of the submitted token. The minting session remains live because ending it would
+of the submitted token. The minting session is retained because revoking it would
 also end the token and the new session. Explicit logout of the minting session
 ends its tokens and descendant sessions. Logging out a descendant ends only
 that descendant's authority.

@@ -101,9 +101,6 @@ func (s *Server) validateSessionFlow(session *store.Session) error {
 		return sessionUnavailable()
 	}
 	if s.sessionExpired(session.CreatedAt, time.Now().UTC()) {
-		if err := s.operator.DeleteSession(session.ID); err != nil {
-			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
-		}
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: errSessionLifetimeExceeded.Error()}
 	}
 	return nil
