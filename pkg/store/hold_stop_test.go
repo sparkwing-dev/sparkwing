@@ -4,6 +4,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
@@ -146,50 +149,86 @@ func TestHoldRollbackRestoresRunningAward(t *testing.T) {
 	}
 }
 
-func TestFundingStopPreservesIndependentCustomerRunner(t *testing.T) {
+func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 	for _, refusal := range []string{"balance", "hold"} {
 		t.Run(refusal, func(t *testing.T) {
-			s, demand, now := billingModelFixture(t)
-			cloud, cloudActor := meteredUnitClaim(t, s, demand)
-			tenant := &Tenant{s: s, team: "a"}
-			billingModelJob(t, s, "customer")
-			demand.Target.NodeID, demand.CapabilityPrefix = "customer", "runner"
-			customer, customerActor := meteredUnitClaim(t, s, demand)
-			for _, actor := range []Actor{cloudActor, customerActor} {
-				node := "job"
-				if actor.CapabilityPrefix == customerActor.CapabilityPrefix {
-					node = "customer"
+			tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "cloud"}, {ID: "customer"}, {ID: "next", Needs: []string{"customer"}}, {ID: "blocked", Needs: []string{"cloud"}},
+			}})
+			s := tenant.s
+			now := s.now()
+			s.clock = func() time.Time { return now }
+			if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: request.RunID, To: RunRunning, Cause: RunStart, Actor: request.Actor}); err != nil {
+				t.Fatal(err)
+			}
+			fundUnitClaim(t, s)
+			for _, prefix := range []string{"cloud-runner", "customer-runner"} {
+				root := authorityRoot(prefix, "a")
+				root.Grants = []capability.Grant{capability.NodesClaim}
+				if prefix == "cloud-runner" {
+					root.Subject.Kind, root.Team, root.RootMetered = capability.SubjectService, "", true
+					root.Grants = []capability.Grant{capability.ClaimsLaunch}
 				}
-				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", node}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+				authorityPersist(t, s, root)
+			}
+			start := func(id, prefix string) (UnitClaim, Actor) {
+				t.Helper()
+				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, id}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor}); err != nil {
 					t.Fatal(err)
 				}
+				claim, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: request.RunID, NodeID: id}})
+				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, id}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+					t.Fatal(err)
+				}
+				return claim, actor
 			}
+			cloud, _ := start("cloud", "cloud-runner")
+			customer, customerActor := start("customer", "customer-runner")
 			if refusal == "hold" {
-				if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "mixed", "", "dispute opened", *now); err != nil {
+				if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "mixed", "", "dispute opened", now); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=600`)
+				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)
 			}
-			*now = now.Add(10 * time.Second)
+			now = now.Add(10 * time.Second)
 			beat, err := s.RenewUnit(t.Context(), cloud.Award.CapabilityPrefix, true)
 			if err != nil || !beat.CancelRequested {
 				t.Fatalf("Cloud stop: %+v %v", beat, err)
 			}
-			stopped, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
-			if err != nil || stopped.CancelRequestedAt == nil {
-				t.Fatalf("Cloud stop not persisted: %+v %v", stopped, err)
+			if beat, err := tenant.RenewOwner(t.Context(), request.Actor); err != nil || beat.CancelRequested {
+				t.Fatalf("job stop cancelled its owner: %+v %v", beat, err)
 			}
-			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.CancelRequestedAt != nil {
-				t.Fatalf("funding stop cancelled whole run: %+v %v", run, err)
-			}
-			beat, err = s.RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true)
-			if err != nil || beat.CancelRequested {
+			if beat, err := s.RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || beat.CancelRequested {
 				t.Fatalf("independent customer job cancelled: %+v %v", beat, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
+			}
+			_, next := start("next", "customer-runner")
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "next"}, Actor: next, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+				t.Fatal(err)
+			}
+			now = beat.ExpiresAt
+			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ReapUnits(t.Context(), lease, 10); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "blocked"}, To: NodeSkipped, Cause: CauseDependency, Actor: request.Actor}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: request.Actor.Owner, Transition: RunTransition{RunID: request.RunID, To: RunFailed, Cause: RunFinish, Actor: request.Actor}}); err != nil {
+				t.Fatal(err)
+			}
+			run, err := tenant.ReadRun(t.Context(), request.RunID)
+			if err != nil || run.State != RunFailed || run.CancelRequestedAt != nil {
+				t.Fatalf("job stop changed whole-run cancellation: state=%s cancelled=%v, %v", run.State, run.CancelRequestedAt, err)
 			}
 		})
 	}

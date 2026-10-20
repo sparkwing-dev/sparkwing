@@ -264,6 +264,20 @@ func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, re
 	if _, err := tx.ExecContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`, reason, drain.UnixNano(), team, a.provenance.ReservationID); err != nil {
 		return err
 	}
+	previous := tx.cancelingTeam
+	tx.cancelingTeam = team
+	defer func() { tx.cancelingTeam = previous }()
+	if a.unit == capability.UnitTrigger || a.unit == capability.UnitPlan {
+		run, err := readRunTx(ctx, tx, team, a.run)
+		if err != nil {
+			return err
+		}
+		if run.FinishedAt == nil && run.CancelRequestedAt == nil {
+			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: a.run, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: reason}, tx.now()); err != nil {
+				return err
+			}
+		}
+	}
 	if a.unit != capability.UnitNode {
 		var intervals int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM billable_intervals WHERE team=? AND reservation_id=?`, team, a.provenance.ReservationID).Scan(&intervals); err != nil {
@@ -280,9 +294,6 @@ func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, re
 	if err != nil || row.Status == StatusDone || row.Generation != a.generation || row.CancelRequestedAt != nil {
 		return err
 	}
-	previous := tx.cancelingTeam
-	tx.cancelingTeam = team
-	defer func() { tx.cancelingTeam = previous }()
 	_, err = transitionNodeStateTx(ctx, tx, team, NodeTransition{Ref: ref, To: NodeCancelled, Actor: Actor{Kind: ActorOperator}, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}}, tx.now())
 	return err
 }
@@ -383,27 +394,27 @@ func finishExpansionBillingTx(ctx context.Context, tx *storeTx, team Team, reque
 	return settleUnitBillingTx(ctx, tx, team, unit, lease.Generation, tx.now())
 }
 
-func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor Actor, now time.Time, beat *LeaseBeat) ([]time.Time, error) {
+func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor Actor, now time.Time) ([]time.Time, error) {
 	if actor.CapabilityPrefix == "" {
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,lease_expires_at,capability_prefix FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
+	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,lease_expires_at,capability_prefix FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' AND cancel_requested_at IS NULL ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
 	if err != nil {
 		return nil, err
 	}
 	type held struct {
 		node       string
 		generation int64
+		expiry     int64
 		prefix     string
 	}
 	var awards []held
 	for rows.Next() {
 		var award held
-		var expiry int64
-		if err := rows.Scan(&award.node, &award.generation, &expiry, &award.prefix); err != nil {
+		if err := rows.Scan(&award.node, &award.generation, &award.expiry, &award.prefix); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
-		if expiry <= now.UnixNano() {
+		if award.expiry <= now.UnixNano() {
 			return nil, errors.Join(holderRefusal(), rows.Close())
 		}
 		awards = append(awards, award)
@@ -413,13 +424,24 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	}
 	var bounds []time.Time
 	for _, award := range awards {
-		bound, err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: award.node}, award.generation, beat)
+		var beat LeaseBeat
+		bound, err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: award.node}, award.generation, &beat)
 		if err != nil {
 			return nil, err
 		}
-		bound, err = leaseBoundTx(ctx, tx, award.prefix, now, bound)
+		var previous time.Time
+		if beat.CancelRequested {
+			previous = time.Unix(0, award.expiry)
+		}
+		bound, err = leaseBoundTx(ctx, tx, award.prefix, now, bound, previous)
 		if err != nil {
 			return nil, err
+		}
+		if beat.CancelRequested {
+			if _, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=? AND generation=?`, bound.UnixNano(), team, actor.Owner.RunID, award.node, award.generation); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		bounds = append(bounds, bound)
 	}

@@ -505,7 +505,9 @@ and record graphs still protect a shared digest.
 Every metered renewal charges usage and reserves the next slice under the team's
 ledger lock. A refusal writes `billing_awards.stop_reason` and
 `drain_deadline_at` (one slice out) and cancels the metered job in the same
-transaction. Independent unmetered jobs retain their state. Placing a dispute, warning or operator hold, or revoking standing,
+transaction. A job stop leaves its owner orchestrating independent unmetered
+jobs. An owner-unit stop cancels the whole run. Placing a dispute, warning or
+operator hold, or revoking standing,
 also writes the stop and cancellation for active metered awards before the hold
 commits. Releasing a hold never clears that stop. These billing mutations use
 the same whole-transaction retry as other admin/work lock-order exceptions.
@@ -516,12 +518,13 @@ each metered award's funded horizon and its durable drain deadline. A stopped,
 unstarted award retains its drain after refunding the reservation. A refunded
 award without a stop cannot renew. Launcher preparation returns the committed
 expiry to its keeper, including capability bounds shorter than a slice.
-An owner renewing self-claimed jobs uses those jobs' authority bounds as well
-as their funded horizons, so its keeper cannot outlive any child it renews.
-A stopped trigger cannot schedule its accepted graph. Once that metered trigger
-fails, the elected controller settles the sealed graph through the existing
-scheduler, preserving independent customer jobs and normal dependency outcomes.
-The run retains its sealed dispatch, and the stopped generation cannot requeue.
+An owner renewing active self-claimed jobs uses those jobs' authority bounds
+and funded horizons. A stopped child retains its own bounded lease and no
+longer constrains the owner's renewal or cancellation.
+Stopping a metered trigger or plan writes whole-run cancellation in the same
+transaction because its orchestrator has stopped. The reaper drains that run
+and settles its awards without taking ownership of its graph. Stopped units
+cannot requeue after funding returns or a hold is released.
 
 The schema enforces one billing award per capability and per unit generation.
 Refill settlement scopes its checkout and grant to the same team. Every new job attempt clears its job summary and annotations.

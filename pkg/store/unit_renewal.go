@@ -121,7 +121,7 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err != nil {
 		return err
 	}
-	if run.FinishedAt != nil || run.Dispatch != "controller" && (run.Owner == nil || run.Owner.Kind != OwnerController) {
+	if run.FinishedAt != nil || run.Dispatch != "controller" {
 		return holderRefusal()
 	}
 	source, err := readNodeTx(ctx, tx, team, request.Source)

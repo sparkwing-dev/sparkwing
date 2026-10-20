@@ -12,11 +12,7 @@ type ControllerRun struct {
 	RunID string
 }
 
-// A stopped metered host cannot settle its accepted graph. The controller uses the same scheduler for that graph.
-const controllerRunOwnership = `r.plan_accepted_generation>0 AND
- (r.dispatch='controller' OR (r.dispatch='host' AND r.intake_mode='execute' AND r.sealed_at IS NOT NULL AND EXISTS (
- SELECT 1 FROM triggers t JOIN billing_awards a ON a.team=t.team AND a.run_id=t.id AND a.generation=t.generation AND a.unit_kind=t.unit_kind
- WHERE t.team=r.team AND t.id=r.id AND t.unit_kind='trigger' AND t.status='failed' AND a.metered=1 AND a.stop_reason<>'')))`
+const controllerRunOwnership = `r.dispatch='controller' AND r.plan_accepted_generation>0`
 
 const controllerRunScheduling = controllerRunOwnership + ` AND r.intake_mode='execute' AND r.sealed_at IS NOT NULL`
 

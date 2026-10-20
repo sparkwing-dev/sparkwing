@@ -115,3 +115,61 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 		t.Fatal("self-claim owner renewed past the funding stop")
 	}
 }
+
+func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
+	s, demand, now := meteredUnitFixture(t, false)
+	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}})
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+	owner, actor := meteredUnitClaim(t, s, demand)
+	tenant := &Tenant{s: s, team: "a"}
+	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: NodeRef{"run", "job"}, Actor: actor, Policy: SourceNone})
+	if err != nil || self.Kind != Execute {
+		t.Fatalf("self claim: %+v %v", self, err)
+	}
+	principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, holder, err := renewalActor(principal.Capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120+(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)
+	*now = now.Add(10 * time.Second)
+	beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ownerStop, childStop string
+	if err := s.db.QueryRow(`SELECT stop_reason FROM billing_awards WHERE team='a' AND unit_kind='trigger'`).Scan(&ownerStop); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT stop_reason FROM billing_awards WHERE team='a' AND unit_kind='node'`).Scan(&childStop); err != nil {
+		t.Fatal(err)
+	}
+	if ownerStop != "" || childStop == "" {
+		t.Fatalf("unexpected stops owner=%q child=%q", ownerStop, childStop)
+	}
+	if beat.CancelRequested {
+		t.Fatalf("funded owner stopped for its child's refusal: %+v ownerStop=%q childStop=%q", beat, ownerStop, childStop)
+	}
+	row, err := tenant.ReadNode(t.Context(), self.Node.Ref)
+	if err != nil || row.CancelRequestedAt == nil || row.LeaseExpiresAt == nil || row.LeaseExpiresAt.After(self.Claim.LeaseExpiresAt) {
+		t.Fatalf("child stop escaped its lease: %+v, %v", row, err)
+	}
+	stoppedExpiry := *row.LeaseExpiresAt
+	for _, at := range []time.Time{now.Add(10 * time.Second), stoppedExpiry.Add(time.Second)} {
+		*now = at
+		beat, err := s.RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
+		if err != nil || beat.CancelRequested {
+			t.Fatalf("stopped child ended owner renewal: %+v, %v", beat, err)
+		}
+		row, err := tenant.ReadNode(t.Context(), self.Node.Ref)
+		if err != nil || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.Equal(stoppedExpiry) {
+			t.Fatalf("owner extended stopped child's lease: %+v, %v", row.LeaseExpiresAt, err)
+		}
+	}
+}

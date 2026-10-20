@@ -59,7 +59,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if !cancelled && !expired && !lapsed && !queuedOut && owner.status != "failed" && owner.status != "done" {
 		return nil, nil
 	}
-	if (lapsed || expired) && !(stopped && !cancelled) {
+	if lapsed || expired {
 		tx.finishedLocalSecrets = append(tx.finishedLocalSecrets, localSecretKey{target.team, run.ID})
 	}
 	if lapsed && owner.started.Valid && !cancelled && !stopped && owner.disruptions < limits.MaxDisruptions {
@@ -82,22 +82,11 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			return nil, err
 		}
 	}
-	if stopped && !cancelled {
-		controller, err := controllerSchedulingTx(ctx, tx, target.team, run.ID)
-		if err != nil {
-			return nil, err
-		}
-		if controller {
-			return result, settleControllerTx(ctx, tx, target.team, run.ID, now)
-		}
-	}
-	if !stopped || cancelled {
-		if err := cancelRunNodesTx(ctx, tx, target.team, run.ID, actor, run.CancelReason, now); err != nil {
-			return nil, err
-		}
+	if err := cancelRunNodesTx(ctx, tx, target.team, run.ID, actor, run.CancelReason, now); err != nil {
+		return nil, err
 	}
 	var claims int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND (claimed_by IS NOT NULL OR ?=1)`, target.team, run.ID, boolInt(stopped && !cancelled)).Scan(&claims); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL`, target.team, run.ID).Scan(&claims); err != nil {
 		return nil, err
 	}
 	if claims != 0 {

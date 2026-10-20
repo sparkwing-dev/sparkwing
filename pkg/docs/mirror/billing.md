@@ -165,8 +165,13 @@ SDK cancellation and cleanup share the time remaining under the bound.
 Kubernetes Jobs use the committed lease deadline and zero termination grace.
 Renewals cannot move a funding stop's deadline. There is no grace period,
 and lifting the hold or adding funds does not resume the stopped job.
-Final settlement refunds the unused part of the last slice. Independent work on unmetered customer runners continues;
-normal dependency settlement decides which descendants can run.
+Final settlement refunds the unused part of the last slice.
+
+When a funding stop or hold stops a metered job, only that job stops. The run's
+owner keeps orchestrating, and independent unmetered jobs continue. Normal
+dependency settlement decides which descendants can run. When it stops the
+run's owner itself (a trigger or plan running on Cloud), the whole run stops,
+including jobs on customer-owned runners, because its orchestrator has stopped.
 
 Retained storage is charged only from the balance there is: once the balance
 reaches zero, storage accounting advances without a debit. The unfunded part
@@ -179,7 +184,7 @@ for active metered work in the same transaction. Running Cloud work stops when
 the owner or keeper receives the cancellation, or when its funded lease expires
 if the controller connection is lost. Releasing the hold before the next
 heartbeat still leaves that cancellation in place. Start a new run after the
-hold is resolved. Work on the team's own runners continues.
+hold is resolved. Unmetered jobs continue when their run's owner remains active.
 A hold has one of four causes:
 
 - an operator hold, placed from the operator console;
