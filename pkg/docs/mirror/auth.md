@@ -685,13 +685,15 @@ kubectl exec -n NAMESPACE deploy/RELEASE-sparkwing-full-controller -- \
   sparkwing-controller admin grant --team qa-team --cents 500 --reason "QA fixture" --key qa-1
 ```
 
-It acts on the store the serving controller holds. Once startup succeeds and
-the controller holds its serve lease, it records its `--deployment`, `--store`,
-`--credentials-dir` and the store's identity in
+It acts on the store the serving controller holds. Once startup succeeds, the
+controller records its `--deployment`, `--store`, `--credentials-dir`, where its
+database connection landed (server, port, database and schema, or the SQLite
+file) and when the store was created in
 `$SPARKWING_HOME/deployment.json`. `admin` opens the existing store that record
-names and checks its identity. It never creates a store, and it refuses when
-there is no record or when the store it reaches is not the recorded one, for
-example after `pg-url` was changed.
+names and checks that its own connection landed on the same target and store
+before it acts. It never creates a store, and it refuses when there is no
+record or when the store it reaches differs, for example after `pg-url` was
+pointed at a restored copy.
 
 A grant with a `--key` it has seen reports the first grant instead of granting
 again. One grant is capped at 10,000 cents ($100); set

@@ -256,4 +256,26 @@ func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
 	if err := freeze(); err == nil || !strings.Contains(err.Error(), "recorded") {
 		t.Fatalf("admin on a store other than the recorded one = %v, want an identity refusal", err)
 	}
+
+	// A record naming another connection target, as when pg-url now points
+	// at a restored clone elsewhere, is refused before admin acts.
+	path := deploymentRecordPath(p.StateDB())
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec deploymentRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Connection.Target = "postgres://10.0.0.9:5432/sparkwing/public"
+	if body, err = json.Marshal(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := freeze(); err == nil || !strings.Contains(err.Error(), "connected to") {
+		t.Fatalf("admin on another connection target = %v, want a target refusal", err)
+	}
 }

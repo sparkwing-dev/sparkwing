@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -50,15 +49,15 @@ func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath 
 
 // deploymentRecord is what a serving controller leaves beside its state for
 // `admin`, which runs in the same pod and must act on the same store
-// without the operator repeating the controller's flags. It is written only
-// once startup has succeeded and the serve lease is held, and it names the
-// store by its identity, so admin cannot be pointed at another database by
-// a failed start or a rotated pg-url.
+// without the operator repeating the controller's flags. It is written once
+// startup has succeeded, and it names where the controller's connection
+// landed, so admin refuses a store reached at another target or created at
+// another time, such as one a rotated pg-url points at.
 type deploymentRecord struct {
 	Kind           deployment.Kind  `json:"kind"`
 	Store          deployment.Store `json:"store"`
 	CredentialsDir string           `json:"credentials_dir"`
-	StoreIdentity  string           `json:"store_identity"`
+	Connection     store.Connection `json:"connection"`
 }
 
 func deploymentRecordPath(stateDB string) string {
@@ -66,7 +65,7 @@ func deploymentRecordPath(stateDB string) string {
 }
 
 func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir string, st *store.Store) error {
-	identity, err := st.StoreIdentity(ctx)
+	conn, err := st.Connection(ctx)
 	if err != nil {
 		return err
 	}
@@ -75,7 +74,7 @@ func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.C
 			return err
 		}
 	}
-	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir, StoreIdentity: identity})
+	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir, Connection: conn})
 	if err != nil {
 		return err
 	}
@@ -94,8 +93,9 @@ func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.C
 	return nil
 }
 
-// openDeclaredStore opens the store the serving controller recorded, refuses
-// rather than create one, and refuses a store whose identity differs.
+// openDeclaredStore opens the store the serving controller recorded. It
+// never creates one, and before returning it checks that its own connection
+// landed on the recorded target and baseline.
 func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error) {
 	path := deploymentRecordPath(stateDB)
 	body, err := os.ReadFile(path)
@@ -109,7 +109,7 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 	if err := json.Unmarshal(body, &rec); err != nil {
 		return nil, fmt.Errorf("deployment record %s: %w", path, err)
 	}
-	if rec.StoreIdentity == "" {
+	if rec.Connection.Target == "" {
 		return nil, fmt.Errorf("deployment record %s names no store", path)
 	}
 	dialect, target := store.DialectSQLite, stateDB
@@ -124,87 +124,16 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 	if err != nil {
 		return nil, err
 	}
-	identity, err := st.StoreIdentity(ctx)
-	if err == nil && identity != rec.StoreIdentity {
-		err = fmt.Errorf("the store admin reached is %s, but the serving controller recorded %s; the credentials changed since it started", identity, rec.StoreIdentity)
+	conn, err := st.Connection(ctx)
+	switch {
+	case err != nil:
+	case conn.Target != rec.Connection.Target:
+		err = fmt.Errorf("admin reached %s, but the serving controller is connected to %s; the credentials changed since it started", conn.Target, rec.Connection.Target)
+	case conn.Created != rec.Connection.Created:
+		err = fmt.Errorf("the store at %s is not the one the serving controller recorded (baseline %d, recorded %d)", conn.Target, conn.Created, rec.Connection.Created)
 	}
 	if err != nil {
 		return nil, errors.Join(err, st.Close())
 	}
 	return st, nil
-}
-
-const (
-	serveLeaseName = "controller.serve"
-	serveLeaseTTL  = 30 * time.Second
-)
-
-var errServeLeaseExpired = errors.New("serve lease expired before it was renewed; another controller may now serve this store")
-
-// safety: per-process state such as flood budgets, live logs and the
-// filesystem signing key is right only while one controller serves a store,
-// so a second one waits here instead of serving beside the first. Waiting,
-// rather than failing, lets a replacement pod start while the old lease
-// runs out.
-func acquireServeLease(ctx context.Context, st *store.Store, holder string, logger *slog.Logger) (store.SingletonLease, error) {
-	warned := false
-	for {
-		lease, err := st.AsOperator().AcquireSingletonLease(ctx, serveLeaseName, holder, serveLeaseTTL)
-		if err == nil {
-			return lease, nil
-		}
-		if !errors.Is(err, store.ErrLockHeld) {
-			return store.SingletonLease{}, fmt.Errorf("serve lease: %w", err)
-		}
-		if !warned {
-			logger.Warn("another controller serves this store; standing by until its lease ends", "lease", serveLeaseName)
-			warned = true
-		}
-		select {
-		case <-ctx.Done():
-			return store.SingletonLease{}, ctx.Err()
-		case <-time.After(serveLeaseTTL / 3):
-		}
-	}
-}
-
-// serveWhileLeased runs serve until it returns or serving authority ends.
-// Authority runs on this process's own clock: it ends ttl after the start
-// of the last renewal that succeeded, whether or not a later renewal has
-// returned, and each renewal must finish inside the window that is left.
-// held is when the lease was last acquired. It does not wait for a renewal
-// that ignores its deadline, so serving ends on time even then.
-func serveWhileLeased(ctx context.Context, held time.Time, ttl time.Duration, renew, serve func(context.Context) error) error {
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	expiry := held.Add(ttl)
-	watchdog := time.AfterFunc(time.Until(expiry), func() { cancel(errServeLeaseExpired) })
-	defer watchdog.Stop()
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(ttl / 3):
-			}
-			sent := time.Now()
-			rctx, rcancel := context.WithDeadline(ctx, expiry)
-			err := renew(rctx)
-			rcancel()
-			switch {
-			case err == nil:
-				expiry = sent.Add(ttl)
-				watchdog.Reset(time.Until(expiry))
-			case errors.Is(err, store.ErrLockHeld):
-				cancel(fmt.Errorf("serve lease lost: %w", err))
-				return
-			}
-		}
-	}()
-	err := serve(ctx)
-	cancel(nil)
-	if cause := context.Cause(ctx); err == nil && cause != nil && !errors.Is(cause, context.Canceled) {
-		err = cause
-	}
-	return err
 }

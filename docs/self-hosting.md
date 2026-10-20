@@ -67,16 +67,19 @@ integration evidence. See [log completeness](observability.md#log-completeness).
 
 ### Overlapping controllers during an upgrade
 
-One controller serves a store at a time. Before it writes anything, a
-controller takes the `controller.serve` lease in the store and renews it every
-10 seconds. A second controller pointed at the same store, such as a new pod
-during an upgrade or a laptop given the production `pg-url`, logs that it is
-standing by and waits until the first stops or its lease lapses after 30
-seconds. Serving authority runs on the controller's own clock: it ends 30
-seconds after the last renewal that succeeded began, even while a renewal is
-stalled on the database, and the controller then closes its listeners. Flood budgets, live
-logs and per-token limits live in one process's memory, so they are right only
-with one controller.
+Two controllers may serve one store at the same time, for example the old
+and new pod during an upgrade. Every write is a transaction, and every
+background job that must run once holds its own lease row in the store: the
+reaper and claim-attention sweep, run recovery, run completion effects,
+storage maintenance, the cron tick, bucket measurement, and each team
+deletion. What does not carry across controllers is per-process: request and
+flood budgets apply per controller, so two controllers allow up to twice the
+configured rate, and a live log tail shows only what reached the controller
+the reader asked. Filesystem data lives under each controller's own
+`SPARKWING_HOME`, so controllers sharing a store need the S3 data store.
+`--payment-mode` and `--free-team-slots` are shared settings each controller
+writes at startup; controllers on one store must declare the same values, or
+the last one started wins.
 
 ### Declared deployment
 
@@ -103,7 +106,7 @@ Startup refuses, before it opens the store or writes any setting, when:
 - any other flag is invalid, or `--addr`, `--trusted-proxy-addr` or
   `--metrics-addr` cannot be bound. Every listener is bound before the store is
   opened. The bootstrap seed, the payment mode and the free team slots are
-  written only after every check passes and under the serve lease.
+  written only after every check passes.
 
 A license that expires while the controller runs does not change the
 deployment. Metering, the free tier and sign-in keep working, and

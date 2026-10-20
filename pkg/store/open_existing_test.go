@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -54,6 +55,10 @@ func TestOpenExistingNeverCreatesAPostgresStore(t *testing.T) {
 	st, err := store.OpenExisting(t.Context(), store.DialectPostgres, target.DSN())
 	if err != nil {
 		t.Fatalf("OpenExisting on a created store: %v", err)
+	}
+	conn, err := st.Connection(t.Context())
+	if err != nil || !strings.HasPrefix(conn.Target, "postgres://") || !strings.Contains(conn.Target, "/sw_") || conn.Created == 0 {
+		t.Fatalf("connection = %+v, %v; want the server, database and baseline it reached", conn, err)
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)

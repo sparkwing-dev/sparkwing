@@ -2819,8 +2819,8 @@ startup.
 
 Startup binds every listener before it opens the store, and writes the
 bootstrap seed, `--payment-mode` and `--free-team-slots` only after every other
-check passes, while it holds the new `controller.serve` lease; a second
-controller on the same store waits. `--external-url` follows the runners' rule:
+check passes. Controllers sharing a store must declare the same payment mode
+and free team slots. `--external-url` follows the runners' rule:
 `https`, or `http` only on loopback or a Kubernetes Service. Without
 `--external-url`, the GitHub runner binding routes answer
 `capability_unsupported` rather than a workflow built from the request's host.

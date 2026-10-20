@@ -16,7 +16,7 @@ type SingletonLease struct {
 
 func validSingletonWork(name string) bool {
 	switch name {
-	case "controller.serve", "controller.reaper", "controller.owner", "completion", "maintenance", "schedules.tick", "bucket.measure":
+	case "controller.reaper", "controller.owner", "completion", "maintenance", "schedules.tick", "bucket.measure":
 		return true
 	}
 	return false

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -461,22 +459,6 @@ func run(args []string) error {
 		return fmt.Errorf("open state db: %w", serr)
 	}
 	defer func() { _ = st.Close() }()
-	lease, err := acquireServeLease(ctx, st, rand.Text(), slog.Default())
-	if err != nil {
-		return err
-	}
-	leaseHeld := time.Now()
-	var leaseMu sync.Mutex
-	current := func() store.SingletonLease {
-		leaseMu.Lock()
-		defer leaseMu.Unlock()
-		return lease
-	}
-	defer func() {
-		if err := st.AsOperator().ReleaseSingletonLease(context.WithoutCancel(ctx), current()); err != nil {
-			slog.Warn("release serve lease", "err", err)
-		}
-	}()
 
 	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller", Log: readLog()})
 	if err != nil {
@@ -581,10 +563,11 @@ func run(args []string) error {
 	}
 	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
 
-	// safety: these are the only database writes startup makes. They come
-	// after every check above and every listener is bound, and under the
-	// serve lease, so a start that fails earlier, or a second controller,
-	// changes nothing.
+	// safety: these are the only database writes startup makes, and they come
+	// after every check above and after every listener is bound, so a start
+	// that fails earlier changes nothing. The payment mode and free team
+	// slots are shared settings: controllers serving one store must declare
+	// the same values, or the last one started wins.
 	if err := ensureBootstrapAdmin(ctx, st, creds.BootstrapAdminToken, slog.Default()); err != nil {
 		return err
 	}
@@ -603,18 +586,7 @@ func run(args []string) error {
 	if err := writeDeploymentRecord(ctx, p.StateDB(), cfg, *credentialsDir, st); err != nil {
 		return err
 	}
-	renew := func(ctx context.Context) error {
-		renewed, err := st.AsOperator().RenewSingletonLease(ctx, current(), serveLeaseTTL)
-		if err == nil {
-			leaseMu.Lock()
-			lease = renewed
-			leaseMu.Unlock()
-		}
-		return err
-	}
-	return serveWhileLeased(ctx, leaseHeld, serveLeaseTTL, renew, func(ctx context.Context) error {
-		return controller.ServeWith(ctx, srv, listeners.Listeners)
-	})
+	return controller.ServeWith(ctx, srv, listeners.Listeners)
 }
 
 type boundListeners struct{ controller.Listeners }
