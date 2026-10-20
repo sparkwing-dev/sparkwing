@@ -70,8 +70,6 @@ type ExecutorDependencies struct {
 	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
 	Start            func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
 	EnsureEngine     func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
-	ValidatePlan     func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash    func(any) (runspec.Hash, error)
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation       nodeproto.ValidationContext
 	PrepareArtifacts func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
@@ -90,21 +88,15 @@ type nodeExecutor struct {
 }
 
 // NewNodeExecutor builds the common executor for local and dispatched claims.
-// Validation, hashing and deadline defaults are owned by their contract packages.
+// Validation, hashing and deadlines are owned by their contract packages.
 func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
 		return nil, errors.New("node executor requires store, process, engine and masking adapters")
 	}
-	if deps.ValidatePlan == nil {
-		deps.ValidatePlan = nodeproto.ValidatePlan
-	}
-	if deps.CanonicalHash == nil {
-		deps.CanonicalHash = runspec.CanonicalHash
-	}
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
+	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, Validation: deps.Validation}}, nil
 }
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error) {
@@ -165,7 +157,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if input.RouteBinding.RunID != input.Accepted.RunID || input.RouteBinding.JobID != input.NodeID {
 		return spec, row, job, executorError(apierr.SpecDrift, "process binding does not match the accepted job")
 	}
-	hash, err := h.deps.CanonicalHash(input.Accepted.Plan)
+	hash, err := runspec.CanonicalHash(input.Accepted.Plan)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -192,7 +184,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {
 		return spec, row, job, executorError(apierr.PlanDrift, "persisted job specification is invalid")
 	}
-	hash, err = h.deps.CanonicalHash(job)
+	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		return spec, row, job, err
 	}

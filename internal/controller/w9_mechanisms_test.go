@@ -147,7 +147,7 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := planned.Functions.Plan(t.Context())
+	plan, err := planned.Plan(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := prepared.Functions.Plan(t.Context())
+	plan, err := prepared.Plan(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

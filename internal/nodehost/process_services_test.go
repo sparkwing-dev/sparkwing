@@ -207,12 +207,12 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
 	registry := NewMaskRegistry(secrets.NewMasker())
 	host.Masks = registry
-	job := nodeproto.JobSpec{ID: "persisted"}
+	job := nodeproto.JobSpec{ID: "persisted", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	prepare := host.Prepare
 	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 		planning, err := prepare(ctx, in, entry)
-		planning.Functions.Validate = func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-			return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}, nil
+		planning.Plan = func(context.Context) (json.RawMessage, error) {
+			return json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
 		}
 		return planning, err
 	}

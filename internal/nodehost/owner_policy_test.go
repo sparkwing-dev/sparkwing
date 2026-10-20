@@ -24,7 +24,7 @@ func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput
 	job.Closures.Generate = nil
 	edit(&job)
 	in.Accepted.Plan.Jobs[0] = job
-	hash, err := executorHash(in.Accepted.Plan)
+	hash, err := runspec.CanonicalHash(in.Accepted.Plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, err = executorHash(job)
+	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		t.Fatal(err)
 	}

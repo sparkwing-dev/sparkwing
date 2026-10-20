@@ -11,14 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// PlanningFunctions connects SDK planning to the shared validation and hash owners.
-// Nil Validate and Hash use nodeproto.ValidatePlan and runspec.CanonicalHash.
-type PlanningFunctions struct {
-	Plan     func(context.Context) (json.RawMessage, error)
-	Validate func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	Hash     func(any) (runspec.Hash, error)
-}
-
 // PlanningInput supplies current validation for initial SDK planning.
 type PlanningInput struct{ Validation nodeproto.ValidationContext }
 
@@ -30,32 +22,31 @@ type PlannedInitial struct {
 }
 
 // PlanInitial runs and validates SDK planning before acceptance.
-func PlanInitial(ctx context.Context, input PlanningInput, functions PlanningFunctions) (PlannedInitial, error) {
+func PlanInitial(ctx context.Context, input PlanningInput, planSDK func(context.Context) (json.RawMessage, error)) (PlannedInitial, error) {
 	if err := context.Cause(ctx); err != nil {
 		return PlannedInitial{}, err
 	}
 	if err := initialPlanningContext(input.Validation); err != nil {
 		return PlannedInitial{}, err
 	}
-	functions = functions.defaults()
-	if functions.Plan == nil {
+	if planSDK == nil {
 		return PlannedInitial{}, errors.New("initial planning requires an SDK planner")
 	}
-	raw, err := functions.Plan(ctx)
+	raw, err := planSDK(ctx)
 	if context.Cause(ctx) != nil {
 		return PlannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
 		return PlannedInitial{}, err
 	}
-	plan, err := functions.Validate(raw, input.Validation)
+	plan, err := nodeproto.ValidatePlan(raw, input.Validation)
 	if context.Cause(ctx) != nil {
 		return PlannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
 		return PlannedInitial{}, err
 	}
-	canonical, hash, err := canonicalPlanningDocument(raw, functions.Hash)
+	canonical, hash, err := canonicalPlanningDocument(raw)
 	if context.Cause(ctx) != nil {
 		return PlannedInitial{}, context.Cause(ctx)
 	}
@@ -75,8 +66,8 @@ func initialPlanningContext(validation nodeproto.ValidationContext) error {
 	return nil
 }
 
-func canonicalPlanningDocument(raw json.RawMessage, hashPlan func(any) (runspec.Hash, error)) (json.RawMessage, runspec.Hash, error) {
-	hash, err := hashPlan(raw)
+func canonicalPlanningDocument(raw json.RawMessage) (json.RawMessage, runspec.Hash, error) {
+	hash, err := runspec.CanonicalHash(raw)
 	if err != nil {
 		return nil, "", err
 	}
@@ -97,16 +88,6 @@ func canonicalPlanningDocument(raw json.RawMessage, hashPlan func(any) (runspec.
 		return nil, "", fmt.Errorf("canonicalize plan: %w", err)
 	}
 	return canonical, hash, nil
-}
-
-func (f PlanningFunctions) defaults() PlanningFunctions {
-	if f.Validate == nil {
-		f.Validate = nodeproto.ValidatePlan
-	}
-	if f.Hash == nil {
-		f.Hash = runspec.CanonicalHash
-	}
-	return f
 }
 
 func planningDigestValid(digest runspec.Hash) bool {

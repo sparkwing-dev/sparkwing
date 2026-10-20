@@ -53,10 +53,10 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 	if mode == "artifact_retry" {
-		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "producer", Artifacts: []string{"bin/program"}})
+		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "producer", Artifacts: []string{"bin/program"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 	}
-	planHash, _ := expansionHash(plan)
-	jobHash, _ := expansionHash(job)
+	planHash, _ := runspec.CanonicalHash(plan)
+	jobHash, _ := runspec.CanonicalHash(job)
 	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	resolved := engine.Resolved{Identity: identity}
 	execution := runspec.JobExecutionSettings{}
@@ -81,7 +81,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	s := newExecutionHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []store.NodeRow{row}})
 	if mode == "artifact_retry" {
 		producer, _ := json.Marshal(plan.Jobs[1])
-		producerHash, _ := expansionHash(plan.Jobs[1])
+		producerHash, _ := runspec.CanonicalHash(plan.Jobs[1])
 		s.snapshot.Nodes = append(s.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: "success", Spec: producer, SpecHash: string(producerHash)})
 	}
 	if mode == "result_refused" {
@@ -110,18 +110,16 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		CanonicalHash: expansionHash,
-		ValidatePlan: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-			var plan nodeproto.PlanDoc
-			err := json.Unmarshal(raw, &plan)
-			return plan, err
-		},
+
 		ChildContext: func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
 			child, cancel := context.WithCancel(ctx)
 			return child, cancel, nil
 		},
 		PublishOutput: func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
 			return nil, errors.New("private output refused")
+		}, Validation: nodeproto.ValidationContext{
+			Placement: nodeproto.PlacementLocal,
+			Secrets:   noV2Secrets{},
 		},
 	}
 	setTestExecutor(&dependencies, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {

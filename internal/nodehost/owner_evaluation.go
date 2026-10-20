@@ -48,17 +48,15 @@ type EvaluationInput struct {
 // Start owns run-log attribution, masking and environment. Bound input requires Bind.
 // ChildContext applies the shared deadline policy to skip and memo evaluation.
 type EvaluationDependencies struct {
-	Store         EvaluationStore
-	Bind          func(context.Context, EvaluationInput) (ProcessGrant, error)
-	Start         func(context.Context, EvaluationInput) (ExecutorProcess, error)
-	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
-	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash func(any) (runspec.Hash, error)
-	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
-	Validation    nodeproto.ValidationContext
-	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Mask          func(string) string
-	Masks         *MaskRegistry
+	Store        EvaluationStore
+	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
+	Start        func(context.Context, EvaluationInput) (ExecutorProcess, error)
+	EnsureEngine func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
+	Validation   nodeproto.ValidationContext
+	ReadOutput   func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	Mask         func(string) string
+	Masks        *MaskRegistry
 }
 
 // OwnerEvaluator reconstructs accepted code and evaluates owner closures. It
@@ -73,16 +71,10 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
 		return nil, errors.New("owner evaluator requires store, process, engine and masking adapters")
 	}
-	if deps.ValidatePlan == nil {
-		deps.ValidatePlan = nodeproto.ValidatePlan
-	}
-	if deps.CanonicalHash == nil {
-		deps.CanonicalHash = runspec.CanonicalHash
-	}
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
+	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, Validation: deps.Validation}}, nil
 }
 
 // Expand evaluates every declared generator from the source's recorded output
@@ -151,7 +143,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if input.RouteBinding.RunID != input.Accepted.RunID || input.RouteBinding.JobID != input.NodeID {
 		return spec, row, job, executorError(apierr.SpecDrift, "evaluation binding does not match the accepted job")
 	}
-	hash, err := h.CanonicalHash(input.Accepted.Plan)
+	hash, err := runspec.CanonicalHash(input.Accepted.Plan)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -168,7 +160,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {
 		return spec, row, job, executorError(apierr.PlanDrift, "evaluation source declaration is invalid")
 	}
-	hash, err = h.CanonicalHash(job)
+	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -212,7 +204,7 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	if err != nil {
 		return nil, err
 	}
-	_, err = h.ValidatePlan(body, validation)
+	_, err = nodeproto.ValidatePlan(body, validation)
 	return body, err
 }
 

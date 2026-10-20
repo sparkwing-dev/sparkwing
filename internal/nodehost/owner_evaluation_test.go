@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -23,7 +24,7 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, Evaluatio
 	job := input.Accepted.Plan.Jobs[0]
 	job.Closures.Generate = []string{"first", "empty", "last"}
 	input.Accepted.Plan.Jobs[0] = job
-	hash, _ := executorHash(input.Accepted.Plan)
+	hash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 	input.Accepted.PlanHash = string(hash)
 	var spec map[string]any
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
@@ -32,18 +33,23 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, Evaluatio
 	spec["plan_hash"] = hash
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	st.row.Spec, _ = json.Marshal(job)
-	hash, _ = executorHash(job)
+	hash, _ = runspec.CanonicalHash(job)
 	st.row.SpecHash = string(hash)
 	st.row.Status, st.row.Outcome, st.row.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
 	st.row.ClaimedBy, st.row.CapabilityPrefix = "", ""
 	p := &executorProcess{plan: input.Accepted.Plan}
 	in := EvaluationInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: string(hash), Entry: input.Entry, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding}
-	deps := EvaluationDependencies{Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ValidatePlan: exec.ValidatePlan, CanonicalHash: exec.CanonicalHash, ChildContext: exec.ChildContext, Mask: func(s string) string { return strings.ReplaceAll(s, "private", "***") }, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
-		if ref != st.row.Ref || generation != st.row.Generation {
-			t.Fatal("read output without source fence")
-		}
-		return json.RawMessage(`{"count":2}`), nil
-	}}
+	deps := EvaluationDependencies{
+		Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ChildContext: exec.ChildContext, Mask: func(s string) string { return strings.ReplaceAll(s, "private", "***") }, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+			if ref != st.row.Ref || generation != st.row.Generation {
+				t.Fatal("read output without source fence")
+			}
+			return json.RawMessage(`{"count":2}`), nil
+		}, Validation: nodeproto.ValidationContext{
+			Placement: nodeproto.PlacementLocal,
+			Secrets:   noV2Secrets{},
+		},
+	}
 	return in, st, deps, p
 }
 
@@ -61,7 +67,7 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 				}
 				jobs := []nodeproto.JobSpec{}
 				if r.Closure != "empty" {
-					jobs = append(jobs, nodeproto.JobSpec{ID: r.Closure, Groups: []string{r.Closure}})
+					jobs = append(jobs, nodeproto.JobSpec{ID: r.Closure, Groups: []string{r.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 				}
 				raw, _ := json.Marshal(jobs)
 				return nodeproto.EvalResult{Value: raw}, nil
@@ -122,22 +128,17 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 				if mode == "sdk" && r.Closure == "last" {
 					return nodeproto.EvalResult{Error: cause}, nil
 				}
+				if mode == "validator" {
+					return nodeproto.EvalResult{Value: json.RawMessage(`[{"id":"child","groups":["first"],"steps":[]}]`)}, nil
+				}
 				if mode == "shape" {
 					return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 				}
 				return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
 			}
 			switch mode {
-			case "validator":
-				validate := deps.ValidatePlan
-				deps.ValidatePlan = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					if ctx.Expansion {
-						return nodeproto.PlanDoc{}, cause
-					}
-					return validate(raw, ctx)
-				}
 			case "drift":
-				p.plan.Jobs = []nodeproto.JobSpec{{ID: "changed"}}
+				p.plan.Jobs = []nodeproto.JobSpec{{ID: "changed", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 			case "output":
 				deps.ReadOutput = func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) { return nil, cause }
 			case "close":
@@ -236,51 +237,36 @@ func TestOwnerEvaluationCannotAttributeJobsToAnotherGenerator(t *testing.T) {
 	}
 }
 
-func TestOwnerEvaluationValidatorSeesRawCombinedBodyAndPersistedTopology(t *testing.T) {
-	in, st, deps, p := evaluationFixture(t)
-	var validated bool
-	validate := deps.ValidatePlan
-	deps.ValidatePlan = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-		if !ctx.Expansion {
-			return validate(raw, ctx)
-		}
-		validated = true
-		if ctx.SourceJob != st.row.Ref.NodeID || len(ctx.ExistingJobs) != 1 || ctx.ExistingJobs[0].ID != in.NodeID {
-			t.Fatalf("context = %+v", ctx)
-		}
-		if !strings.Contains(string(raw), `"unrecognized":true`) {
-			t.Fatalf("host discarded an unknown declaration before validation: %s", raw)
-		}
-		return nodeproto.PlanDoc{}, &apierr.Error{Code: apierr.PlanInvalid, Message: "unknown field"}
-	}
+func TestOwnerEvaluationRejectsUnknownFieldsInCombinedBody(t *testing.T) {
+	in, _, deps, p := evaluationFixture(t)
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op != nodeproto.OpEval {
 			return nil, nil
 		}
 		raw := json.RawMessage(`[]`)
 		if r.Closure == "first" {
-			raw = json.RawMessage(`[{"id":"child","groups":["first"],"unrecognized":true}]`)
+			raw = json.RawMessage(`[{"id":"child","groups":["first"],"steps":[{"id":"body"}],"unrecognized":true}]`)
 		}
 		return nodeproto.EvalResult{Value: raw}, nil
 	}
 	h, _ := NewOwnerEvaluator(deps)
 	body, failure, err := h.Expand(t.Context(), in)
-	if !validated || err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.PlanInvalid {
-		t.Fatalf("validated = %v, body = %s, failure = %+v, error = %v", validated, body, failure, err)
+	if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.PlanInvalid || !strings.Contains(failure.MaskedError, "unknown field") {
+		t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 	}
 }
 
 func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	in, st, deps, p := evaluationFixture(t)
 	source := in.Accepted.Plan.Jobs[0]
-	root := nodeproto.JobSpec{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestor"}}}
+	root := nodeproto.JobSpec{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestor"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	source.Groups = []string{"ancestor"}
 	st.row.Spec, _ = json.Marshal(source)
-	hash, _ := executorHash(source)
+	hash, _ := runspec.CanonicalHash(source)
 	st.row.SpecHash, in.SpecHash = string(hash), string(hash)
 	in.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{root}}
 	p.plan = in.Accepted.Plan
-	hash, _ = executorHash(in.Accepted.Plan)
+	hash, _ = runspec.CanonicalHash(in.Accepted.Plan)
 	in.Accepted.PlanHash = string(hash)
 	var spec map[string]any
 	if err := json.Unmarshal(in.Accepted.Spec, &spec); err != nil {
@@ -289,11 +275,11 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	spec["plan_hash"] = hash
 	in.Accepted.Spec, _ = json.Marshal(spec)
 	expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}
-	hash, _ = executorHash(expansion)
+	hash, _ = runspec.CanonicalHash(expansion)
 	raw, _ := json.Marshal(expansion)
 	st.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
 	rootBody, _ := json.Marshal(root)
-	rootHash, _ := executorHash(root)
+	rootHash, _ := runspec.CanonicalHash(root)
 	st.nodes = map[string]store.NodeRow{"root": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
 	deps.Store = recordedReplayStore{st}
 	rootKey := blob.MaterializedRecordKey("a", "run", "root", 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)

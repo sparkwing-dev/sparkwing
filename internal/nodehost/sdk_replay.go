@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -34,7 +35,7 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 		if expansion.Source.RunID != input.Accepted.RunID || expansion.Source.NodeID == "" || expansion.SourceGeneration < 0 || json.Unmarshal(expansion.Body, &plan) != nil || plan.Jobs == nil {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry has an invalid accepted expansion")
 		}
-		hash, err := h.CanonicalHash(expansion.Body)
+		hash, err := runspec.CanonicalHash(expansion.Body)
 		if err != nil {
 			return nil, err
 		}
@@ -67,14 +68,14 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 			return nil, executorError(apierr.PlanDrift, "generator ancestry lost its successful source generation")
 		}
 		declaration := declarations[row.Ref.NodeID]
-		hash, err := h.CanonicalHash(declaration)
+		hash, err := runspec.CanonicalHash(declaration)
 		if err != nil {
 			return nil, err
 		}
 		if len(declaration.Closures.Generate) == 0 || declaration.Closures.Generate[0] == "" || !json.Valid(row.Spec) {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry has no persisted source generator")
 		}
-		persistedHash, err := h.CanonicalHash(row.Spec)
+		persistedHash, err := runspec.CanonicalHash(row.Spec)
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +170,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 	if err != nil {
 		return nil, err
 	}
-	expansion, err := h.ValidatePlan(body, validation)
+	expansion, err := nodeproto.ValidatePlan(body, validation)
 	if err != nil {
 		return nil, errors.Join(executorError(apierr.PlanDrift, "generator replay no longer matches its accepted topology"), err)
 	}
@@ -189,7 +190,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 		if err != nil {
 			return nil, executorError(apierr.PlanDrift, "generator replay added a job absent from the accepted expansion")
 		}
-		hash, err := h.CanonicalHash(generated)
+		hash, err := runspec.CanonicalHash(generated)
 		if err != nil {
 			return nil, err
 		}
@@ -233,7 +234,7 @@ func (h *sdkCode) replayMembers(snapshot store.RunSnapshot, replay GeneratorRepl
 		if err := json.Unmarshal(accepted.Body, &plan); err != nil {
 			return nil, executorError(apierr.PlanDrift, "accepted expansion is malformed")
 		}
-		hash, err := h.CanonicalHash(plan)
+		hash, err := runspec.CanonicalHash(plan)
 		if err != nil {
 			return nil, err
 		}

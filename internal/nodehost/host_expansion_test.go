@@ -2,8 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,12 +56,6 @@ func strictExpansionJobs(mode, closure string) json.RawMessage {
 	return raw
 }
 
-func expansionHash(value any) (runspec.Hash, error) {
-	raw, err := json.Marshal(value)
-	sum := sha256.Sum256(raw)
-	return runspec.Hash(hex.EncodeToString(sum[:])), err
-}
-
 func TestOwnerExpansion(t *testing.T) {
 	t.Helper()
 	for _, mode := range []string{"success", "empty", "failure", "refused", "unknown", "duplicate", "null", "concurrency", "mismatch_capacity", "mismatch_scope", "mismatch_on_limit", "cost", "cycle", "fan256", "fan257"} {
@@ -76,8 +68,8 @@ func TestOwnerExpansion(t *testing.T) {
 			if mode == "cycle" {
 				plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "consumer", Steps: []nodeproto.StepSpec{{ID: "body"}}, NeedsGenerated: []string{"first"}})
 			}
-			planHash, _ := expansionHash(plan)
-			jobHash, _ := expansionHash(job)
+			planHash, _ := runspec.CanonicalHash(plan)
+			jobHash, _ := runspec.CanonicalHash(job)
 			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
 			request := runspec.SealedRequest{RunID: "run", Hash: "request", Request: runspec.Request{Pipeline: "pipeline"}}
@@ -99,7 +91,7 @@ func TestOwnerExpansion(t *testing.T) {
 			process := newExpansionSDK(plan, mode)
 			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
-			}, CanonicalHash: expansionHash, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+			}, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 				if ref != s.node.Ref || generation != 4 {
 					t.Fatal("output read lost source fence")
 				}

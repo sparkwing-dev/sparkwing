@@ -23,8 +23,8 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"condition"}}}
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
-			planHash, _ := expansionHash(plan)
-			jobHash, _ := expansionHash(job)
+			planHash, _ := runspec.CanonicalHash(plan)
+			jobHash, _ := runspec.CanonicalHash(job)
 			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
 			spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{Engine: identity}}
@@ -46,12 +46,6 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return resolved, nil
 				},
-				CanonicalHash: expansionHash,
-				ValidatePlan: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					var plan nodeproto.PlanDoc
-					err := json.Unmarshal(raw, &plan)
-					return plan, err
-				},
 				ChildContext: func(ctx context.Context, budget, _ time.Duration) (context.Context, context.CancelFunc, error) {
 					bounded, cancel := context.WithTimeout(ctx, budget)
 					return bounded, cancel, nil
@@ -59,7 +53,10 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 					return nil, errors.New("approval cannot read its own unexecuted output")
 				},
-				Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },
+				Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") }, Validation: nodeproto.ValidationContext{
+					Placement: nodeproto.PlacementLocal,
+					Secrets:   noV2Secrets{},
+				},
 			})
 			if err != nil {
 				t.Fatal(err)

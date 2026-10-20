@@ -158,7 +158,7 @@ func main() {
 	if prepared.Description.Name != "ci" || prepared.Description.Args == nil {
 		t.Fatalf("local probe description: %+v", prepared.Description)
 	}
-	raw, err := prepared.Functions.Plan(t.Context())
+	raw, err := prepared.Plan(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

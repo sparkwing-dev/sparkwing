@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -33,8 +32,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Log:          func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil },
-		ValidatePlan: f.functions().Validate, CanonicalHash: f.functions().Hash,
+		Log: func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil },
 	}
 	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 		if planner.Masker.Mask(input.Args["label"]) != "***" {
@@ -84,7 +82,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {
 		t.Fatalf("logs = %+v", logs)
 	}
-	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions); err != nil {
+	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	if len(processes) != 2 {
@@ -108,9 +106,8 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		ValidatePlan: f.functions().Validate, CanonicalHash: f.functions().Hash,
 		Start: func(_ context.Context, _ PlanningProcessInput, _ func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := &executorProcess{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}}
+			process := &executorProcess{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}}
 			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 				switch request.Op {
 				case nodeproto.OpHello:
@@ -160,7 +157,7 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.Run.Git.SHA, input.Run.Trigger.User, input.Run.Trigger.PullRequest.Number = "later", "later", 99
-	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions); err != nil {
+	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	if !planned || len(*processes) != 2 {
@@ -246,7 +243,7 @@ func TestSDKPlanningRejectsIncompleteDescriptionsAndCleansUp(t *testing.T) {
 }
 
 func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
-	for _, stage := range []string{"start", "hello", "describe", "plan", "close", "cleanup", "log", "validate", "hash"} {
+	for _, stage := range []string{"start", "hello", "describe", "plan", "close", "cleanup", "log", "validate"} {
 		t.Run(stage, func(t *testing.T) {
 			p, input, f, processes := sdkPlanningFixture(t)
 			secret := "private-planning-secret"
@@ -258,6 +255,9 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 				proc := process.(*executorProcess)
 				answer := proc.answer
 				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
+					if stage == "validate" && req.Op == nodeproto.OpPlan {
+						return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: secret}}}, nil
+					}
 					if string(req.Op) == stage {
 						return nil, failure
 					}
@@ -282,18 +282,10 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 			if stage == "log" {
 				p.Log = func(context.Context, nodeproto.FrameLog) error { return failure }
 			}
-			if stage == "validate" {
-				p.ValidatePlan = func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					return nodeproto.PlanDoc{}, failure
-				}
-			}
-			if stage == "hash" {
-				p.CanonicalHash = func(any) (runspec.Hash, error) { return "", failure }
-			}
 			prepared, err := p.Prepare(t.Context(), input, f.input)
 			var result PlannedInitial
 			if err == nil {
-				result, err = PlanInitial(t.Context(), prepared.Input, prepared.Functions)
+				result, err = PlanInitial(t.Context(), prepared.Input, prepared.Plan)
 			}
 			if err == nil || strings.Contains(err.Error(), secret) || len(result.CanonicalPlan) != 0 {
 				t.Fatalf("plan = %+v, error = %v", result, err)
@@ -333,7 +325,7 @@ func TestSDKPlanningCancellationDiscardsSuccessfulReplies(t *testing.T) {
 					t.Fatal(err)
 				}
 				var raw json.RawMessage
-				raw, err = prepared.Functions.Plan(ctx)
+				raw, err = prepared.Plan(ctx)
 				if len(raw) != 0 {
 					t.Fatal("cancelled planning returned declarations")
 				}

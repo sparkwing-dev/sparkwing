@@ -487,7 +487,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				if request.Args["token"] != "private-plan-default" || request.Run.RunID != "run" {
 					os.Exit(9)
 				}
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 			default:
 				os.Exit(10)
 			}
@@ -520,7 +520,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				if request.Job != "" || string(request.Input) != `{"count":2}` {
 					os.Exit(6)
 				}
-				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}}})
+				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}}})
 				reply(request, nodeproto.EvalResult{Value: raw})
 			default:
 				os.Exit(7)
@@ -628,7 +628,7 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions)
+		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan)
 		if err != nil {
 			t.Fatalf("plan %d = %+v, %v", i, result, err)
 		}

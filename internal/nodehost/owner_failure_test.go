@@ -30,7 +30,7 @@ func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
 				prepare := host.Prepare
 				host.Prepare = func(ctx context.Context, input RunInput, entry *source.Entry) (OwnerPlanning, error) {
 					planning, err := prepare(ctx, input, entry)
-					planning.Functions.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
+					planning.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
 					return planning, err
 				}
 			case "accept":
@@ -102,7 +102,7 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 				prepare := h.Prepare
 				h.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 					out, err := prepare(ctx, in, entry)
-					out.Functions.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
+					out.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
 					return out, err
 				}
 			}

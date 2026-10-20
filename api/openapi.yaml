@@ -6708,21 +6708,6 @@ components:
           type: integer
       type: object
       x-sparkwing-go-type: wingwire.HostResources
-    pkg.wingwire.JevAdmissionStats:
-      additionalProperties: true
-      properties:
-        admits:
-          type: integer
-        attempts:
-          type: integer
-        fallbacks:
-          type: integer
-      required:
-        - attempts
-        - admits
-        - fallbacks
-      type: object
-      x-sparkwing-go-type: wingwire.JevAdmissionStats
     pkg.wingwire.QueueState:
       additionalProperties: true
       properties:
@@ -6768,10 +6753,6 @@ components:
             - type: "null"
         ignore_external:
           type: boolean
-        jev:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.wingwire.JevAdmissionStats'
-            - type: "null"
         resources:
           anyOf:
             - items:

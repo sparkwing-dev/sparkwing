@@ -50,7 +50,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 				}
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || !strings.Contains(failure.Message, "missing deployment setting") || prepared.Functions.Plan != nil {
+				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || !strings.Contains(failure.Message, "missing deployment setting") || prepared.Plan != nil {
 					t.Fatalf("broken pipeline did not refuse with its cause: %+v: %v", prepared, err)
 				}
 			}

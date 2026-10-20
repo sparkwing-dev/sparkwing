@@ -66,7 +66,6 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	processes.Session.Environments.Snapshots = config.Snapshots
 	validation := config.Validation
 	validation.Secrets = config.Masks
-	functions := (PlanningFunctions{}).defaults()
 	execution := ExecutorDependencies{Log: config.Executor.Log, BindStorage: config.Executor.BindStorage, Bind: config.Executor.Bind, ChildContext: config.Executor.ChildContext, PrepareArtifacts: config.Executor.PrepareArtifacts, PrepareCaches: config.Executor.PrepareCaches, PublishOutput: config.Executor.PublishOutput, Annotate: config.Executor.Annotate, ReadFailure: config.Executor.ReadFailure, ReadOutput: config.ReadOutput}
 	if execution.Log == nil {
 		execution.Log = func(ctx context.Context, input NodeInput, frame nodeproto.FrameLog) error {
@@ -76,7 +75,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	execution.Masks = config.Masks
 	execution.Store, execution.Mask = config.Store, config.Masks.masker.Mask
 	execution.Start, execution.EnsureEngine = processes.Start, config.Source.Engines.Ensure
-	execution.Validation, execution.ValidatePlan, execution.CanonicalHash = validation, functions.Validate, functions.Hash
+	execution.Validation = validation
 	executor, err := NewNodeExecutor(execution)
 	if err != nil {
 		return nil, nil, nil, err
@@ -85,12 +84,12 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	evaluation.Masks = config.Masks
 	evaluation.Store, evaluation.Mask = config.Store, config.Masks.masker.Mask
 	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
-	evaluation.Validation, evaluation.ValidatePlan, evaluation.CanonicalHash = validation, functions.Validate, functions.Hash
+	evaluation.Validation = validation
 	evaluator, err := NewOwnerEvaluator(evaluation)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.StartPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker, ValidatePlan: functions.Validate, CanonicalHash: functions.Hash}
+	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.StartPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker}
 	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, MemoPolicy: config.Owner.MemoPolicy, AdmissionPolicy: config.Owner.AdmissionPolicy, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing

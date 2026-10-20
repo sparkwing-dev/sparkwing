@@ -243,9 +243,9 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 			out.args[name] = "***"
 		}
 	}
-	raw, err := prepared.Functions.Plan(ctx)
+	raw, err := prepared.Plan(ctx)
 	if err == nil {
-		out.doc, err = prepared.Functions.Validate(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
+		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
 	}
 	if err != nil {
 		err = &maskedCLIError{err: planError(pipeline, err), masker: entry.planner.Masker}

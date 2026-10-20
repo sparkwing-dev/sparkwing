@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -15,25 +14,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
-func TestOwnerHostGuardRefusalBypassesPlanAndCache(t *testing.T) {
+func TestOwnerHostGuardRefusalBypassesPlan(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
 	planning := newPlanningFixture(t)
 	host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
-		return OwnerPlanning{Resolved: runspec.Resolved{Guards: runspec.Guards{Unless: []string{"where:local"}, Reason: "refused"}}, Planning: planning.input, Functions: PlanningFunctions{
-			Plan: func(context.Context) (json.RawMessage, error) {
+		return OwnerPlanning{
+			Resolved: runspec.Resolved{Guards: runspec.Guards{Unless: []string{"where:local"}, Reason: "refused"}}, Planning: planning.input, Plan: func(context.Context) (json.RawMessage, error) {
 				t.Error("refused guard invoked SDK plan")
 				return nil, nil
 			},
-			Validate: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				var plan nodeproto.PlanDoc
-				err := json.Unmarshal(raw, &plan)
-				if plan.Jobs == nil || len(plan.Jobs) != 0 {
-					t.Error("guard refusal proposed executable work")
-				}
-				return plan, err
-			},
-			Hash: func(any) (runspec.Hash, error) { return runspec.Hash(strings.Repeat("a", 64)), nil },
-		}}, nil
+		}, nil
 	}
 	if _, err := host.Run(t.Context(), input); err != nil {
 		t.Fatal(err)
@@ -76,13 +66,12 @@ func TestCheckoutProjectDiscoveryStopsAtAcquiredRoot(t *testing.T) {
 }
 
 func TestOwnerHostResolvesValidatedPlansBeforeAcceptance(t *testing.T) {
-	for _, cached := range []bool{false, true} {
-		t.Run(map[bool]string{false: "planned", true: "cached"}[cached], func(t *testing.T) {
+	for _, repeated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "planned", true: "repeated"}[repeated], func(t *testing.T) {
 			f, host, input := newOwnerFixture(t, false)
 			planning := newPlanningFixture(t)
 			functions := planning.functions()
-			functions.Hash = func(any) (runspec.Hash, error) { return runspec.Hash(strings.Repeat("a", 64)), nil }
-			if cached {
+			if repeated {
 				if _, err := PlanInitial(t.Context(), planning.input, functions); err != nil {
 					t.Fatal(err)
 				}
@@ -93,8 +82,8 @@ func TestOwnerHostResolvesValidatedPlansBeforeAcceptance(t *testing.T) {
 			input.SealedRequest, _ = json.Marshal(request)
 			resolved := false
 			host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
-				return OwnerPlanning{Planning: planning.input, Functions: functions, Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
-					if !reflect.DeepEqual(plan, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test"}}}) {
+				return OwnerPlanning{Planning: planning.input, Plan: functions, Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
+					if !reflect.DeepEqual(plan, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}) {
 						t.Fatal("resolver did not receive the validated plan")
 					}
 					resolved = true

@@ -15,8 +15,8 @@ func TestNodeExecutorThrowingStepPredicateCannotRunBody(t *testing.T) {
 	input, st, deps, _ := executorFixture(t)
 	job := &input.Accepted.Plan.Jobs[0]
 	job.Steps[0].Closures.SkipIf = []string{"guard"}
-	planHash, _ := executorHash(input.Accepted.Plan)
-	jobHash, _ := executorHash(job)
+	planHash, _ := runspec.CanonicalHash(input.Accepted.Plan)
+	jobHash, _ := runspec.CanonicalHash(job)
 	st.row.Spec, _ = json.Marshal(job)
 	st.row.SpecHash, input.SpecHash, input.Accepted.PlanHash = string(jobHash), string(jobHash), string(planHash)
 	var spec runspec.Spec

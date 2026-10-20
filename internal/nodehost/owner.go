@@ -38,7 +38,7 @@ type OwnerPlanning struct {
 	Declarations runspec.CheckoutDeclarations
 	Resolved     runspec.Resolved
 	Planning     PlanningInput
-	Functions    PlanningFunctions
+	Plan         func(context.Context) (json.RawMessage, error)
 	Resolve      func(nodeproto.PlanDoc) (runspec.Resolved, error)
 }
 
@@ -303,7 +303,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	}
 	guards := prepared.Resolved.Guards
 	if !guards.Passed && (len(guards.When)+len(guards.Unless) != 0 || guards.Reason != "") {
-		prepared.Functions.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
+		prepared.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
 	}
 	if err := h.Masks.initialize(row.Request, &prepared.Resolved, nil, nil); err != nil {
 		return AcceptedRun{}, err
@@ -311,7 +311,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if h.Masks != nil {
 		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}
 	}
-	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
+	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Plan)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}

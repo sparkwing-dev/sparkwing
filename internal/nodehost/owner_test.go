@@ -243,9 +243,13 @@ func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance)
 	if f.acceptErr != nil {
 		return store.AcceptedPlan{}, f.acceptErr
 	}
-	spec := runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: input.Seal.Resolved}
-	f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), input.Seal.Plan
-	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: strings.Repeat("a", 64)}, nil
+	hash, err := runspec.CanonicalHash(input.Seal.Plan)
+	if err != nil {
+		return store.AcceptedPlan{}, err
+	}
+	spec := runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: hash, Resolved: input.Seal.Resolved}
+	f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, string(hash), input.Seal.Plan
+	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: string(hash)}, nil
 }
 
 func (f *ownerFixture) TransitionRun(_ context.Context, change store.RunTransition) (store.Applied, error) {
@@ -332,16 +336,12 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 		},
 		Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 			f.record("prepare")
-			return OwnerPlanning{Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}}}, Functions: PlanningFunctions{
-				Plan: func(context.Context) (json.RawMessage, error) {
+			return OwnerPlanning{
+				Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}, Placement: nodeproto.PlacementLocal}}, Plan: func(context.Context) (json.RawMessage, error) {
 					f.record("plan")
 					return json.RawMessage(`{"jobs":[]}`), nil
 				},
-				Validate: func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nil
-				},
-				Hash: func(any) (runspec.Hash, error) { return runspec.Hash(strings.Repeat("a", 64)), nil },
-			}}, nil
+			}, nil
 		},
 		Project: func(s store.RunSnapshot) (store.ScheduleSnapshot, error) {
 			result := store.ScheduleSnapshot{}

@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -31,7 +32,7 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, err := executorHash(job)
+	hash, err := runspec.CanonicalHash(job)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, err = executorHash(expansion)
+	hash, err = runspec.CanonicalHash(expansion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hash, err := executorHash(jobs[i])
+		hash, err := runspec.CanonicalHash(jobs[i])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +223,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hash, err = executorHash(expansion)
+		hash, err = runspec.CanonicalHash(expansion)
 		if err != nil {
 			t.Fatal(err)
 		}

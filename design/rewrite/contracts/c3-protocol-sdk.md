@@ -154,8 +154,8 @@ Session and StartSession. Retained planners and attempts use ProtocolSession.
 Native service and placement cutovers remain open.
 
 [The envelope consolidation](../w3-envelope-consolidation-progress.md) removes
-duplicate layer orders and the local planning loop. Retained local, trigger and
-pod paths use LayerTable and native progress handling. Native owner-policy and
+duplicate layer orders and the local planning loop. Local, trigger and
+pod paths use explicit ordered owner and executor operations and native progress handling. Native owner-policy and
 placement cutovers remain open.
 
 [Shared steps and alias callers](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
@@ -302,7 +302,7 @@ The capability and layer tables contain the complete target data.
 | Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
 | Checkout and entry acquisition | `internal/source/source.go` |
-| Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache.go` |
+| SDK planning, canonical validation and hashing | `internal/nodehost/planning.go` |
 | Exact engines, verified releases and signed version policy | `internal/engine` |
 | Go declarations and services | `sparkwing/sdk_contract.go`, `sparkwing/inputs/memo_contract.go`, retained API inventory below |
 | Author test host | `sparkwing/sparkwingtest/host_contract.go` |
@@ -376,9 +376,7 @@ are part of this contract.
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
 | `nodehost.SDKEnvironment`, `ProtocolSessionConfig.Environments` | Project captured host inputs, sealed run facts and persisted job environment through the shared process policy before native SDK startup. |
 | `nodehost.FileEnvironmentSnapshots`, `NewFileEnvironmentSnapshots`, `CapturedEnvironmentLoader` | Store private local values and verify the request's environment identity before source acquisition or SDK startup. |
-| `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
-| `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
-| `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
+| `nodehost.OwnerOperations`, `ExecutionOperations`, `EvaluationOperations` | Supply placement callbacks to `NativeHostConfig`, which takes shared dependencies once. |
 | `nodehost.Reconciler.ReconcileNode` | Follows a holder and repeats atomic reconciliation after terminal or requeue events. |
 | `nodehost.StateFollower`, `StateReader`, `StateSubscription` | Share persisted catch-up and joined subscriptions between owner graph waits and node reconciliation. |
 | `nodehost.ExpansionStore` | Gives owner/eval hosts the Tenant's expansion persistence boundary. |
@@ -529,7 +527,7 @@ required contracts without changing another area's declarations.
 
 ## Executor directory caches
 
-`DepcacheRecords.Prepare` implements the caches row of `LayerTable`. `Bind`
+`DepcacheRecords.Prepare` restores executor caches and returns their finalizer. `Bind`
 resolves a write destination for the current attempt and the derived
 `blob.DepcacheKey`. It must return a `JobUpload` whose authority, repository,
 ref, pipeline, job, cache name and key match those inputs. The controller still
@@ -560,40 +558,17 @@ safe warning and preserve the job verdict. `Budget` bounds cache reads only
 when its caller supplies a deadline. No cache timeout, size cap or expiry is
 added here.
 
-## Planning cache
+## SDK planning
 
-C3 owns the default-enabled `nodehost.PlanCache`. `PlanCacheInputs` includes the
-team/repository scope, exact engine/SDK, entry and source-tree digests, project
-settings, merged args, environment, checkout policy, describe result, secret
-registry version, granted runner and complete SDK-visible run context.
-`PlanCacheIdentity` canonicalizes that input with explicit presence. A changed
-input changes the key. An input whose dependency set cannot be established
-bypasses the cache and plans normally.
+`PlanInitial` runs SDK planning and calls `nodeproto.ValidatePlan` and
+`runspec.CanonicalHash` directly. `PlanningInput` carries the current validation
+context. `PlannedInitial` carries the validated declarations, canonical bytes
+and hash to `AcceptPlan`, which validates again in its acceptance transaction.
+Resumes use the persisted accepted plan.
 
-The complete run context includes run IDs and timestamps because the SDK can
-read them during planning. This conservative key permits reuse only when those
-inputs also match. Cross-run reuse needs an explicit SDK guarantee before any
-of those fields can be omitted. Key digests stay private, because hashes of
-secret-bearing inputs can reveal guesses.
-
-`PlanCache.Lookup`, `Put` and `Invalidate` own persistence. Entries hold raw
-validated declarations and their canonical hash, never another run's accepted
-seal or authority. Missing, corrupted, stale or unreadable entries are misses
-with a reason, followed by normal planning. There is no new cache-age cutoff.
-`ValidatePlanCacheHit` checks the key/digest and reruns `ValidatePlan` with the
-current capability table and secret matcher. It returns `ValidatedPlanHit`.
-
-Every hit still enters `AcceptPlan` with checkout-derived facts. The store
-reruns validation, settings resolution, operator ceilings, authority and secret
-preflight and commits seal point two. A hit bypasses SDK planning compute, so
-it has no planning charge. Cache writes happen only for validated initial
-plans; generator expansions remain under their own transactional barrier.
-`PlanningInput` supplies this dependency to every placement's planning path. Native host assembly uses a private scoped file cache under its source workspace, or the user cache directory when no workspace is configured. Checkout planning constructs the cache before describe; the native environment projection and acquired checkout/entry bytes supply fingerprints before lookup. Source fingerprints include Git metadata. Nonregular source dependencies, external Git metadata/alternates, and unresolved executables bypass reuse. Inputs that mutate externally after capture are unsupported varying inputs; capture does not lock the filesystem. `PlanningInput.Disabled` is the explicit opt-out; absent cache wiring is an error, while cache storage failures warn and plan normally.
-
-`PlanInitial` connects cache lookup, validation, invalidation and fresh planning.
-Its `PlanningFunctions` use the shared validator and canonical hasher by default.
-`PlannedInitial.CacheHit` records whether SDK planning ran. Every result still
-passes `AcceptPlan`. Cache diagnostics omit input hashes and declaration contents.
+`SDKPlanner`, `ExecutorDependencies` and `EvaluationDependencies` accept external
+process and storage adapters. They cannot replace validation or hashing.
+Execution and generator replay call the same canonical algorithms as planning.
 
 ## Host adapter boundaries
 
