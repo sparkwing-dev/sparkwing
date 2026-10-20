@@ -1,12 +1,17 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
@@ -78,6 +83,120 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	}
 	if chargedMicro(t, s) != 0 {
 		t.Fatal("self-hosted pool charged credits")
+	}
+	rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+}
+
+func TestVerifiedPoolRefusesPersistentRunnerCredentials(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		for _, kind := range []capability.UnitKind{capability.UnitNode, capability.UnitTrigger} {
+			s, demand := poolLauncherFixture(t)
+			root := authorityRoot("persistent-pool", "a")
+			root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+			root.ReservedPools = []string{"deploy"}
+			root.Trust = capability.TrustVerifiedDefault
+			if inherited {
+				root.Trust = ""
+				rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'deploy')`)
+			}
+			authorityPersist(t, s, root)
+			demand.CapabilityPrefix = root.Prefix
+			demand.Target = &UnitRef{Kind: kind, RunID: "run", NodeID: "job"}
+			if kind == capability.UnitTrigger {
+				demand.Target.NodeID = ""
+			}
+			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+				t.Fatalf("persistent runner claimed verified pool work: kind=%s inherited=%v", kind, inherited)
+			}
+		}
+	}
+}
+
+func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
+	ctx := t.Context()
+	tenant, input, now := intakeFixture(t)
+	s := tenant.s
+	s.intake = fakeIntakeContracts{resolve: settings.ResolvePlan}
+	input.Request.Dispatch = ""
+	input.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"pool=deploy"}}}
+	input.Request.Git.Repository.Display = "https://github.com/acme/repo"
+	input.VerifiedDeliveryID = "delivery"
+	git := input.Request.Git
+	git.Ref = "refs/heads/main"
+	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}
+	s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+		return IntakePolicyFacts{RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "actor"}}}, nil
+	}))
+	rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','deploy','deploy','gh:1','owner',1)`)
+	admitted, err := tenant.AdmitRun(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admitted.Request.Request.Dispatch != runspec.DispatchController {
+		t.Fatal("pool pin must offer a launcher plan unit")
+	}
+	seal := admitted.Request
+	root := authorityRoot("deploy-launcher", "a")
+	root.Grants, root.ReservedPools, root.Trust = []capability.Grant{capability.ClaimsLaunch}, []string{"deploy"}, capability.TrustVerifiedDefault
+	authorityPersist(t, s, root)
+	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "controller", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := func(kind capability.UnitKind) capability.Capability {
+		t.Helper()
+		demand := UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+		award, err := s.ClaimUnit(ctx, demand)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if award.RunID != admitted.RunID || award.Kind != kind {
+			t.Fatalf("pool award: %+v", award)
+		}
+		issued, err := s.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: award.Award.CapabilityPrefix})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return issued.Capability
+	}
+	planner := claim(capability.UnitPlan)
+	_, actor, err := renewalActor(planner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := runspec.CheckoutDeclarations{Version: 1}
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: seal, Plan: plan, Declarations: declarations})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.AcceptPlan(ctx, PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{Request: seal, Plan: raw, Declarations: declarations, Resolved: runspec.Resolved{Args: seal.Request.RequestedArgs, SecretArgs: []string{}, DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}, DefaultBranchSource: runspec.DefaultBranchApp, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	worker := claim(capability.UnitNode)
+	_, actor, err = renewalActor(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, state := range []NodeState{NodeRunning, NodeSuccess} {
+		cause := CauseStart
+		if i > 0 {
+			cause = CauseReport
+		}
+		if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: NodeRef{admitted.RunID, "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AsOperator().ReconcileControllerRuns(ctx, lease, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(ctx, admitted.RunID)
+	if err != nil || run.State != RunSuccess {
+		t.Fatalf("pool-pinned run: %+v %v", run, err)
 	}
 	rewriteSchemaCount(t, s.db, "billable_intervals", 0)
 }

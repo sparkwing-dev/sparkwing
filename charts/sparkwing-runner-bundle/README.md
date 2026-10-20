@@ -32,20 +32,25 @@ repository's default branch, and any other pool takes any run.
 submitted environment names this pool's jobs receive; empty accepts none. See
 [pool trust](../../docs/self-hosting.md#shared-runners-and-pool-trust).
 
-For a pool with reserved secrets, set `runner.reservedPools` to its enrolled
-pool names. This defaults `runner.trustClass` to `verified-default-only` and
-replaces the persistent runner Deployment and cache PVC with the existing
-launcher. The same class can be set explicitly for a pool without a stored
-secret. `runner.trustClass=any` retains persistent runners for other pools;
-this value must match the credential's admin-set trust class.
+For a pool with reserved secrets, enroll a launcher-only credential:
 
-Enroll a team runner through `POST /api/v1/runners` with
-`reserved_pools`, `trust: "verified-default"` and `grants: ["claims.launch"]`.
-The launcher grant is exclusive: this credential cannot also run the persistent
-runner claim loop. Its team, repository patterns and reserved pools still
-constrain every claim. Store this credential in `controller.tokenSecret`.
-An existing credential with `nodes.claim` / `triggers.claim` must be replaced
-with a launcher enrollment before switching the chart.
+```bash
+sparkwing runners add --profile prod --runner deploy-1 --repos github.com/acme/* --reserved-for deploy --trust verified-default --launcher
+```
+
+This skips the persistent runner service and writes the credential to the local
+runner credentials directory. Store its `agent-token` in `launcher.tokenSecret`
+and set `launcher.enabled=true`. The chart renders the existing launcher in
+place of the persistent runner and cache PVC. The credential determines whether
+the launcher serves a self-hosted pool or Cloud. Trust and reserved pools come
+from the credential, with no matching chart values to maintain.
+
+The launcher grant is exclusive. Its team, repository patterns and reserved
+pools constrain every claim. The server refuses persistent runner credentials
+on verified-default pools, including pools whose reserved secrets select that
+class by default. Replace an existing `nodes.claim` / `triggers.claim`
+credential with a launcher enrollment. Run-level `--requires pool=deploy` pins
+use controller dispatch, so the launcher can take both the plan and job units.
 
 Supply `launcher.image`, digest-pinned `launcher.jobImage` and
 `launcher.dockerImage`, `launcher.cpuCeiling` and `launcher.memoryCeiling`, and

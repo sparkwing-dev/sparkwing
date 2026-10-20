@@ -5,10 +5,10 @@ Sparkwing runner bundle installed.
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
 Components:
-{{- if and .Values.runner.enabled (not (include "sparkwing-runner-bundle.poolLauncher" .)) }}
+{{- if and .Values.runner.enabled (not .Values.launcher.enabled) }}
   Runner    {{ .Values.runner.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.runner.fullname" . }}
 {{- end }}
-{{- if include "sparkwing-runner-bundle.launcher.enabled" . }}
+{{- if .Values.launcher.enabled }}
   Claim launcher -> {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "launcher") }}
   Jobs require team-dedicated nodes and enforced Pod ingress and egress. See
   README.md. The CNI must enforce NetworkPolicy; on EKS, set

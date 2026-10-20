@@ -59,8 +59,8 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
 	}
-	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability); err != nil || !trusted {
-		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant takes only verified default-branch work")
+	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability, e.launcher); err != nil || !trusted {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant trust requires verified default-branch work and launcher mode for reserved pools")
 		return e, err
 	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, checks.lock)
@@ -130,7 +130,7 @@ func localClaimant(c capability.Capability) bool {
 // safety: a claimant that runs one job after another shares host state between them,
 // so work from a run anyone can push must not reach a host that later holds a pool's
 // reserved secrets.
-func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability) (bool, error) {
+func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher bool) (bool, error) {
 	if root.Trust == capability.TrustAny {
 		return true, nil
 	}
@@ -139,6 +139,9 @@ func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string
 		if err != nil || !reserved {
 			return true, err
 		}
+	}
+	if len(root.ReservedPools) > 0 && !launcher {
+		return false, nil
 	}
 	seal, err := sealedRequestTx(ctx, tx, team, run)
 	if err != nil {

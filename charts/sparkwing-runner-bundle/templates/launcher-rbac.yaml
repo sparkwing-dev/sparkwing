@@ -1,4 +1,4 @@
-{{- if or (include "sparkwing-runner-bundle.launcher.enabled" .) .Values.launcher.serviceAccountName }}
+{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
 {{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
 {{- if .Values.launcher.createNamespace }}
 apiVersion: v1

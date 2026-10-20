@@ -311,9 +311,14 @@ A runner's credential fixes which runs it accepts:
   reserved secrets. The class is stored with the runner's credential, so the
   runner, or anyone holding its token, cannot change it.
 
-On Kubernetes, set `runner.reservedPools` to the enrolled pool names in the
-runner bundle chart. This defaults `runner.trustClass` to
-`verified-default-only`; setting that class explicitly also selects the launcher.
+For a verified-default pool, enroll a launcher-only credential with
+`--reserved-for deploy --trust verified-default --launcher` on `runners add`.
+On Kubernetes, set `launcher.enabled=true` and reference that credential in
+`launcher.tokenSecret` in the runner bundle chart. The server refuses verified
+pool work to persistent runner credentials, including when reserved secrets
+select verified-default by default. Pool and trust settings live on the
+credential. A run-level `--requires pool=deploy` uses controller dispatch so
+its plan and jobs can be claimed by the launcher.
 The launcher runs each plan, evaluation and job claim in a fresh pod through the
 same admission policy, bootstrap exchange, quarantine and boundary probe as Cloud.
 Only the launcher mounts the pool credential. Each job receives a one-time

@@ -1,4 +1,4 @@
-{{- if include "sparkwing-runner-bundle.launcher.enabled" . }}
+{{- if .Values.launcher.enabled }}
 {{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

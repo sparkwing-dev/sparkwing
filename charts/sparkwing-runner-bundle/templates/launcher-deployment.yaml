@@ -1,9 +1,6 @@
-{{- if include "sparkwing-runner-bundle.launcher.enabled" . }}
+{{- if .Values.launcher.enabled }}
 {{- $launcher := .Values.launcher }}
 {{- $credential := $launcher.tokenSecret }}
-{{- if include "sparkwing-runner-bundle.poolLauncher" . }}
-{{- $credential = .Values.controller.tokenSecret }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -53,9 +50,7 @@ spec:
           command: ["/usr/local/bin/sparkwing-runner"]
           args:
             - launch
-            {{- if include "sparkwing-runner-bundle.poolLauncher" . }}
             {{- include "sparkwing-runner-bundle.runnerLabelArgs" . | nindent 12 }}
-            {{- end }}
             - {{ printf "--controller=%s" (required "launcher requires controller.url" (include "sparkwing-runner-bundle.controllerURL" .)) | quote }}
             - {{ printf "--namespace=%s" (include "sparkwing-runner-bundle.jobNamespace" .) | quote }}
             - {{ printf "--image=%s" (include "sparkwing-runner-bundle.digestImage" $launcher.jobImage) | quote }}

@@ -1,4 +1,4 @@
-{{- if and .Values.runner.enabled (not (include "sparkwing-runner-bundle.poolLauncher" .)) }}
+{{- if and .Values.runner.enabled (not .Values.launcher.enabled) }}
 {{- if and .Values.runner.goCache.persistence.enabled (not .Values.runner.goCache.persistence.existingClaim) -}}
 apiVersion: v1
 kind: PersistentVolumeClaim

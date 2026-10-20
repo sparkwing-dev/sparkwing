@@ -593,9 +593,16 @@ For pool awards, resource pins remain exact; an unpinned dimension uses the
 operator's configured ceiling. The launcher projects that allocation identically
 for claim and capacity-request reconciliation.
 
-The runner chart selects this mode for `runner.trustClass=verified-default-only`,
-which is the default with `runner.reservedPools` configured. It renders the
-launcher in place of the persistent runner and cache PVC. The launcher alone
-mounts `controller.tokenSecret`; each Job mounts only its own bootstrap Secret
-and a fresh emptyDir. Machine runners outside Kubernetes retain their existing
-same-uid execution model, documented in the self-hosting guide.
+The runner chart uses `launcher.enabled=true` and `launcher.tokenSecret` for
+both pool and Cloud launchers. The credential supplies the team, pools and
+verified-default trust class. Enroll a pool with `runners add --launcher` and
+`--reserved-for`; this issues only `claims.launch` and skips the persistent
+runner service. The server refuses verified pool work to non-launcher
+credentials, including the default class of a pool holding reserved secrets.
+Run-level pool pins use controller dispatch, offering plan and job units to
+the launcher.
+
+Enabling the launcher replaces the persistent runner and cache PVC. Each Job
+mounts only its own bootstrap Secret and a fresh emptyDir. Machine runners
+outside Kubernetes retain their same-uid execution model, documented in the
+self-hosting guide.

@@ -38,8 +38,9 @@ controller:
     # Key inside the Secret holding the bearer token.
     key: token
 
-# Cloud launcher. Jobs use a separate identity and digest-pinned images.
+# Cloud or self-hosted pool launcher. Jobs use a separate identity and digest-pinned images.
 launcher:
+  # Enabling the launcher replaces the persistent runner and its cache PVC.
   enabled: false
   serviceAccountName: ""
   # Cloud Jobs run in this dedicated namespace, <release namespace>-cloud-jobs
@@ -81,12 +82,6 @@ launcher:
 runner:
   enabled: true
   repos: []
-  # Match the pools reserved on the enrolled credential. A configured pool
-  # defaults to verified-default-only and uses the launcher instead of a
-  # persistent runner. Enroll it with only the claims.launch grant.
-  reservedPools: []
-  trustClass: ""
-
   # Pool size. RollingUpdate strategy means a `helm upgrade` doesn't
   # drop all pods at once; one in-flight claim's worth of work may
   # need to retry but the pool stays available.
