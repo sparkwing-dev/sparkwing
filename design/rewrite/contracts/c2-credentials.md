@@ -3588,7 +3588,7 @@ Another repository or revision produces asserted provenance and shared-only
 secret access. Cycle detection compares both repository and pipeline.
 
 Admission stores the charged flood key and hourly subject separately from source
-provenance. App and schedule roots share the team flood bucket. Retries charge
+provenance. App and schedule roots share the team bucket for flood and hourly limits. Retries charge
 the retrier. Children inherit their parent's charged identity, including after a
 retry, without reclassifying the source envelope.
 

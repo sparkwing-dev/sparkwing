@@ -121,6 +121,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		return AdmissionResult{}, err
 	}
 	charge := principal.Capability.Subject
+	if policy.AdmissionKey == "team:"+string(team) {
+		charge = capability.Subject{Kind: capability.SubjectService, ID: policy.AdmissionKey}
+	}
 	if snapshot.request.RunID == "" {
 		input, err := trustedIntakeRequest(request, principal, team, policy)
 		if err != nil {
@@ -433,7 +436,7 @@ func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.R
 		if source != "" && (source != string(runspec.OriginApp) || !provenance.Verified()) {
 			continue
 		}
-		if branch != "" && !provenanceOnBranch(provenance, branch) {
+		if branch != "" && (!strings.HasPrefix(provenance.Ref(), "refs/heads/") || !(runspec.BranchSelector{branch}).Matches(provenance.Ref())) {
 			continue
 		}
 		if route != "" {
@@ -537,12 +540,6 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		id = ancestor.Lineage.ParentRunID
 	}
 	return depth, nil
-}
-
-// provenanceOnBranch reports whether a verified run speaks for a branch the selector names.
-func provenanceOnBranch(p runspec.Provenance, selector string) bool {
-	branch, ok := strings.CutPrefix(p.Ref(), "refs/heads/")
-	return (p.Verified() || p.TrustedDefault()) && ok && runspec.BranchSelector{selector}.Matches(branch)
 }
 
 func intakeScope(principal capability.Principal, pipeline string) (string, error) {

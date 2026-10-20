@@ -148,3 +148,38 @@ func TestChildOfRetriedChildSpendsRetriersHourlyBudget(t *testing.T) {
 		t.Fatalf("child did not spend retrier's exhausted hourly budget: %v", err)
 	}
 }
+
+func TestAppAndScheduleAdmissionRecordTeamBucket(t *testing.T) {
+	for _, origin := range []runspec.Origin{runspec.OriginApp, runspec.OriginSchedule} {
+		t.Run(string(origin), func(t *testing.T) {
+			var tenant *Tenant
+			var admit func() (AdmissionResult, error)
+			if origin == runspec.OriginApp {
+				_, row, in := appAdmissionFixture(t, true, "team-charge")
+				tenant = row
+				admit = func() (AdmissionResult, error) { return tenant.AdmitGitHubAppRun(t.Context(), in) }
+			} else {
+				row, schedule, now := scheduleIntakeFixture(t, 1)
+				tenant = row
+				admit = func() (AdmissionResult, error) { return tenant.AdmitScheduledRun(t.Context(), schedule, now) }
+			}
+			policy := tenant.s.intakePolicy
+			tenant.s.SetIntakePolicy(fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
+				facts, err := policy.ResolveIntake(ctx, resolver, request)
+				facts.AdmissionKey = "team:a"
+				return facts, err
+			}))
+			admitted, err := admit()
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := tenant.ReadRun(t.Context(), admitted.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.Lineage.AdmissionKey != "team:a" || run.Lineage.AdmissionSubject != (capability.Subject{Kind: capability.SubjectService, ID: "team:a"}) {
+				t.Fatalf("team admission charged another identity: %+v", run.Lineage)
+			}
+		})
+	}
+}

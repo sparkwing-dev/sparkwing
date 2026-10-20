@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -77,6 +78,7 @@ func TestEngineIntakeHTTP(t *testing.T) {
 			case "child", "wrong parent", "sibling parent job":
 				b = newCredentialBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.ChildrenStart}
+				b.snapshot.Authorities[0].Principal.Capability.Children = []nodeproto.ChildPipeline{{Pipeline: "build", Repository: "git:example.com/team/repo"}}
 				// A child runs from its parent's repository location and revision.
 				var from runspec.Request
 				if err := json.Unmarshal([]byte(`{`+sourceFields+`}`), &from); err != nil {
@@ -155,8 +157,10 @@ func TestEnginePlanHTTP(t *testing.T) {
 	for _, name := range []string{"planner", "owner", "work claim", "sibling run", "cancelled", "ended", "exact replay", "changed replay", "wrong route replay", "body fence", "trailing body", "old wire", "transaction refusal", "first seal removed"} {
 		t.Run(name, func(t *testing.T) {
 			b := planBoundary()
-			f := &engineTransactions{run: store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run", Hash: "first-seal"}},
-				accepted: store.AcceptedPlan{PlanHash: "committed", Plan: json.RawMessage(`{"jobs":[]}`)}}
+			f := &engineTransactions{
+				run:      store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run", Hash: "first-seal"}},
+				accepted: store.AcceptedPlan{PlanHash: "committed", Plan: json.RawMessage(`{"jobs":[]}`)},
+			}
 			path, body := "/api/v1/runs/run/plan", `{"plan":{"jobs":[]},"declarations":{"version":1,"file":"sparkwing.yaml"}}`
 			status, code, writes := 200, apierr.Code(""), 1
 			switch name {
@@ -179,8 +183,10 @@ func TestEnginePlanHTTP(t *testing.T) {
 				status, code, writes = 401, apierr.Unauthenticated, 0
 				if name != "ended" {
 					digest := sha256.Sum256([]byte(body))
-					b.snapshot.Binding.Result = &capability.RecordedResult{Actor: b.snapshot.Authorities[0].Principal.Authority,
-						Method: "POST", Pattern: "/api/v1/runs/{run}/plan", RunID: "run", Generation: 4, Attempt: 2, Digest: hex.EncodeToString(digest[:])}
+					b.snapshot.Binding.Result = &capability.RecordedResult{
+						Actor:  b.snapshot.Authorities[0].Principal.Authority,
+						Method: "POST", Pattern: "/api/v1/runs/{run}/plan", RunID: "run", Generation: 4, Attempt: 2, Digest: hex.EncodeToString(digest[:]),
+					}
 					if name == "exact replay" {
 						status, code, writes, f.accepted.Replayed = 200, "", 1, true
 					} else if name == "changed replay" {

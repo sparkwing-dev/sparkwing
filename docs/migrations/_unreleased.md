@@ -2888,7 +2888,7 @@ upgrading:
   root starts at most 50 children, retries excluded; past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
   child spends the admission budget recorded on its parent. App and schedule
-  roots use the team flood bucket. A retry charges the retrier and its
+  roots use the team bucket for flood and hourly limits. A retry charges the retrier and its
   descendants inherit that charge, while its source provenance stays unchanged.
 - **Release subscriptions.** `release_published` and `release_prereleased`
   require the new `release_tags` patterns on

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"testing"
@@ -57,7 +58,7 @@ func TestClosedPullRequestRunsOnlyTheMergeCommit(t *testing.T) {
 // 10#1 and 13 C1: a child names its parent's exact revision or a branch the
 // controller resolves; a body that pairs another ref with a commit is refused.
 func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
-	e, _, _ := childIntakeFixture(t)
+	e, _, claim := childIntakeFixture(t)
 	server := New(e.Store, nil)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -67,7 +68,11 @@ func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
 	request := parent.Request.Request
 	request.Pipeline, request.Lineage = "deploy", runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
 	same := request

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -59,21 +60,12 @@ func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[stri
 			continue
 		}
 		for _, pool := range c.ReservedPools {
-			if !containsPoolRunner(runners[pool], c.Subject.ID) {
+			if !slices.Contains(runners[pool], c.Subject.ID) {
 				runners[pool] = append(runners[pool], c.Subject.ID)
 			}
 		}
 	}
 	return rules, runners, tx.Commit()
-}
-
-func containsPoolRunner(names []string, name string) bool {
-	for _, n := range names {
-		if n == name {
-			return true
-		}
-	}
-	return false
 }
 
 func readPoolRulesTx(ctx context.Context, tx *storeTx, team Team, id string) ([]PoolAccessRule, error) {
