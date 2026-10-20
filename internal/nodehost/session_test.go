@@ -18,21 +18,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
 // safety: set, the test binary acts as an SDK process (or, as "sleep", as a
 // grandchild that blocks until killed) instead of running the tests.
 const fakeSDKEnv = "NODEHOST_FAKE_SDK"
 
-func TestMain(m *testing.M) {
+// runAsFakeProcess turns a re-executed test binary into the fake SDK.
+func runAsFakeProcess() {
 	switch os.Getenv(fakeSDKEnv) {
 	case "sdk":
 		fakeSDK()
 	case "sleep":
 		select {}
 	}
-	testleak.Main(m)
 }
 
 // safety: node, step and closure ids pick the fake's behavior; "barrier/N"

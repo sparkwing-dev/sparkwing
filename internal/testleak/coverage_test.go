@@ -2,6 +2,7 @@ package testleak
 
 import (
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -40,10 +41,14 @@ func TestEveryTestPackageRunsInsideTheSandbox(t *testing.T) {
 	for dir, files := range dirs {
 		rel, _ := filepath.Rel(root, dir)
 		rel = filepath.ToSlash(rel)
-		if testMainUsesTestleak(t, files) {
-			continue
+		// safety: a TestMain behind a build constraint protects only the
+		// platforms that compile it, so each target is judged on its own files.
+		for _, goos := range []string{"linux", "darwin", "windows"} {
+			selected := targetFiles(t, goos, files)
+			if len(selected) > 0 && !testMainUsesTestleak(t, selected) {
+				missing = append(missing, rel+" ("+goos+")")
+			}
 		}
-		missing = append(missing, rel)
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
@@ -51,6 +56,24 @@ func TestEveryTestPackageRunsInsideTheSandbox(t *testing.T) {
 			"home reaches the developer's real files. Add a leak_test.go with "+
 			"`func TestMain(m *testing.M) { testleak.Main(m) }`:\n  %s", strings.Join(missing, "\n  "))
 	}
+}
+
+// targetFiles keeps the files a default build for goos compiles.
+func targetFiles(t *testing.T, goos string, files []string) []string {
+	t.Helper()
+	ctx := build.Default
+	ctx.GOOS, ctx.GOARCH, ctx.BuildTags = goos, "amd64", nil
+	var selected []string
+	for _, path := range files {
+		ok, err := ctx.MatchFile(filepath.Dir(path), filepath.Base(path))
+		if err != nil {
+			t.Fatalf("match %s: %v", path, err)
+		}
+		if ok {
+			selected = append(selected, path)
+		}
+	}
+	return selected
 }
 
 func testMainUsesTestleak(t *testing.T, files []string) bool {
