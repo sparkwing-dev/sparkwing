@@ -43,7 +43,7 @@ internal/health	3
 internal/installsite	1
 internal/lease	2
 internal/license	4
-internal/limits	115
+internal/limits	113
 internal/localsecrets	8
 internal/logpretty	6
 internal/logutil	2
