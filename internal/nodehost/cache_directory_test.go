@@ -34,21 +34,21 @@ func TestDirectoryCacheKeyMatchesSDK(t *testing.T) {
 	}
 }
 
-func TestCacheDirectoryUsesPersistedBodyEnvironment(t *testing.T) {
+func TestCacheDirectoryOnASharedHostIgnoresTheJobsEnvironment(t *testing.T) {
 	for _, resolver := range []string{"go-modules", "npm"} {
 		t.Run(resolver, func(t *testing.T) {
 			input, state, _, _ := executorFixture(t)
 			input.Entry.Directory = t.TempDir()
-			wanted := filepath.Join(t.TempDir(), "declared-cache")
+			host := filepath.Join(t.TempDir(), "host-cache")
 			name := "GOMODCACHE"
 			if resolver == "npm" {
 				name = "npm_config_cache"
 			}
-			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: wanted}}}
+			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: "/etc/sparkwing/credentials"}}}
 			state.row.Spec, _ = json.Marshal(job)
-			environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{name + "=host-cache"}, Masker: secrets.NewMasker()}}
+			environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{name + "=" + host, "PATH="}, SubmitEnvAllow: []string{name}, Masker: secrets.NewMasker()}}
 			got, err := environments.CacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
-			if err != nil || got != wanted {
+			if err != nil || got != host {
 				t.Fatalf("resolved cache=%q, %v", got, err)
 			}
 		})

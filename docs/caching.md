@@ -75,6 +75,12 @@ directory and explicit lockfile input. `DirCache.Key(workdir)` hashes the
 declaration, platform and lockfile content inside that workspace. An escaping
 path, missing input or read failure returns an error.
 
+A `Dir()` path is relative to the workspace. Plan validation refuses an absolute
+path or one that leaves the workspace, and the host refuses a path that passes
+through a symlink when it restores or saves the cache. `GoModules()` and `Npm()`
+on a runner the run's owner does not own use the runner's own `GOMODCACHE` and
+npm cache, never values the job declares.
+
 ### Storage
 
 Local runs keep dependency-cache records and archives in the local controller,

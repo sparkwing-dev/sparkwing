@@ -19,7 +19,12 @@ func (d DepcacheRecords) save(ctx context.Context, input NodeInput, cache direct
 	if input.Storage.Bytes == nil || input.Storage.Records == nil {
 		return errors.New("cache save requires the current storage binding")
 	}
-	entries, err := os.ReadDir(cache.dir)
+	// safety: the job ran since prepare and may have swapped the declared path for a symlink.
+	dir, err := cache.confined()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) == 0 {
 		return err
 	}
@@ -43,7 +48,7 @@ func (d DepcacheRecords) save(ctx context.Context, input NodeInput, cache direct
 	}
 	defer func() { err = errors.Join(err, file.Close(), os.Remove(file.Name())) }()
 	hash := sha256.New()
-	if err := tarsafe.WriteGzip(ctx, io.MultiWriter(file, hash), cache.dir); err != nil {
+	if err := tarsafe.WriteGzip(ctx, io.MultiWriter(file, hash), dir); err != nil {
 		return err
 	}
 	size, err := file.Seek(0, io.SeekCurrent)

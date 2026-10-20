@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
@@ -27,6 +29,8 @@ type directoryCache struct {
 	key  blob.DepcacheKey
 	dir  string
 	save bool
+
+	workspace, declared string
 }
 
 // Prepare restores caches once and saves successful cold directories after retries.
@@ -69,23 +73,25 @@ func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declarati
 	if err != nil {
 		return directoryCache{}, err
 	}
-	dir := declaration.Path
+	cache := directoryCache{key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
 	if declaration.Resolver != "" {
 		if d.Resolve == nil {
 			return directoryCache{}, errors.New("cache directory resolver is unavailable")
 		}
-		dir, err = d.Resolve(ctx, input, declaration)
+		cache.dir, err = d.Resolve(ctx, input, declaration)
 		if err != nil {
 			return directoryCache{}, err
 		}
+		if !filepath.IsAbs(cache.dir) {
+			return directoryCache{}, errors.New("cache resolver returned a relative directory")
+		}
+	} else {
+		cache.workspace, cache.declared = sdkWorkingDirectory(input.Entry), declaration.Path
+		if cache.dir, err = cache.confined(); err != nil {
+			return directoryCache{}, err
+		}
 	}
-	if dir == "" {
-		return directoryCache{}, errors.New("cache directory is empty")
-	}
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(sdkWorkingDirectory(input.Entry), dir)
-	}
-	cache := directoryCache{dir: dir, key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
+	dir := cache.dir
 	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return cache, err
@@ -195,4 +201,35 @@ func (d DepcacheRecords) warning(message string) {
 	} else {
 		slog.Warn(message)
 	}
+}
+
+// safety: the host archives and overwrites this directory, so a path outside the workspace or
+// through a symlink would let a job read or replace files only the host can reach.
+func (c directoryCache) confined() (string, error) {
+	if c.workspace == "" {
+		return c.dir, nil
+	}
+	if !filepath.IsLocal(c.declared) {
+		return "", errors.New("cache path must be relative and stay inside the workspace")
+	}
+	root, err := os.OpenRoot(c.workspace)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = root.Close() }()
+	current := ""
+	for _, part := range strings.Split(filepath.Clean(c.declared), string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := root.Lstat(current)
+		if errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return "", errors.New("cache path passes through a symlink")
+		}
+	}
+	return filepath.Join(c.workspace, c.declared), nil
 }

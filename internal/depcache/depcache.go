@@ -56,8 +56,8 @@ func (s Spec) TargetDir(workdir string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown cache resolver %q", s.Resolver)
 	}
-	if filepath.IsAbs(s.Path) {
-		return s.Path, nil
+	if !filepath.IsLocal(s.Path) {
+		return "", fmt.Errorf("cache path %q must be relative and stay inside the workspace", s.Path)
 	}
 	return filepath.Join(workdir, s.Path), nil
 }
