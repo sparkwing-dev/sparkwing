@@ -38,10 +38,12 @@ const (
 // onto any Pod created with spec.nodeName.
 var nodeTopologyLabels = []string{corev1.LabelTopologyRegion, corev1.LabelTopologyZone}
 
-var jobLabelKeys = []string{"app", "app.kubernetes.io/managed-by", JobLabel, TeamLabel, "batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name", "controller-uid", "job-name"}
-var workloadEnv = []string{"HOME", "DOCKER_HOST", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_STS_REGIONAL_ENDPOINTS"}
+var (
+	jobLabelKeys = []string{"app", "app.kubernetes.io/managed-by", JobLabel, TeamLabel, "batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name", "controller-uid", "job-name"}
+	workloadEnv  = []string{"HOME", "DOCKER_HOST", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_STS_REGIONAL_ENDPOINTS"}
+)
 
-func podValidations() []admissionv1.Validation {
+func podValidations(pod bool) []admissionv1.Validation {
 	return []admissionv1.Validation{
 		{Expression: `!variables.create || variables.shape != 'other'`, Message: "only Cloud Job, capacity and boundary probe Pods run in the Sparkwing job namespace"},
 		{Expression: `!variables.create || variables.spec.?serviceAccountName.orValue('') == '` + ServiceAccount + `' && !variables.spec.?automountServiceAccountToken.orValue(true)`, Message: "Pods use the customer job service account without an API token"},
@@ -57,23 +59,37 @@ func podValidations() []admissionv1.Validation {
 		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec) || variables.shape == 'probe' && c.name == 'peer' && p == c.?readinessProbe && p.value().exec.?command.orValue([]) == ` + celList(peerReadiness) + `))`, Message: "containers run no lifecycle hooks or exec probes beyond the peer listener's loopback readiness check"},
 		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) == 0 || variables.inits[0].?command.orValue([]) == ` + celList(dockerCommand) + ` && variables.inits[0].?args.orValue([]) == ` + celList(dockerArgs), Message: "the Docker sidecar runs only the launcher's dockerd command"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([])) == 0 && c.?env.orValue([]).all(e, variables.shape == 'job' && (e.name in ` + celList(workloadEnv) + ` && !has(e.valueFrom))))`, Message: "containers carry only the launcher's environment and EKS region values, never AWS credentials"},
-		{Expression: `!variables.create || variables.team != '' && variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team && ` + exactTolerations() + ``, Message: "Pods select and tolerate only their own team's nodes"},
+		{Expression: `!variables.create || variables.team != '' && variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team && ` + exactTolerations(pod), Message: "Pods select and tolerate only their own team's nodes"},
 		{Expression: `!variables.create || (variables.shape == 'capacity' ? variables.spec.?nodeName.orValue('') == '' : variables.spec.?nodeName.orValue('') != '')`, Message: "Job and probe Pods are bound to their reserved node; capacity requests are not"},
 		{Expression: `!variables.create || (variables.shape == 'job' ? variables.labels.all(k, k in ` + celList(jobLabelKeys) + ` || k in variables.nodeTopology) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'sparkwing.dev/job'].orValue('') != '' : variables.shape == 'capacity' ? variables.labels.all(k, k in ['app', 'app.kubernetes.io/managed-by', '` + capacityLabel + `', 'sparkwing.dev/team']) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'` + capacityLabel + `'].orValue('') == 'true' : variables.labels.all(k, k in ['` + boundaryControlLabel + `', 'app', 'app.kubernetes.io/managed-by', 'sparkwing.dev/job', 'sparkwing.dev/team'] || k in variables.nodeTopology))`, Message: "Pods carry exactly the launcher's labels"},
 		{Expression: `!variables.create || variables.spec.?readinessGates.orValue([]).all(g, g.conditionType.startsWith('target-health.elbv2.k8s.aws/'))`, Message: "only AWS load balancer readiness gates are allowed"},
 	}
 }
 
-func exactTolerations() string {
+func exactTolerations(pod bool) string {
 	tolerations := teamTolerations("", "")
-	checks := []string{fmt.Sprintf("size(variables.spec.?tolerations.orValue([])) == %d", len(tolerations))}
-	for _, t := range tolerations {
+	required := len(tolerations)
+	// DefaultTolerationSeconds mutates Pods, but not Job templates; its timeouts are cluster settings.
+	if pod {
+		for _, key := range []string{corev1.TaintNodeNotReady, corev1.TaintNodeUnreachable} {
+			tolerations = append(tolerations, corev1.Toleration{Key: key, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute})
+		}
+	}
+	var checks, matches []string
+	for i, t := range tolerations {
 		value := strconv.Quote(t.Value)
 		if t.Key == TeamNodeLabel {
 			value = "variables.team"
 		}
-		checks = append(checks, fmt.Sprintf("variables.spec.?tolerations.orValue([]).exists(t, t.?key.orValue('') == %q && t.?operator.orValue('Equal') == %q && t.?value.orValue('') == %s && t.?effect.orValue('') == %q && !has(t.tolerationSeconds))", t.Key, t.Operator, value, t.Effect))
+		seconds, count := "!has(t.tolerationSeconds)", "== 1"
+		if i >= required {
+			seconds, count = "has(t.tolerationSeconds) && t.tolerationSeconds >= 0", "<= 1"
+		}
+		match := fmt.Sprintf("t.?key.orValue('') == %q && t.?operator.orValue('Equal') == %q && t.?value.orValue('') == %s && t.?effect.orValue('') == %q && %s", t.Key, t.Operator, value, t.Effect, seconds)
+		matches = append(matches, "("+match+")")
+		checks = append(checks, "variables.spec.?tolerations.orValue([]).filter(t, "+match+").size() "+count)
 	}
+	checks = append(checks, "variables.spec.?tolerations.orValue([]).all(t, "+strings.Join(matches, " || ")+")")
 	return strings.Join(checks, " && ")
 }
 
@@ -132,14 +148,14 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 		{Expression: `request.operation != 'UPDATE' || object.spec == oldObject.spec && variables.labels == oldObject.metadata.?labels.orValue({})`, Message: "Pod specs and labels are immutable here"},
 		{Expression: `request.operation != 'UPDATE' || variables.owners == oldObject.metadata.?ownerReferences.orValue([]) || request.userInfo.username in ` + podOwners, Message: "only the Job controller and garbage collector change Pod ownership"},
 		{Expression: `!variables.create || variables.shape != 'probe' || ` + probeCommands(), Message: "boundary probes run only the launcher's measurement commands"},
-	}, podValidations()...)
+	}, podValidations(true)...)
 	jobs := append(policyVariables(c, "object.spec.template"), admissionv1.Variable{Name: "shape", Expression: `'job'`}, admissionv1.Variable{Name: "nodeTopology", Expression: `[]`})
 	jobRules := append([]admissionv1.Validation{
 		{Expression: `!variables.create || request.userInfo.username == variables.launcher`, Message: "only the launcher creates Jobs here"},
 		{Expression: `!variables.create || object.metadata.name == variables.labels[?'sparkwing.dev/job'].orValue('')`, Message: "the Job template names its own Job"},
 		{Expression: `object.spec.?parallelism.orValue(1) == 1 && object.spec.?completions.orValue(1) == 1 && object.spec.?backoffLimit.orValue(6) == 0 && !has(object.spec.podFailurePolicy) && !has(object.spec.successPolicy) && object.spec.?completionMode.orValue('NonIndexed') == 'NonIndexed'`, Message: "Jobs run exactly one Pod without retries"},
 		{Expression: `request.operation != 'UPDATE' || (object.spec.template == oldObject.spec.template || request.userInfo.username == variables.launcher && oldObject.spec.?suspend.orValue(false) && object.spec.template.spec == oldObject.spec.template.spec && object.spec.template.metadata.?labels.orValue({}) == oldObject.spec.template.metadata.?labels.orValue({})) && (request.userInfo.username == variables.launcher || object.spec == oldObject.spec && object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({}))`, Message: "only the launcher changes a Job; template annotations can change only before activation"},
-	}, podValidations()...)
+	}, podValidations(false)...)
 	writes := []admissionv1.OperationType{admissionv1.Create, admissionv1.Update}
 	var policies []*admissionv1.ValidatingAdmissionPolicy
 	var bindings []*admissionv1.ValidatingAdmissionPolicyBinding

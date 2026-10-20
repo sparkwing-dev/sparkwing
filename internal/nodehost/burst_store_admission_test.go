@@ -2,8 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -12,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -125,18 +122,14 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 			t.Fatal(err)
 		}
 	}
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	requester, err := fixture.Store.ResolveAuthority(t.Context(), fixture.Control.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.Store.SetSessionKeyCipher(cipher)
-	session, _, _, err := fixture.Store.CreateAccountSession(t.Context(), store.Account{ID: "burst-requester"}, store.DefaultTeam, time.Hour)
-	if err != nil {
-		t.Fatal(err)
+	if requester.Capability.Parent == nil || requester.Capability.Parent.Kind != capability.AuthoritySession {
+		t.Fatal("burst requester has no account session")
 	}
-	digest := sha256.Sum256([]byte(session))
-	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := fixture.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: &authority, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := fixture.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: requester.Capability.Parent, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

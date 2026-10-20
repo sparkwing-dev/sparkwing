@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -24,9 +25,14 @@ func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capabilit
 	return match.Profile{Location: env.location, Capacity: capacity, OS: "linux", Arch: "amd64"}, capacity, nil
 }
 
-func configureGitHubClaims(s *controller.Server, st *store.Store) *controller.Server {
+func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) *controller.Server {
+	t.Helper()
 	st.SetClaimProfileResolver(githubClaimEnvironment{})
-	return s.WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: githubClaimEnvironment{}})
+	versions, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.WithEngineController(&controller.EngineController{Store: st, RunnerPolicy: githubClaimEnvironment{}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}})
 }
 
 func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {

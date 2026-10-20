@@ -83,7 +83,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 		for _, opt := range opts {
 			srv = opt(srv)
 		}
-		configureGitHubClaims(srv, st)
+		configureGitHubClaims(t, srv, st)
 		ts := httptest.NewServer(srv.Handler())
 		t.Cleanup(ts.Close)
 		return srv, ts.URL

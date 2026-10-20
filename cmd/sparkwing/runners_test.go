@@ -117,7 +117,7 @@ func (f *runnersFixture) CreateToken(_ context.Context, input controllerwire.Tok
 	if f.mintErr != nil {
 		return controllerwire.TokenCreated{}, f.mintErr
 	}
-	prefix := fmt.Sprintf("swk_%08d", len(f.tokens)+1)
+	prefix := fmt.Sprintf("swk_%0*d", store.CredentialPrefixLength-len("swk_"), len(f.tokens)+1)
 	token := controllerwire.TokenMetadata{Prefix: prefix, Kind: input.Kind, Principal: input.Principal, Scopes: input.Scopes}
 	f.tokens = append(f.tokens, token)
 	if f.afterMint != nil {

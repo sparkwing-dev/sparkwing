@@ -38,6 +38,9 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
+	if issued.Capability.Parent == nil || *issued.Capability.Parent != authority {
+		return errors.New("member credential lost its issuing session ancestry")
+	}
 	child, err := s.DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, Audience: capability.Controller, Binding: issued.Capability.Binding, Grants: issued.Capability.Grants})
 	if err != nil {
 		return err
@@ -75,7 +78,7 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if rotation.Issued.Raw == "" || rotation.Previous.CreatedBy != member.Account.ID || rotation.Issued.Capability.Parent != nil {
+	if rotation.Issued.Raw == "" || rotation.Previous.CreatedBy != member.Account.ID || rotation.Issued.Capability.Parent == nil || *rotation.Issued.Capability.Parent != authority {
 		return errors.New("rotation lost original ownership or ancestry")
 	}
 	if err := reopen(); err != nil {
@@ -95,7 +98,7 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if next.Issued.Raw == "" {
+	if next.Issued.Raw == "" || next.Issued.Capability.Parent == nil || *next.Issued.Capability.Parent != authority {
 		return errors.New("reopening lost root provisioning origin")
 	}
 	if err := tenant.RevokeAuthority(ctx, store.Actor{Authority: authority}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}); err != nil {

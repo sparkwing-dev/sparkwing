@@ -18,19 +18,18 @@ func meteredRunnerOnly(t *testing.T, s *Store) {
 	authorityPersist(t, s, paid)
 }
 
-func executingRunFixture(t *testing.T) (*Store, UnitDemand) {
+func executingRunFixture(t *testing.T, dispatch runspec.Dispatch) (*Store, UnitDemand) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
-	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?`, request)
+	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Dispatch: dispatch, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,dispatch=?`, request, dispatch)
 	return s, demand
 }
 
 func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
-			s, demand := executingRunFixture(t)
-			rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
+			s, demand := executingRunFixture(t, runspec.DispatchController)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 			meteredRunnerOnly(t, s)
 			if kind == capability.UnitNode {
@@ -75,8 +74,7 @@ func TestUnmeteredRunnerWorkCarriesNoCreditHold(t *testing.T) {
 
 func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) {
 	t.Helper()
-	s, demand := executingRunFixture(t)
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
+	s, demand := executingRunFixture(t, runspec.DispatchController)
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan', status='done'`)
 	if kind == capability.UnitPlan {
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='pending'`)
@@ -108,7 +106,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 }
 
 func TestUnclaimedRunnerWorkCarriesNoCreditHold(t *testing.T) {
-	s, _ := executingRunFixture(t)
+	s, _ := executingRunFixture(t, runspec.DispatchHost)
 	view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
 	if err != nil || view.Waiting == nil || view.Waiting.CreditHold != "" {
 		t.Fatalf("runner-hosted waiting unit = %+v, %v", view.Waiting, err)

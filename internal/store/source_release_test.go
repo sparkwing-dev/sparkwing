@@ -92,6 +92,10 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 
 func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityOrigin) {
 	t.Helper()
+	if origin != nil && origin.Personal {
+		authorityMember(t, s, "owner", RoleOwner)
+		origin.Requirement = &authorityRequirement{Account: "owner", Grant: capability.RunsWrite, MembersCanAddMachines: true}
+	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		record, err := loadCapabilityRecordTx(t.Context(), tx, prefix)
 		if err != nil {

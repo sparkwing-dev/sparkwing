@@ -32,7 +32,8 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	}
 	_, demand := unitClaimFixtureStore(t, s)
 	f := &RankingFixture{Store: s, Self: demand.CapabilityPrefix, ReadyAt: s.now()}
-	f.now = f.ReadyAt
+	// Claimants must exist before the polls that establish availability at readiness.
+	f.now = f.ReadyAt.Add(-time.Minute)
 	s.pinnedClock = func() time.Time { return f.now }
 	t.Cleanup(func() { s.pinnedClock = nil })
 	f.Owner = rankingMember(t, s, "owner", RoleOwner)
@@ -54,6 +55,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	if funded {
 		fundUnitClaim(t, s)
 	}
+	f.At(0)
 	f.Request(t, func(*runspec.Request) {})
 	s.testOnlyExec(t, `UPDATE runs SET dispatch='controller',created_principal='owner',created_subject_kind='account',git_branch='refs/heads/main',git_sha=?`, rankingSHA)
 	s.testOnlyExec(t, `UPDATE triggers SET unit_kind='plan',available_at=?`, f.ReadyAt.UnixNano())
