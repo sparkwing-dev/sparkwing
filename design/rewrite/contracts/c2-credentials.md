@@ -1574,7 +1574,7 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Operator split | Deployment tokens cannot trust, grant, freeze, refund or delete accounts, including by delegating or using a local peer. |
 | Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, accepted-plan resume, customer wait exclusion and no double charge. |
 | Payment callback | Signed test/live events use one verifier, bind to the committed checkout, derive team and grant once across retries and distinct duplicate events. Invalid proof, wrong mode/amount/currency, unknown checkout and human console powers remain refused. |
-| Auth cache | Both TTL and fresh full-generation equality are required. Ancestor/session revocation, cross-team launcher revocation and membership loss invalidate reuse. |
+| Current authority | Authentication reads current ancestry and membership state. Ancestor/session revocation, cross-team launcher revocation and membership loss refuse further use. |
 | Windows | SID-verified local subjects, private-file ACLs and equivalent refusal semantics. |
 
 `TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads` exercises thirteen actual Server

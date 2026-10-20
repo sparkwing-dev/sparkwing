@@ -600,8 +600,8 @@ credentials before ordinary job logging starts.
 An acquisition adapter that returns success after cancellation cannot continue
 to acceptance or scheduling. Requested cancellation before acceptance finishes
 the run and owner unit atomically. Lease loss and failed resume setup leave the
-work to recovery. Initial planning retains the cancellation cause across cache
-lookup, hit validation, invalidation, fresh planning, hashing and publication.
+work to recovery. Initial planning retains the cancellation cause across SDK
+planning, hashing and acceptance.
 The owner seal acceptance check covers masked setup/acceptance errors and late
 acquisition success after cancellation with fake store and acquisition adapters.
 
@@ -733,9 +733,9 @@ nonprivate snapshots fail before acquisition or process startup. A read failure
 cannot select the daemon's environment.
 
 `PlanningProcessInput.Environment` carries the intake snapshot metadata through
-describe and plan. `SDKPlanner` includes its digest beside the host environment
-digest in the planning-cache inputs. Snapshot identity cannot replace missing
-host inputs or hide changes to a remote base.
+describe and plan. Planning runs for each invocation with the sealed snapshot
+and host environment. Snapshot identity cannot replace missing host inputs or
+hide changes to a remote base.
 Attempt and eval startup read the identity from the accepted request, including
 retry seals that retain the source run ID. Native child-process tests use the
 real procenv policy to check credential filtering and runtime identity after

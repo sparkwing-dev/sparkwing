@@ -189,7 +189,7 @@ Race passes for the focused host suite, full source/lease suites and full
 acceptance package. The focused host command uses:
 
 ```text
--run '^(TestNodeExecutor|TestClaimedNodeHost|TestOwnerHost|TestOwnerEvaluator|TestOwnerPolicy|TestSDK|TestProtocolSession|TestPlanInitial|TestPlanCache|TestFollowReconciliation|TestRemote|TestStateFollower|TestProcessServices|TestMaskRegistry|TestLogSink|TestLayerOwnership|TestSessionMasksASecretSplitAtTheLineLimit|TestAnAbandonedSinkQueueShowsNoPieceOfAHeldSecret|TestNodeErrorBoundingNeverSplitsASecret)'
+-run '^(TestNodeExecutor|TestClaimedNodeHost|TestOwnerHost|TestOwnerEvaluator|TestOwnerPolicy|TestSDK|TestProtocolSession|TestPlanInitial|TestFollowReconciliation|TestRemote|TestStateFollower|TestProcessServices|TestMaskRegistry|TestLogSink|TestSessionMasksASecretSplitAtTheLineLimit|TestAnAbandonedSinkQueueShowsNoPieceOfAHeldSecret|TestNodeErrorBoundingNeverSplitsASecret)'
 ```
 
 `git diff --check` passes. Sleepcheck reports two inherited wall-clock assertions

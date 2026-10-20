@@ -84,7 +84,7 @@ success body. No second eval decoder was introduced.
 | Finding 4, eval | Shared decoder and throwing predicate, generator and memo behavior are covered. Legacy closure paths retire with the native cut. |
 | Finding 5, expansion | The shared evaluator retains raw generated jobs through validation and the owner passes the same body to AcceptExpansion. W4's strict validator is still a stub. Plan-concurrency context is missing from its declaration. Full strict scheduler-path acceptance remains open. |
 | Finding 6, settlement | Blocked on W4's missing terminal-state/attempt-boundary protocol fields. No host-only wire shape was added. |
-| Finding 7, pipeline identity | Shared checkout planning, describe, plan, cache and replan carry distinct invoked and registered names. W9 must connect discovery and flag parsing to that selection. |
+| Finding 7, pipeline identity | Shared checkout planning, describe, plan and replan carry distinct invoked and registered names. W9 must connect discovery and flag parsing to that selection. |
 | Finding 9, A1-48 environment | Shared native attempt/eval startup and complete cleanup projection are implemented and exercised. Real SDK body application and native placement constructors remain open. |
 
 Amendment rows A1-01/02/05 use the completed registrar and existing mask gate.

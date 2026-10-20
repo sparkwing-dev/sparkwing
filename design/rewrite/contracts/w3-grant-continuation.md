@@ -135,7 +135,7 @@ and cache/temp paths under `/tmp/sw-astra-W3/`. Scratch is deleted at shutdown.
 The current host selection is:
 
 ```text
--run '^(TestNodeExecutor|TestClaimedNodeHost|TestOwnerHost|TestOwnerEvaluator|TestOwnerEvaluation|TestOwnerPolicy|TestSDK|TestProtocolSession|TestPlanInitial|TestPlanCache|TestFollowReconciliation|TestRemote|TestStateFollower|TestProcess|TestMaskRegistry|TestLogSink|TestLayerOwnership|TestSessionMasksASecretSplitAtTheLineLimit|TestAnAbandonedSinkQueueShowsNoPieceOfAHeldSecret|TestNodeErrorBoundingNeverSplitsASecret|Fuzz)'
+-run '^(TestNodeExecutor|TestClaimedNodeHost|TestOwnerHost|TestOwnerEvaluator|TestOwnerEvaluation|TestOwnerPolicy|TestSDK|TestProtocolSession|TestPlanInitial|TestFollowReconciliation|TestRemote|TestStateFollower|TestProcess|TestMaskRegistry|TestLogSink|TestSessionMasksASecretSplitAtTheLineLimit|TestAnAbandonedSinkQueueShowsNoPieceOfAHeldSecret|TestNodeErrorBoundingNeverSplitsASecret|Fuzz)'
 ```
 
 The full acceptance failure is retained. No TypeScript code or dependency install
