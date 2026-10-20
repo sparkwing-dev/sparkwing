@@ -288,12 +288,14 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('b',42,'build','acme/repo',8,1,'gh:42')`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('prior-owner-1','first@example.test',1,1,1),('prior-owner-2','second@example.test',1,1,1),('prior-reader','reader@example.test',1,1,1),('prior-unverified','unverified@example.test',0,1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','prior-owner-1','owner',1),('b','prior-owner-2','owner',1),('b','prior-reader','reader',1),('b','prior-unverified','owner',1)`)
 	row.Reclaim = true
 	got, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row)
 	if err != nil || got.Team != "a" {
 		t.Fatalf("reclaim=%+v: %v", got, err)
 	}
-	if got.ReclaimedFrom != "b" {
+	if got.Reclaimed == nil || got.Reclaimed.Team != "b" || !reflect.DeepEqual(got.Reclaimed.OwnerEmails, []string{"first@example.test", "second@example.test"}) {
 		t.Fatalf("reclaim notification: %+v", got)
 	}
 	for _, team := range []*Tenant{old, tenant} {
@@ -307,7 +309,7 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 		}
 	}
 	refreshed, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row)
-	if err != nil || refreshed.ReclaimedFrom != "" {
+	if err != nil || refreshed.Reclaimed != nil {
 		t.Fatalf("same team notified again: %+v %v", refreshed, err)
 	}
 	var remaining int

@@ -205,18 +205,22 @@ func (s *Server) mailOwners(ctx context.Context, team store.Team, subject, text,
 		s.logger.Warn("owner mail: owners", "team", string(team), "err", err)
 		return
 	}
+	s.mailRecipients(ctx, owners, subject, text, link)
+}
+
+func (s *Server) mailRecipients(ctx context.Context, recipients []string, subject, text, link string) {
 	m := s.mailer
 	if m == nil {
 		m = mailer.Log{Logger: s.logger}
 	}
-	for _, to := range owners {
+	for _, to := range recipients {
 		msg := mailer.Message{
 			To: to, Subject: subject, Text: text + "\n" + link + "\n",
 			HTML: "<p>" + html.EscapeString(text) + "</p><p><a href=\"" + html.EscapeString(link) + "\">" +
 				html.EscapeString(link) + "</a></p>",
 		}
 		if err := m.Send(ctx, msg); err != nil {
-			s.logger.Warn("owner mail: send", "team", string(team), "err", err)
+			s.logger.Warn("owner mail: send", "err", err)
 		}
 	}
 }

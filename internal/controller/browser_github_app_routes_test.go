@@ -32,7 +32,6 @@ type githubConnectFake struct {
 	seen                   capability.Authorized
 	bound                  store.GitHubAppInstallation
 	consumed               map[string]bool
-	reclaimedFrom          store.Team
 	bindErr                error
 	reads, consumes, binds int
 }
@@ -61,7 +60,6 @@ func (f *githubConnectFake) BindAuthorizedGitHubInstallation(_ context.Context, 
 	f.binds++
 	f.seen, f.bound = a, row
 	row.Team = f.team
-	row.ReclaimedFrom = f.reclaimedFrom
 	return row, f.bindErr
 }
 
@@ -407,16 +405,20 @@ func TestGitHubReclaimNotifiesPreviousTeamAdministrators(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
 	sender := &reclaimMailer{}
 	f.s.WithMailer(sender)
-	f.writer.reclaimedFrom = "b"
+	f.s.WithTenantResolver(storeTenantResolver(f.s.store))
+	f.h = f.s.Handler()
 	engineSQL(t, f.s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 	engineSQL(t, f.s.store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('prior-owner-1','first@example.test',1,1,1),('prior-owner-2','second@example.test',1,1,1),('prior-reader','reader@example.test',1,1,1)`)
 	engineSQL(t, f.s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','prior-owner-1','owner',1),('b','prior-owner-2','owner',1),('b','prior-reader','reader',1)`)
-	recipients := []string{"first@example.test", "second@example.test"}
-	p := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}}}, Target: capability.Target{Team: "a"}}
-	inst := githubapp.Installation{ID: 7}
-	if _, err := f.s.bindGitHubAppInstallation(t.Context(), f.writer, p, inst, 42); err != nil {
-		t.Fatal(err)
+	engineSQL(t, f.s.store, `INSERT INTO identities(provider,subject,account_id,created_at) VALUES ('github','42','member',1)`)
+	engineSQL(t, f.s.store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'b',42,'owner','User',1,1)`)
+	flow := f.start(t, false)
+	flow.Code, flow.InstallationID = "code", 7
+	w := f.request("GET", githubAppCompletePath, nil, &flow, nil)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("complete = %d %s", w.Code, w.Body)
 	}
+	recipients := []string{"first@example.test", "second@example.test"}
 	messages := sender.messages
 	if len(messages) != 2 {
 		t.Fatalf("notifications: %+v", messages)
@@ -427,7 +429,8 @@ func TestGitHubReclaimNotifiesPreviousTeamAdministrators(t *testing.T) {
 		}
 	}
 	f.writer.bindErr = errors.New("bind refused")
-	if _, err := f.s.bindGitHubAppInstallation(t.Context(), f.writer, p, inst, 42); err == nil {
+	p := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}}}, Target: capability.Target{Team: "a"}}
+	if _, err := f.s.bindGitHubAppInstallation(t.Context(), f.writer, p, githubapp.Installation{ID: 7}, 42); err == nil {
 		t.Fatal("failed binding succeeded")
 	}
 	if len(sender.messages) != 2 {

@@ -68,12 +68,11 @@ func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) sched
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC()
-	p := capability.Principal{
-		Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Prefix},
-		Capability: *issued,
+	snapshot, err := s.store.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: issued.Digest, Audience: issued.Audience}, capability.RequestEvidence{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}}}
+	facts := &reportingFacts{digest: issued.Digest, snapshot: snapshot}
 	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
 	return scheduleHTTPFixture{s, writer, raw, facts}
 }

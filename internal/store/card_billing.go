@@ -200,8 +200,12 @@ func parseRefundKey(key string) (string, int64, bool) {
 }
 
 // TeamOwnerEmails returns the verified email addresses of t's owners.
-func (t *Tenant) TeamOwnerEmails(ctx context.Context) (_ []string, err error) {
-	rows, err := t.s.query(ctx, `SELECT a.email FROM memberships m JOIN accounts a ON a.id = m.account_id
+func (t *Tenant) TeamOwnerEmails(ctx context.Context) ([]string, error) {
+	return t.teamOwnerEmails(ctx, t.s.query)
+}
+
+func (t *Tenant) teamOwnerEmails(ctx context.Context, query func(context.Context, string, ...any) (*sql.Rows, error)) (_ []string, err error) {
+	rows, err := query(ctx, `SELECT a.email FROM memberships m JOIN accounts a ON a.id = m.account_id
 	  WHERE m.team = ? AND m.role = 'owner' AND a.email_verified = 1 ORDER BY a.email`, string(t.team))
 	if err != nil {
 		return nil, err

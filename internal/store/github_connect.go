@@ -107,7 +107,12 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 					return err
 				}
 			}
-			out.ReclaimedFrom = previousTeam
+			// Resolve recipients inside the transfer; the request is scoped to the new team.
+			emails, err := (&Tenant{s: t.s, team: previousTeam}).teamOwnerEmails(ctx, tx.QueryContext)
+			if err != nil {
+				return err
+			}
+			out.Reclaimed = &GitHubInstallationReclaim{Team: previousTeam, OwnerEmails: emails}
 		}
 		return nil
 	}, row.InstallationID)
