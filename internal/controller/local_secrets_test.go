@@ -101,7 +101,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: plan})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Request, Declarations: declarations, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,16 +113,16 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		badResolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: badPlan})
+		badResolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Request, Declarations: declarations, Plan: badPlan})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
+		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Env: award.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
 		if err == nil || value != "" && strings.Contains(err.Error(), value) {
 			t.Fatal("local secret reached a persisted plan identifier or its refusal")
 		}
 	}
-	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: award.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

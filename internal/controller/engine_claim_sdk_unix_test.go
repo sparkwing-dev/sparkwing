@@ -177,7 +177,7 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Claim.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -49,9 +49,12 @@ type CreateRunRequest struct {
 
 // CreateRunResponse returns the accepted run and any first-intake here bearer.
 type CreateRunResponse struct {
-	RunID   string                `json:"run_id"`
-	Number  int64                 `json:"number"`
-	Request runspec.SealedRequest `json:"request"`
+	RunID      string          `json:"run_id"`
+	Number     int64           `json:"number"`
+	Inputs     runspec.Display `json:"inputs"`
+	RequestID  string          `json:"request_id,omitempty"`
+	WriteScope string          `json:"write_scope"`
+	Here       bool            `json:"here"`
 	// HereBearer is issued once and retained privately for resume.
 	HereBearer string `json:"here_bearer,omitempty"`
 	Replayed   bool   `json:"replayed"`

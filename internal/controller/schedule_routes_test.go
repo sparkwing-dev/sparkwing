@@ -121,7 +121,7 @@ func TestScheduleHTTPReadWriteAndReplay(t *testing.T) {
 	}
 	var detail controllerwire.DetailView
 	f.call(t, "GET", scheduleHTTPPath+"?fires=0&next=2", "", "", 200, &detail)
-	if len(detail.Upcoming) != 2 || detail.Fires == nil || len(detail.Fires) != 0 || detail.Schedule.Effective.Args["depth"] != "deep" {
+	if len(detail.Upcoming) != 2 || detail.Fires == nil || len(detail.Fires) != 0 || detail.Schedule.Effective.Args.Values()["depth"] != "***" {
 		t.Fatalf("detail=%+v", detail)
 	}
 	for _, action := range []string{"pause", "resume"} {
@@ -148,11 +148,11 @@ func TestScheduleHTTPOverrideAndWithdrawal(t *testing.T) {
 	f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 200, nil)
 	var out controllerwire.ScheduleEnvelope
 	f.call(t, "PUT", scheduleHTTPPath+"/override", `{"cron":"*/15 * * * *","tz":"America/Denver","overlap":"queue","catch_up":"0s","args":{}}`, "", 200, &out)
-	if out.Schedule.Effective.Cron != "*/15 * * * *" || out.Schedule.Effective.TZ != "America/Denver" || out.Schedule.Effective.Overlap != "queue" || out.Schedule.Effective.CatchUpNS != 0 || len(out.Schedule.Effective.Args) != 0 || len(out.Schedule.Override.Fields) != 5 {
+	if out.Schedule.Effective.Cron != "*/15 * * * *" || out.Schedule.Effective.TZ != "America/Denver" || out.Schedule.Effective.Overlap != "queue" || out.Schedule.Effective.CatchUpNS != 0 || len(out.Schedule.Effective.Args.Values()) != 0 || len(out.Schedule.Override.Fields) != 5 {
 		t.Fatalf("override=%+v", out)
 	}
 	f.call(t, "DELETE", scheduleHTTPPath+"/override", "", "", 200, &out)
-	if out.Schedule.Effective.Cron != "0 3 * * *" || out.Schedule.Effective.Args["depth"] != "deep" || len(out.Schedule.Override.Fields) != 0 {
+	if out.Schedule.Effective.Cron != "0 3 * * *" || out.Schedule.Effective.Args.Values()["depth"] != "***" || len(out.Schedule.Override.Fields) != 0 {
 		t.Fatalf("reset=%+v", out)
 	}
 	var withdrawn controllerwire.ScheduleRepoWritten

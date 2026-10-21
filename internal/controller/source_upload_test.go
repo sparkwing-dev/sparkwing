@@ -76,8 +76,8 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Request.Request.Source.BundleDigest.Value != digest || created.Request.Request.Git.App.Set {
-		t.Fatalf("source seal: %+v", created.Request)
+	if storedIntake(t, s.store, created.RunID).Request.Source.BundleDigest.Value != digest || storedIntake(t, s.store, created.RunID).Request.Git.App.Set {
+		t.Fatalf("source seal: %+v", storedIntake(t, s.store, created.RunID))
 	}
 	replay, err := c.CreateRun(t.Context(), request)
 	if err != nil || !replay.Replayed || replay.RunID != created.RunID {

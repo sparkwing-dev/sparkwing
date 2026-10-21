@@ -29,22 +29,26 @@ func (f *scheduleFixture) ReadSchedule(_ context.Context, name string, _ control
 	}
 	return row, nil
 }
+
 func (f *scheduleFixture) SetSchedulePaused(_ context.Context, name string, pause bool) (controllerwire.ScheduleView, error) {
 	f.calls = append(f.calls, "pause:"+name)
 	row := f.rows[name].Schedule
 	row.Paused = pause
 	return row, nil
 }
+
 func (f *scheduleFixture) OverrideSchedule(_ context.Context, name string, input controllerwire.ScheduleOverride) (controllerwire.ScheduleView, error) {
 	f.calls = append(f.calls, "override:"+name)
 	f.override = input
 	return f.rows[name].Schedule, nil
 }
+
 func (f *scheduleFixture) RunSchedule(_ context.Context, name, key string) (controllerwire.ScheduleRun, error) {
 	f.calls = append(f.calls, "run:"+name)
 	f.keys = append(f.keys, key)
 	return controllerwire.ScheduleRun{RunID: "run-" + name, Schedule: f.rows[name].Schedule, Replayed: true}, nil
 }
+
 func (f *scheduleFixture) ListSchedules(_ context.Context, q controllerwire.ScheduleQuery) (controllerwire.ScheduleOverview, error) {
 	f.query = q
 	result := controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{}, Upcoming: []controllerwire.ScheduleUpcoming{{Schedule: "s1", Name: "check/nightly", At: "2099-01-01T01:00:00Z"}}}
@@ -53,6 +57,7 @@ func (f *scheduleFixture) ListSchedules(_ context.Context, q controllerwire.Sche
 	}
 	return result, nil
 }
+
 func scheduleInvocation(t *testing.T, args ...string) clisurface.Invocation {
 	t.Helper()
 	inv, err := clisurface.Parse("sparkwing", append([]string{"schedules"}, args...))
@@ -61,10 +66,12 @@ func scheduleInvocation(t *testing.T, args ...string) clisurface.Invocation {
 	}
 	return inv
 }
+
 func scheduleFake() *scheduleFixture {
 	row := controllerwire.DetailView{Schedule: controllerwire.ScheduleView{ID: "s1", Name: "check/nightly", Pipeline: "check", Where: "local", Declared: true, State: "armed", Effective: controllerwire.EffectiveView{Cron: "0 3 * * *", TZ: "UTC", Overlap: "skip"}}}
 	return &scheduleFixture{rows: map[string]controllerwire.DetailView{"s1": row, "check/nightly": row}}
 }
+
 func TestScheduleManagementResolvesEverySelectorBeforeMutation(t *testing.T) {
 	f := scheduleFake()
 	var out bytes.Buffer
@@ -81,6 +88,7 @@ func TestScheduleManagementResolvesEverySelectorBeforeMutation(t *testing.T) {
 		t.Fatalf("alias double mutation: %v %s", f.calls, out.String())
 	}
 }
+
 func TestScheduleManagementKeepsOverridePresenceAndExactValues(t *testing.T) {
 	f := scheduleFake()
 	var out bytes.Buffer
@@ -93,6 +101,7 @@ func TestScheduleManagementKeepsOverridePresenceAndExactValues(t *testing.T) {
 		t.Fatalf("lost explicit values: %+v %q", got, out.String())
 	}
 }
+
 func TestScheduleManagementUsesAuthoritativeUpcomingAndRunReceipt(t *testing.T) {
 	f := scheduleFake()
 	var out bytes.Buffer
@@ -112,13 +121,19 @@ func TestScheduleManagementUsesAuthoritativeUpcomingAndRunReceipt(t *testing.T) 
 		t.Fatalf("run receipt: %v %s", f.keys, out.String())
 	}
 }
+
 func TestScheduleManagementRejectsInvalidSelectionsAndEdits(t *testing.T) {
 	for _, args := range [][]string{
-		{"list", "--all", "--timer"}, {"list", "--next", "0"}, {"show", "--schedule", "s1", "--fires", "-1"},
-		{"show", "--schedule", "s1", "--fires", "0", "--next", "2"}, {"set", "--schedule", "s1"},
-		{"set", "--schedule", "s1", "--reset", "--tz", "UTC"}, {"set", "--schedule", "s1", "--arg", "bad"},
+		{"list", "--all", "--timer"},
+		{"list", "--next", "0"},
+		{"show", "--schedule", "s1", "--fires", "-1"},
+		{"show", "--schedule", "s1", "--fires", "0", "--next", "2"},
+		{"set", "--schedule", "s1"},
+		{"set", "--schedule", "s1", "--reset", "--tz", "UTC"},
+		{"set", "--schedule", "s1", "--arg", "bad"},
 		{"set", "--schedule", "s1", "--arg", "a=1,a=2"},
-		{"set", "--schedule", "s1", "--arg", "a=1,"}, {"set", "--schedule", "s1", "--cron", "bad"},
+		{"set", "--schedule", "s1", "--arg", "a=1,"},
+		{"set", "--schedule", "s1", "--cron", "bad"},
 		{"set", "--schedule", "s1", "--catch-up", "-1s"},
 	} {
 		inv := scheduleInvocation(t, args...)
@@ -136,7 +151,7 @@ func TestScheduleManagementListKeepsSelectionMetadataAndShowKeepsDetails(t *test
 	f := scheduleFake()
 	row := f.rows["s1"]
 	row.Schedule.Lock = controllerwire.LockView{State: "ahead", Ref: "original-sha", Binary: "private/path", Digest: "digest"}
-	row.Schedule.Args = map[string]string{"oversized": "detail-only"}
+	row.Schedule.Args = controllerwire.DisplayScheduleArgs(map[string]string{"oversized": "detail-only"})
 	row.Schedule.Override = controllerwire.OverrideView{Fields: []string{"cron"}, Stale: true}
 	f.rows["s1"] = row
 	var out bytes.Buffer
@@ -165,6 +180,7 @@ type scheduleHealthFixture struct {
 func (f *scheduleHealthFixture) ListSchedules(context.Context, controllerwire.ScheduleQuery) (controllerwire.ScheduleOverview, error) {
 	return controllerwire.ScheduleOverview{Health: f.health}, nil
 }
+
 func TestScheduleManagementHealthDoesNotLoseFailureStatus(t *testing.T) {
 	for _, healthy := range []bool{true, false} {
 		f := &scheduleHealthFixture{health: controllerwire.HealthView{Schedules: 2, Armed: 2, Detail: "evaluator status", Remedy: "start the timer"}}

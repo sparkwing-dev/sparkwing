@@ -63,6 +63,7 @@ linters:
           allow:
             - $gostd
             - github.com/sparkwing-dev/sparkwing/internal/swtags
+            - github.com/sparkwing-dev/sparkwing/internal/secrets
 
         store-allowed-internal:
           list-mode: lax

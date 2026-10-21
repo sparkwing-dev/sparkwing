@@ -38,7 +38,7 @@ func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				response := controllerwire.CreateRunResponse{RunID: "r17", Number: 17, Request: seal}
+				response := controllerwire.CreateRunResponse{RunID: "r17", Number: 17, Inputs: runspec.DisplayRequest(seal), Here: seal.Request.Options.Runner.Value.Kind == runspec.RunnerHere}
 				if here {
 					response.HereBearer = "private-server-bearer"
 				}

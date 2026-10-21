@@ -47,3 +47,17 @@ func TestNilMaskerStreamPassesTextThrough(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestStreamBoundsChainsOfOverlappingMatches(t *testing.T) {
+	m := newTestMasker("abab", "baba")
+	stream := m.Stream()
+	for range 4 {
+		stream.Mask(strings.Repeat("ab", 1<<14), false)
+		if len(stream.held) > 64 {
+			t.Fatal("overlap retained an unbounded line")
+		}
+	}
+	if got := stream.Mask(" tail", true); strings.Contains(got, "abab") || strings.Contains(got, "baba") {
+		t.Fatal("overlap tail exposed a registered value")
+	}
+}

@@ -23,7 +23,7 @@ func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
 
 // ContainsSecret implements the shared plan validator's matcher, including short values.
 func (r *MaskRegistry) ContainsSecret(identifier string) bool {
-	return (planningSecrets{masker: r.masker}).ContainsSecret(identifier)
+	return r.masker.ContainsSecret(identifier)
 }
 
 // Register refuses collisions before changing any sink; success is synchronous.
@@ -39,9 +39,8 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	if r.masker == nil {
 		return errors.New("mask registration requires a shared masker")
 	}
-	matcher := planningSecrets{masker: candidate}
 	for identifier, path := range r.identifiers {
-		if matcher.ContainsSecret(identifier) {
+		if candidate.ContainsSecret(identifier) {
 			return identifierMaskError(path)
 		}
 	}

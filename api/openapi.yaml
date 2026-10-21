@@ -936,20 +936,28 @@ components:
     internal.controllerwire.CreateRunResponse:
       additionalProperties: true
       properties:
+        here:
+          type: boolean
         here_bearer:
           type: string
+        inputs:
+          $ref: '#/components/schemas/internal.runspec.Display'
         number:
           type: integer
         replayed:
           type: boolean
-        request:
-          $ref: '#/components/schemas/internal.runspec.SealedRequest'
+        request_id:
+          type: string
         run_id:
+          type: string
+        write_scope:
           type: string
       required:
         - run_id
         - number
-        - request
+        - inputs
+        - write_scope
+        - here
         - replayed
       type: object
       x-sparkwing-go-type: controllerwire.CreateRunResponse
@@ -1466,11 +1474,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         catch_up_ns:
           type: integer
         cron:
@@ -1698,11 +1705,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         decided_at:
           type: string
         detail:
@@ -2521,11 +2527,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         catch_up_ns:
           type: integer
         cron:
@@ -3626,11 +3631,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         armed_at:
           type: string
         catch_up_ns:

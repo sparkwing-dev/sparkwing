@@ -19,7 +19,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 		admitted, claim := tenantRunClaim(t, f)
 		plan := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{{Group: "deploy"}}, Jobs: []nodeproto.JobSpec{}}
 		declarations := runspec.CheckoutDeclarations{Version: 1}
-		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
+		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: claim.Request, Declarations: declarations, Plan: plan})
 		if err != nil {
 			t.Fatal(err)
 		}

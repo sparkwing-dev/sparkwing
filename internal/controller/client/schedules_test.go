@@ -206,7 +206,7 @@ func TestScheduleManagerPreservesCanonicalResolutionAndConfirmsOverrides(t *test
 	if _, err := c.OverrideSchedule(t.Context(), "s1", edit); err == nil {
 		t.Fatal("lost explicit override was accepted")
 	}
-	row.Override = controllerwire.OverrideView{Fields: []string{"tz", "catch_up", "args"}, TZ: "", CatchUpNS: 0, Args: args}
+	row.Override = controllerwire.OverrideView{Fields: []string{"tz", "catch_up", "args"}, TZ: "", CatchUpNS: 0, Args: controllerwire.DisplayScheduleArgs(args)}
 	if _, err := c.OverrideSchedule(t.Context(), "s1", edit); err != nil {
 		t.Fatalf("confirmed zero/empty edit: %v", err)
 	}

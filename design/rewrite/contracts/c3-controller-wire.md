@@ -147,7 +147,7 @@ an additional transport retry loop.
 The prepared-request initial-trigger component calls `Controller.CreateRun` once,
 preserving a supplied idempotency key or generating one before submission. Its
 receipt exposes run ID, team number, replay, observed terminal outcome and a
-masked error. The component validates the returned first seal and initial run
+masked error. The component validates the display receipt and initial run
 identity before handing the complete private response to here hosting. A fresh
 here receipt requires its bearer; a replay cannot contain one. Received here
 authority reaches the retaining handoff even if cancellation arrived during
@@ -331,7 +331,7 @@ one envelope and use `apierr.DecodeInner`.
 | Export | Contract |
 | --- | --- |
 | `Compatibility`, `CompatibilityFor`, `APIMajor` | API identity and per-engine compatibility window, served by `/api/v1/capabilities?engine_version=` from verified release metadata. |
-| `CreateRunRequest`, `CreateRunResponse` | Shared intake, allocated team number, first seal, replay and one-time here bearer. |
+| `CreateRunRequest`, `CreateRunResponse` | Shared intake, allocated team number, display inputs, write scope, replay and one-time here bearer. |
 | `PlanSubmission`, `PlanAccepted` | Second-seal proposal and committed plan/spec hashes. Restricted `CheckoutDeclarations` retain pipeline/default layers and origins; the store resolves them against its own request overrides and ceilings. |
 | `ClaimRequest`, `ClaimResponse`, `ClaimedUnit` | Queue or named selection and a server-derived unit award. Granted identity, pools and billing never come from the request. Runner software version is checked by `engine.EvaluateRunner` before new awards; draining renewals stay available. |
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
@@ -378,9 +378,12 @@ an unknown/absent mode or absent idempotency key before intake. The mode joins
 the exact-body digest, so the same key with a different mode conflicts. Neither
 selection changes the original request, plan, source authority, actor or captured
 environment. The controller records the retrier as separate lineage.
-`CreateRunResponse.RunID` identifies the newly allocated retry. Its `Request`
-retains the original seal's run identity and hash, including across retry chains.
-Consumers must not rewrite or equate those identities.
+`CreateRunResponse.RunID` identifies the newly allocated retry. `Inputs` is a
+`runspec.Display` projection. Member receipts carry no sealed request, source
+location, environment digest or secret-bearing hash. `WriteScope` is derived
+from stored provenance for local publication. `Here` tells the CLI whether it
+must host the run. The original seal remains in execution claims, including
+across retry chains. Consumers must not rewrite that seal.
 
 The CLI submits both local and profile retries through `Controller.Retry`.
 It resolves and deduplicates all flag/stdin selectors before submitting any run.

@@ -2,13 +2,52 @@ package controllerwire
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
+
+// ScheduleArgs is a display projection. Schedule declarations are not classified by describe,
+// so every value is private until an execution claim resolves it.
+type ScheduleArgs struct{ values map[string]string }
+
+// DisplayScheduleArgs retains names while hiding unclassified values.
+func DisplayScheduleArgs(args map[string]string) ScheduleArgs {
+	if len(args) == 0 {
+		return ScheduleArgs{}
+	}
+	values := make(map[string]string, len(args))
+	for name := range args {
+		values[name] = runspec.RedactedArgValue
+	}
+	return ScheduleArgs{values: values}
+}
+
+// Values returns a copy of the display arguments.
+func (args ScheduleArgs) Values() map[string]string { return maps.Clone(args.values) }
+
+func (args ScheduleArgs) MarshalJSON() ([]byte, error) {
+	if args.values == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(args.values)
+}
+
+func (args *ScheduleArgs) UnmarshalJSON(raw []byte) error {
+	var values map[string]string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return err
+	}
+	*args = DisplayScheduleArgs(values)
+	return nil
+}
 
 // TimerStateView is the OS timer that calls the tick. A controller reports its
 // own loop here instead, with its loop status as the detail.
@@ -64,67 +103,67 @@ type LockView struct {
 // the same override the evaluator holds and can print it beside the
 // declaration.
 type OverrideView struct {
-	Fields    []string          `json:"fields"`
-	Stale     bool              `json:"stale"`
-	SetAt     string            `json:"set_at"`
-	Cron      string            `json:"cron"`
-	TZ        string            `json:"tz"`
-	Overlap   string            `json:"overlap"`
-	CatchUpNS int64             `json:"catch_up_ns"`
-	Args      map[string]string `json:"args"`
+	Fields    []string     `json:"fields"`
+	Stale     bool         `json:"stale"`
+	SetAt     string       `json:"set_at"`
+	Cron      string       `json:"cron"`
+	TZ        string       `json:"tz"`
+	Overlap   string       `json:"overlap"`
+	CatchUpNS int64        `json:"catch_up_ns"`
+	Args      ScheduleArgs `json:"args"`
 }
 
 // EffectiveView is the cadence a schedule actually runs.
 type EffectiveView struct {
-	Cron      string            `json:"cron"`
-	TZ        string            `json:"tz"`
-	Overlap   string            `json:"overlap"`
-	CatchUpNS int64             `json:"catch_up_ns"`
-	Args      map[string]string `json:"args"`
+	Cron      string       `json:"cron"`
+	TZ        string       `json:"tz"`
+	Overlap   string       `json:"overlap"`
+	CatchUpNS int64        `json:"catch_up_ns"`
+	Args      ScheduleArgs `json:"args"`
 }
 
 // ScheduleView is one schedule. Name is the display name; GitBranch is set
 // only on a schedule pushed to a controller.
 type ScheduleView struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	ScheduleName string            `json:"schedule_name"`
-	RepoPath     string            `json:"repo_path"`
-	Pipeline     string            `json:"pipeline"`
-	Where        string            `json:"where"`
-	GitBranch    string            `json:"git_branch,omitempty"`
-	Cron         string            `json:"cron"`
-	TZ           string            `json:"tz"`
-	Overlap      string            `json:"overlap"`
-	CatchUpNS    int64             `json:"catch_up_ns"`
-	Args         map[string]string `json:"args"`
-	Lock         LockView          `json:"lock"`
-	Override     OverrideView      `json:"override"`
-	Effective    EffectiveView     `json:"effective"`
-	Paused       bool              `json:"paused"`
-	Declared     bool              `json:"declared"`
-	State        string            `json:"state"`
-	StateDetail  string            `json:"state_detail"`
-	ArmedAt      string            `json:"armed_at"`
-	UpdatedAt    string            `json:"updated_at"`
-	LastFiredAt  *string           `json:"last_fired_at"`
-	LastRunID    string            `json:"last_run_id"`
-	LastOutcome  string            `json:"last_outcome"`
-	NextDueAt    *string           `json:"next_due_at"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	ScheduleName string        `json:"schedule_name"`
+	RepoPath     string        `json:"repo_path"`
+	Pipeline     string        `json:"pipeline"`
+	Where        string        `json:"where"`
+	GitBranch    string        `json:"git_branch,omitempty"`
+	Cron         string        `json:"cron"`
+	TZ           string        `json:"tz"`
+	Overlap      string        `json:"overlap"`
+	CatchUpNS    int64         `json:"catch_up_ns"`
+	Args         ScheduleArgs  `json:"args"`
+	Lock         LockView      `json:"lock"`
+	Override     OverrideView  `json:"override"`
+	Effective    EffectiveView `json:"effective"`
+	Paused       bool          `json:"paused"`
+	Declared     bool          `json:"declared"`
+	State        string        `json:"state"`
+	StateDetail  string        `json:"state_detail"`
+	ArmedAt      string        `json:"armed_at"`
+	UpdatedAt    string        `json:"updated_at"`
+	LastFiredAt  *string       `json:"last_fired_at"`
+	LastRunID    string        `json:"last_run_id"`
+	LastOutcome  string        `json:"last_outcome"`
+	NextDueAt    *string       `json:"next_due_at"`
 }
 
 // FireView is one resolved due instant. RunStatus is empty when the fire
 // launched nothing or its run has since been pruned.
 type FireView struct {
-	ID         string            `json:"id"`
-	ScheduleID string            `json:"schedule_id"`
-	DueAt      string            `json:"due_at"`
-	DecidedAt  string            `json:"decided_at"`
-	Outcome    string            `json:"outcome"`
-	RunID      string            `json:"run_id"`
-	Detail     string            `json:"detail"`
-	Args       map[string]string `json:"args"`
-	RunStatus  string            `json:"run_status"`
+	ID         string       `json:"id"`
+	ScheduleID string       `json:"schedule_id"`
+	DueAt      string       `json:"due_at"`
+	DecidedAt  string       `json:"decided_at"`
+	Outcome    string       `json:"outcome"`
+	RunID      string       `json:"run_id"`
+	Detail     string       `json:"detail"`
+	Args       ScheduleArgs `json:"args"`
+	RunStatus  string       `json:"run_status"`
 }
 
 // ScheduleOverview is the evaluator's health and everything it holds.

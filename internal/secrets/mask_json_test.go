@@ -32,9 +32,9 @@ func TestMask_OverlappingSecretsLeaveNoTail(t *testing.T) {
 func TestMaskJSONReachesKeysNumbersAndEscapes(t *testing.T) {
 	m := newTestMasker("s3cr3t", "1234567", "a<b")
 	for raw, want := range map[string]string{
-		`{"s3cr3t":"ok","n":3}`:        `{"n":3,"***":"ok"}`,
+		`{"s3cr3t":"ok","n":3}`:        `{"***":"ok","n":3}`,
 		`{"v":"s3cr3t","w":"a<b"}`:     `{"v":"***","w":"***"}`,
-		`{"pin":1234567}`:              `{"masked_attrs":"{\"pin\":***}"}`,
+		`{"pin":1234567}`:              `{"pin":"***"}`,
 		`{ "safe": 9007199254740993 }`: `{"safe":9007199254740993}`,
 		`not json s3cr3t`:              `not json ***`,
 	} {

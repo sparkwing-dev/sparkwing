@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -25,7 +25,7 @@ type host struct {
 	cancel  context.CancelFunc
 	mu      sync.Mutex
 	work    sync.WaitGroup
-	masks   []string
+	masker  *secrets.Masker
 	records []sparkwing.LogRecord
 	plans   []json.RawMessage
 	settled map[stepStateKey][]string
@@ -186,7 +186,7 @@ func (h *host) Records() []sparkwing.LogRecord {
 func (h *host) Masks() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]string(nil), h.masks...)
+	return h.masker.Values()
 }
 
 func (h *host) Close() error {
@@ -326,18 +326,14 @@ func (h *host) Mask(ctx context.Context, value string) error {
 	if err := h.executionError(ctx); err != nil {
 		return err
 	}
+	candidate := secrets.NewMasker()
+	candidate.Register(value)
 	for _, plan := range h.plans {
-		if _, err := nodeproto.ValidatePlan(plan, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: registeredMasks{value}}); err != nil {
+		if _, err := nodeproto.ValidatePlan(plan, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: candidate}); err != nil {
 			return err
 		}
 	}
-	for _, v := range h.masks {
-		if v == value {
-			return nil
-		}
-	}
-	h.masks = append(h.masks, value)
-	slices.SortFunc(h.masks, func(a, b string) int { return len(b) - len(a) })
+	h.masker.Merge(candidate)
 	return nil
 }
 
@@ -350,21 +346,10 @@ func (h *host) remember(p *sparkwing.Plan) error {
 	return err
 }
 
-type registeredMasks []string
-
-func (values registeredMasks) ContainsSecret(id string) bool {
-	for _, value := range values {
-		if value != "" && strings.Contains(id, value) {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: registeredMasks(h.masks)})
+	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: h.masker})
 	if err == nil && (len(h.plans) == 0 || !bytes.Equal(raw, h.plans[len(h.plans)-1])) {
 		h.plans = append(h.plans, raw)
 	}
@@ -374,7 +359,7 @@ func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 func (h *host) ContainsSecret(id string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return registeredMasks(h.masks).ContainsSecret(id)
+	return h.masker.ContainsSecret(id)
 }
 
 func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
@@ -385,12 +370,6 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 			panic(err)
 		}
 	}
-	mask := func(s string) string {
-		for _, v := range h.masks {
-			s = strings.ReplaceAll(s, v, "***")
-		}
-		return s
-	}
 	ts, _ := time.Parse(time.RFC3339Nano, frame.TS)
 	attrs := map[string]any{}
 	if len(frame.Attrs) > 0 && string(frame.Attrs) != "null" {
@@ -398,47 +377,20 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 			panic("invalid log attributes")
 		}
 		// safety: rounding a numeric secret before masking can conceal the match.
-		decoder := json.NewDecoder(bytes.NewReader(frame.Attrs))
+		decoder := json.NewDecoder(bytes.NewReader(h.masker.MaskJSON(frame.Attrs)))
 		decoder.UseNumber()
 		if err := decoder.Decode(&attrs); err != nil {
 			panic(err)
 		}
 	}
-	attrs = maskAttrs(attrs, mask).(map[string]any)
-	message := mask(frame.Message)
+	message := h.masker.Mask(frame.Message)
 	if (frame.Event == "annotation" || frame.Event == "summary") && int64(len(message)) > limits.AnnotationBytes {
 		message = limits.Record(message)
 	}
 	if frame.Event == "summary" {
 		attrs["markdown"] = message
 	}
-	h.records = append(h.records, sparkwing.LogRecord{TS: ts, JobID: job, Level: frame.Level, Step: frame.Step, Event: frame.Event, Msg: message, Attrs: attrs})
-}
-
-func maskAttrs(v any, mask func(string) string) any {
-	switch value := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(value))
-		for k, x := range value {
-			out[mask(k)] = maskAttrs(x, mask)
-		}
-		return out
-	case []any:
-		for i, x := range value {
-			value[i] = maskAttrs(x, mask)
-		}
-	case string:
-		return mask(value)
-	case json.Number, bool, nil:
-		text := "null"
-		if value != nil {
-			text = fmt.Sprint(value)
-		}
-		if masked := mask(text); masked != text {
-			return masked
-		}
-	}
-	return v
+	h.records = append(h.records, sparkwing.LogRecord{TS: ts, JobID: job, Level: frame.Level, Step: h.masker.Mask(frame.Step), Event: frame.Event, Msg: message, Attrs: attrs})
 }
 
 func newHost(opts Options) Host {
@@ -458,13 +410,12 @@ func newHost(opts Options) Host {
 	opts.Outputs = outputs
 	opts.Runner.Labels = append([]string(nil), opts.Runner.Labels...)
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &host{opts: opts, ctx: ctx, cancel: cancel}
+	h := &host{opts: opts, ctx: ctx, cancel: cancel, masker: secrets.NewMasker()}
 	for _, v := range opts.Secrets {
 		if v.Masked && v.Value != "" {
-			h.masks = append(h.masks, v.Value)
+			h.masker.Register(v.Value)
 		}
 	}
-	slices.SortFunc(h.masks, func(a, b string) int { return len(b) - len(a) })
 	return h
 }
 

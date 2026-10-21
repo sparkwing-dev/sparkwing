@@ -25,6 +25,8 @@ func TestSchemasDescribeSharedJSONInsteadOfStoreRows(t *testing.T) {
 		wire.QueuePriorityResult{RunID: "run"},
 		wire.RunDetail{},
 		wire.ScheduleJob{},
+		wire.ScheduleView{},
+		wire.CreateRunResponse{},
 		wire.DataUploadRequest{},
 		wire.TokenCreate{},
 	} {

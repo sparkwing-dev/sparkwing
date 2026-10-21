@@ -9,13 +9,13 @@ import (
 	"os"
 	"runtime/debug"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type sdkOperations struct{}
@@ -426,17 +426,6 @@ func (l protocolLogger) Emit(r LogRecord) {
 	l.s.Emit(nodeproto.FrameLog{TS: r.TS.Format(time.RFC3339Nano), Level: r.Level, Step: r.Step, Event: r.Event, Message: r.Msg, Attrs: attrs})
 }
 
-type secretSet []string
-
-func (s secretSet) ContainsSecret(id string) bool {
-	for _, v := range s {
-		if v != "" && strings.Contains(id, v) {
-			return true
-		}
-	}
-	return false
-}
-
 func closureJob(p *Plan, id string) *JobNode {
 	for _, spec := range planDocument(p).Jobs {
 		if hasClosure(spec.Closures, id) {
@@ -511,7 +500,7 @@ func generatorClosure(job *JobNode, closure string) bool {
 }
 
 type combinedSecrets struct {
-	values secretSet
+	values *secrets.Masker
 	host   nodeproto.SecretMatcher
 }
 
@@ -521,7 +510,11 @@ func (s combinedSecrets) ContainsSecret(id string) bool {
 
 func declarationSecrets(ctx context.Context, values []string) nodeproto.SecretMatcher {
 	host, _ := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher)
-	return combinedSecrets{values: values, host: host}
+	masker := secrets.NewMasker()
+	for _, value := range values {
+		masker.Register(value)
+	}
+	return combinedSecrets{values: masker, host: host}
 }
 
 func referenceError(err error, latest bool) error {

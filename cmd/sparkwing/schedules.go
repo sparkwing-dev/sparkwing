@@ -366,7 +366,8 @@ func renderScheduleDetail(out io.Writer, detail controllerwire.DetailView) error
 	return tw.Flush()
 }
 
-func renderScheduleArgs(args map[string]string) string {
+func renderScheduleArgs(display controllerwire.ScheduleArgs) string {
+	args := display.Values()
 	if len(args) == 0 {
 		return "-"
 	}

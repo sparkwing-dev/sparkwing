@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -93,7 +95,9 @@ func (s *EngineController) replayRun(ctx context.Context, team string, request s
 
 func createRunResponse(admitted store.AdmissionResult) controllerwire.CreateRunResponse {
 	return controllerwire.CreateRunResponse{
-		RunID: admitted.RunID, Number: admitted.Number, Request: admitted.Request,
+		RunID: admitted.RunID, Number: admitted.Number, Inputs: runspec.DisplayRequest(admitted.Request),
+		RequestID: admitted.Request.Request.RequestID, WriteScope: blob.ScopeFor(admitted.Request.Provenance).CapabilityScope(),
+		Here:       admitted.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere,
 		HereBearer: string(admitted.HereBearer), Replayed: admitted.Replayed,
 	}
 }
@@ -218,6 +222,17 @@ func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authoriz
 	}
 	if run.ID != a.Target.RunID || string(run.Team) != a.Target.Team || run.Request.RunID == "" {
 		return controllerwire.PlanAccepted{}, missingEndpointPolicy()
+	}
+	if run.Request.Request.Mode == runspec.IntakePublish {
+		var plan nodeproto.PlanDoc
+		if err := json.Unmarshal(body.Plan, &plan); err != nil {
+			return controllerwire.PlanAccepted{}, invalidEngineBody("invalid publication plan")
+		}
+		body.Resolved.Env = run.Request.Request.Env
+		body.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: body.Declarations, Plan: plan, Context: settings.Context{Local: true}})
+		if err != nil {
+			return controllerwire.PlanAccepted{}, err
+		}
 	}
 	accepted, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{
 		RunID: a.Target.RunID, Actor: engineActor(a),

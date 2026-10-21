@@ -85,7 +85,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 						t.Fatal(err)
 					}
 					award.Request = sealed
-					return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Request: sealed}, nil
+					return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Inputs: runspec.DisplayRequest(sealed), RequestID: sealed.Request.RequestID, Here: sealed.Request.Options.Runner.Value.Kind == runspec.RunnerHere}, nil
 				},
 				claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					*observed = append(*observed, "claim")
@@ -309,14 +309,11 @@ func TestLocalRunSelectsStandaloneFromRealParser(t *testing.T) {
 	}
 }
 
-func TestLocalIntakeCannotSwitchPipelineOrDispatchPurpose(t *testing.T) {
+func TestLocalIntakeRejectsDifferentDisplayPipeline(t *testing.T) {
 	award := localTestAward(t)
-	property := func(pipeline string, mode, origin, dispatch uint8) bool {
+	property := func(pipeline string) bool {
 		request := award.Request.Request
 		request.Pipeline = pipeline
-		request.Mode = []runspec.IntakeMode{runspec.IntakeExecute, runspec.IntakePublish}[mode%2]
-		request.Origin = []runspec.Origin{runspec.OriginLocal, runspec.OriginTrigger}[origin%2]
-		request.Dispatch = []runspec.Dispatch{runspec.DispatchHost, runspec.DispatchController}[dispatch%2]
 		if request.Pipeline == "" {
 			request.Pipeline = "other"
 		}
@@ -330,12 +327,12 @@ func TestLocalIntakeCannotSwitchPipelineOrDispatchPurpose(t *testing.T) {
 		deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
 			runtime, err := resolve(ctx, opts)
 			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-				return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Request: sealed}, nil
+				return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Inputs: runspec.DisplayRequest(sealed), RequestID: sealed.Request.RequestID, Here: sealed.Request.Options.Runner.Value.Kind == runspec.RunnerHere}, nil
 			}}
 			return runtime, err
 		}
 		err = runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
-		valid := request.Pipeline == "ci" && request.Mode == runspec.IntakeExecute && request.Origin == runspec.OriginLocal && request.Dispatch == runspec.DispatchHost
+		valid := request.Pipeline == "ci"
 		return (err == nil) == valid
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
@@ -624,7 +621,7 @@ func FuzzLocalRunPrivateResponseDiagnostics(f *testing.F) {
 				return runtime, err
 			}
 			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-				response := controllerwire.CreateRunResponse{HereBearer: secret, Request: runspec.SealedRequest{Request: runspec.Request{RequestedArgs: map[string]string{"token": secret}}}}
+				response := controllerwire.CreateRunResponse{HereBearer: secret, Inputs: runspec.Display{RequestedArgs: map[string]string{"token": "***"}}}
 				if stage%3 == 1 {
 					return response, errors.New("invalid response: " + secret)
 				}
@@ -873,5 +870,25 @@ func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
 	}
 	if !followed || !strings.Contains(out.String(), "masked output ***") {
 		t.Fatalf("attached run lost logs: %s", &out)
+	}
+}
+
+func TestLocalOwnerClaimRejectsDifferentIntakePurposes(t *testing.T) {
+	for _, change := range []func(*runspec.Request){
+		func(r *runspec.Request) { r.Origin = runspec.OriginTrigger },
+		func(r *runspec.Request) { r.Mode = runspec.IntakePublish },
+		func(r *runspec.Request) { r.Dispatch = runspec.DispatchController },
+	} {
+		award := localTestAward(t)
+		request := award.Request.Request
+		change(&request)
+		sealed, err := runspec.SealRequest(request, runspec.IntakeFacts{RunID: award.RunID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		award.Request = sealed
+		if _, err := localRunInput(award.RunID, sealed.Hash, award); err == nil {
+			t.Fatal("local execution accepted a different intake purpose")
+		}
 	}
 }

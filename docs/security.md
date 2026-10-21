@@ -44,7 +44,10 @@ An authorized pipeline can use and disclose its secrets. Masking covers values
 registered with the host and their supported encodings. Arbitrary transformations,
 network exfiltration and files outside the host's output path are outside that
 protection. Registered secrets are refused in job, step, group and approval IDs
-because stored identifiers cannot be masked safely.
+because stored identifiers cannot be masked safely. The Go SDK, host diagnostics
+and test host share one masker. Registration includes comma-separated list
+elements and nonblank lines. Go toolchain variables passed to the requester's
+own hosted machine are masked before execution.
 
 ## Authentication and authorization
 
@@ -144,6 +147,10 @@ prefix. Source and secret releases record their authorized subject. Raw bearers,
 request bodies, captured environment values and secret-bearing hashes do not
 belong in logs or receipts. Public run details are redacted display projections.
 Restricted claims and sealed execution inputs must never be rendered as details.
+Run creation and retry return display inputs, not the execution seal. Schedule
+declarations, overrides, effective arguments and fire history hide every argument
+value because schedules have no describe-time secret classification. Execution
+claims retain the original values.
 
 ## Login and request budgets
 

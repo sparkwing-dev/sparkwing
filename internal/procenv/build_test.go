@@ -464,8 +464,8 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 				t.Errorf("kind %d owner-machine host left %q visible", kind, credential)
 			}
 		}
-		if masked := hostMasker.Mask(values["GOPATH"]); masked != values["GOPATH"] {
-			t.Errorf("kind %d owner-machine host masked a public Go setting: %q", kind, masked)
+		if masked := hostMasker.Mask(values["GOPATH"]); masked != "***" {
+			t.Errorf("kind %d owner-machine host left a Go setting visible: %q", kind, masked)
 		}
 		remote, err := Build(kind, Base{Ambient: entries, Masker: secrets.NewMasker()}, Runtime{})
 		if err != nil {
@@ -474,6 +474,23 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 		for name := range values {
 			if _, present := envMap(remote)[name]; present {
 				t.Errorf("kind %d shared runner inherited %s", kind, name)
+			}
+		}
+	}
+}
+
+func TestOwnerToolchainValuesAreMaskedBeforeExecution(t *testing.T) {
+	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
+		for _, value := range []string{"-race", "private-toolchain-setting"} {
+			masker := secrets.NewMasker()
+			base := Base{OwnerMachine: true, Ambient: []string{"GOFLAGS=" + value}, Masker: masker}
+			env, err := Build(kind, base, Runtime{})
+			if err != nil || envMap(env)["GOFLAGS"] != value || masker.Mask(value) != "***" {
+				t.Fatalf("kind %d: toolchain value passed without masking: %v", kind, err)
+			}
+			base.Masker = nil
+			if _, err := Build(kind, base, Runtime{}); err == nil {
+				t.Fatal("owner toolchain accepted without a masker")
 			}
 		}
 	}

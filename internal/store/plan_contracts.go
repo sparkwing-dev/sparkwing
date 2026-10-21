@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -60,38 +58,30 @@ type PlanSecretOpener interface {
 	OpenPlanSecret(context.Context, Team, Secret) (string, error)
 }
 
-type planSecretValues []string
-
-func (values planSecretValues) ContainsSecret(identifier string) bool {
-	return slices.ContainsFunc(values, func(value string) bool { return value != "" && strings.Contains(identifier, value) })
-}
-
-func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection) (planSecretValues, error) {
-	values := planSecretValues{}
+func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection) (*secrets.Masker, error) {
+	values := secrets.NewMasker()
 	if spec.Request.Request.Origin != runspec.OriginLocal && len(spec.Request.Request.Env.Names) > 0 {
 		submitted, err := (&Tenant{s: tx.store, team: team}).readSubmittedEnvironmentTx(ctx, tx, spec.Request.RunID)
 		if err != nil {
 			return nil, err
 		}
-		masker := secrets.NewMasker()
-		if err := procenv.CheckSubmitted(submitted, masker); err != nil {
+		if err := procenv.CheckSubmitted(submitted, values); err != nil {
 			return nil, err
 		}
-		values = append(values, masker.Values()...)
 	}
 	for _, name := range spec.Request.Request.LocalSecretNames {
 		value, err := tx.store.localSecret(team, spec.Request.RunID, name)
 		if err != nil {
 			return nil, err
 		}
-		values = append(values, value)
+		values.Register(value)
 	}
 	for _, name := range spec.Resolved.SecretArgs {
 		value, exists := spec.Resolved.Args[name]
 		if !exists {
 			return nil, authorityError(apierr.PlanInvalid, "secret argument classification names an absent argument")
 		}
-		values = append(values, value)
+		values.Register(value)
 	}
 	rows, err := selectedSecretsTx(ctx, tx, team, "", selection)
 	if err != nil {
@@ -109,7 +99,7 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		if err != nil {
 			return nil, authorityError(apierr.Unavailable, "plan secret decryption failed")
 		}
-		values = append(values, value)
+		values.Register(value)
 	}
 	return values, nil
 }

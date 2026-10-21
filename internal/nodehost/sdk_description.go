@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -84,10 +83,5 @@ func (s planningSecrets) ContainsSecret(identifier string) bool {
 	if s.prior != nil && s.prior.ContainsSecret(identifier) {
 		return true
 	}
-	for _, value := range s.masker.Values() {
-		if value != "" && strings.Contains(identifier, value) {
-			return true
-		}
-	}
-	return false
+	return s.masker.ContainsSecret(identifier)
 }

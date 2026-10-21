@@ -163,7 +163,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: plan})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: claimed.Claim.Request, Declarations: declarations, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}

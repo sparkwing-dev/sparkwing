@@ -1,13 +1,12 @@
 package nodehost
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // safety: a failed command's error embeds its whole output, which the node's
@@ -44,53 +43,12 @@ func maskHostError(err error, mask func(string) string) error {
 	masked := maskedRunError{err: err, text: boundedNodeErrText(mask(err.Error()))}
 	var canonical *apierr.Error
 	if errors.As(err, &canonical) {
-		masked.canonical = &apierr.Error{Code: maskedFailureCode(canonical.Code, mask), Message: masked.text, Details: maskErrorDetails(canonical.Details, mask)}
+		masked.canonical = &apierr.Error{Code: maskedFailureCode(canonical.Code, mask), Message: masked.text, Details: secrets.MaskDetails(canonical.Details, mask)}
 		if canonical.Hint != "" {
 			masked.canonical.Hint = boundedNodeErrText(mask(canonical.Hint))
 		}
 	}
 	return masked
-}
-
-func maskErrorDetails(details map[string]any, mask func(string) string) map[string]any {
-	if details == nil {
-		return nil
-	}
-	raw, err := json.Marshal(details)
-	if err != nil {
-		return nil
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var normalized map[string]any
-	if decoder.Decode(&normalized) != nil {
-		return nil
-	}
-	var sanitize func(any) any
-	sanitize = func(value any) any {
-		switch value := value.(type) {
-		case map[string]any:
-			result := make(map[string]any, len(value))
-			for key, item := range value {
-				result[mask(key)] = sanitize(item)
-			}
-			return result
-		case []any:
-			for i, item := range value {
-				value[i] = sanitize(item)
-			}
-			return value
-		case string:
-			return mask(value)
-		case json.Number, bool:
-			text := fmt.Sprint(value)
-			if masked := mask(text); masked != text {
-				return masked
-			}
-		}
-		return value
-	}
-	return sanitize(normalized).(map[string]any)
 }
 
 // safety: the first line names what failed and the tail is where a command's

@@ -244,7 +244,7 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 		t.Fatalf("public here award cannot be hosted: purpose=%s delivery=%s binding=%+v error=%v", claimed.Claim.Purpose, claimed.Claim.Delivery, claimed.Claim.Binding, err)
 	}
 	options.Bearer = func(context.Context) (string, error) { return claimed.Claim.Capability, nil }
-	spec, err := source.ForRequest(created.Request)
+	spec, err := source.ForRequest(claimed.Claim.Request)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,9 +2,8 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"sync"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type Source interface {
@@ -53,4 +52,4 @@ func (c *Cached) Resolve(ctx context.Context, name string) (string, bool, error)
 }
 
 // ErrSecretMissing is what a [Source] returns for a name it does not hold.
-var ErrSecretMissing = sparkwing.ErrSecretMissing
+var ErrSecretMissing = errors.New("secret missing")
