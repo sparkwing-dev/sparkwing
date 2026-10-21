@@ -12,7 +12,8 @@ group set grants in one transaction with one durable arrival sequence. A queued
 set holds no group. Policy effects, including cancellation, roll back if another
 group must wait. Promotion runs through the same complete-set operation. Handoff
 changes authorization fences and start permits, never reservation identity or
-arrival. An expired reservation starts a new arrival. Supersession cancels the current
+arrival. Queue timeouts apply only while waiting; replaying a retained grant cannot
+time out. An expired reservation starts a new arrival. Supersession cancels the current
 job award even when the reservation predates its claim. The retained transactional
 ledger and policy engine live in `internal/store/concurrency.go`.
 

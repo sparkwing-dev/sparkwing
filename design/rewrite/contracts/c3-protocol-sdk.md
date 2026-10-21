@@ -346,7 +346,7 @@ are part of this contract.
 | `nodehost.CapacityStore`, `StartGate`, `ComposeStartGate` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The thin client presents only its current job award. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
 | `nodehost.NativeHostConfig.Admission`, `NativeConfig.Admission` | Carry one composed admission value. Required requester compute is independent of placement eligibility. Runners may omit compute while retaining the supplied capacity store. |
 | `nodehost.AdmissionFailure` | Preserve the store decision while terminal settlement remains store-owned. |
-| `Tenant.ReleaseEvaluation`, ready transitions | Commit plan admission with release permission. Reconciliation starts immediately and settles released work while new releases wait. |
+| `store.Tenant.ReleaseEvaluation`, ready transitions | Commit plan admission with release permission. Reconciliation starts immediately and settles released work while new releases wait. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |

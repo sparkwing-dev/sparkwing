@@ -123,7 +123,8 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding CapacityB
 	}
 	id := binding.RunID + "/" + nodeIDOrDash(binding.NodeID)
 	var arrival, previousExpiry int64
-	err = tx.QueryRowContext(ctx, `SELECT arrived_at,lease_expires_at FROM admission_work WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID).Scan(&arrival, &previousExpiry)
+	var retainedGrant bool
+	err = tx.QueryRowContext(ctx, `SELECT arrived_at,lease_expires_at,granted=1 FROM admission_work WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID).Scan(&arrival, &previousExpiry, &retainedGrant)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return AcquireSlotResponse{}, err
 	}
@@ -138,6 +139,7 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding CapacityB
 		}
 	}
 	if err != nil || previousExpiry <= now.UnixNano() {
+		retainedGrant = false
 		if err := clearAdmissionLevelTx(ctx, tx, t.team, binding.RunID, binding.NodeID); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -182,7 +184,7 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding CapacityB
 	result := AcquireSlotResponse{Kind: AcquireGranted, HolderID: id, LeaseExpiresAt: time.Unix(0, expires)}
 	for _, key := range keys {
 		group := declarations[key]
-		if group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 && !time.Unix(0, arrival).Add(time.Duration(*group.QueueTimeoutMS)*time.Millisecond).After(tx.now(ctx)) {
+		if !retainedGrant && group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 && !time.Unix(0, arrival).Add(time.Duration(*group.QueueTimeoutMS)*time.Millisecond).After(tx.now(ctx)) {
 			result = AcquireSlotResponse{Kind: AcquireFailed, FailureReason: FailureQueueTimeout}
 			break
 		}

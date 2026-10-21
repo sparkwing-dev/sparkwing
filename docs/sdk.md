@@ -356,6 +356,7 @@ policy. Plan and job groups have separate namespaces. The same name at both
 levels identifies two budgets. The store derives keys from accepted declarations
 and the actual execution award. Each complete group set grants atomically. A
 queued job holds none of its groups. `QueueTimeout` bounds initial waiting.
+Replaying an already granted admission after that timeout retains its groups.
 
 After released work loses plan capacity, it keeps running. New releases queue
 without a timeout until the plan reacquires capacity. `CancelOthers` replaces

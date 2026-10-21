@@ -95,6 +95,53 @@ func TestAdmissionGroupSetIsAtomicAndUsesOneArrival(t *testing.T) {
 	}
 }
 
+func TestAdmissionQueueTimeoutOnlyAppliesWhileWaiting(t *testing.T) {
+	for _, dialect := range []struct {
+		name   string
+		target func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			for _, queued := range []bool{false, true} {
+				t.Run(map[bool]string{false: "granted", true: "waiting"}[queued], func(t *testing.T) {
+					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
+						doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), OnLimit: new("queue"), QueueTimeoutMS: new(int64(1000))}}
+					})
+					now, err := f.s.TestOnlyDatabaseTime(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					f.s.SetTestClock(t, func() time.Time { return now })
+					want := store.AcquireGranted
+					if queued {
+						blocker, actor := admissionPolicyBlocker(t, f)
+						if result, err := f.tenant.MayStart(t.Context(), blocker, actor); err != nil || result.Kind != store.AcquireGranted {
+							t.Fatalf("blocker: %+v %v", result, err)
+						}
+						want = store.AcquireQueued
+					}
+					binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+					if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != want {
+						t.Fatalf("initial admission: %+v %v", result, err)
+					}
+					now = now.Add(2 * time.Second)
+					if queued {
+						want = store.AcquireFailed
+					}
+					result, err := f.tenant.MayStart(t.Context(), binding, f.holder)
+					if err != nil || result.Kind != want || queued && result.FailureReason != store.FailureQueueTimeout {
+						t.Fatalf("admission after queue deadline: %+v %v", result, err)
+					}
+					if !queued {
+						if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
+							t.Fatalf("retained permit cannot start: %v", err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestAdmissionRequiresActualJobAward(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}

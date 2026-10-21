@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
@@ -34,9 +35,22 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 			}
 			competitor := ""
 			if held != "group" {
-				competitor, err = f.capacityCompetitor(ctx)
+				admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
 				if err != nil {
 					t.Fatal(err)
+				}
+				competitor = admitted.RunID
+				owner, err := f.claimOwner(ctx, competitor, "competitor")
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan := f.plan
+				plan.RunID, plan.Actor, plan.Seal.Request = competitor, owner, admitted.Request
+				if _, err := f.tenant.AcceptPlan(ctx, plan); err != nil {
+					t.Fatal(err)
+				}
+				if granted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: competitor, Generation: int64(owner.Owner.Generation)}, owner); err != nil || granted.Kind != store.AcquireGranted {
+					t.Fatalf("competitor plan admission: %+v, %v", granted, err)
 				}
 
 			}

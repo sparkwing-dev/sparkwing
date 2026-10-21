@@ -168,7 +168,7 @@ func FuzzOwnerHostSelfClaimPreservesExecutionIdentity(f *testing.F) {
 		}
 		probe := &ownerReconcileProbe{OwnerStore: &ownerFixture{}, result: store.ReconciledNode{Kind: store.Execute, Node: state.row, Claim: claim, Bearer: []byte("private-award")}}
 		adopted, executed := false, false
-		h := OwnerHost{Store: probe, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
+		h := OwnerHost{executionAdmission: ComposeStartGate(probe.OwnerStore.(*ownerFixture), nil, false), Mask: func(s string) string { return s }, Store: probe, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
 			adopted = true
 			if string(award.Bearer) != "private-award" {
 				t.Fatal("private award lost before adoption")

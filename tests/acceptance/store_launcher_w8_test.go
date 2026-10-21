@@ -79,6 +79,7 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitStoredUnitW8(t, server.Store, unit)
 	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("Cloud start: %+v: %v", started, err)

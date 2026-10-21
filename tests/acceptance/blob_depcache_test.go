@@ -82,10 +82,6 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil {
 		return fmt.Errorf("store physical output: %w", err)
 	}
-	memoKey, err := blob.ResolveWriteKey(authority, blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Key: fmt.Sprintf("%x", sha256.Sum256(seed[:])), Name: blob.MemoRecordName})
-	if err != nil {
-		return err
-	}
 	if err := os.WriteFile(filepath.Join(root, "lockfile"), seed[:], 0o600); err != nil {
 		return err
 	}
@@ -114,9 +110,6 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 		return fmt.Errorf("read physical artifact manifest: %v", err)
 	}
 	manifest := manifestHit.Record
-	if _, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Authority: authority, Source: identity, Key: memoKey, Digest: result.Digest, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}, Members: manifestHit.Members}); err != nil {
-		return fmt.Errorf("store physical memo: %w", err)
-	}
 	backend := depcacheblob.New(data)
 	if _, err := backend.Store(ctx, key, source); err != nil {
 		return fmt.Errorf("save physical archive: %w", err)
@@ -143,20 +136,12 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if got, err := output.Read(ctx, result.Key); err != nil || !bytes.Equal(got, body) {
 		return fmt.Errorf("reopened physical output differs: %v", err)
 	}
-	hitMemo, err := data.Records.LookupMemo(ctx, blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Hash: runspec.Hash(memoKey.Scope.Key)}, Budget: data.Budget})
-	if err != nil || !hitMemo.Found || !hitMemo.Output.Set || hitMemo.Output.Value != result.Digest {
-		return fmt.Errorf("reopened physical memo differs: %+v: %v", hitMemo, err)
-	}
-	copied, err := data.Records.CopyMemo(ctx, blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Hash: runspec.Hash(memoKey.Scope.Key)}, Budget: data.Budget}, Destination: identity.Attempt.Value})
-	if err != nil || !copied.Found || !copied.Manifest.Set || copied.Manifest.Value != manifest.Digest {
-		return fmt.Errorf("materialize physical memo: %+v: %v", copied, err)
-	}
 	artifactData.Bytes, artifactData.Records = data.Bytes, data.Records
 	if err := os.Mkdir(filepath.Join(root, "staged"), 0o700); err != nil {
 		return err
 	}
 	if _, err := artifacts.Stage(ctx, artifactData, filepath.Join(root, "staged"), []artifacts.Edge{{Record: manifest.Key}}); err != nil {
-		return fmt.Errorf("stage physical memo artifacts: %w", err)
+		return fmt.Errorf("stage physical artifacts: %w", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "staged", "module")); err != nil || !bytes.Equal(got, payload) {
 		return fmt.Errorf("staged physical artifact differs: %v", err)

@@ -4239,6 +4239,8 @@ Every start requires a permit, including jobs without groups. Process delegation
 reads the same permit with its running attempt in one authentication snapshot.
 Logical reservation generations do not need adoption or rewriting. Claim or
 owner liveness preserves continuously retained arrival. Expired leases never revive.
+Queue timeouts apply only to ungranted work. Replaying a live complete grant
+retains its permit and arrival after the queue deadline.
 
 `StartGate` is a decision client followed by optional machine compute. It derives
 no groups or policies. The store alone derives accepted keys and the award's box

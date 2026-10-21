@@ -49,6 +49,8 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 			t.Error(err)
 		}
 	})
+	now := time.Now().UTC()
+	f.s.SetTestClock(t, func() time.Time { return now })
 	var plan store.PlanAcceptance
 	f.tenant, plan, err = storePlanSealRequestWith(ctx, f.s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}, Retry: &nodeproto.RetrySpec{Attempts: 2}}}

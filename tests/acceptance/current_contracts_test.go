@@ -133,7 +133,7 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, capacityInventory, ok := strings.Cut(string(data), "### internal/store/capacity_adoption.go\n")
+	_, capacityInventory, ok := strings.Cut(string(data), "### internal/store/capacity_admission.go\n")
 	if !ok {
 		t.Fatal("missing capacity inventory")
 	}

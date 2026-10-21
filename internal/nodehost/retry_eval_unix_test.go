@@ -152,6 +152,9 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	f, sourceInput := retryWithRecordedExpansion(t)
 	input := claimedFixtureNode(t, f, "bad")
 	input.Entry = &source.Entry{Engine: input.Engine}
+	if result, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || result.Kind != store.AcquireGranted {
+		t.Fatalf("execution admission: %+v %v", result, err)
+	}
 	before, err := f.Tenant.ReadSnapshot(t.Context(), f.Accepted.RunID)
 	if err != nil {
 		t.Fatal(err)

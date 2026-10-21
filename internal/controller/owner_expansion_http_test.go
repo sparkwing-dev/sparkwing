@@ -3,11 +3,13 @@ package controller
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestOwnerExpansionHTTPDerivesSourceAuthority(t *testing.T) {
@@ -19,7 +21,8 @@ func TestOwnerExpansionHTTPDerivesSourceAuthority(t *testing.T) {
 		{"failure", `{"source_generation":3,"failure":{"code":"sdk_error","message":"generator failed"}}`, store.ExpansionFailed},
 	} {
 		t.Run(report.name, func(t *testing.T) {
-			engine, tenant := engineRuntimeStore(t)
+			now := time.Now().UTC()
+			engine, tenant := engineRuntimeStore(t, teststore.WithClock(func() time.Time { return now }))
 			owner := engineRuntimeClaim(t, engine, capability.UnitTrigger)
 			raw := nativeClaimPresentation(t, engine, owner)
 			run, err := tenant.ReadRun(t.Context(), "run")
