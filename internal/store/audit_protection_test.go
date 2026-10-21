@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
@@ -102,5 +103,55 @@ func TestMemberRemovalRequiresCommittedAudit(t *testing.T) {
 	rows, err := tenant.BusinessEvents(t.Context(), "team.mutated", 1000, "")
 	if err != nil || len(rows) != 1 || rows[0].Actor != "owner" || rows[0].SubjectID != "member" || rows[0].Attrs["operation"] != "membership.removed" {
 		t.Fatalf("membership audit=%+v: %v", rows, err)
+	}
+	if _, err := s.DeleteAccount(t.Context(), "member", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = tenant.BusinessEvents(t.Context(), "team.mutated", 1000, "")
+	if err != nil || len(rows) != 1 || rows[0].SubjectID != "deleted account" {
+		t.Fatalf("deleted subject=%+v: %v", rows, err)
+	}
+}
+
+func TestAuditOwnerRejectsEmails(t *testing.T) {
+	s := authorityStore(t)
+	for _, ev := range []BusinessEvent{
+		{Kind: "privacy", Actor: "person@example.test"},
+		{Kind: "privacy", Account: "person@example.test"},
+		{Kind: "privacy", SubjectID: "person@example.test"},
+		{Kind: "privacy", Attrs: map[string]any{"nested": []any{map[string]any{"value": "person@example.test"}}}},
+	} {
+		if err := s.inTx(t.Context(), func(tx *storeTx) error { return tx.operator.RecordBusinessEvent(tx, ev) }); err == nil {
+			t.Fatalf("email entered audit: %+v", ev)
+		}
+	}
+	rewriteSchemaCount(t, s.db, "audit_events", 0)
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{Team: "a", Kind: "privacy", Attrs: map[string]any{"reason": "person@example.test", "message": "Person Name", "last4": "1234", "amount_micro": 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "privacy", 10, "")
+	if err != nil || len(events) != 1 || len(events[0].Attrs) != 1 || events[0].Attrs["amount_micro"] != float64(1) {
+		t.Fatalf("personal audit attrs: %+v %v", events, err)
+	}
+}
+
+func TestInvitationAuditUsesInvitationID(t *testing.T) {
+	s := authorityStore(t)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	tn := &Tenant{s: s, team: "a"}
+	a := teamAuthorization(t, s, owner, "a", "POST", "/api/v1/team/invitations")
+	invitation, err := tn.CreateAuthorizedInvitation(t.Context(), a, "invitee@example.test", RoleReader, "invitation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := tn.BusinessEvents(t.Context(), "team.mutated", 10, "")
+	if err != nil || len(events) != 1 || events[0].SubjectID != invitation.ID || events[0].Actor != "owner" {
+		t.Fatalf("invitation audit: %+v %v", events, err)
+	}
+	a.Principal.Capability.Subject.ID = "another-account"
+	if _, err := tn.CreateAuthorizedInvitation(t.Context(), a, "other@example.test", RoleReader, "invitation"); err == nil {
+		t.Fatal("invitation identity used an uncommitted actor")
 	}
 }

@@ -111,6 +111,7 @@ type RetentionRequest struct {
 
 // RetentionResult reports committed removals and preserved pins; financial rows must always remain untouched.
 type RetentionResult struct {
+	AuditEvents   int64
 	Runs          int64
 	Metrics       int64
 	Records       int64

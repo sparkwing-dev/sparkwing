@@ -1,21 +1,43 @@
 package store
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const defaultAuditRetentionDays = 400
+
+// The guard and maintenance use the database clock and the same policy expression.
+func auditRetentionCutoffSQL(d Dialect) string {
+	value := "CAST(CAST(value AS TEXT) AS BIGINT)"
+	if d == DialectPostgres {
+		value = "CAST(convert_from(value, 'UTF8') AS BIGINT)"
+	}
+	return fmt.Sprintf(`(SELECT CASE WHEN days BETWEEN 1 AND %d THEN (%s)-days*%d ELSE NULL END
+ FROM (SELECT COALESCE((SELECT %s FROM settings WHERE key='%s'),%d) AS days) policy)`,
+		maxRetentionDays, strings.TrimPrefix(databaseTimeSQL(d), "SELECT "), int64(24*time.Hour), value, storageAuditRetentionKey, defaultAuditRetentionDays)
+}
 
 func (op *Operator) installAuditProtection(ctx context.Context, tx *storeTx) error {
 	if err := op.installRunTombstones(ctx, tx); err != nil {
 		return err
 	}
 	if tx.dialect == DialectPostgres {
-		_, err := tx.ExecContext(ctx, `CREATE FUNCTION reject_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'audit events are append-only'; END $$`)
+		_, err := tx.ExecContext(ctx, `CREATE FUNCTION reject_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF TG_OP = 'DELETE' THEN
+  IF OLD.ts < `+auditRetentionCutoffSQL(tx.dialect)+` THEN RETURN OLD; END IF;
+ END IF;
+ RAISE EXCEPTION 'audit events are append-only within retention'; END $$`)
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_events FOR EACH STATEMENT EXECUTE FUNCTION reject_audit_mutation()`)
+		_, err = tx.ExecContext(ctx, `CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_audit_mutation()`)
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM PUBLIC, CURRENT_USER`)
+		_, err = tx.ExecContext(ctx, `CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events FOR EACH STATEMENT EXECUTE FUNCTION reject_audit_mutation()`)
 		return err
 	}
 	// SQLite REPLACE skips delete triggers unless recursive triggers are enabled.
@@ -24,10 +46,13 @@ func (op *Operator) installAuditProtection(ctx context.Context, tx *storeTx) err
         BEGIN SELECT RAISE(IGNORE); END`); err != nil {
 		return err
 	}
-	for _, action := range []string{"UPDATE", "DELETE"} {
-		if _, err := tx.ExecContext(ctx, `CREATE TRIGGER audit_events_no_`+action+` BEFORE `+action+` ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END`); err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, `CREATE TRIGGER audit_events_no_UPDATE BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE TRIGGER audit_events_no_DELETE BEFORE DELETE ON audit_events
+ WHEN NOT COALESCE(OLD.ts < `+auditRetentionCutoffSQL(tx.dialect)+`,0)
+ BEGIN SELECT RAISE(ABORT, 'audit events are append-only within retention'); END`); err != nil {
+		return err
 	}
 	return nil
 }

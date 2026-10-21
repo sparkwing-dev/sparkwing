@@ -9,7 +9,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 17, which drops `card_charges`,
+schema baseline moves to version 18, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -3095,3 +3095,9 @@ the implicit rowid so replacement cannot bypass their guarded primary key.
 The store baseline uses SQLite STRICT tables and stronger relational and row
 constraints on both dialects. Recreate stores from another baseline before
 starting this build. There is no in-place migration.
+
+Audit entries retain account IDs and invitation IDs rather than personal details.
+Deleted accounts render as "deleted account". Operator storage settings expose
+`audit_retention_days` (default 400 days, zero restores the default). The controller
+prunes older audit rows on its existing maintenance loop. The guards enforce
+append-only against application SQL. Database credentials can disable them.

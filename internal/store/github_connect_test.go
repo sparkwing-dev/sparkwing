@@ -304,7 +304,7 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 			t.Fatalf("team %s audit: %+v %v", team.team, events, err)
 		}
 		ev := events[0]
-		if ev.Actor != a.Principal.Capability.Subject.ID || ev.Attrs["previous_team"] != "b" || ev.Attrs["new_team"] != "a" || ev.Attrs["installation_id"] != float64(8) || ev.Attrs["github_user_id"] != float64(row.GitHubUserID) {
+		if ev.Actor != a.Principal.Capability.Subject.ID || ev.Attrs["previous_team"] != "b" || ev.Attrs["new_team"] != "a" || ev.Attrs["installation_id"] != float64(8) || ev.Attrs["github_user_id"] != nil {
 			t.Fatalf("missing transfer facts: %+v", ev)
 		}
 	}

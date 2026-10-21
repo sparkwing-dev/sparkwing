@@ -1008,6 +1008,8 @@ CREATE TABLE audit_events (
     kind TEXT NOT NULL,
     subject_id TEXT NOT NULL DEFAULT '',
     actor TEXT NOT NULL DEFAULT '',
+    actor_is_account BIGINT NOT NULL DEFAULT 0 CHECK(actor_is_account IN (0,1)),
+    subject_is_account BIGINT NOT NULL DEFAULT 0 CHECK(subject_is_account IN (0,1)),
     attrs TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -1618,6 +1620,8 @@ CREATE INDEX idx_cron_schedules_github_identity ON cron_schedules(team, github_i
 
 CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);
 
+
+CREATE INDEX idx_audit_events_retention ON audit_events(ts,id);
 
 CREATE INDEX idx_audit_events_team_ts ON audit_events(team, ts, id);
 

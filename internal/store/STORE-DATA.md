@@ -13,10 +13,30 @@ The schema counterexample suites exercise these rules against either dialect.
 Secret releases, source credential releases and privileged mutations append to
 `audit_events` in the transaction that authorizes them. Audit rows retain plain
 team and run identifiers because deleting a run, team or account must preserve
-the facts. Database triggers reject updates and deletion, including PostgreSQL
-TRUNCATE. SQLite audit rows use STRICT, WITHOUT ROWID so replacement cannot
-bypass their guarded primary key. Every run deletion appends a `run.deleted`
-tombstone with a fresh identity, including when a later run reuses the ID.
+the facts. Audit rows are append-only against application code. Triggers reject
+every UPDATE and permit DELETE only for rows older than the operator-set horizon.
+PostgreSQL also rejects TRUNCATE. The same role owns the PostgreSQL tables and runs
+the application, so a holder of the database credentials can disable these guards.
+Separate owner and runtime roles are post-launch hardening. Local SQLite
+append-only holds only against SQL the app issues. SQLite audit rows use
+STRICT, WITHOUT ROWID so replacement cannot bypass their guarded primary key.
+Every run deletion appends a `run.deleted` tombstone with a fresh identity,
+including when a later run reuses the ID.
+
+Actors and account subjects use account IDs. Invitation subjects use invitation
+IDs. The shared audit writer refuses email addresses and omits free-form reasons,
+messages, provider failure text and card/person details from nested attributes.
+Readers render a missing account as "deleted account" without rewriting history.
+The account and operational records own personal details and deletion of them.
+
+The operator storage settings API exposes `audit_retention_days`, stored as
+`operator.audit_retention_days`. The default is 400 days. A zero or omitted write
+restores that default. Positive values set the horizon. The existing leased
+controller maintenance pass prunes expired audit rows in bounded batches,
+including facts for deleted teams. It uses the same database-clock cutoff as the
+SQL guards, so pruning cannot bypass the horizon. All UPDATEs remain refused,
+including changes to expired rows.
+
 Editors may delete only runs they submitted. Owners may delete any run in their team.
 
 `Tenant.BusinessEvents` reads bounded pages in descending timestamp and ID order.

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -70,10 +71,29 @@ func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 		if attrs, err = json.Marshal(ev.Attrs); err != nil {
 			return fmt.Errorf("business event attrs: %w", err)
 		}
+		var fields map[string]any
+		decoder := json.NewDecoder(bytes.NewReader(attrs))
+		decoder.UseNumber()
+		if err := decoder.Decode(&fields); err != nil {
+			return err
+		}
+		stripAuditPersonalFields(fields)
+		attrs, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
 		if len(attrs) > maxBusinessEventAttrsBytes {
 			return fmt.Errorf("%w: business event attrs are %d bytes, over %d",
 				ErrInvalidInput, len(attrs), maxBusinessEventAttrsBytes)
 		}
+	}
+	// Email addresses have no durable home in an append-only record.
+	identityFields, err := json.Marshal([]string{string(ev.Team), ev.Kind, ev.Account, ev.SubjectID, ev.Actor, ev.RunID})
+	if err != nil {
+		return err
+	}
+	if bytes.ContainsRune(identityFields, '@') || bytes.ContainsRune(attrs, '@') {
+		return fmt.Errorf("%w: audit events contain identifiers, never email addresses", ErrInvalidInput)
 	}
 	var id string
 	switch ev.Kind {
@@ -95,12 +115,14 @@ func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	if ev.Team == "" {
 		team = nil
 	}
-	_, err := tx.Exec(`
-		INSERT INTO audit_events (id, ts, team, account, kind, subject_id, actor, attrs, run_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err = tx.Exec(`
+		INSERT INTO audit_events (id, ts, team, account, kind, subject_id, actor, attrs, run_id, actor_is_account, subject_is_account)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+        CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END,
+        CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END)
 		ON CONFLICT DO NOTHING`,
 		id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID,
-		truncate(ev.Actor, 200), string(attrs), ev.RunID)
+		truncate(ev.Actor, 200), string(attrs), ev.RunID, ev.Actor, ev.SubjectID)
 	return err
 }
 
@@ -111,7 +133,12 @@ func (t *Tenant) BusinessEvents(ctx context.Context, kind string, limit int, bef
 	if limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("%w: event limit is 1 to 1000", ErrInvalidInput)
 	}
-	query := `SELECT id, ts, team, account, kind, subject_id, actor, attrs, run_id FROM audit_events WHERE team = ?`
+	query := `SELECT id, ts, team,
+ CASE WHEN account<>'' AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.account) THEN 'deleted account' ELSE account END,
+ kind,
+ CASE WHEN subject_is_account=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.subject_id) THEN 'deleted account' ELSE subject_id END,
+ CASE WHEN actor_is_account=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.actor) THEN 'deleted account' ELSE actor END,
+ attrs, run_id FROM audit_events WHERE team = ?`
 	args := []any{string(t.team)}
 	if kind != "" {
 		query, args = query+` AND kind = ?`, append(args, kind)
@@ -151,4 +178,23 @@ func (t *Tenant) BusinessEvents(ctx context.Context, kind string, limit int, bef
 		out = append(out, ev)
 	}
 	return out, rows.Err()
+}
+
+// Free-form explanations and card/person details stay in mutable operational records.
+func stripAuditPersonalFields(value any) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			switch strings.ToLower(key) {
+			case "reason", "message", "failure", "email", "last4", "brand", "github_user_id":
+				delete(v, key)
+			default:
+				stripAuditPersonalFields(child)
+			}
+		}
+	case []any:
+		for _, child := range v {
+			stripAuditPersonalFields(child)
+		}
+	}
 }

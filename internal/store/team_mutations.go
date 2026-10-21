@@ -83,19 +83,22 @@ func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Autho
 // CreateAuthorizedInvitation creates or replays an invitation under current administration.
 func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Authorized, email string, role Role, key string) (Invitation, error) {
 	var out Invitation
-	err := t.teamMutationTx(ctx, a, "CreateAuthorizedInvitation", NormalizeEmail(email), func(tx *storeTx, p capability.Principal) error {
+	identity, err := json.Marshal([]string{string(t.team), a.Principal.Capability.Subject.ID, key})
+	if err != nil {
+		return Invitation{}, err
+	}
+	sum := sha256.Sum256(identity)
+	id := hex.EncodeToString(sum[:])
+	err = t.teamMutationTx(ctx, a, "CreateAuthorizedInvitation", id, func(tx *storeTx, p capability.Principal) error {
+		if p.Capability.Subject != a.Principal.Capability.Subject {
+			return bindingRefusal()
+		}
 		email = NormalizeEmail(email)
 		if !LooksLikeEmail(email) || !role.Valid() || strings.TrimSpace(key) == "" {
 			return ErrInvalidInput
 		}
-		identity, err := json.Marshal([]string{string(t.team), p.Capability.Subject.ID, key})
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256(identity)
-		id := hex.EncodeToString(sum[:])
 		var created, expires int64
-		err = tx.QueryRowContext(ctx, `SELECT id,team,email,role,invited_by,created_at,expires_at FROM invitations WHERE team=? AND id=?`, t.team, id).Scan(&out.ID, &out.Team, &out.Email, &out.Role, &out.InvitedBy, &created, &expires)
+		err := tx.QueryRowContext(ctx, `SELECT id,team,email,role,invited_by,created_at,expires_at FROM invitations WHERE team=? AND id=?`, t.team, id).Scan(&out.ID, &out.Team, &out.Email, &out.Role, &out.InvitedBy, &created, &expires)
 		if err == nil {
 			if out.Email != email || out.Role != role {
 				return authorityError(apierr.Conflict, "idempotency key names another invitation")
@@ -224,10 +227,10 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 			return authorityError(apierr.Conflict, "run is still active")
 		}
 		var held int
-		if err := tx.QueryRowContext(ctx, `SELECT
- EXISTS(SELECT 1 FROM nodes WHERE team=? AND run_id=? AND claimed_by IS NOT NULL) +
- EXISTS(SELECT 1 FROM triggers WHERE team=? AND id=? AND claimed_by IS NOT NULL) +
- EXISTS(SELECT 1 FROM eval_units WHERE team=? AND run_id=? AND claimed_by IS NOT NULL)`, t.team, a.Target.RunID, t.team, a.Target.RunID, t.team, a.Target.RunID).Scan(&held); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN
+ EXISTS(SELECT 1 FROM nodes WHERE team=? AND run_id=? AND claimed_by IS NOT NULL) OR
+ EXISTS(SELECT 1 FROM triggers WHERE team=? AND id=? AND claimed_by IS NOT NULL) OR
+ EXISTS(SELECT 1 FROM eval_units WHERE team=? AND run_id=? AND claimed_by IS NOT NULL) THEN 1 ELSE 0 END`, t.team, a.Target.RunID, t.team, a.Target.RunID, t.team, a.Target.RunID).Scan(&held); err != nil {
 			return err
 		}
 		if held != 0 {

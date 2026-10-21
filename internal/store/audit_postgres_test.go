@@ -2,13 +2,14 @@ package store_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
 func TestAuditAppendOnlyPostgres(t *testing.T) {
 	s := storetest.NewPostgres(t).Open(t)
-	if _, err := s.DB().Exec(`INSERT INTO audit_events(id,ts,kind) VALUES ('audit-probe',1,'probe')`); err != nil {
+	if _, err := s.DB().Exec(`INSERT INTO audit_events(id,ts,kind) VALUES ('audit-probe',$1,'probe')`, time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{`UPDATE audit_events SET actor='forged'`, `DELETE FROM audit_events`, `TRUNCATE audit_events`} {

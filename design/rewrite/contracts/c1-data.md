@@ -680,7 +680,20 @@ retain their ancestry check. Every effect rolls back after a failed write.
 `SchemaTables` is the single table inventory in `schema.go`. Runtime purge,
 tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
 `capabilities` and `sessions` may carry a nullable team. Audit rows are retained
-after team deletion. Bound capabilities and sessions leave with the team.
+after team deletion and expire only by age. Actors and account subjects use
+account IDs, invitation subjects use invitation IDs, and audit rows contain no
+email addresses or free-form personal details. Readers render erased accounts
+as "deleted account". The shared audit owner strips personal attribute fields
+and rejects email-bearing records before insertion.
+
+Audit rows are append-only against application code. Both dialects reject every
+UPDATE and permit DELETE only for rows older than `operator.audit_retention_days`
+(default 400 days, set through the operator storage settings API). The leased
+controller maintenance pass prunes expired rows in bounded batches using the same
+database-clock cutoff as the triggers. PostgreSQL rejects TRUNCATE. One PostgreSQL
+role owns the tables and runs the app, so credentials can disable the triggers.
+Separate roles are post-launch hardening. Local SQLite append-only holds only
+against SQL the app issues. Bound capabilities and sessions leave with the team.
 Purge removes quota reservations before aggregates and removes
 runs after their operational rows and restrictive pins. Generated SQLite checks
 compare all surviving rows across repeated purges with adversarial tenant keys.
