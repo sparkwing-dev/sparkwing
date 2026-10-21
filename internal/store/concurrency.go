@@ -979,7 +979,11 @@ func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, jo
 	if job != "" {
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
 	} else {
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END FROM runs r WHERE team=? AND id=?`, team, run).Scan(&lease)
+		// Running jobs keep plan capacity through owner recovery.
+		err = tx.QueryRowContext(ctx, `SELECT MAX(deadline) FROM (
+ SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END AS deadline FROM runs r WHERE team=? AND id=?
+ UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL
+) live`, team, run, team, run).Scan(&lease)
 	}
 	if err != nil {
 		return 0, err

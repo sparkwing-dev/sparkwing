@@ -62,8 +62,15 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
 		return err
 	}
-	if _, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder); err != nil {
-		return err
+	beat, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder)
+	if err != nil {
+		return fmt.Errorf("renew retained node: %w", err)
+	}
+	for _, key := range []string{"node", "plan"} {
+		state, err := f.tenant.GetConcurrencyState(ctx, key)
+		if err != nil || len(state.Holders) != 1 || !state.Holders[0].LeaseExpiresAt.Equal(beat.ExpiresAt) {
+			return fmt.Errorf("retained %s capacity must follow live job while owner expires: %+v, %v", key, state, err)
+		}
 	}
 	if units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued || runspec.RunID(units[0].RunID) != f.ref.RunID {
 		return fmt.Errorf("owner recovery: %+v, %v", units, err)
@@ -89,7 +96,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 		}
 	}
 	if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}); err != nil {
-		return err
+		return fmt.Errorf("report retained node: %w", err)
 	}
 	if err := checkCapacityWinner(ctx, f.tenant, "node", competitor); err != nil {
 		return err
@@ -98,7 +105,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 		return fmt.Errorf("job completion released plan capacity: %+v, %v", state, err)
 	}
 	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: owner, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
-		return err
+		return fmt.Errorf("finish successor owner: %w", err)
 	}
 	return checkCapacityWinner(ctx, f.tenant, "plan", competitor)
 }

@@ -4217,6 +4217,8 @@ slot leases. Renewal uses `leaseBound` for the authority, cancellation and funde
 bounds. The schema baseline is version 16.
 The shared capacity writer applies the bound to each holder and waiter,
 including controller reconciliation.
+Plan capacity follows the latest owner or claimed-job lease because jobs can
+outlive their owner during recovery. Cancellation still bounds the whole run.
 
 `Tenant.TransitionNode` accepts the closed `NodeCommand` interface. `StartNode`,
 `RetryNode`, `ReportNode` and `ReleaseNode` carry the captured attempt. Start,

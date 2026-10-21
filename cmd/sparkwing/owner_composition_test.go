@@ -57,7 +57,16 @@ func (s *cliOwnerStore) FinishRunAndUnit(_ context.Context, finish store.FinishR
 		return store.Applied{}, errors.New("completion changed the awarded owner")
 	}
 	s.finished = &finish
-	return store.Applied{}, s.failure
+	if s.failure != nil {
+		return store.Applied{}, s.failure
+	}
+	graph, err := s.snapshot.Scheduling()
+	if err != nil {
+		return store.Applied{}, err
+	}
+	decision := store.Decide(graph)
+	s.snapshot.Run.State = store.RunState(decision.Outcome)
+	return store.Applied{Outcome: s.snapshot.Run.State, Reason: decision.Reason}, nil
 }
 
 func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
@@ -116,12 +125,12 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 							return controllerwire.RenewalResponse{}, err
 						},
 						finish: func(ctx context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
-							_, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
+							applied, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
 								Unit: state.actor.Owner, Transition: store.RunCompletion{
 									RunID: runspec.RunID(run), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
 								},
 							})
-							return controllerwire.Applied{}, err
+							return controllerwire.Applied{Outcome: string(applied.Outcome), Reason: applied.Reason, StateSeq: applied.StateSeq, Replayed: applied.Replayed}, err
 						},
 					}
 					adapter, err := nodehost.NewRemoteHostStore(transport, state, award.UnitID, func() bool { return false })

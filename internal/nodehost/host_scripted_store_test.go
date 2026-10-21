@@ -163,10 +163,24 @@ func newOwnerSealStore(row store.RunRow) *ownerSealFixture {
 		s.row.State = input.To
 		return store.Applied{}, nil
 	}
-	s.finishRunAndUnit = func(_ context.Context, input store.FinishRunRequest) (store.Applied, error) {
+	s.finishRunAndUnit = func(ctx context.Context, input store.FinishRunRequest) (store.Applied, error) {
 		s.trace = append(s.trace, "finish")
 		s.finished = input
-		return store.Applied{}, nil
+		if s.row.Spec == nil {
+			s.row.State = store.RunFailed
+			return store.Applied{Outcome: s.row.State, Reason: input.Transition.Reason}, nil
+		}
+		snapshot, err := s.ReadSnapshot(ctx, s.row.ID)
+		if err != nil {
+			return store.Applied{}, err
+		}
+		graph, err := snapshot.Scheduling()
+		if err != nil {
+			return store.Applied{}, err
+		}
+		decision := store.Decide(graph)
+		s.row.State = store.RunState(decision.Outcome)
+		return store.Applied{Outcome: s.row.State, Reason: decision.Reason}, nil
 	}
 	return s
 }
