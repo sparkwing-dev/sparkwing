@@ -190,7 +190,13 @@ class Session {
     const definition = lookupPipeline(String(req.pipeline));
     if (!definition) throw failure("unknown_pipeline", "pipeline is not registered");
     const rawArgs = stringMap(req.args, "args");
-    const plan = new Plan(new PlanningDiagnostics(definition.args, rawArgs));
+    const plan = new Plan(
+      new PlanningDiagnostics(
+        definition.args,
+        rawArgs,
+        this.#services ? (value) => this.#services!.mask(value, new AbortController().signal) : undefined,
+      ),
+    );
     return plan.diagnostics.run(async () => {
       const args = resolvedArgs(definition.args ?? [], rawArgs, true);
       const run = this.#run(object(req.run, "run"), args);
@@ -317,7 +323,10 @@ class Session {
         const value = await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req));
         return { value: jsonValue(value) ?? null };
       } catch (error) {
-        return { value: null, error: errorFields(closure.kind === "generate" ? plan.diagnostics.error(error) : error) };
+        return {
+          value: null,
+          error: errorFields(closure.kind === "generate" ? plan.diagnostics.error(error, "", undefined, "sdk_error") : error),
+        };
       }
     } finally {
       if (stepStarted) this.#state(spec.id).finish(closure.step!.id, false);
@@ -328,15 +337,22 @@ class Session {
     ctx.signal.throwIfAborted();
     if (closure.kind === "generate") {
       if (this.#generated.has(closure.id)) return structuredClone(this.#generated.get(closure.id));
-      const generated = new Generated(closure.generator.source, closure.id, this.#current().plan);
-      await closure.fn(generated, req.input ?? null, ctx);
-      ctx.signal.throwIfAborted();
-      const jobs = generated.toDoc().jobs;
       const { definition, plan, rawArgs } = this.#current();
-      resolvedArgs(
-        [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
-        rawArgs,
-        definition.extra === true,
+      const generated = new Generated(closure.generator.source, closure.id, plan);
+      const jobs = await plan.diagnostics.run(
+        async () => {
+          await closure.fn(generated, req.input ?? null, ctx);
+          ctx.signal.throwIfAborted();
+          resolvedArgs(
+            [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
+            rawArgs,
+            definition.extra === true,
+          );
+          return generated.toDoc().jobs;
+        },
+        "",
+        undefined,
+        "sdk_error",
       );
       plan.insert(generated);
       this.#generated.set(closure.id, jobs);

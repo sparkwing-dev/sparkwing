@@ -191,24 +191,24 @@ func TestMaskerMultilineComponentsKeepLiteralMatchingPolicy(t *testing.T) {
 	m.Register(value)
 	before := m.Values()
 	m.Register(value)
-	if !slices.Equal(before, m.Values()) || !slices.Contains(before, "xy") || !slices.Contains(before, "longer-private-xy") || slices.Contains(before, " ") {
+	if !slices.Equal(before, m.Values()) || slices.Contains(before, "xy") || !slices.Contains(before, "longer-private-xy") || slices.Contains(before, " ") {
 		t.Fatalf("registration not deduplicated: %q", m.Values())
 	}
 	if !slices.Contains(before, value) {
 		t.Fatal("whole value not retained")
 	}
-	if got := m.Mask("longer-private-xy xy ordinary"); got != "*** *** ordinary" {
+	if got := m.Mask("longer-private-xy xy ordinary"); got != "*** xy ordinary" {
 		t.Fatalf("longest/literal matching=%q", got)
 	}
-	if got := m.Mask("ordinary xy text"); got != "ordinary *** text" {
+	if got := m.Mask("ordinary xy text"); got != "ordinary xy text" {
 		t.Fatalf("short component rule=%q", got)
 	}
 	if got := m.Mask(" \r"); got != " \r" {
 		t.Fatal("blank component became a mask pattern")
 	}
 	spaces := NewMasker()
-	spaces.Register(" left \r\nright\r\n")
-	if spaces.Mask("left") != "left" || spaces.Mask(" left ") != "***" || spaces.Mask("right") != "***" {
+	spaces.Register(" left-private \r\nright-private\r\n")
+	if spaces.Mask("left-private") != "left-private" || spaces.Mask(" left-private ") != "***" || spaces.Mask("right-private") != "***" {
 		t.Fatal("line whitespace was changed beyond CRLF normalization")
 	}
 	if m.Mask("longer-private-") != "longer-private-" {

@@ -31,7 +31,7 @@ func TestStreamHoldsAtMostOneValueOfOverlappingText(t *testing.T) {
 	run := strings.Repeat("a", pieceLen)
 	for i := range 3 {
 		got := s.Mask(run, false)
-		if len(got) < pieceLen-8 || strings.Contains(got, "aa") {
+		if len(got) > 3 || strings.Contains(got, "aa") {
 			t.Fatalf("piece %d shown as %d bytes, holding back too much or leaking", i, len(got))
 		}
 	}

@@ -485,8 +485,13 @@ func TestPlanControllerHandoffRequiresLiveOwnerLease(t *testing.T) {
 
 func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
+		in.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{}}
 		in.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42, BaseRepo: "gh:1", HeadRepo: "gh:1", BaseRef: "main", HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567"}}
 	})
+	if runspec.DisplayRequest(plan.Seal.Request).RequestedArgs["message"] != "hello" {
+		t.Fatal("intake fixture must initially classify message as public")
+	}
+	plan.Seal.Resolved.SecretArgs = []string{"message"}
 	retrier := authorityRoot("retrier", "a")
 	retrier.Grants = []capability.Grant{capability.RunsControl}
 	authorityPersist(t, tenant.s, retrier)
@@ -498,6 +503,9 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	retry, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if retry.Inputs.RequestedArgs["message"] != runspec.RedactedArgValue || retry.Inputs.Args["message"] != runspec.RedactedArgValue {
+		t.Fatal("retry receipt ignored accepted secret classification")
 	}
 	run, err := tenant.ReadRun(t.Context(), retry.RunID)
 	if err != nil {
@@ -511,7 +519,7 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 		t.Fatalf("retry job=%+v %v", node, err)
 	}
 	replay, err := tenant.AdmitRun(t.Context(), request)
-	if err != nil || !replay.Replayed || replay.RunID != retry.RunID {
+	if err != nil || !replay.Replayed || replay.RunID != retry.RunID || replay.Inputs.RequestedArgs["message"] != runspec.RedactedArgValue || replay.Inputs.Args["message"] != runspec.RedactedArgValue {
 		t.Fatalf("retry replay=%+v %v", replay, err)
 	}
 }

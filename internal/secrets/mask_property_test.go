@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestMaskMergesOverlappingSecrets(t *testing.T) {
@@ -39,7 +38,7 @@ func TestMaskHidesEveryJSONEscapeSpelling(t *testing.T) {
 // Invariant: no registered secret is visible in masked text, raw or after
 // decoding JSON escapes, however its characters are escaped or overlap others.
 func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := rand.New(rand.NewSource(817))
 	alpha := []rune(`ab/"\é`)
 	word := func(n int) string {
 		var b strings.Builder

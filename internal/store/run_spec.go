@@ -36,11 +36,12 @@ type IntakeRequest struct {
 	OriginMachine string `json:"-"`
 }
 
-// AdmissionResult includes the atomically allocated team number and the first sealed request.
+// AdmissionResult includes execution inputs and a member projection built under the admission transaction.
 type AdmissionResult struct {
 	RunID                string
 	Number               int64
 	Request              runspec.SealedRequest
+	Inputs               runspec.Display
 	OwnerUnit            *OwnerLeaseRef
 	HereCapabilityPrefix string
 	// HereBearer reaches only the requesting host; C2 owns its encoding and it never enters persisted run JSON.

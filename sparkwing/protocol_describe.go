@@ -30,8 +30,7 @@ func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error
 }
 
 func describePipeline(ctx context.Context, reg *registration) (d nodeproto.PipelineDescription, err error) {
-	diagnostics := &planningDiagnostics{}
-	diagnostics.collect(reg.Schema)
+	diagnostics := &planningDiagnostics{ctx: ctx}
 	ctx = withPlanningDiagnostics(ctx, diagnostics)
 	defer func() {
 		if failure := recover(); failure != nil {
@@ -41,6 +40,7 @@ func describePipeline(ctx context.Context, reg *registration) (d nodeproto.Pipel
 			err = diagnostics.sanitize(err, apierr.PlanFailed, fmt.Sprintf("describe pipeline %q: ", reg.Name))
 		}
 	}()
+	diagnostics.collect(reg.Schema)
 	p := reg.instance()
 	d = nodeproto.PipelineDescription{Name: reg.Name, Args: []nodeproto.ArgumentDescription{}, Extra: reg.Schema.Extra}
 	if h, ok := p.(HelpProvider); ok {

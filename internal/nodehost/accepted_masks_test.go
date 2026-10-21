@@ -92,3 +92,16 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDescribeRegistersTypedSecretListParts(t *testing.T) {
+	masker := secrets.NewMasker()
+	planner := SDKPlanner{Masker: masker, Masks: NewMaskRegistry(masker)}
+	raw := json.RawMessage(`{"pipelines":[{"name":"list","args":[{"name":"tokens","type":"[]string","secret":true,"default":"default-first-secret,default-second-secret"},{"name":"token","type":"string","secret":true}]}]}`)
+	_, complete, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "list", Args: map[string]string{"tokens": "supplied-first-secret,supplied-second-secret", "token": "pw,1"}})
+	if err != nil || !complete {
+		t.Fatalf("describe complete=%v err=%v", complete, err)
+	}
+	if got := masker.Mask("default-first-secret default-second-secret supplied-first-secret supplied-second-secret pw,1 revision 1"); got != "*** *** *** *** *** revision 1" {
+		t.Fatalf("list masking=%q", got)
+	}
+}

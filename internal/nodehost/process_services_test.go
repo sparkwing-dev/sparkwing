@@ -20,7 +20,7 @@ import (
 )
 
 func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
-	for _, value := range []string{"b", "build", "body", "group", "new\nbuild", "YnVpbGQ="} {
+	for _, value := range []string{"b", "build", "body", "group", "YnVpbGQ="} {
 		t.Run(value, func(t *testing.T) {
 			m := secrets.NewMasker()
 			registry := NewMaskRegistry(m)

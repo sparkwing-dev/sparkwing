@@ -12,17 +12,26 @@ func TestMaskingConformanceVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	var vectors []struct {
-		Name                string
-		Values              []string
-		Input, Want         string
-		JSONInput, JSONWant string
+		Name                       string
+		Values, Lists, MergeValues []string
+		Input, Want                string
+		JSONInput, JSONWant        string
 	}
 	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range vectors {
 		t.Run(v.Name, func(t *testing.T) {
-			m := newTestMasker(v.Values...)
+			m := newTestMasker(v.MergeValues...)
+			merged := NewMasker()
+			merged.Merge(m)
+			m = merged
+			for _, value := range v.Values {
+				m.Register(value)
+			}
+			for _, value := range v.Lists {
+				m.RegisterList(value)
+			}
 			if got := m.Mask(v.Input); got != v.Want {
 				t.Fatalf("Mask = %q, want %q", got, v.Want)
 			}
@@ -43,7 +52,7 @@ func TestMaskingConformanceVectors(t *testing.T) {
 
 func TestRegisterMasksEachSecretListElement(t *testing.T) {
 	m := NewMasker()
-	m.Register("first-private, second-private")
+	m.RegisterList("first-private, second-private")
 	for _, value := range []string{"first-private", "second-private"} {
 		if m.Mask(value) != "***" || !m.ContainsSecret("job-"+value) {
 			t.Fatal("list element is not registered")

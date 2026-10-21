@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -289,5 +290,62 @@ func TestPlanningDiagnosticsMaskShortAndStructuredValues(t *testing.T) {
 			}
 			assertDiagnosticSecretsAbsent(t, wire, []string{secret})
 		})
+	}
+}
+
+func TestPlanningDiagnosticsPreserveArgumentTypes(t *testing.T) {
+	for _, tc := range []struct {
+		kind, value, message, want string
+	}{
+		{"[]string", "default-first-secret,default-second-secret", "default-first-secret default-second-secret", "*** ***"},
+		{"string", "pw,1", "pw,1 revision 1", "*** revision 1"},
+	} {
+		diagnostics := &planningDiagnostics{args: map[string]string{"secret": tc.value}}
+		diagnostics.collect(inputSchema{Fields: []inputField{{Name: "secret", Type: tc.kind, Secret: true, Default: tc.value}}})
+		var got *apierr.Error
+		if !errors.As(diagnostics.sanitize(&apierr.Error{Code: apierr.Code(tc.value), Message: tc.message}, apierr.PlanFailed, ""), &got) || got.Message != tc.want || got.Code != apierr.PlanFailed {
+			t.Fatalf("%s: got %+v", tc.kind, got)
+		}
+	}
+}
+
+type diagnosticListInputs struct {
+	Tokens []string `flag:"tokens" secret:"true" default:"first-default-secret,second-default-secret"`
+}
+
+type diagnosticMasks struct {
+	sdkserve.Services
+	values []string
+	err    error
+}
+
+func (s *diagnosticMasks) Mask(_ context.Context, value string) error {
+	s.values = append(s.values, value)
+	return s.err
+}
+
+func TestPlanningRegistersTypedListBeforeCallback(t *testing.T) {
+	name := inputsSchemaTestName("diagnostic-list-")
+	services := &diagnosticMasks{}
+	Register[diagnosticListInputs](name, func() Pipeline[diagnosticListInputs] {
+		return protocolDiscoveryPipeline[diagnosticListInputs]{declare: func(_ *Plan, inputs diagnosticListInputs) error {
+			for _, value := range inputs.Tokens {
+				if !slices.Contains(services.values, value) {
+					t.Fatalf("list item %q reached callback before mask registration", value)
+				}
+			}
+			return nil
+		}}
+	})
+	ctx := (sdkOperations{}).Context(t.Context(), nodeproto.RunContext{}, nodeproto.RunnerIdentity{}, services)
+	for _, args := range []map[string]string{nil, {"tokens": "first-supplied-secret,second-supplied-secret"}} {
+		if _, _, err := (sdkOperations{}).Plan(ctx, name, args, nodeproto.RunContext{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	services.err = errors.New("first-default-secret mask refused")
+	reg, _ := lookup(name)
+	if _, err := describePipeline(ctx, reg); err == nil || strings.Contains(err.Error(), "first-default-secret") || !strings.Contains(err.Error(), "mask refused") {
+		t.Fatalf("describe mask failure was not sanitized: %v", err)
 	}
 }

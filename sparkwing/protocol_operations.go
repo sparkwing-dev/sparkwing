@@ -49,6 +49,7 @@ func (sdkOperations) Document(plan any) nodeproto.PlanDoc { return planDocument(
 
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context {
 	ctx = sdkserve.WithServices(ctx, s)
+	ctx = context.WithValue(ctx, planningMaskServicesKey{}, s)
 	ctx = context.WithValue(ctx, keyLogger, protocolLogger{s: s})
 	ctx = context.WithValue(ctx, runnerCtxKey{}, &RunnerInfo{Name: runner.Name, Type: runner.Type, Labels: append([]string(nil), runner.Labels...)})
 	ctx = context.WithValue(ctx, dryRunKey{}, rc.DryRun)
@@ -82,7 +83,7 @@ func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runne
 }
 
 func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error) {
-	diagnostics := &planningDiagnostics{args: maps.Clone(args)}
+	diagnostics := &planningDiagnostics{ctx: ctx, args: maps.Clone(args)}
 	defer func() {
 		if value := recover(); value != nil {
 			built = nil
@@ -239,8 +240,9 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	}
 	if generatorClosure(n, req.Closure) {
 		if p.diagnostics == nil {
-			p.diagnostics = &planningDiagnostics{args: p.args, values: slices.Clone(p.secretInputs)}
+			p.diagnostics = &planningDiagnostics{ctx: ctx, args: p.args, values: slices.Clone(p.secretInputs)}
 		}
+		p.diagnostics.ctx = ctx
 		defer func() {
 			err = p.diagnostics.sanitize(err, apierr.SDKError, "")
 			if result.Error != nil {
@@ -508,11 +510,11 @@ func (s combinedSecrets) ContainsSecret(id string) bool {
 	return s.values.ContainsSecret(id) || (s.host != nil && s.host.ContainsSecret(id))
 }
 
-func declarationSecrets(ctx context.Context, values []string) nodeproto.SecretMatcher {
+func declarationSecrets(ctx context.Context, values []diagnosticSecret) nodeproto.SecretMatcher {
 	host, _ := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher)
 	masker := secrets.NewMasker()
 	for _, value := range values {
-		masker.Register(value)
+		value.register(masker)
 	}
 	return combinedSecrets{values: masker, host: host}
 }

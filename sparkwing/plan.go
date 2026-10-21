@@ -20,7 +20,7 @@ type Plan struct {
 	diagnostics               *planningDiagnostics
 	evalGate                  chan struct{}
 	generated                 map[string][]nodeproto.JobSpec
-	secretInputs              []string
+	secretInputs              []diagnosticSecret
 	registration              *registration
 	source                    *Checkout
 	prioritySet, claimWaitSet bool

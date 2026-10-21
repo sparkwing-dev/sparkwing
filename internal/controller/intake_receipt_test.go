@@ -29,7 +29,7 @@ func TestMemberIntakeAndRetryResponsesAreDisplayOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, replayed := range []bool{false, true} {
-		response := createRunResponse(store.AdmissionResult{RunID: "retry", Number: 2, Request: sealed, Replayed: replayed})
+		response := createRunResponse(store.AdmissionResult{RunID: "retry", Number: 2, Request: sealed, Inputs: runspec.DisplayRequest(sealed), Replayed: replayed})
 		raw, err := json.Marshal(response)
 		if err != nil {
 			t.Fatal(err)
@@ -41,6 +41,18 @@ func TestMemberIntakeAndRetryResponsesAreDisplayOnly(t *testing.T) {
 		}
 		if !strings.Contains(string(raw), `"token":"***"`) || !strings.Contains(string(raw), `"public":"visible"`) {
 			t.Fatal("receipt lost display classification")
+		}
+	}
+}
+
+func TestMemberReceiptCarriesAcceptedDisplayClassification(t *testing.T) {
+	request := runspec.SealedRequest{Request: runspec.Request{RequestedArgs: map[string]string{"token": "seal-two-secret"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{}}}}
+	spec := runspec.Spec{Request: request, Resolved: runspec.Resolved{Args: request.Request.RequestedArgs, SecretArgs: []string{"token"}}}
+	for _, replayed := range []bool{false, true} {
+		response := createRunResponse(store.AdmissionResult{Request: request, Inputs: runspec.DisplaySpec(spec), Replayed: replayed})
+		raw, err := json.Marshal(response)
+		if err != nil || strings.Contains(string(raw), "seal-two-secret") || response.Inputs.RequestedArgs["token"] != runspec.RedactedArgValue {
+			t.Fatalf("receipt discarded accepted classification: %s, %v", raw, err)
 		}
 	}
 }

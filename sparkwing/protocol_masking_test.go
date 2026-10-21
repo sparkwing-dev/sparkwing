@@ -17,6 +17,8 @@ func TestPlanningDiagnosticsMaskingConformance(t *testing.T) {
 	var vectors []struct {
 		Name        string
 		Values      []string
+		MergeValues []string
+		Lists       []string
 		Input, Want string
 	}
 	if err := json.Unmarshal(raw, &vectors); err != nil {
@@ -24,7 +26,13 @@ func TestPlanningDiagnosticsMaskingConformance(t *testing.T) {
 	}
 	for _, v := range vectors {
 		t.Run(v.Name, func(t *testing.T) {
-			diagnostics := &planningDiagnostics{values: v.Values}
+			diagnostics := &planningDiagnostics{}
+			for _, value := range append(v.Values, v.MergeValues...) {
+				diagnostics.values = append(diagnostics.values, diagnosticSecret{value: value})
+			}
+			for _, value := range v.Lists {
+				diagnostics.values = append(diagnostics.values, diagnosticSecret{value: value, list: true})
+			}
 			source := &apierr.Error{Code: apierr.PlanFailed, Message: v.Input, Hint: v.Input, Details: map[string]any{"nested": []string{v.Input}}}
 			var result *apierr.Error
 			if !errors.As(diagnostics.sanitize(source, apierr.PlanFailed, ""), &result) {

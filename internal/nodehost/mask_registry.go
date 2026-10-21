@@ -33,6 +33,12 @@ func (r *MaskRegistry) Register(value string) error {
 	return r.register(candidate)
 }
 
+func (r *MaskRegistry) registerList(value string) error {
+	candidate := secrets.NewMasker()
+	candidate.RegisterList(value)
+	return r.register(candidate)
+}
+
 func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

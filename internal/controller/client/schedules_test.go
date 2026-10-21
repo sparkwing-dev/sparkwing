@@ -211,3 +211,16 @@ func TestScheduleManagerPreservesCanonicalResolutionAndConfirmsOverrides(t *test
 		t.Fatalf("confirmed zero/empty edit: %v", err)
 	}
 }
+
+func TestScheduleOverrideConfirmsRedactedArguments(t *testing.T) {
+	args := map[string]string{"token": "private-token"}
+	want := controllerwire.ScheduleOverride{Args: &args}
+	got := controllerwire.OverrideView{Fields: []string{"args"}, Args: controllerwire.DisplayScheduleArgs(args)}
+	if !confirmsScheduleOverride(got, want) {
+		t.Fatal("redacted argument confirmation compared private values")
+	}
+	got.Args = controllerwire.DisplayScheduleArgs(map[string]string{"different": "private-token"})
+	if confirmsScheduleOverride(got, want) {
+		t.Fatal("redacted confirmation accepted conflicting argument names")
+	}
+}

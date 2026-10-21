@@ -95,7 +95,7 @@ func (s *EngineController) replayRun(ctx context.Context, team string, request s
 
 func createRunResponse(admitted store.AdmissionResult) controllerwire.CreateRunResponse {
 	return controllerwire.CreateRunResponse{
-		RunID: admitted.RunID, Number: admitted.Number, Inputs: runspec.DisplayRequest(admitted.Request),
+		RunID: admitted.RunID, Number: admitted.Number, Inputs: admitted.Inputs,
 		RequestID: admitted.Request.Request.RequestID, WriteScope: blob.ScopeFor(admitted.Request.Provenance).CapabilityScope(),
 		Here:       admitted.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere,
 		HereBearer: string(admitted.HereBearer), Replayed: admitted.Replayed,

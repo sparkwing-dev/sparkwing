@@ -102,7 +102,7 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 		if !inherited(k, row, known, name, b) {
 			continue
 		}
-		if err := registerMasks(b.Masker, name, value, !b.Local && k != HostChild && (ownerTool(b, row) || len(value) >= limits.OperatorEnvMaskMinLength)); err != nil {
+		if err := registerMasks(b.Masker, name, value, !b.Local && k != HostChild && len(value) >= limits.OperatorEnvMaskMinLength); err != nil {
 			return nil, err
 		}
 		env[envKey(name)] = name + "=" + value

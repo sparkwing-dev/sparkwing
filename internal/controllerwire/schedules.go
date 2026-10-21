@@ -97,11 +97,8 @@ type LockView struct {
 	State  string `json:"state"`
 }
 
-// OverrideView names the declared fields the evaluating side has overridden,
-// whether the declaration has moved under them since, and the values that were
-// set. A field the override does not name is empty here, so a reader rebuilds
-// the same override the evaluator holds and can print it beside the
-// declaration.
+// OverrideView displays the overridden fields beside their declaration.
+// Args retain names only because schedule declarations have no secret classification.
 type OverrideView struct {
 	Fields    []string     `json:"fields"`
 	Stale     bool         `json:"stale"`

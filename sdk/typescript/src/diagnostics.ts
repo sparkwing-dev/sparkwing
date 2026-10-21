@@ -1,25 +1,45 @@
 import type { Args, ArgSpec } from "../index.d.ts";
 import { SDKError, errorFields } from "./errors.ts";
 
+function trimFragment(value: string): string {
+  return value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+}
+
+function listFragments(value: string): string[] {
+  return value
+    .split(",")
+    .map(trimFragment)
+    .filter((part) => Buffer.byteLength(part) >= 12);
+}
+
 type Span = { lo: number; hi: number };
 
 // Mirrors internal/secrets; the shared vectors pin both implementations.
 export class Masker {
   readonly #values = new Set<string>();
-  readonly #keys = new Set<string>();
+  readonly #raw = new Set<string>();
   register(value: string): void {
-    this.#register(value, /[,\n]/, this.#values);
-    this.#register(value, /,/, this.#keys);
+    this.#register(value, false);
   }
-  #register(value: string, separators: RegExp, values: Set<string>): void {
-    if (!value) return;
-    const parts = [
-      value,
-      ...value
-        .split(separators)
-        .map((part) => (value.includes(",") ? part.trim() : part.replace(/\r$/, "")))
-        .filter((part) => part.trim()),
-    ];
+  registerList(value: string): void {
+    this.#register(value, true);
+  }
+  merge(other: Masker): void {
+    for (const value of other.#raw) this.#raw.add(value);
+    for (const value of other.#values) this.#values.add(value);
+  }
+  #register(value: string, list: boolean): void {
+    const registration = JSON.stringify([value, list]);
+    if (!value || this.#raw.has(registration)) return;
+    this.#raw.add(registration);
+    const parts = [value];
+    if (list) parts.push(...listFragments(value));
+    for (const part of [...parts])
+      for (const line of part.split("\n")) {
+        const fragment = line.replace(/\r$/, "");
+        if (trimFragment(fragment) && Buffer.byteLength(fragment) >= 12) parts.push(fragment);
+      }
+    const values = this.#values;
     for (const part of parts) {
       values.add(part);
       const json = JSON.stringify(part).slice(1, -1);
@@ -76,7 +96,7 @@ export class Masker {
         [text, false],
         [decoded, true],
       ] as const) {
-        for (let at = 0; (at = source.indexOf(value, at)) >= 0; at += value.length) {
+        for (let at = 0; (at = source.indexOf(value, at)) >= 0; at++) {
           spans.push(escaped ? { lo: units[at]!.lo, hi: units[at + value.length - 1]!.hi } : { lo: at, hi: at + value.length });
         }
       }
@@ -93,29 +113,36 @@ export class Masker {
   containsSecret(text: string): boolean {
     return this.#spans(text).length > 0;
   }
-  mask(text: string): string {
-    return this.#mask(text, this.#values);
+  #marker(): string {
+    return this.containsSecret("***") ? "" : "***";
   }
-  #mask(text: string, values: Set<string>): string {
-    for (let pass = 0; pass < 4; pass++) {
-      const spans = this.#spans(text, values);
-      if (!spans.length) break;
+  mask(text: string): string {
+    const marker = this.#marker();
+    for (;;) {
+      const spans = this.#spans(text);
+      if (!spans.length) return text;
       let result = "",
         previous = 0;
       for (const span of spans) {
-        result += text.slice(previous, span.lo) + "***";
+        result += text.slice(previous, span.lo) + marker;
         previous = span.hi;
       }
       text = result + text.slice(previous);
     }
-    return this.#spans(text, values).length ? "" : text;
   }
   maskJSON(value: unknown): unknown {
     const visit = (value: unknown): unknown => {
       if (typeof value === "string") return this.mask(value);
       if (Array.isArray(value)) return value.map(visit);
-      if (value && typeof value === "object")
-        return Object.fromEntries(Object.entries(value).map(([key, child]) => [this.#mask(key, this.#keys), visit(child)]));
+      if (value && typeof value === "object") {
+        const out: Record<string, unknown> = {};
+        for (const [key, child] of Object.entries(value).sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b)))) {
+          const masked = this.mask(key);
+          if (Object.hasOwn(out, masked)) return this.#marker();
+          Object.defineProperty(out, masked, { value: visit(child), enumerable: true });
+        }
+        return out;
+      }
       const text = JSON.stringify(value);
       return text !== undefined && this.mask(text) !== text ? this.mask(text) : value;
     };
@@ -126,33 +153,53 @@ export class Masker {
 export class PlanningDiagnostics {
   readonly #masker = new Masker();
   readonly #args: Args;
-  constructor(specs: readonly ArgSpec[] = [], args: Args = {}) {
+  readonly #pending = new Set<string>();
+  readonly #register: ((value: string) => Promise<void>) | undefined;
+  constructor(specs: readonly ArgSpec[] = [], args: Args = {}, register?: (value: string) => Promise<void>) {
+    this.#register = register;
     this.#args = args;
     this.declare(specs);
   }
   declare(specs: readonly ArgSpec[]): void {
     for (const spec of specs) {
       if (!spec.secret) continue;
-      for (const value of [spec.default, this.#args[spec.name]]) if (value) this.#masker.register(value);
+      for (const value of [spec.default, this.#args[spec.name]])
+        if (value) {
+          if (spec.type === "[]string") {
+            this.#masker.registerList(value);
+            for (const part of listFragments(value)) this.#pending.add(part);
+          } else this.#masker.register(value);
+        }
     }
   }
-  async run<T>(fn: () => T | Promise<T>, prefix = "", forceCode?: string): Promise<T> {
+  async run<T>(fn: () => T | Promise<T>, prefix = "", forceCode?: string, fallbackCode = "plan_failed"): Promise<T> {
     try {
-      return await fn();
+      await this.#flush();
+      const result = await fn();
+      await this.#flush();
+      return result;
     } catch (error) {
-      throw this.error(error, prefix, forceCode ?? (error instanceof SDKError ? undefined : "plan_failed"));
+      throw this.error(error, prefix, forceCode ?? (error instanceof SDKError ? undefined : fallbackCode), fallbackCode);
     }
   }
-  error(error: unknown, prefix = "", forceCode?: string): SDKError {
+  async #flush(): Promise<void> {
+    if (!this.#register) return;
+    for (const value of this.#pending) {
+      await this.#register(value);
+      this.#pending.delete(value);
+    }
+  }
+  error(error: unknown, prefix = "", forceCode?: string, fallbackCode = "plan_failed"): SDKError {
     try {
       const fields = errorFields(error);
+      const details = fields.details === undefined ? undefined : this.#masker.maskJSON(fields.details);
       return new SDKError(this.#masker.mask(prefix + fields.message), {
-        code: this.#masker.mask(forceCode ?? fields.code),
+        code: this.#masker.containsSecret(forceCode ?? fields.code) ? fallbackCode : (forceCode ?? fields.code),
         ...(fields.hint === undefined ? {} : { hint: this.#masker.mask(fields.hint) }),
-        ...(fields.details === undefined ? {} : { details: this.#masker.maskJSON(fields.details) as Record<string, unknown> }),
+        ...(details && typeof details === "object" && !Array.isArray(details) ? { details: details as Record<string, unknown> } : {}),
       });
     } catch {
-      return new SDKError("planning diagnostic is not JSON serializable", { code: "plan_failed" });
+      return new SDKError("planning diagnostic is not JSON serializable", { code: fallbackCode });
     }
   }
 }

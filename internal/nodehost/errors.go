@@ -10,14 +10,13 @@ import (
 )
 
 // safety: a failed command's error embeds its whole output, which the node's
-// log already holds, and the controller refuses a finish body over 1 MiB, so
-// the row and end event carry a bounded error.
+// log already holds, so the row and end event carry a bounded error.
 const (
 	nodeErrTextMaxBytes  = 8 << 10
 	nodeErrTextHeadBytes = 512
 )
 
-// safety: only the text is masked, so errors.Is and As still reach the cause.
+// safety: rendering uses sanitized text and canonical fields while matching retains the cause.
 type maskedRunError struct {
 	err       error
 	text      string

@@ -39,6 +39,11 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 			}
 			args[arg.Name] = true
 			if arg.Secret && arg.Default != nil {
+				if arg.Type == "[]string" {
+					if err := p.Masks.registerList(*arg.Default); err != nil {
+						return PreparedPlanning{}, false, err
+					}
+				}
 				defaults.Args[arg.Name] = *arg.Default
 				defaults.SecretArgs = append(defaults.SecretArgs, arg.Name)
 			}
@@ -62,7 +67,12 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 		if _, present := prepared.Args[arg.Name]; !present && arg.Default != nil {
 			prepared.Args[arg.Name] = *arg.Default
 		}
-		if arg.Secret {
+		if arg.Secret || slices.Contains(input.SecretArgs, arg.Name) {
+			if arg.Type == "[]string" {
+				if err := p.Masks.registerList(prepared.Args[arg.Name]); err != nil {
+					return PreparedPlanning{}, false, err
+				}
+			}
 			if !slices.Contains(prepared.SecretArgs, arg.Name) {
 				prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
 			}

@@ -45,9 +45,12 @@ registered with the host and their supported encodings. Arbitrary transformation
 network exfiltration and files outside the host's output path are outside that
 protection. Registered secrets are refused in job, step, group and approval IDs
 because stored identifiers cannot be masked safely. The Go SDK, host diagnostics
-and test host share one masker. Registration includes comma-separated list
-elements and nonblank lines. Go toolchain variables passed to the requester's
-own hosted machine are masked before execution.
+and test host share one masker. Registration derives nonblank lines and, for `[]string` arguments, comma-separated
+items. Each derived fragment needs 12 UTF-8 bytes. Explicit raw secrets are masked
+at any length. Arbitrary data keys use the full registry. Go toolchain variables
+passed to the requester's own hosted machine follow the same 12-byte environment
+threshold. Extracted proxy credentials are masked at any length. See the
+[masking contract](../internal/secrets/MASKING.md) for encodings and overlap rules.
 
 ## Authentication and authorization
 

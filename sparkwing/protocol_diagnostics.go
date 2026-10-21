@@ -8,15 +8,33 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type planningDiagnostics struct {
+	ctx    context.Context
 	args   map[string]string
-	values []string
+	values []diagnosticSecret
 }
 
-type planningDiagnosticsKey struct{}
+type diagnosticSecret struct {
+	value string
+	list  bool
+}
+
+func (v diagnosticSecret) register(masker *secrets.Masker) {
+	if v.list {
+		masker.RegisterList(v.value)
+	} else {
+		masker.Register(v.value)
+	}
+}
+
+type (
+	planningDiagnosticsKey  struct{}
+	planningMaskServicesKey struct{}
+)
 
 func (d *planningDiagnostics) collectJob(job any) {
 	_, t := embeddedArgs(job)
@@ -41,7 +59,11 @@ func (d *planningDiagnostics) collectType(t reflect.Type, depth int) {
 			continue
 		}
 		if name != "" && name != ",extra" && field.IsExported() {
-			d.collect(inputSchema{Fields: []inputField{{Name: name, Default: field.Tag.Get("default"), Secret: boolTag(field.Tag.Get("secret"))}}})
+			kind := field.Type.String()
+			if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String {
+				kind = "[]string"
+			}
+			d.collect(inputSchema{Fields: []inputField{{Name: name, Type: kind, Default: field.Tag.Get("default"), Secret: boolTag(field.Tag.Get("secret"))}}})
 		}
 	}
 }
@@ -55,8 +77,18 @@ func (d *planningDiagnostics) collect(schema inputSchema) {
 			continue
 		}
 		for _, value := range []string{field.Default, d.args[field.Name]} {
-			if value != "" && !slices.Contains(d.values, value) {
-				d.values = append(d.values, value)
+			secret := diagnosticSecret{value: value, list: field.Type == "[]string"}
+			if value != "" && !slices.Contains(d.values, secret) {
+				d.values = append(d.values, secret)
+				if secret.list && d.ctx != nil {
+					if services, ok := d.ctx.Value(planningMaskServicesKey{}).(sdkserve.Services); ok {
+						for _, part := range secrets.ListFragments(value) {
+							if err := services.Mask(d.ctx, part); err != nil {
+								panic(err)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -72,7 +104,7 @@ func (d *planningDiagnostics) sanitize(failure error, fallback apierr.Code, pref
 	}
 	masker := secrets.NewMasker()
 	for _, value := range d.values {
-		masker.Register(value)
+		value.register(masker)
 	}
 	code := source.Code
 	if masker.ContainsSecret(string(code)) {

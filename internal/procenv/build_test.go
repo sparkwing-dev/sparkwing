@@ -481,17 +481,35 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 
 func TestOwnerToolchainValuesAreMaskedBeforeExecution(t *testing.T) {
 	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
-		for _, value := range []string{"-race", "private-toolchain-setting"} {
+		for _, tc := range []struct {
+			name, value, masked string
+		}{
+			{"GOFLAGS", "-race", "-race"},
+			{"GOSUMDB", "off", "off"},
+			{"GOPRIVATE", "*", "*"},
+			{"GOFLAGS", "12345678901", "12345678901"},
+			{"GOFLAGS", "123456789012", "***"},
+			{"GOFLAGS", "private-toolchain-setting", "***"},
+		} {
 			masker := secrets.NewMasker()
-			base := Base{OwnerMachine: true, Ambient: []string{"GOFLAGS=" + value}, Masker: masker}
+			base := Base{OwnerMachine: true, Ambient: []string{tc.name + "=" + tc.value}, Masker: masker}
 			env, err := Build(kind, base, Runtime{})
-			if err != nil || envMap(env)["GOFLAGS"] != value || masker.Mask(value) != "***" {
-				t.Fatalf("kind %d: toolchain value passed without masking: %v", kind, err)
+			if err != nil || envMap(env)[tc.name] != tc.value || masker.Mask(tc.value) != tc.masked {
+				t.Fatalf("kind %d, %s=%s: env=%v masked=%q err=%v", kind, tc.name, tc.value, env, masker.Mask(tc.value), err)
+			}
+			if got := masker.Mask("starting kickoff"); got != "starting kickoff" {
+				t.Fatalf("kind %d, %s: public output changed: %q", kind, tc.name, got)
 			}
 			base.Masker = nil
-			if _, err := Build(kind, base, Runtime{}); err == nil {
-				t.Fatal("owner toolchain accepted without a masker")
+			_, err = Build(kind, base, Runtime{})
+			if (err != nil) != (tc.masked == "***") {
+				t.Fatalf("kind %d, %s: masker requirement err=%v", kind, tc.name, err)
 			}
+		}
+		masker := secrets.NewMasker()
+		_, err := Build(kind, Base{OwnerMachine: true, Ambient: []string{"GOPROXY=https://u:p@proxy.example"}, Masker: masker}, Runtime{})
+		if err != nil || masker.Mask("u") != "***" || masker.Mask("p") != "***" {
+			t.Fatalf("kind %d: short proxy credentials left visible: %v", kind, err)
 		}
 	}
 }
