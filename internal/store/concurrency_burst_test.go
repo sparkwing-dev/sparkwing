@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -119,18 +120,27 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 
 func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+		t.Skip("slow: concurrent database admissions and promotions")
 	}
 	s := storetest.Open(t)
-	ctx := ctxT(t)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	defer cancel()
+	tenant := tenantFor(t, s, store.DefaultTeam)
 
 	const N = 20
 	var wg sync.WaitGroup
 	var arrivals atomic.Int32
+	var granted atomic.Int32
 	allArrived := make(chan struct{})
 	errs := make(chan error, N)
+	report := func(err error) {
+		errs <- err
+		cancel()
+	}
+	ready := make(map[string]chan struct{}, N)
 	for i := range N {
 		createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
+		ready[fmt.Sprintf("h-%d", i)] = make(chan struct{})
 	}
 
 	for i := range N {
@@ -140,50 +150,66 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 			holder := fmt.Sprintf("h-%d", i)
 			runID := fmt.Sprintf("r-%d", i)
 
-			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+			resp, err := tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 				Key: "k", HolderID: holder, RunID: runID, NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitQueue,
 			})
+			if resp.Kind == store.AcquireGranted {
+				granted.Add(1)
+			}
 			if arrivals.Add(1) == N {
 				close(allArrived)
 			}
 			if err != nil {
-				errs <- fmt.Errorf("arrival %d acquire: %w", i, err)
+				report(fmt.Errorf("arrival %d acquire: %w", i, err))
 				return
 			}
-			<-allArrived
-			if resp.Kind != store.AcquireGranted {
-				deadline := time.Now().Add(10 * time.Second)
-				poll := time.NewTicker(25 * time.Millisecond)
-				defer poll.Stop()
-				for {
-					if time.Now().After(deadline) {
-						errs <- fmt.Errorf("arrival %d: stuck queued past deadline", i)
-						return
-					}
-					res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", runID, "n", "", "", "", false)
-					if err != nil {
-						errs <- fmt.Errorf("arrival %d resolve: %w", i, err)
-						return
-					}
-					if res.Status == "promoted" {
-						break
-					}
-					if res.Status == "cancelled" {
-						errs <- fmt.Errorf("arrival %d cancelled unexpectedly", i)
-						return
-					}
-					poll.Reset(25 * time.Millisecond)
-					<-poll.C
+			select {
+			case <-allArrived:
+			case <-ctx.Done():
+				return
+			}
+			if got := granted.Load(); got != 1 {
+				report(fmt.Errorf("initial grants=%d, want 1", got))
+				return
+			}
+			switch resp.Kind {
+			case store.AcquireQueued:
+				// A worker stays live until the release transaction promotes it.
+				// A polling deadline could abandon an already promoted holder on a busy database.
+				select {
+				case <-ready[holder]:
+				case <-ctx.Done():
+					return
 				}
+				resolved, err := tenant.ResolveWaiter(ctx, "k", runID, "n", "", "", "", false)
+				if err != nil || resolved.Status != "promoted" || resolved.HolderID != holder {
+					report(fmt.Errorf("arrival %d resolve: %+v, %v", i, resolved, err))
+					return
+				}
+			case store.AcquireGranted:
+			default:
+				report(fmt.Errorf("arrival %d: unexpected admission %s", i, resp.Kind))
+				return
 			}
 
-			_, _, _, relErr := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", holder, "success", "", "", 0, 0)
+			released, _, promoted, relErr := tenant.ReleaseAndNotify(ctx, "k", holder, "success", "", "", 0, 0)
 			if relErr != nil {
-				errs <- fmt.Errorf("arrival %d release: %w", i, relErr)
+				report(fmt.Errorf("arrival %d release: %w", i, relErr))
 				return
 			}
-			_, _ = tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultLeaseDuration)
+			if !released || len(promoted) > 1 {
+				report(fmt.Errorf("arrival %d: released=%v promoted=%v", i, released, promoted))
+				return
+			}
+			for _, waiter := range promoted {
+				next, ok := ready[waiter.HolderID]
+				if !ok {
+					report(fmt.Errorf("arrival %d: unknown promoted holder %q", i, waiter.HolderID))
+					return
+				}
+				close(next)
+			}
 		}(i)
 	}
 
@@ -193,7 +219,10 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 		t.Errorf("%v", e)
 	}
 
-	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
+	state, err := tenant.GetConcurrencyState(ctxT(t), "k")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(state.Holders) != 0 || len(state.Waiters) != 0 {
 		t.Fatalf("residual: holders=%d waiters=%d", len(state.Holders), len(state.Waiters))
 	}
