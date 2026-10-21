@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -138,8 +137,7 @@ func scanPublication(ctx context.Context, root string, bundle *os.File, environm
 	}
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(scanCtx, "git", "-C", checkout, "cat-file", "--batch")
-	cmd.Env = client.env
+	cmd := procenv.CommandContext(scanCtx, client.env, "git", "-C", checkout, "cat-file", "--batch")
 	cmd.Stdin = strings.NewReader(objects)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

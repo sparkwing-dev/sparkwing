@@ -6,11 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -93,33 +93,32 @@ func TestGroupHelperProcess(t *testing.T) {
 }
 
 func holdHelperProcess(ready string) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	reader, writer, err := os.Pipe()
 	if err != nil {
 		os.Exit(2)
 	}
 	if fdText := os.Getenv(procgroupReadyFD); fdText != "" {
 		fd, err := strconv.Atoi(fdText)
 		if err != nil {
-			_ = ln.Close()
+			_ = reader.Close()
 			os.Exit(2)
 		}
 		readyPipe := os.NewFile(uintptr(fd), "procgroup-helper-ready")
 		if _, err := readyPipe.Write([]byte{1}); err != nil {
 			_ = readyPipe.Close()
-			_ = ln.Close()
+			_ = reader.Close()
 			os.Exit(2)
 		}
 		_ = readyPipe.Close()
 	}
 	if ready != "" {
 		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
-			_ = ln.Close()
+			_ = reader.Close()
 			os.Exit(2)
 		}
 	}
-	if _, err := ln.Accept(); err != nil {
-		os.Exit(2)
-	}
+	_, _ = reader.Read(make([]byte, 1))
+	runtime.KeepAlive(writer)
 	os.Exit(2)
 }
 
@@ -505,9 +504,7 @@ func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
 	results := make(chan finishResult, count)
 	for _, group := range groups {
 		go func(group *Group) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			results <- finishResult{id: group.ID(), err: group.Finish(ctx, 50*time.Millisecond)}
+			results <- finishResult{id: group.ID(), err: group.Finish(t.Context(), 50*time.Millisecond)}
 		}(group)
 	}
 	var firstFailure *finishResult

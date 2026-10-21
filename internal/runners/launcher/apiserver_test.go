@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,10 @@ func impersonate(t *testing.T, cfg *rest.Config, user string) kubernetes.Interfa
 	t.Helper()
 	as := rest.CopyConfig(cfg)
 	as.Impersonate = rest.ImpersonationConfig{UserName: user}
+	if strings.HasPrefix(user, "system:serviceaccount:") {
+		parts := strings.Split(user, ":")
+		as.Impersonate.Groups = []string{"system:authenticated", "system:serviceaccounts", "system:serviceaccounts:" + parts[2]}
+	}
 	kube, err := kubernetes.NewForConfig(as)
 	if err != nil {
 		t.Fatal(fmt.Errorf("impersonate %s: %w", user, err))

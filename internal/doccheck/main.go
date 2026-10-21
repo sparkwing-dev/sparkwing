@@ -3,11 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 type block struct {
@@ -106,9 +107,9 @@ func checkGoBlocks(contentDir, repoRoot string) bool {
 			fmt.Fprintln(os.Stderr, "write:", err)
 			os.Exit(2)
 		}
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
+		cmd := procenv.Command(append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"), "go", "build", "-buildvcs=false", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
 		cmd.Dir = tmp
-		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+
 		out, berr := cmd.CombinedOutput()
 		if berr == nil {
 			continue
@@ -266,9 +267,9 @@ func writeModule(tmp, repoRoot string) error {
 	if err := os.WriteFile(filepath.Join(tmp, "root.go"), []byte(root), 0o644); err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "mod", "tidy")
+	cmd := procenv.Command(append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"), "go", "mod", "tidy")
 	cmd.Dir = tmp
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go mod tidy: %v\n%s", err, out)
 	}

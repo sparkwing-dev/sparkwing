@@ -207,8 +207,8 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 			child = append(child, w)
 		}
 	}
-	cmd := pipelineentry.Command(cfg.Command).Exec()
-	cmd.Dir, cmd.Env = cfg.Directory, append([]string{}, cfg.Environment...)
+	cmd := pipelineentry.Command(cfg.Command).Exec(cfg.Environment)
+	cmd.Dir = cfg.Directory
 	cmd.Stdout, cmd.Stderr = child[2], child[3]
 	process, err := startSDKProcess(cmd, child[0], child[1])
 	closeProtocolFiles(child)

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/mod/modfile"
 )
 
@@ -99,7 +99,7 @@ func pipelineYAML(spec Spec) string {
 }
 
 func runFormatCheck(ctx context.Context, dir string) CheckResult {
-	out, err := exec.CommandContext(ctx, "gofmt", "-l", dir).CombinedOutput()
+	out, err := procenv.HostCommandContext(ctx, "gofmt", "-l", dir).CombinedOutput()
 	if err != nil {
 		return CheckResult{Name: CheckFormat, OK: false, Detail: truncate(strings.TrimSpace(string(out)), 600)}
 	}
@@ -110,7 +110,7 @@ func runFormatCheck(ctx context.Context, dir string) CheckResult {
 }
 
 func runCheck(ctx context.Context, name CheckName, dir, bin string, args ...string) CheckResult {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := procenv.HostCommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err == nil {

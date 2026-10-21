@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 	"golang.org/x/mod/modfile"
 )
@@ -152,10 +152,10 @@ func materializeSum(ctx context.Context, workDir, overlayPath, sumPath string) e
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, goBin(), "mod", "download",
+	cmd := procenv.CommandContext(ctx, env, goBin(), "mod", "download",
 		"-modfile="+overlayPath, "all")
 	cmd.Dir = workDir
-	cmd.Env = env
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if explanation := gotoolchain.ExplainOutput(ctx, string(out), env); explanation != nil {

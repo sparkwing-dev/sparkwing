@@ -37,6 +37,7 @@ const (
 	Install
 	HostChild
 	Git
+	kindCount
 )
 
 // Var is a registry row; Prefix matches a family, and engine ownership forbids inheritance.

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
@@ -78,9 +79,9 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 	}
 	ctx, cancel := context.WithTimeout(ctx, CleanupTimeout)
 	defer cancel()
-	cmd := exec.Command(path, c.argv[1:]...)
+	cmd := procenv.Command(env, path, c.argv[1:]...)
 	cmd.Args[0] = name
-	cmd.Dir, cmd.Env = dir, env
+	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.WaitDelay = cleanupWaitDelay
 	err = runCleanupProcess(ctx, cmd)

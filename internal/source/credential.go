@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -113,8 +113,8 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 			ownerEnvironment = append(ownerEnvironment, item)
 		}
 	}
-	probe := exec.CommandContext(ctx, "git", "config", "--get-urlmatch", "credential.helper", remote)
-	probe.Env, probe.Dir = ownerEnvironment, g.workspace
+	probe := procenv.CommandContext(ctx, ownerEnvironment, "git", "config", "--get-urlmatch", "credential.helper", remote)
+	probe.Dir = g.workspace
 	helper, err := gitcmd.Output(ctx, probe, false)
 	if gitExit(err, 1) || err == nil && strings.TrimSpace(string(helper)) == "" {
 		return Credential{}, nil
@@ -122,8 +122,8 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 	if err != nil {
 		return Credential{}, errors.New("read owner source credential configuration failed")
 	}
-	cmd := exec.CommandContext(ctx, "git", "credential", "fill")
-	cmd.Env, cmd.Dir = ownerEnvironment, g.workspace
+	cmd := procenv.CommandContext(ctx, ownerEnvironment, "git", "credential", "fill")
+	cmd.Dir = g.workspace
 	cmd.Stdin = strings.NewReader("url=" + remote + "\n\n")
 	out, err := gitcmd.Output(ctx, cmd, false)
 	if err != nil {

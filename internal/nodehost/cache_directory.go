@@ -60,16 +60,16 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	}
 	var command *exec.Cmd
 	if cache.Resolver == depcache.ResolverNpm {
-		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, lookPath, "config", "get", "cache")
+		command, err = pipelineentry.NPMCommand(ctx, env, runtime.GOOS, lookPath, "config", "get", "cache")
 	} else {
 		var executable string
 		executable, err = lookPath("go")
 		if err == nil {
-			command = exec.CommandContext(ctx, executable, "env", "GOMODCACHE")
+			command = procenv.CommandContext(ctx, env, executable, "env", "GOMODCACHE")
 		}
 	}
 	if err == nil {
-		command.Env, command.Dir = env, sdkWorkingDirectory(input.Entry)
+		command.Dir = sdkWorkingDirectory(input.Entry)
 		if !e.Base.Local {
 			command.Dir = filepath.Dir(command.Path)
 		}

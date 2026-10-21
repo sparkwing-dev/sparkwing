@@ -77,7 +77,7 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // Git never inherits a repository/index/config override or a credential helper from a caller.
 // Remote installs on a host the run's owner does not own set GOENV=off.
 func Build(k Kind, b Base, rt Runtime) ([]string, error) {
-	if k > Git {
+	if k >= kindCount {
 		return nil, errors.New("unknown process environment kind")
 	}
 	if k == StepTool || k == Cleanup {

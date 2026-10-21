@@ -84,8 +84,7 @@ func Environment(t *testing.T) []string {
 // Git runs native fixture operations without the user's git configuration.
 func Git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(Environment(t), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
+	cmd := procenv.CommandContext(t.Context(), append(Environment(t), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"), "git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
@@ -133,10 +132,10 @@ func FixedRemote(t *testing.T, urls ...string) string {
 	Git(t, dir, "init", "--quiet", "--initial-branch=main")
 	Write(t, filepath.Join(dir, "README"), "fixed\n")
 	Git(t, dir, "add", ".")
-	cmd := exec.CommandContext(t.Context(), "git", "-C", dir, "commit", "--quiet", "--no-gpg-sign", "-m", "fixed")
-	cmd.Env = append(Environment(t), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
+	cmd := procenv.CommandContext(t.Context(), append(Environment(t), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=Source Test", "GIT_AUTHOR_EMAIL=source@example.test", "GIT_AUTHOR_DATE=2000-01-01T00:00:00Z",
-		"GIT_COMMITTER_NAME=Source Test", "GIT_COMMITTER_EMAIL=source@example.test", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z")
+		"GIT_COMMITTER_NAME=Source Test", "GIT_COMMITTER_EMAIL=source@example.test", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z"), "git", "-C", dir, "commit", "--quiet", "--no-gpg-sign", "-m", "fixed")
+
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("fixed commit: %v: %s", err, out)
 	}

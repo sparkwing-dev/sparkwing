@@ -467,8 +467,7 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string
 		"GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
 		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
 	}
-	cmd := snapshotGitCommand(ctx, env, "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
-	cmd.Env = append(append([]string{}, env...), identity...)
+	cmd := snapshotGitCommand(ctx, append(append([]string{}, env...), identity...), "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
 	cmd.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -824,7 +823,6 @@ func snapshotGitCommand(ctx context.Context, env []string, args ...string) *exec
 		args = append([]string{"-c", "core.longpaths=true"}, args...)
 	}
 	// #nosec G702 -- fixed Git argv; Git callbacks receive the filtered environment.
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = append([]string{}, env...)
+	cmd := procenv.CommandContext(ctx, append([]string{}, env...), "git", args...)
 	return cmd
 }

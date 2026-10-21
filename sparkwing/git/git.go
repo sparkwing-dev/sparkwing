@@ -22,13 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
@@ -413,11 +413,11 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
 	sdkserve.RequireExecution(ctx, "git "+firstWord(args))
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := procenv.CommandContext(ctx, env, "git", args...)
 	if repoDir != "" {
 		cmd.Dir = repoDir
 	}
-	cmd.Env = env
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

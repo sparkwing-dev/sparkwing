@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // RunGo executes Go with captured inputs and cancellation of its child processes.
@@ -28,12 +28,12 @@ func RunGo(ctx context.Context, dir string, args []string, options CompileOption
 	if err := errors.Join(err, noticeErr); err != nil {
 		return err
 	}
-	cmd := exec.Command(tool, args...)
+	cmd := procenv.Command(env, tool, args...)
 	cmd.Dir = dir
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(options.Diagnostics, &captured)
 	cmd.Stderr = cmd.Stdout
-	cmd.Env = env
+
 	err = gotoolchain.Run(ctx, cmd)
 	if err != nil {
 		if explanation := gotoolchain.ExplainOutput(ctx, captured.String(), env); explanation != nil {

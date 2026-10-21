@@ -18,6 +18,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
@@ -639,9 +640,9 @@ func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locate sparkwing executable: %w", err)
 	}
-	cmd := exec.Command(self, args...)
+	cmd := procenv.Command(append(os.Environ(), "SPARKWING_LOG_FORMAT=plain"), self, args...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=plain")
+
 	return cmd, nil
 }
 

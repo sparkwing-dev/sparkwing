@@ -6,13 +6,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	"unsafe"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/sys/unix"
 )
 
@@ -126,7 +126,7 @@ func (p *platformSampler) SampleWithOwned(roots []OwnedRoot, arbitratedCores flo
 func darwinProcessCPUSnapshot() (map[int]darwinCPUProcess, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "ps", "-Ao", "pid=,ppid=,time=").Output()
+	output, err := procenv.HostCommandContext(ctx, "ps", "-Ao", "pid=,ppid=,time=").Output()
 	if err != nil {
 		return nil, false
 	}
@@ -159,7 +159,7 @@ func darwinProcessCPUFractions(pids []int) (map[int]float64, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	args := []string{"-o", "pid=", "-o", "pcpu=", "-p", darwinPIDList(pids)}
-	out, err := exec.CommandContext(ctx, "ps", args...).Output()
+	out, err := procenv.HostCommandContext(ctx, "ps", args...).Output()
 	if err != nil {
 		return nil, false
 	}
@@ -192,7 +192,7 @@ func darwinPIDList(pids []int) string {
 
 func sampleHost() (HostStat, error) {
 	return sampleDarwinHost(func(ctx context.Context) ([]byte, error) {
-		return exec.CommandContext(ctx, "/usr/bin/vm_stat").Output()
+		return procenv.HostCommandContext(ctx, "/usr/bin/vm_stat").Output()
 	})
 }
 

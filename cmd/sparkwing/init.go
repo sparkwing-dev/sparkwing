@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"golang.org/x/mod/module"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
@@ -242,8 +242,7 @@ func tidySkeleton(ctx context.Context, sparkwingDir string) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
-	cmd.Env = env
+	cmd := procenv.CommandContext(ctx, env, "go", "mod", "tidy")
 	cmd.Dir = sparkwingDir
 	var captured bytes.Buffer
 	cmd.Stdout = &captured

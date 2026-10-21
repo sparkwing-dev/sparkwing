@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+func commandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
+	return processCommandContext(ctx, environment, name, args...)
 }
 
 func configureProcessGroup(context.Context, *exec.Cmd, <-chan struct{}) {}

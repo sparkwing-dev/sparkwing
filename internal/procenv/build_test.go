@@ -218,7 +218,7 @@ func TestInstallReceivesOnlyBase(t *testing.T) {
 }
 
 func TestEveryBoundaryRejectsCredentialTransport(t *testing.T) {
-	for kind := CLI; kind <= HostChild; kind++ {
+	for kind := range kindCount {
 		for _, name := range []string{"SPARKWING_NODE_TOKEN", "AWS_ACCESS_KEY_ID", "UNKNOWN_API_TOKEN", "LC_API_TOKEN", "SPARKWING_PROTOCOL_HANDLES"} {
 			entry := name + "=sensitive"
 			b := Base{Local: true, Captured: []string{entry}, Ambient: []string{entry}, SubmitEnvAllow: []string{name}}

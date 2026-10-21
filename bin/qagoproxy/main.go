@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,6 +18,8 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/zip"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func main() {
@@ -40,7 +41,7 @@ func run(args []string) error {
 	if *repo == "" || *revision == "" || *version == "" || *out == "" {
 		return errors.New("--repo, --revision, --version and --out are required")
 	}
-	show := exec.Command("git", "-C", *repo, "show", "-s", "--format=%cI", *revision)
+	show := procenv.HostCommand("git", "-C", *repo, "show", "-s", "--format=%cI", *revision)
 	stamp, err := show.Output()
 	if err != nil {
 		return fmt.Errorf("read commit time: %w", err)
@@ -49,7 +50,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	read := exec.Command("git", "-C", *repo, "show", *revision+":go.mod")
+	read := procenv.HostCommand("git", "-C", *repo, "show", *revision+":go.mod")
 	gomod, err := read.Output()
 	if err != nil {
 		return fmt.Errorf("read go.mod: %w", err)

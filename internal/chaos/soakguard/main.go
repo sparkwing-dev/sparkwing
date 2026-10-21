@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
@@ -25,7 +26,7 @@ func run(args []string, signals <-chan os.Signal, started chan<- int) int {
 		return 2
 	}
 	// #nosec G702 -- the command named on this operator's command line, as argv without a shell
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := procenv.HostCommand(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

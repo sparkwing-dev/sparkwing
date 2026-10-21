@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -203,7 +204,7 @@ func (h *Harness) buildBinaries() {
 
 func (h *Harness) build(pkg string, required bool) string {
 	bin := filepath.Join(h.home, filepath.Base(pkg))
-	cmd := exec.Command("go", "build", "-o", bin, pkg)
+	cmd := procenv.HostCommand("go", "build", "-o", bin, pkg)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		if required {
@@ -320,7 +321,7 @@ func (h *Harness) spawn(wedged bool) {
 		}
 	}
 
-	cmd := exec.Command(h.dummyBin, args...)
+	cmd := procenv.HostCommand(h.dummyBin, args...)
 	cmd.Stderr = nil
 	stdout, group, err := startActorCommand(cmd)
 	if err != nil {
@@ -488,7 +489,7 @@ func (h *Harness) takeover() {
 		"--daemon-grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 	}
-	cmd := exec.Command(h.dummyBin, args...)
+	cmd := procenv.HostCommand(h.dummyBin, args...)
 	stdout, group, err := startActorCommand(cmd)
 	if err != nil {
 		return
@@ -542,8 +543,9 @@ func (h *Harness) hammerCLI() {
 	}
 	verbs := [][]string{{"runs", "list", "--limit", "5"}, {"info"}, {"queue"}}
 	verb := verbs[h.rng.Intn(len(verbs))]
-	cmd := exec.Command(h.sparkBin, verb...)
-	cmd.Env = append(os.Environ(), "SPARKWING_HOME="+h.home)
+	cmd := procenv.Command(
+		append(os.Environ(), "SPARKWING_HOME="+h.home), h.sparkBin, verb...)
+
 	_ = cmd.Run()
 	h.jr.Append(Event{Kind: "cli", Detail: strings.Join(verb, " ")})
 }
@@ -1036,7 +1038,7 @@ func (h *Harness) daemonSpawn() func(home, version string) error {
 		if v == "" {
 			v = "v1.0.0"
 		}
-		cmd := exec.Command(h.dummyBin, "daemon",
+		cmd := procenv.HostCommand(h.dummyBin, "daemon",
 			"--home", home,
 			"--version", v,
 			"--grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),

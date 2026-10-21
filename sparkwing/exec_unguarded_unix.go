@@ -9,8 +9,8 @@ import (
 	"syscall"
 )
 
-func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+func commandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
+	return processCommandContext(ctx, environment, name, args...)
 }
 
 func configureProcessGroup(_ context.Context, cmd *exec.Cmd, _ <-chan struct{}) {

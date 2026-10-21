@@ -144,15 +144,15 @@ func executeUpgradeCheck(ctx context.Context, dir string, env []string, program 
 	var command *exec.Cmd
 	if program == "npm" {
 		var err error
-		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
+		command, err = pipelineentry.NPMCommand(ctx, env, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		// #nosec G204 -- native tool argv or the resolver's verified executable, never a shell.
-		command = exec.CommandContext(ctx, program, args...)
+		command = procenv.CommandContext(ctx, env, program, args...)
 	}
-	command.Dir, command.Env = dir, env
+	command.Dir = dir
 	var out, diagnostics bytes.Buffer
 	command.Stdout, command.Stderr = &out, &diagnostics
 	if err := command.Run(); err != nil {

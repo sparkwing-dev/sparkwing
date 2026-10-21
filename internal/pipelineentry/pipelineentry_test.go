@@ -82,7 +82,7 @@ func TestTypeScriptStartsTheInstalledSDKEntry(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
-	if args := got.Exec().Args; args[len(args)-1] != ProtocolArg || len(args) != len(want)+1 {
+	if args := got.Exec(nil).Args; args[len(args)-1] != ProtocolArg || len(args) != len(want)+1 {
 		t.Fatalf("exec args = %q", args)
 	}
 

@@ -6,12 +6,15 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func execToolchain(bin string, args, env []string) error {
 	// #nosec G702 -- the engine resolver verified this executable and its release identity
-	cmd := exec.Command(bin, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, os.Stdout, os.Stderr, env
+	cmd := procenv.Command(
+		env, bin, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

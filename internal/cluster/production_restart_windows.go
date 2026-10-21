@@ -6,11 +6,14 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func restartRunner(executable string, args, environment []string) error {
-	command := exec.Command(executable, args...)
-	command.Stdin, command.Stdout, command.Stderr, command.Env = os.Stdin, os.Stdout, os.Stderr, environment
+	command := procenv.Command(
+		environment, executable, args...)
+	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := command.Run(); err != nil {
 		var exited *exec.ExitError
 		if errors.As(err, &exited) {

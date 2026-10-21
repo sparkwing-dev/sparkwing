@@ -13,6 +13,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
@@ -638,7 +639,7 @@ func goToolchainVersion() string {
 	if err != nil {
 		return ""
 	}
-	out, err := exec.Command(bin, "version").Output()
+	out, err := procenv.HostCommand(bin, "version").Output()
 	if err != nil {
 		return ""
 	}

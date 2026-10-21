@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -18,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -174,12 +174,12 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-o", dest, ".")
-	cmd := exec.Command(tool, args...)
+	cmd := procenv.Command(env, tool, args...)
 	cmd.Dir = sparkwingDir
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(options.Diagnostics, &captured)
 	cmd.Stderr = cmd.Stdout
-	cmd.Env = env
+
 	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr

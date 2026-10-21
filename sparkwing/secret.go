@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"errors"
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
 // ErrSecretMissing classifies a "no entry for this name" outcome from
@@ -16,7 +16,7 @@ import (
 // Every secrets backend returns this same value, so
 // `errors.Is(err, sparkwing.ErrSecretMissing)` matches a miss from any of
 // them.
-var ErrSecretMissing = errors.New("secret missing")
+var ErrSecretMissing = secretname.ErrMissing
 
 // SecretResolver resolves a stored value to (plain, masked) at the
 // moment of the call. The orchestrator installs a resolver on the

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/sys/unix"
 )
 
@@ -37,7 +38,7 @@ func processTable(withSessions bool) ([]Info, error) {
 func psProcessTable(withSessions bool) ([]Info, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), processTableTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,pgid=,stat=").Output()
+	out, err := procenv.HostCommandContext(ctx, "ps", "-axo", "pid=,pgid=,stat=").Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("process table listing did not finish within %s: %w", processTableTimeout, ctx.Err())

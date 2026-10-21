@@ -186,15 +186,15 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, envir
 }
 
 func installTool(ctx context.Context, dir string, environment []string, name string, args ...string) ([]byte, error) {
-	command := exec.Command(name, args...)
+	command := procenv.Command(environment, name, args...)
 	if name == "npm" {
 		var err error
-		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
+		command, err = pipelineentry.NPMCommand(ctx, environment, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return nil, fmt.Errorf("resolve npm: %w", err)
 		}
 	}
-	command.Dir, command.Env = dir, environment
+	command.Dir = dir
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := gotoolchain.Run(ctx, command); err != nil {
