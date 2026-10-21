@@ -163,7 +163,11 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	}
 	root := "host-fixture-root"
 	if _, err := database.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}); err != nil {
-		now, until := time.Now(), time.Now().Add(time.Hour)
+		now, err := teststore.Now(ctx, database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		until := now.Add(time.Hour)
 		credential := capability.Capability{Prefix: root, Digest: sha256.Sum256([]byte(root)), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite, capability.TriggersClaim, capability.NodesClaim, capability.ApprovalsWrite, capability.RunsControl}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, IssuedAt: now, ExpiresAt: &until, Repositories: nil, ReservedPools: []string{}}
 		record := store.CapabilityRecord{Version: 1, Value: credential}
 		if err := record.Validate(); err != nil {

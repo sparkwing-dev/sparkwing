@@ -28,7 +28,7 @@ const testRunID = "run-sched"
 
 func openStore(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{teststore.WithClock(time.Now), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 		return store.Policies{Intake: hostIntakePolicy{}, ClaimProfiles: hostEnrollment{}, SessionKeys: cipher}, err
 	})}, opts...)...)
@@ -40,6 +40,15 @@ func openStore(t *testing.T, opts ...store.Option) *store.Store {
 }
 
 func deps(ids ...string) []string { return ids }
+
+func TestStoreHostFixtureUsesStoreClock(t *testing.T) {
+	now := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	database := openStore(t, teststore.WithClock(func() time.Time { return now }))
+	f := newStoreHostFixtureOn(t, database, fanOutDoc(), runspec.Options{})
+	if _, err := database.AsOperator().ResolveAuthority(t.Context(), f.Actor.Authority); err != nil {
+		t.Fatalf("owner authority differs from its store clock: %v", err)
+	}
+}
 
 func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
