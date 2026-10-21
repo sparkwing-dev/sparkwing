@@ -2525,76 +2525,38 @@ properties exercise real SQLite authentication and CSRF with fake transactions.
 They prove transport behavior and private errors, not atomic persistence or
 native credential matrix cells. Closed invitations use canonical conflict.
 
-### Concurrency route cutover
+### Concurrency admission and queue views
 
-The eight `/api/v1/concurrency/{key}` registrations are removed. Their C2
-replacements are `/api/v1/queue/groups/{group}` and its `acquire`, `heartbeat`,
-`release`, `cancel-waiter`, `holder`, `resolve` and `force-release` operations.
-They use PolicyRouter and the existing access alternatives. Acquire and resolve
-use sensitive liveness. Heartbeat, release, cancellation and holder reads use
-reporting liveness. Group reads allow members or a claim bound to its declared
-group. Force release requires member `runs.control`. Local and deployment
-administrators cannot bypass a claim's binding.
+`NativeAdmission` and `Tenant.AdmitCapacity` own logical admission for all
+execution placements. The private awarded-unit capacity endpoint names only the
+unit through its authenticated award. The store derives every group, scope,
+capacity, cost, policy and lease bound from sealed acceptance. Box keys use only
+the award's sealed `ExecutionHost`. Launcher awards wait for authenticated
+activation to seal that identity.
 
-The wire uses `job_id`, `leader_job_id` and `origin_job_id`. Group reads use
-controllerwire.QueueGroup, including one-based waiter positions and numeric
-cancel_timeout_ns. The existing Go client sends the final paths and shapes. Its duplicate
-ConcurrencyState and StateWaiter wire types and duration parser are removed.
-The group read returns the validated shared QueueGroup.
-The orchestrator converts group positions to its store's zero-based form.
-The legacy runner, here and Actions slot-route permissions are removed. Hosted
-transport retries use the final paths and refuse automatic acquire replay.
-Client domain errors retain the canonical apierr.Error alongside the existing
-store sentinel. A canonical rate-limit error is never an admission result.
+The public queue API exposes group reads at `GET /api/v1/queue/groups/{group}`
+and member priority changes at `PUT /api/v1/queue/groups/{group}/priority`.
+The single-group acquire, heartbeat, release, waiter cancellation, holder
+observation, resolve and force-release endpoints are deleted. Their request and
+response types and authority-bearing mutation methods are deleted with them.
 
-C2 adds Target.SlotKey and Target.SlotHolderID. The decoder preserves the exact
-selected group, holder and body/query run and job. ResolveTarget supplies the
-authenticated generation. Holder-only calls and group reads use the bound run
-and job as the proposed identity. This does not establish that a stored holder
-belongs to that identity. BindingChecker must resolve the selected holder and
-declared group from persistence before granting access. Duplicate query values,
-retired node_id selectors, unknown JSON fields, trailing JSON and invalid or
-overflowing durations are refused. The existing one-MiB request budget remains.
+Group reads use `controllerwire.QueueGroup`, with one-based waiter positions
+and numeric `cancel_timeout_ns`. Members need `runs.read`. Claims need
+`node.report` or `runs.state` and a binding to the accepted group and current
+work generation. The decoder supplies the selected group. The resolver supplies
+the authenticated run, job and generation. There are no caller-selected holder
+or leader selectors.
 
-C2 declares controller.ConcurrencyStore and Server.WithConcurrencyStore. Each
-resolved adapter must report the authorized team. Its methods are:
+`controller.ConcurrencyStore` is a tenant read port. Its group read rechecks
+current authority and accepted declarations in one snapshot. Claim views
+preserve contention accounting while removing memo keys and leader references
+outside the declared read set. Admission and renewal use the private unit owner,
+which preserves generation, lease and adoption fencing.
 
-- AcquireAuthorizedSlot(ctx, Authorized, store.AcquireSlotRequest)
-  (store.AcquireSlotResponse, error).
-- HeartbeatAuthorizedSlot(ctx, Authorized, group, holder, lease)
-  (time.Time, superseded bool, error).
-- ReadAuthorizedHolder(ctx, Authorized, group, holder)
-  (store.ConcurrencyHolder, error).
-- ReleaseAuthorizedSlot(ctx, Authorized, group, holder, outcome, outputRef,
-  cacheKeyHash, cacheTTL) error.
-- ReadAuthorizedGroup(ctx, Authorized, group) (*store.ConcurrencyState, error).
-- ResolveAuthorizedWaiter(ctx, Authorized, group, run, job, cacheKeyHash,
-  leaderRun, leaderJob, bypassRead) (store.WaiterResolution, error).
-- CancelAuthorizedWaiter(ctx, Authorized, group, store.NodeRef) (bool, error).
-- ForceReleaseAuthorizedSlots(ctx, Authorized, group)
-  ([]store.ConcurrencyHolder, error).
-
-These transactions own the store clock and must recheck full live authority,
-tenancy, holder and generation, the sealed group or memo namespace and policy,
-and every referenced output or leader edge. Inheritance cannot join another
-job's holder. Supplied capacity and cost cannot replace the accepted declaration.
-Leases cannot exceed effective authority or work deadlines. Release and force
-release include notification and waiter promotion in their committing transaction.
-A cancelled claim keeps reporting rights without reacquiring capacity. Holder
-continuity and capacity accounting follow C1's existing frozen contract.
-The default uses Tenant only if it implements this interface. There is no call
-to the old unfenced methods when it does not.
-
-C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
-Tenant consumes SlotKey/SlotHolderID through the concrete transaction interface.
-See C1's scheduled intake and concurrency section for coverage and the remaining
-memo namespace integration. Public node slot transactions refuse box selectors.
-Private unit admission derives box keys from `ExecutionHost` sealed on the
-authenticated award. Launcher awards wait for activation to seal that identity.
-The HTTP properties use committed-fact and transaction fakes. They prove target
-transport, policy selection, cancellation classes and safe failure. They do not
-close native group/memo declaration, cross-team leader, lease-continuity or
-transaction-race acceptance cells. Those integration obligations remain open.
+The independent credential-route expectations and generated API reference check
+the route inventory. Real controller/store regressions acquire through shared
+admission, read the resulting group and assert that retired endpoints return
+404 without changing its holder.
 
 ### Typed step handoff integration
 

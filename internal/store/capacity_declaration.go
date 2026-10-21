@@ -52,13 +52,13 @@ func declaredCapacityGroupTx(ctx context.Context, tx *storeTx, team Team, runID,
 	return runspec.Concurrency{}, bindingRefusal()
 }
 
-func sealedCapacityRequestTx(ctx context.Context, tx *storeTx, team Team, req AcquireSlotRequest, authority capability.AuthorityRef) (AcquireSlotRequest, error) {
+func sealedCapacityRequestTx(ctx context.Context, tx *storeTx, team Team, req acquireSlotRequest, authority capability.AuthorityRef) (acquireSlotRequest, error) {
 	group, err := declaredCapacityGroupTx(ctx, tx, team, req.RunID, req.NodeID, req.Key, authority)
 	if err != nil {
-		return AcquireSlotRequest{}, err
+		return acquireSlotRequest{}, err
 	}
 	if req.Capacity != 0 && req.Capacity != group.Capacity || req.Cost != 0 && req.Cost != group.Cost || req.Policy != "" && req.Policy != group.OnLimit || req.CacheKeyHash != "" || req.CacheTTL != 0 {
-		return AcquireSlotRequest{}, bindingRefusal()
+		return acquireSlotRequest{}, bindingRefusal()
 	}
 	req.Capacity, req.Cost, req.Policy = group.Capacity, group.Cost, group.OnLimit
 	req.CancelTimeout = 0

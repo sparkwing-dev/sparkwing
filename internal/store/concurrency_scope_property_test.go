@@ -20,7 +20,7 @@ func TestConcurrencyMutationsRemainTenantScopedProperty(t *testing.T) {
 	for range 96 {
 		key := fmt.Sprintf("%s/%x", []string{"deploy", "' OR 1=1 --", "_%", "a/b", "雪"}[random.IntN(5)], random.Uint64())
 		holder := []string{"shared", "' OR 1=1 --", "_%", "雪"}[random.IntN(4)]
-		request := AcquireSlotRequest{Key: key, HolderID: holder, NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: OnLimitQueue}
+		request := acquireSlotRequest{Key: key, HolderID: holder, NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: OnLimitQueue}
 		for _, tenant := range []*Tenant{a, b} {
 			request.RunID = string(tenant.team)
 			got, err := tenant.AcquireConcurrencySlot(t.Context(), request)
@@ -75,7 +75,7 @@ func TestConcurrencyExpiredCapacityNeverRevivesProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(194, 672))
 	for range 96 {
 		lease := time.Duration(1 + random.Int64N(int64(time.Second)))
-		request := AcquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: lease, Policy: OnLimitQueue}
+		request := acquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: lease, Policy: OnLimitQueue}
 		got, err := tenant.AcquireConcurrencySlot(t.Context(), request)
 		if err != nil || got.Kind != AcquireGranted || !got.LeaseExpiresAt.Equal(now.Add(lease)) {
 			t.Fatalf("acquire: %+v, %v", got, err)

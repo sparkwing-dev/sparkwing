@@ -7,7 +7,7 @@ import (
 )
 
 // AcquireCapacity admits capacity under the live owner and captured work binding.
-func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error) {
+func (t *Tenant) AcquireCapacity(ctx context.Context, req acquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error) {
 	if req.RunID != binding.RunID || req.NodeID != binding.NodeID || req.CacheKeyHash != "" {
 		return AcquireSlotResponse{}, holderRefusal()
 	}
@@ -28,7 +28,7 @@ func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, bi
 }
 
 // ResolveCapacityWaiter adjudicates promotion and sealed queue expiry under the captured owner fence.
-func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error) {
+func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (waiterResolution, error) {
 	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding: binding, actor: actor})
 }
 

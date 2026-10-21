@@ -1,5 +1,11 @@
 # W2 concurrency and typed step continuation
 
+This transport handoff is superseded by the concurrency admission and queue-view
+contracts in [c2-credentials.md](contracts/c2-credentials.md). Public single-group
+mutations and their holder selectors are deleted. The retained group view and
+priority control use the shared queue client. Execution uses unit admission.
+
+
 <!-- design:begin -->
 
 ## Implemented
@@ -19,8 +25,7 @@ Acquire and resolve are sensitive. Cancellation preserves reporting operations.
 Force release requires runs.control. Malformed bodies, duplicate query selectors
 and overflowing durations fail without exposing private diagnostics.
 
-C2 declares ConcurrencyStore and WithConcurrencyStore, plus Target.SlotKey and
-SlotHolderID. The complete methods and committing requirements are recorded in
+C2 declares ConcurrencyStore and WithConcurrencyStore, plus Target.the group selector. The complete methods and committing requirements are recorded in
 c2-credentials.md. Missing authority-bearing adapters refuse operations. There
 is no fallback to the old unfenced store methods or token-table checks.
 The shared QueueGroup replaces duplicate client wire types, uses job names and
@@ -95,7 +100,7 @@ continuity/ceilings or committing races.
 
 ## Contract changes needed and real integrations
 
-- W1 must implement ConcurrencyStore on Tenant and consume SlotKey/SlotHolderID
+- W1 must implement ConcurrencyStore on Tenant and consume the group selector
   in BindSlotOfBoundNode. authority_binding.go still returns unavailable for
   that binding. Transactions must recheck live ancestry, tenant, authority,
   generation, declared group/memo policy, capacity/cost, inherited holder and

@@ -55,8 +55,8 @@ const (
 	AcquireCancellingOthers AcquireKind = "cancelling_others"
 )
 
-// AcquireSlotRequest selects a group and the work consuming its capacity.
-type AcquireSlotRequest struct {
+// acquireSlotRequest selects a group and the work consuming its capacity.
+type acquireSlotRequest struct {
 	Key           string
 	HolderID      string
 	RunID         string
@@ -178,23 +178,7 @@ type ConcurrencyState struct {
 	Waiters           []ConcurrencyWaiter
 }
 
-func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest, fence *capacityFence) (AcquireSlotResponse, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return AcquireSlotResponse{}, err
-	}
-	defer rollbackOrLog(tx)
-	result, err := t.acquireConcurrencySlotTx(ctx, tx, req, fence, time.Time{})
-	if err != nil {
-		return AcquireSlotResponse{}, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, req.Key}); err != nil {
-		return AcquireSlotResponse{}, err
-	}
-	return result, nil
-}
-
-func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req AcquireSlotRequest, fence *capacityFence, deadline time.Time) (AcquireSlotResponse, error) {
+func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req acquireSlotRequest, fence *capacityFence, deadline time.Time) (AcquireSlotResponse, error) {
 	if fence != nil {
 		if err := checkCapacityFenceTx(ctx, tx, t.team, req.Key, *fence); err != nil {
 			return AcquireSlotResponse{}, err
@@ -1138,22 +1122,22 @@ func txDeleteWaiter(ctx context.Context, tx *storeTx, team Team, key, runID, nod
 	return n > 0, nil
 }
 
-// WaiterStatus is what a polling waiter observes.
-type WaiterStatus string
+// waiterStatus is what a polling waiter observes.
+type waiterStatus string
 
 const (
-	WaiterStillWaiting WaiterStatus = "still_waiting"
-	waiterPromoted     WaiterStatus = "promoted"
+	waiterStillWaiting waiterStatus = "still_waiting"
+	waiterPromoted     waiterStatus = "promoted"
 
-	WaiterLeaderFinished WaiterStatus = "leader_finished"
+	waiterLeaderFinished waiterStatus = "leader_finished"
 
-	waiterCancelled WaiterStatus = "cancelled"
-	waiterExpired   WaiterStatus = "expired"
+	waiterCancelled waiterStatus = "cancelled"
+	waiterExpired   waiterStatus = "expired"
 )
 
-// WaiterResolution: fields populate per Status.
-type WaiterResolution struct {
-	Status              WaiterStatus
+// waiterResolution: fields populate per Status.
+type waiterResolution struct {
+	Status              waiterStatus
 	HolderID            string
 	HolderLeaseExpires  time.Time
 	OutputRef           string
@@ -1169,101 +1153,12 @@ type WaiterResolution struct {
 	Holders     []ConcurrencyHolder
 }
 
-func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRunID, leaderNodeID string, fence *capacityFence) (WaiterResolution, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return WaiterResolution{}, err
-	}
-	defer rollbackOrLog(tx)
-	if fence != nil {
-		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
-			return WaiterResolution{}, err
-		}
-	}
-	busy, err := tryLockEntryTx(ctx, tx, t.team, key)
-	if err != nil {
-		return WaiterResolution{}, err
-	}
-	if busy {
-		// safety: a writer holds the entry, so its commit decides this waiter;
-		// a poll that queued behind it would delay that writer for nothing.
-		// The head of the queue still waits, because it is next to promote.
-		observed, ok, err := t.observeWaiterTx(ctx, tx, key, runID, nodeID)
-		if err != nil {
-			return WaiterResolution{}, err
-		}
-		if ok && (observed.Status != WaiterStillWaiting || observed.Position > 0) {
-			return observed, nil
-		}
-	}
-	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, leaderRunID, leaderNodeID, defaultConcurrencyLease, fence)
-	if err != nil {
-		return WaiterResolution{}, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return WaiterResolution{}, err
-	}
-	return result, nil
-}
-
-// observeWaiterTx answers a poll from committed rows without the entry lock.
-// It decides only a promoted holder or a still-waiting queue entry; anything
-// else falls through to the locked path.
-func (t *Tenant) observeWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID string) (WaiterResolution, bool, error) {
-	nowNS := tx.now().UnixNano()
-	var holderID string
-	var leaseNS int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT holder_id, lease_expires_at FROM concurrency_holders
-		  WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND `+holderLiveSQL(""),
-		string(t.team), key, runID, nodeID, nowNS,
-	).Scan(&holderID, &leaseNS)
-	if err == nil {
-		return WaiterResolution{Status: waiterPromoted, HolderID: holderID, HolderLeaseExpires: time.Unix(0, leaseNS)}, true, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return WaiterResolution{}, false, err
-	}
-	waiter, err := scanWaiter(tx.QueryRowContext(ctx,
-		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND lease_expires_at > ?`,
-		string(t.team), key, runID, nodeID, nowNS,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return WaiterResolution{}, false, nil
-	}
-	if err != nil {
-		return WaiterResolution{}, false, err
-	}
-	deadline, err := capacityQueueDeadlineTx(ctx, tx, t.team, waiter)
-	if err != nil || (!deadline.IsZero() && !deadline.After(tx.now())) {
-		return WaiterResolution{}, false, err
-	}
-	var position, queueLength int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy IN (?, ?) AND arrived_at < ?`,
-		string(t.team), key, OnLimitQueue, OnLimitCancelOthers, waiter.ArrivedAt.UnixNano(),
-	).Scan(&position); err != nil {
-		return WaiterResolution{}, false, err
-	}
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy IN (?, ?)`,
-		string(t.team), key, OnLimitQueue, OnLimitCancelOthers,
-	).Scan(&queueLength); err != nil {
-		return WaiterResolution{}, false, err
-	}
-	holders, err := txActiveHolders(ctx, tx, t.team, key, nowNS)
-	if err != nil {
-		return WaiterResolution{}, false, err
-	}
-	return WaiterResolution{Status: WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, true, nil
-}
-
-func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID, leaderRunID, leaderNodeID string, lease time.Duration, fence *capacityFence) (WaiterResolution, error) {
+func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID, leaderRunID, leaderNodeID string, lease time.Duration, fence *capacityFence) (waiterResolution, error) {
 	var err error
 
 	if fence != nil {
 		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
-			return WaiterResolution{}, err
+			return waiterResolution{}, err
 		}
 	}
 
@@ -1271,14 +1166,14 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 	// serialized writers committed, not a pre-wait snapshot.
 	nowNS := tx.now().UnixNano()
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return WaiterResolution{}, err
+		return waiterResolution{}, err
 	}
 	if err := checkCapacityMutationTx(ctx, tx, t.team, key, "", fence); err != nil {
-		return WaiterResolution{}, err
+		return waiterResolution{}, err
 	}
 	nowNS = tx.now().UnixNano()
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, t.team, key); err != nil {
-		return WaiterResolution{}, err
+		return waiterResolution{}, err
 	}
 
 	var holderID string
@@ -1293,13 +1188,13 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 	).Scan(&holderID, &leaseNS, &superInt)
 	switch {
 	case err == nil && superInt == 0 && leaseNS > nowNS:
-		return WaiterResolution{
+		return waiterResolution{
 			Status:             waiterPromoted,
 			HolderID:           holderID,
 			HolderLeaseExpires: time.Unix(0, leaseNS),
 		}, nil
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
-		return WaiterResolution{}, err
+		return waiterResolution{}, err
 	}
 
 	waiter, err := scanWaiter(tx.QueryRowContext(
@@ -1310,13 +1205,13 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 	if err == nil {
 		deadline, err := capacityQueueDeadlineTx(ctx, tx, t.team, waiter)
 		if err != nil {
-			return WaiterResolution{}, err
+			return waiterResolution{}, err
 		}
 		if !deadline.IsZero() && !deadline.After(tx.now()) {
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
-				return WaiterResolution{}, err
+				return waiterResolution{}, err
 			}
-			return WaiterResolution{Status: waiterExpired}, nil
+			return waiterResolution{Status: waiterExpired}, nil
 		}
 
 		shouldPromote := waiter.Policy == OnLimitQueue
@@ -1327,7 +1222,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 				`SELECT COUNT(*) FROM concurrency_holders WHERE team = ? AND key = ?`,
 				string(t.team), key,
 			).Scan(&holderCount); err != nil {
-				return WaiterResolution{}, err
+				return waiterResolution{}, err
 			}
 			shouldPromote = holderCount == 0
 		}
@@ -1335,11 +1230,11 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			now := tx.now()
 			promoted, err := txPromotePollingWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(lease).UnixNano())
 			if err != nil {
-				return WaiterResolution{}, err
+				return waiterResolution{}, err
 			}
 			for _, waiter := range promoted {
 				if waiter.RunID == runID && waiter.NodeID == nodeID {
-					return WaiterResolution{
+					return waiterResolution{
 						Status:             waiterPromoted,
 						HolderID:           waiter.HolderID,
 						HolderLeaseExpires: now.Add(lease),
@@ -1353,7 +1248,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy IN (?, ?) AND arrived_at < ?`,
 			string(t.team), key, OnLimitQueue, OnLimitCancelOthers, waiter.ArrivedAt.UnixNano(),
 		).Scan(&position); e != nil {
-			return WaiterResolution{}, e
+			return waiterResolution{}, e
 		}
 		var queueLength int
 		if e := tx.QueryRowContext(
@@ -1361,28 +1256,28 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy IN (?, ?)`,
 			string(t.team), key, OnLimitQueue, OnLimitCancelOthers,
 		).Scan(&queueLength); e != nil {
-			return WaiterResolution{}, e
+			return waiterResolution{}, e
 		}
 		holders, e := txActiveHolders(ctx, tx, t.team, key, nowNS)
 		if e != nil {
-			return WaiterResolution{}, e
+			return waiterResolution{}, e
 		}
-		return WaiterResolution{Status: WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
+		return waiterResolution{Status: waiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return WaiterResolution{}, err
+		return waiterResolution{}, err
 	}
 
 	if leaderRunID != "" {
 		leaderOutcome, leaderReason, found, err := txNodeOutcome(ctx, tx, t.team, leaderRunID, leaderNodeID)
 		if err != nil {
-			return WaiterResolution{}, err
+			return waiterResolution{}, err
 		}
 		if !found || leaderOutcome != "success" {
-			return WaiterResolution{Status: waiterCancelled}, nil
+			return waiterResolution{Status: waiterCancelled}, nil
 		}
-		return WaiterResolution{
-			Status:              WaiterLeaderFinished,
+		return waiterResolution{
+			Status:              waiterLeaderFinished,
 			LeaderRunID:         leaderRunID,
 			LeaderNodeID:        leaderNodeID,
 			LeaderOutcome:       leaderOutcome,
@@ -1390,7 +1285,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		}, nil
 	}
 
-	return WaiterResolution{Status: waiterCancelled}, nil
+	return waiterResolution{Status: waiterCancelled}, nil
 }
 
 // GetConcurrencyState returns this tenant's capacity, holders and waiters for a key.

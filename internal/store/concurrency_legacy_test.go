@@ -7,13 +7,23 @@ import (
 	"time"
 )
 
+// Fixture adapters expose the shared accounting primitives to external-package tests.
+type AcquireSlotRequest = acquireSlotRequest
+type WaiterResolution = waiterResolution
+type WaiterStatus = waiterStatus
+
+const (
+	WaiterStillWaiting   = waiterStillWaiting
+	WaiterLeaderFinished = waiterLeaderFinished
+)
+
 // AcquireConcurrencySlot atomically admits work using this tenant's capacity, cache and waiters.
-func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error) {
+func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req acquireSlotRequest) (AcquireSlotResponse, error) {
 	return t.acquireConcurrencySlot(ctx, req, nil)
 }
 
 // ResolveWaiter reads this tenant's waiter or cached result without inserting a waiter.
-func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error) {
+func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (waiterResolution, error) {
 	return t.resolveWaiter(ctx, key, runID, nodeID, leaderRunID, leaderNodeID, nil)
 }
 
@@ -321,4 +331,41 @@ func (t *Tenant) concurrencyHolder(ctx context.Context, key, holderID string, no
 
 func holderLeaseLiveSQL(alias string) string {
 	return alias + "lease_expires_at > ?"
+}
+
+func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req acquireSlotRequest, fence *capacityFence) (AcquireSlotResponse, error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	defer rollbackOrLog(tx)
+	result, err := t.acquireConcurrencySlotTx(ctx, tx, req, fence, time.Time{})
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, req.Key}); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	return result, nil
+}
+
+func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRunID, leaderNodeID string, fence *capacityFence) (waiterResolution, error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return waiterResolution{}, err
+	}
+	defer rollbackOrLog(tx)
+	if fence != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
+			return waiterResolution{}, err
+		}
+	}
+	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, leaderRunID, leaderNodeID, defaultConcurrencyLease, fence)
+	if err != nil {
+		return waiterResolution{}, err
+	}
+	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
+		return waiterResolution{}, err
+	}
+	return result, nil
 }

@@ -267,8 +267,8 @@ func Scenarios() []Scenario {
 			ID: "credentials-matrix-node-child-slot", Group: "credentials",
 			Sections: []string{"§5.1", "A68"}, Requires: []Area{C1, C2},
 			Placements: []Placement{RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"catalog", "identities", "store"},
-			Steps:      []string{"Request data authority for the caller's job and a different path job, then exercise childOfBoundNode and slotOfBoundNode with own and foreign resources.", "Repeat mismatched slot requests using a deployment-admin credential and tokenless local mode."},
-			Assertions: []string{"The path job is enforced; only the bound job's child and slot are accessible with the required grants.", "Admin and tokenless mode do not bypass slot binding; denied requests neither mutate nor disclose foreign resources."},
+			Steps:      []string{"Request data authority for the caller's job and a different path job, then exercise childOfBoundNode and declared-group reads with own and foreign resources.", "Attempt the removed public single-group mutation and resolution endpoints, then repeat group reads with undeclared groups."},
+			Assertions: []string{"The path job is enforced; only the bound job's child and declared group are accessible with the required grants.", "Removed single-group endpoints return 404. Denied group reads do not disclose undeclared resources."},
 		},
 		{
 			ID: "credentials-matrix-pipeline-and-audience", Group: "credentials",

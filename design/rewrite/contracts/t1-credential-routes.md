@@ -166,7 +166,7 @@ No bound rule has a blanket admin bypass. A separately authorized operator actio
 | `BODY` | `bodyNamesRun` checks the run named by creation/parent bodies. Substituting another parent or run fails authorization before creation. Here intake requires the requester's live `runs.write` in the run's team. Ordinary role-to-intake grants remain `U-RUN`. Frozen §5.1/A68. |
 | `PIPE` | `pipelineOfBoundRun` limits a work claim to its bound run's exact repo/pipeline sizing identity. A machine root with claim scope alone cannot read arbitrary pipeline sizing. A bare or encoded name cannot manufacture another repo's binding. Frozen §5.1/A68, §4.1 repo identity and §9.5. |
 | `CHILD` | `children.start` and `childOfBoundNode` restrict child creation/read to the bound parent job's child. A sibling job's or foreign run's child is denied. Reading a child's output also requires the declared-reference/read-set rule. Frozen §5.1, §5.5 and §8.1. |
-| `SLOT` | `slotOfBoundNode` checks the bound job and slot holder names. Neither an admin credential nor tokenless local mode bypasses that bound-route check. A separate administrative force-release operation needs independently specified authority, recorded as `U-QUEUE`. Frozen §5.1/A68. |
+| `SLOT` | `slotOfBoundNode` restricts a claim group read to its accepted declaration and current work generation. Logical mutations use the private unit admission owner. |
 | `DATA` | `data.read`/`data.write` are bound to run, repo and server-derived ref scope. Reads and `HasMany` are limited to the read set. Reference creation requires own verified upload receipt or an already authorized dependency/reference/memo edge. Foreign existing bytes and unrelated same-run job receipts are insufficient. `CommitRecord` checks every member. Manual refs cannot overwrite verified refs. Frozen §5.1 and §8.1/A66. |
 | `LOG` | A bound claim can use its permitted job log-tail/report operations. Trigger owners remain subject to holder rights. Log reads reauthorize through the controller. Signed log PUT URLs name only their segment/manifest and last 15 minutes, without early revocation. Live authority for one job cannot sign or seal another holder's log. Account log-read roles remain `U-RUN`. Frozen §5.1, §5.5 and §8.1. |
 | `SECRET` | Execution release requires a live `secrets.release` grant, declared secrets and the awarded binding. `only_on` also requires the awarded reserved pool. Restricted secrets are refused on here machines. A machine root with claim scopes alone cannot read execution secrets. Account secret CRUD is `U-SECRET-ADMIN`. Frozen §3.5, §5.1, §5.3 and §5.5. |
@@ -396,14 +396,14 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 | Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
 |---|---|---|---|---|
-| `GET /api/v1/concurrency/{key}/holder` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `GET /api/v1/concurrency/{key}/resolve` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `GET /api/v1/concurrency/{key}/state` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/acquire` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/cancel-waiter` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/force-release` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT prohibits a bound-route admin bypass; U-QUEUE must specify any distinct force-release authority |
-| `POST /api/v1/concurrency/{key}/heartbeat` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/release` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
+| `GET /api/v1/concurrency/{key}/holder` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
+| `GET /api/v1/concurrency/{key}/resolve` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
+| `GET /api/v1/concurrency/{key}/state` | removed | Read the group through `/api/v1/queue/groups/{group}`. | `credentials-matrix-node-child-slot` | SLOT |
+| `POST /api/v1/concurrency/{key}/acquire` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
+| `POST /api/v1/concurrency/{key}/cancel-waiter` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
+| `POST /api/v1/concurrency/{key}/force-release` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
+| `POST /api/v1/concurrency/{key}/heartbeat` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
+| `POST /api/v1/concurrency/{key}/release` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
 
 ### Billing and credit APIs
 

@@ -30,7 +30,7 @@ func FuzzCapacityMutationsRejectReplacedOwnerAndCapturedBinding(f *testing.F) {
 		}
 		switch operation % 3 {
 		case 0:
-			_, err = tenant.AcquireCapacity(t.Context(), AcquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1}, binding, actor)
+			_, err = tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1}, binding, actor)
 		case 1:
 			_, err = tenant.ResolveCapacityWaiter(t.Context(), "global:key", binding, actor)
 		case 2:
@@ -82,7 +82,7 @@ func TestCapacityQueueExpiryUsesPersistedPolicyAndStoreTime(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','global:db','blocker','run','',?,?,2)`, now.UnixNano(), now.Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','global:db','waiter','run','job',?,?,3,'queue')`, now.UnixNano(), now.Add(time.Hour).UnixNano())
 	got, err := tenant.ResolveCapacityWaiter(t.Context(), "global:db", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-	if err != nil || got.Status != WaiterStillWaiting {
+	if err != nil || got.Status != waiterStillWaiting {
 		t.Fatalf("fresh waiter expired against host clock: %+v, %v", got, err)
 	}
 	*now = now.Add(time.Minute)

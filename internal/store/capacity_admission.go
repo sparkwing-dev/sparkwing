@@ -165,7 +165,7 @@ func (t *Tenant) admitCapacityStageTx(ctx context.Context, tx *storeTx, stage ca
 			switch resolved.Status {
 			case waiterPromoted:
 				continue
-			case WaiterStillWaiting:
+			case waiterStillWaiting:
 				result = AcquireSlotResponse{Kind: AcquireQueued, Position: resolved.Position, QueueLength: resolved.QueueLength, Holders: resolved.Holders}
 			case waiterExpired:
 				result = AcquireSlotResponse{Kind: AcquireFailed, FailureReason: FailureQueueTimeout}
@@ -175,7 +175,7 @@ func (t *Tenant) admitCapacityStageTx(ctx context.Context, tx *storeTx, stage ca
 				return result, bindingRefusal()
 			}
 		case acquireAgain:
-			result, err = t.acquireConcurrencySlotTx(ctx, tx, AcquireSlotRequest{Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID}, &fence, time.Time{})
+			result, err = t.acquireConcurrencySlotTx(ctx, tx, acquireSlotRequest{Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID}, &fence, time.Time{})
 			if err != nil {
 				return result, err
 			}

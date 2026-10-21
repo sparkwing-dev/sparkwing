@@ -4048,14 +4048,13 @@ Replacing the armer cannot admit a second run for an already committed instant.
 The tick reloads the tenant's stored row before passing it to the writer, so
 caller-supplied schedule fields cannot replace persisted intent.
 
-Tenant also implements all eight `ConcurrencyStore` transactions. They consume
-C2's resolved selectors, current authority and accepted declarations. Acquisition
-cannot replace declared capacity, cost or policy. Holder and waiter access checks
-the exact run, job and generation. Renewal and promotion respect authority and
-work deadlines. Release and force release notify and promote in their transaction.
-Claim group reads preserve contention accounting while removing memo keys and
-leader references outside the declared read set. Native host acquisition and the
-HTTP writer share the existing accounting helpers and lock order.
+`Tenant.AdmitCapacity` owns logical admission for every execution placement.
+It reads sealed declarations and award bindings, acquires plan capacity before
+job capacity and preserves generation, lease and recovery adoption fencing.
+The public queue API retains group reads and member priority control. Single-group
+mutation and resolution routes are deleted. `ConcurrencyStore` is a tenant read
+port. Claim group reads preserve contention accounting while removing memo keys
+and leader references outside the declared read set.
 
 Proofs use real SQLite, controller routing, source resolution and sealed intake.
 They cover concurrent due replay, consent revocation, membership loss, source

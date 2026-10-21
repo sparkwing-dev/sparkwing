@@ -30,11 +30,11 @@ var enumGroups = map[string]struct {
 			"AcquireCancellingOthers",
 		},
 	},
-	"store.WaiterStatus": {
+	"store.waiterStatus": {
 		file: "internal/store/concurrency.go",
 		values: []string{
-			"WaiterStillWaiting", "waiterPromoted",
-			"WaiterLeaderFinished", "waiterCancelled", "waiterExpired",
+			"waiterStillWaiting", "waiterPromoted",
+			"waiterLeaderFinished", "waiterCancelled", "waiterExpired",
 		},
 	},
 	"store.CronOverlap": {

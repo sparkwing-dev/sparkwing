@@ -8,7 +8,7 @@ import (
 
 func TestHolderLivenessUsesStoreClock(t *testing.T) {
 	tenant, now, actor := capacityFixture(t)
-	request := AcquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Minute, Policy: OnLimitQueue}
+	request := acquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Minute, Policy: OnLimitQueue}
 	got, err := tenant.AcquireConcurrencySlot(t.Context(), request)
 	if err != nil || got.Kind != AcquireGranted || !got.LeaseExpiresAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("clocked acquisition: %+v, %v", got, err)
@@ -36,7 +36,7 @@ func TestConcurrencyAdmissionPersistsWorkAndWaiterFences(t *testing.T) {
 	maintenanceRun(t, tenant.s, "waiter", 2, RunRunning)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='waiter'`)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation) VALUES ('a','waiter','job','pending',?,?,7)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	request := AcquireSlotRequest{Key: "global:key", HolderID: "leader", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: OnLimitQueue}
+	request := acquireSlotRequest{Key: "global:key", HolderID: "leader", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: OnLimitQueue}
 	if got, err := tenant.AcquireConcurrencySlot(t.Context(), request); err != nil || got.Kind != AcquireGranted {
 		t.Fatalf("leader: %+v, %v", got, err)
 	}
@@ -81,7 +81,7 @@ func TestConcurrencyExpiredWaiterBecomesANewArrival(t *testing.T) {
 	for _, id := range []string{"returning", "earlier"} {
 		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run',?,'pending',?,?)`, id, []byte(`{}`), []byte(`{}`))
 	}
-	request := AcquireSlotRequest{Key: "global:key", HolderID: "leader", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: OnLimitQueue}
+	request := acquireSlotRequest{Key: "global:key", HolderID: "leader", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: OnLimitQueue}
 	if _, err := tenant.AcquireConcurrencySlot(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}

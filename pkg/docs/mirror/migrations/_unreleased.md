@@ -2379,20 +2379,17 @@ Embedded controllers supply `WithOIDCReader` for authority-rechecked sealed
 identity and an effective ancestry expiry. The legacy claimed-run lookup and
 dispatched-node refusal are removed.
 
-## Concurrency credential routes
+## Concurrency admission and queue views
 
-Replace `/api/v1/concurrency/{key}/state` with
-`/api/v1/queue/groups/{group}`. Move `acquire`, `heartbeat`, `release`,
-`cancel-waiter`, `holder`, `resolve` and `force-release` under the same group
-path. Replace `node_id`, `leader_node_id` and `origin_node_id` with their
-`job_id`, `leader_job_id` and `origin_job_id` spellings. Group waiter positions
-are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds.
+Read a group through `GET /api/v1/queue/groups/{group}`. Group waiter positions
+are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds. Member
+priority changes use `PUT /api/v1/queue/groups/{group}/priority`.
 
-Executable callers need a capability bound to the declared group and current
-work generation. Root runner tokens cannot acquire slots directly. Force
-release uses member `runs.control`. Embedded controllers supply
-`WithConcurrencyStore` for authority-bearing transactions. The old unfenced
-concurrency methods do not provide that adapter.
+The single-group `acquire`, `heartbeat`, `release`, `cancel-waiter`, `holder`,
+`resolve` and `force-release` endpoints are removed, including their older
+`/api/v1/concurrency/{key}` spellings. Execution hosts admit capacity through the
+shared admission owner under their unit's award. The store reads accepted groups,
+policies and lease bounds. Callers cannot choose them.
 
 ## Typed step reports
 
