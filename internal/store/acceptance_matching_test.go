@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -41,7 +42,8 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	t.Helper()
 	ctx := t.Context()
 	enrollment := &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}
-	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: enrollment}))
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	s := storetest.OpenSQLite(t, teststore.WithClock(func() time.Time { return now }), store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: enrollment}))
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	labels := []string(nil)
 	pools := []string(nil)
