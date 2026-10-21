@@ -49,7 +49,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 		if unsafeMethod(evidence.Method) && !recentSignIn(p.Capability.IssuedAt, snapshot.Now) {
 			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
 		}
-		p.Class, p.Capability.Subject.Kind, p.Capability.Team = capability.CredentialConsole, capability.SubjectOperator, ""
+		p.Class, p.Capability.Team = capability.CredentialConsole, ""
 		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	}
 	return snapshot, nil

@@ -16,13 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, write func(*storeTx, capability.Principal) error) error {
+func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, operation, subject string, write func(*storeTx, capability.Principal) error) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return t.teamMutationInTx(ctx, tx, a, write)
+		return t.teamMutationInTx(ctx, tx, a, operation, subject, write)
 	})
 }
 
-func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability.Authorized, write func(*storeTx, capability.Principal) error) error {
+func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability.Authorized, operation, subject string, write func(*storeTx, capability.Principal) error) error {
 	if a.Target.RunID != "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 		return bindingRefusal()
 	}
@@ -43,13 +43,20 @@ func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability
 	if err := write(tx, p); err != nil {
 		return err
 	}
-	return t.credentialAdminTx(ctx, tx, a)
+	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
+		return err
+	}
+	return recordMutationAuditTx(ctx, tx, t.team, auditPrincipalActor(p), operation, subject)
+}
+
+func recordMutationAuditTx(ctx context.Context, tx *storeTx, team Team, actor auditActor, operation, subject string) error {
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: team, Actor: actor}, auditMutation{SubjectID: subject, Operation: auditOperation(operation)})
 }
 
 // RenameAuthorizedTeam changes the display name under current team administration.
 func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authorized, name string) (TeamInfo, error) {
 	var out TeamInfo
-	err := t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
+	err := t.teamMutationTx(ctx, a, "RenameAuthorizedTeam", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 		name = strings.TrimSpace(name)
 		if name == "" || len(name) > maxDisplayNameLen {
 			return fmt.Errorf("%w: a display name is 1 to %d characters", ErrInvalidInput, maxDisplayNameLen)
@@ -67,7 +74,7 @@ func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authoriz
 
 // SetAuthorizedBuildTrust commits this team's execution policy under current administration.
 func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "SetAuthorizedBuildTrust", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO team_build_trust(team,trust_local_builds) VALUES (?,?) ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds`, t.team, boolInt(trust))
 		return err
 	})
@@ -76,19 +83,22 @@ func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Autho
 // CreateAuthorizedInvitation creates or replays an invitation under current administration.
 func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Authorized, email string, role Role, key string) (Invitation, error) {
 	var out Invitation
-	err := t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+	identity, err := json.Marshal([]string{string(t.team), a.Principal.Capability.Subject.ID, key})
+	if err != nil {
+		return Invitation{}, err
+	}
+	sum := sha256.Sum256(identity)
+	id := hex.EncodeToString(sum[:])
+	err = t.teamMutationTx(ctx, a, "CreateAuthorizedInvitation", id, func(tx *storeTx, p capability.Principal) error {
+		if p.Capability.Subject != a.Principal.Capability.Subject {
+			return bindingRefusal()
+		}
 		email = NormalizeEmail(email)
 		if !LooksLikeEmail(email) || !role.Valid() || strings.TrimSpace(key) == "" {
 			return ErrInvalidInput
 		}
-		identity, err := json.Marshal([]string{string(t.team), p.Capability.Subject.ID, key})
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256(identity)
-		id := hex.EncodeToString(sum[:])
 		var created, expires int64
-		err = tx.QueryRowContext(ctx, `SELECT id,team,email,role,invited_by,created_at,expires_at FROM invitations WHERE team=? AND id=?`, t.team, id).Scan(&out.ID, &out.Team, &out.Email, &out.Role, &out.InvitedBy, &created, &expires)
+		err := tx.QueryRowContext(ctx, `SELECT id,team,email,role,invited_by,created_at,expires_at FROM invitations WHERE team=? AND id=?`, t.team, id).Scan(&out.ID, &out.Team, &out.Email, &out.Role, &out.InvitedBy, &created, &expires)
 		if err == nil {
 			if out.Email != email || out.Role != role {
 				return authorityError(apierr.Conflict, "idempotency key names another invitation")
@@ -110,7 +120,7 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 
 // DeleteAuthorizedInvitation withdraws an open invitation under current administration.
 func (t *Tenant) DeleteAuthorizedInvitation(ctx context.Context, a capability.Authorized, id string) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "DeleteAuthorizedInvitation", id, func(tx *storeTx, _ capability.Principal) error {
 		result, err := tx.ExecContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.now(ctx).UnixNano(), t.team, id)
 		return credentialRowChanged(result, err)
 	})
@@ -154,7 +164,10 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 			return err
 		}
 		out, err = teamDeletionTx(ctx, tx, t.team)
-		return err
+		if err != nil {
+			return err
+		}
+		return recordMutationAuditTx(ctx, tx, t.team, auditPrincipalActor(p), "DeleteAuthorizedTeam", string(t.team))
 	})
 	if err != nil {
 		return TeamDeletion{}, err
@@ -197,14 +210,27 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if err != nil {
 			return err
 		}
+		role, err := t.roleTx(ctx, tx, p.Capability.Subject.ID)
+		if err != nil {
+			return err
+		}
+		if role != RoleOwner {
+			var creator, kind string
+			if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, t.team, run.ID).Scan(&creator, &kind); err != nil {
+				return err
+			}
+			if role != RoleEditor || kind != string(capability.SubjectAccount) || creator != p.Capability.Subject.ID {
+				return bindingRefusal()
+			}
+		}
 		if run.FinishedAt == nil {
 			return authorityError(apierr.Conflict, "run is still active")
 		}
 		var held int
-		if err := tx.QueryRowContext(ctx, `SELECT
- EXISTS(SELECT 1 FROM nodes WHERE team=? AND run_id=? AND claimed_by IS NOT NULL) +
- EXISTS(SELECT 1 FROM triggers WHERE team=? AND id=? AND claimed_by IS NOT NULL) +
- EXISTS(SELECT 1 FROM eval_units WHERE team=? AND run_id=? AND claimed_by IS NOT NULL)`, t.team, a.Target.RunID, t.team, a.Target.RunID, t.team, a.Target.RunID).Scan(&held); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN
+ EXISTS(SELECT 1 FROM nodes WHERE team=? AND run_id=? AND claimed_by IS NOT NULL) OR
+ EXISTS(SELECT 1 FROM triggers WHERE team=? AND id=? AND claimed_by IS NOT NULL) OR
+ EXISTS(SELECT 1 FROM eval_units WHERE team=? AND run_id=? AND claimed_by IS NOT NULL) THEN 1 ELSE 0 END`, t.team, a.Target.RunID, t.team, a.Target.RunID, t.team, a.Target.RunID).Scan(&held); err != nil {
 			return err
 		}
 		if held != 0 {
@@ -214,6 +240,9 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
+			return err
+		}
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditRunDeletion{RunID: a.Target.RunID}); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, a.Target.RunID)

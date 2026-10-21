@@ -91,7 +91,7 @@ func FuzzStateActivityExcludesForeignAndPublishedRuns(f *testing.F) {
 				t.Fatal(err)
 			}
 			for i := range int(foreign % 4) {
-				seedOwner(t, Binding{Store: b.Store, Tenant: foreignTenant}, string(rune('a'+i)), false)
+				seedOwner(t, Binding{Home: b.Home, Store: b.Store, Tenant: foreignTenant}, string(rune('a'+i)), false)
 			}
 			for i := range int(published % 4) {
 				id := string(rune('k' + i))

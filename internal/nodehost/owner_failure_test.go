@@ -178,7 +178,7 @@ func TestOwnerHostResumeAcquisitionFailureLeavesAcceptedWorkRecoverable(t *testi
 
 func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}}
 	failure := errors.New("policy write refused")
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome != "" {

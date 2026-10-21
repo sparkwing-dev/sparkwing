@@ -1,6 +1,7 @@
 package procenv
 
 import (
+	"errors"
 	"reflect"
 	"runtime"
 	"slices"
@@ -345,7 +346,7 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 		{"npm_config_registry", "https://alice:private-password@proxy.example"},
 		{"HTTPS_PROXY", "http://alice:private%2Dpassword@proxy.example"},
 		{"HTTPS_PROXY", "http://alice:private-password@proxy.example/simple/@scope?next=@other"},
-		{"GOPROXY", "https://alice:private-password@proxy.example/@scope,https://bob:second-password@next.example|direct"},
+		{"GOPROXY", "https://alice:private-password@proxy.example/@scope,https://bobby:second-password@next.example|direct"},
 		{"PIP_EXTRA_INDEX_URL", "https://public.example/@scope https://alice:private-password@proxy.example/simple/@scope"},
 		{"npm_config_registry", "https://alice:private-password@proxy.example/@scope"},
 	} {
@@ -412,7 +413,7 @@ func TestSubmitEnvMalformedPatternsFailBeforeMatching(t *testing.T) {
 func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 	values := map[string]string{
 		"GOPROXY":     "https://public.example,https://alice:proxy-password@proxy.example|direct",
-		"GOSUMDB":     "sum.example+key https://bob:sumdb-password@sum.example",
+		"GOSUMDB":     "sum.example+key https://bobby:sumdb-password@sum.example",
 		"GOFLAGS":     "-mod=mod -modcacherw",
 		"GOPATH":      "/home/dev/go",
 		"GOPRIVATE":   "git.example/*",
@@ -437,7 +438,7 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 				t.Errorf("kind %d owner machine %s = %q, want %q", kind, name, got[name], value)
 			}
 		}
-		for _, credential := range []string{"alice", "proxy-password", "bob", "sumdb-password"} {
+		for _, credential := range []string{"alice", "proxy-password", "bobby", "sumdb-password"} {
 			if strings.Contains(masker.Mask(credential), credential) {
 				t.Errorf("kind %d left Go toolchain credential %q visible", kind, credential)
 			}
@@ -508,8 +509,8 @@ func TestOwnerToolchainValuesAreMaskedBeforeExecution(t *testing.T) {
 		}
 		masker := secrets.NewMasker()
 		_, err := Build(kind, Base{OwnerMachine: true, Ambient: []string{"GOPROXY=https://u:p@proxy.example"}, Masker: masker}, Runtime{})
-		if err != nil || masker.Mask("u") != "***" || masker.Mask("p") != "***" {
-			t.Fatalf("kind %d: short proxy credentials left visible: %v", kind, err)
+		if !errors.Is(err, secrets.ErrInvalidValue) {
+			t.Fatalf("kind %d: short proxy credentials accepted: %v", kind, err)
 		}
 	}
 }

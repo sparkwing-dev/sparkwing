@@ -1231,3 +1231,8 @@ SDK command helpers forward each child stdout/stderr stream through `FrameLog`
 bytes into lines. Base64 preserves incomplete UTF-8 bytes across frames. The host
 decodes each stream, masks it and then emits ordinary `exec_line` records with
 the command's step attribution. Standalone SDK execution remains unmasked.
+
+Partial describe failure does not block a healthy selected pipeline. Its host
+keeps output gated through planning because a failed sibling leaves declarations
+unknown. Selecting the failed pipeline preserves the error code and withholds
+its author-provided error details.

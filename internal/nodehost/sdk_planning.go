@@ -84,17 +84,18 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	}
 	functions := (PlanningFunctions{Validate: p.ValidatePlan, Hash: p.CanonicalHash, Warn: p.Warn}).defaults()
 	validate, hash := functions.Validate, functions.Hash
+	declarationsKnown := false
 	functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
 		plan, err := validate(raw, validation)
 		if err != nil {
-			return nodeproto.PlanDoc{}, p.planningError(context.Background(), err, true)
+			return nodeproto.PlanDoc{}, p.planningError(context.Background(), err, declarationsKnown)
 		}
 		return plan, nil
 	}
 	functions.Hash = func(value any) (runspec.Hash, error) {
 		digest, err := hash(value)
 		if err != nil {
-			return "", p.planningError(context.Background(), err, true)
+			return "", p.planningError(context.Background(), err, declarationsKnown)
 		}
 		return digest, nil
 	}
@@ -130,16 +131,14 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	if err != nil {
 		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
 	}
-	if !logs.known {
-		return PreparedPlanning{}, p.planningError(ctx, errors.New("declaration discovery was incomplete"), false)
-	}
+	declarationsKnown = logs.known
 	if prepared.Description.Error != nil {
 		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known)
 	}
 	input.Args = maps.Clone(prepared.Args)
 	if p.Environment != nil && !planning.Disabled {
 		if err := p.fingerprintPlanning(ctx, input, prepared, &planning); err != nil {
-			return PreparedPlanning{}, p.planningError(ctx, err, true)
+			return PreparedPlanning{}, p.planningError(ctx, err, declarationsKnown)
 		}
 	}
 	planning.Inputs.Engine, planning.Inputs.Pipeline, planning.Inputs.Entrypoint = input.Entry.Engine.Identity, input.Run.Pipeline, input.Entrypoint
@@ -154,19 +153,19 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	}{{raw, &planning.Inputs.DescribeDigest}, {input.Args, &planning.Inputs.ArgsDigest}, {input.Run, &planning.Inputs.RunContextDigest}, {runner, &planning.Inputs.RunnerDigest}} {
 		hash, err := functions.Hash(field.value)
 		if err != nil {
-			return PreparedPlanning{}, p.planningError(ctx, err, true)
+			return PreparedPlanning{}, p.planningError(ctx, err, declarationsKnown)
 		}
 		*field.dst = hash
 	}
 	planning.Validation.Secrets = planningSecrets{prior: planning.Validation.Secrets, masker: p.Masker}
 	functions.Plan = func(ctx context.Context) (json.RawMessage, error) {
-		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: true}
+		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
 			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
-			return nil, p.planningError(ctx, err, true)
+			return nil, p.planningError(ctx, err, logs.known)
 		}
 		return raw, nil
 	}

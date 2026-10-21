@@ -101,9 +101,9 @@ func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,claim_wait_ns=?,created_at=?,status='pending' WHERE id='run'`, raw, int64(time.Minute), now.Add(-time.Minute).UnixNano())
-			rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=NULL WHERE id='run'`)
 			if kind == "job" {
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='live',lease_expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
+				seedTriggerClaim(t, tenant.s, "run", "live", "live", 1, now.Add(time.Hour))
 				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at,queue_started_at) VALUES ('a','run','queued','pending',?, ?,?,?)`, []byte(`{"id":"queued"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(-time.Minute).UnixNano())
 			}
 			*now = now.Add(-time.Nanosecond)
@@ -169,7 +169,7 @@ func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,created_at=?,claim_wait_ns=?,status='pending',lineage_json=? WHERE id='run'`, raw, now.UnixNano(), int64(time.Minute), []byte(`{"retry_of":"earlier"}`))
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=NULL WHERE id='run'`)
 	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunQueueTimeout, Actor: actor}); err == nil {
 		t.Fatal("old seal expired the new queue")

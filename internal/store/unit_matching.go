@@ -235,7 +235,6 @@ func launcherClaimant(c capability.Capability) bool {
 }
 
 func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef, reserved *match.Resources) (UnitClaim, error) {
-
 	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return UnitClaim{}, err
 	}

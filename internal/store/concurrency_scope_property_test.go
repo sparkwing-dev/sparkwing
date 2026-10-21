@@ -14,7 +14,7 @@ func TestConcurrencyMutationsRemainTenantScopedProperty(t *testing.T) {
 	for i, team := range []Team{"a", "b"} {
 		maintenanceRun(t, s, string(team), i+1, RunRunning)
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, team)
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,lease_expires_at) VALUES (?, ?, 'job', 'pending', ?, ?, 'machine', ?)`, team, team, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(time.Hour).UnixNano())
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation,claimed_by,capability_prefix,lease_expires_at) VALUES (?, ?, 'job', 'pending', ?, ?, 1, 'machine', 'claim', ?)`, team, team, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(time.Hour).UnixNano())
 	}
 	random := rand.New(rand.NewPCG(652, 972))
 	for range 96 {

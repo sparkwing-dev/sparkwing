@@ -231,7 +231,8 @@ func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 
 func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) error {
 	values := []string{}
-	if maskValue {
+	// Plain config remains usable even when it cannot be a masking pattern.
+	if maskValue && secrets.Validate(value) == nil {
 		values = append(values, value)
 	}
 	credentials, err := proxyCredentials(name, value)

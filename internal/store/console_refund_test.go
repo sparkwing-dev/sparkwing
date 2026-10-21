@@ -1,6 +1,7 @@
 package store
 
 import (
+	"reflect"
 	"testing"
 	"testing/quick"
 
@@ -15,7 +16,7 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 	}
 	owner := authorityMember(t, s, "operator", RoleReader)
 	c := s.AsConsole(func(id string) bool { return id == "operator" })
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
 	req := controllerwire.OperatorRefund{PaymentID: event.PaymentID, RefundID: "re_console", AmountCents: 1, Reason: "support"}
 	property := func(noise string, dimension uint8) bool {
 		changed := a
@@ -40,19 +41,22 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 	if got, err := c.ConsoleRefund(t.Context(), foreign, req, "request"); err == nil || got.Grant != nil {
 		t.Fatalf("foreign payer: %+v %v", got, err)
 	}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_console_refund BEFORE INSERT ON business_events WHEN NEW.kind='operator.refund_recorded' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
-	if got, err := c.ConsoleRefund(t.Context(), a, req, "request"); err == nil || got.Grant != nil {
-		t.Fatalf("audit failure returned refund: %+v %v", got, err)
+	for _, target := range []string{"console_refund_receipts", "audit_events WHEN NEW.kind='operator.refund_recorded'"} {
+		rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_console_refund BEFORE INSERT ON `+target+` BEGIN SELECT RAISE(ABORT,'receipt or audit unavailable'); END`)
+		if got, err := c.ConsoleRefund(t.Context(), a, req, "request"); err == nil || got.Grant != nil {
+			t.Fatalf("%s failure returned refund: %+v %v", target, got, err)
+		}
+		rewriteSchemaCount(t, s.db, "credit_grants", 1)
+		rewriteSchemaCount(t, s.db, "payment_refunds", 0)
+		rewriteSchemaCount(t, s.db, "console_refund_receipts", 0)
+		rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_console_refund`)
 	}
-	rewriteSchemaCount(t, s.db, "credit_grants", 1)
-	rewriteSchemaCount(t, s.db, "payment_refunds", 0)
-	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_console_refund`)
 	got, err := c.ConsoleRefund(t.Context(), a, req, "request")
 	if err != nil || !got.Created || got.Team != "a" || got.Grant == nil || got.Grant.AmountMicro != -MicroCreditsPerCent || got.Grant.CreatedBy != "operator" {
 		t.Fatalf("refund = %+v: %v", got, err)
 	}
 	replay, err := c.ConsoleRefund(t.Context(), a, req, "request")
-	if err != nil || replay.Created || replay.Grant == nil || replay.Grant.ID != got.Grant.ID {
+	if err != nil || !reflect.DeepEqual(replay, got) {
 		t.Fatalf("replay = %+v: %v", replay, err)
 	}
 	req.AmountCents++
@@ -90,9 +94,13 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 			t.Fatalf("refund lost its payment reference: %+v", grant)
 		}
 	}
-	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "operator.refund_recorded")
-	if err != nil || len(events) != 1 || events[0].Actor != "operator" || events[0].Attrs["reason"] != "support" {
+	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "operator.refund_recorded", 1000, "")
+	if err != nil || len(events) != 1 || events[0].Actor != "operator" || events[0].Attrs["reason"] != nil {
 		t.Fatalf("audit = %+v: %v", events, err)
+	}
+	var actorIsAccount int
+	if err := s.db.QueryRow(`SELECT actor_is_account FROM audit_events WHERE kind='operator.refund_recorded'`).Scan(&actorIsAccount); err != nil || actorIsAccount != 1 {
+		t.Fatalf("refund actor lost verified account provenance: %d: %v", actorIsAccount, err)
 	}
 	req.AmountCents--
 	rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash='operator'`)

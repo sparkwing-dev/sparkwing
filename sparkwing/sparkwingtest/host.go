@@ -40,12 +40,14 @@ type pendingLog struct {
 	job   string
 }
 
-type outputGateKey struct{}
-type outputGate struct {
-	mu      sync.Mutex
-	pending []pendingLog
-	state   uint8 // 0 pending, 1 released, 2 discarded
-}
+type (
+	outputGateKey struct{}
+	outputGate    struct {
+		mu      sync.Mutex
+		pending []pendingLog
+		state   uint8 // 0 pending, 1 released, 2 discarded
+	}
+)
 
 type stepStateKey struct {
 	plan *sparkwing.Plan
@@ -136,6 +138,7 @@ func (h *host) discardGate(g *outputGate) {
 	g.pending = nil
 	g.mu.Unlock()
 }
+
 func (h *host) releaseGate(g *outputGate) {
 	g.mu.Lock()
 	pending := g.pending
@@ -260,6 +263,12 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 		request.Settled = h.stepSnapshot(p, job)
 	}
 	result, err := sdkserve.DefaultOperations.Eval(ctx, p, request)
+	if ctx.Err() != nil {
+		if generator {
+			h.discardGate(gate)
+		}
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		if generator {
 			h.discardGate(gate)

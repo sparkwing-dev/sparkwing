@@ -24,7 +24,7 @@ func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 				}
 				request := controllerwire.CreateRunRequest{IdempotencyKey: "one-intake", Request: runspec.Request{
 					Version: 1, Pipeline: "deploy-prod", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
-					SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"password"}}, Env: env,
+					SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"rollout.image"}}, Env: env,
 					RequestedArgs: map[string]string{"rollout.image": "release", "region": "us-east"},
 					Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:17", Display: "acme/app"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"},
 					Source:        runspec.Source{Ref: pipelineSHA, Entrypoint: "Deploy", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},

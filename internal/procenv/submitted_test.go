@@ -45,6 +45,23 @@ func TestSubmittedEnvironmentPreservesNativeBytes(t *testing.T) {
 	}
 }
 
+func TestPlainSubmittedConfigDoesNotRequireASecretPattern(t *testing.T) {
+	for _, value := range []string{"", "1", "eu", "plain***config", string([]byte{255, 254, 'x'})} {
+		masker := secrets.NewMasker()
+		got, err := Submit([]string{"BUILD_CONFIG=" + value}, []string{"BUILD_*"}, masker)
+		if err != nil || string(got["BUILD_CONFIG"]) != value {
+			t.Fatalf("plain config was refused: %v", err)
+		}
+		base, err := WithSubmitted(Base{Masker: masker}, got, SubmitAcceptAll())
+		if err != nil || !slices.Contains(base.Ambient, "BUILD_CONFIG="+value) {
+			t.Fatalf("plain config was lost at host boundary: %v", err)
+		}
+		if got := masker.Mask(value); got != value {
+			t.Fatalf("plain config became a mask: %q", got)
+		}
+	}
+}
+
 func TestSubmittedEnvironmentRejectsDuplicateProcessNames(t *testing.T) {
 	if _, err := Submit([]string{"BUILD_NOTE=first", "BUILD_NOTE=second"}, []string{"BUILD_*"}, secrets.NewMasker()); err == nil {
 		t.Fatal("duplicate submitted assignments accepted")

@@ -24,7 +24,7 @@ func consoleAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorize
 	if err != nil {
 		return err
 	}
-	if !p.DirectAccountSession() || a.Principal.Capability.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: p.Capability.Subject.ID}) || !tx.store.consolePolicy(p, tx.now(ctx)) {
+	if !p.DirectAccountSession() || a.Principal.Capability.Subject != p.Capability.Subject || !tx.store.consolePolicy(p, tx.now(ctx)) {
 		return bindingRefusal()
 	}
 	for _, access := range route.Access {
@@ -69,7 +69,13 @@ func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized
 		if _, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET metered=?,authority_json=? WHERE prefix=? AND team=?`, boolInt(metered), body, prefix, c.Team)
-		return err
+		p, err := resolveProvisionAuthorityTx(ctx, tx, a.Principal.Authority, capability.ProofForConsole(a.Principal))
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE capabilities SET metered=?,authority_json=? WHERE prefix=? AND team=?`, boolInt(metered), body, prefix, c.Team); err != nil {
+			return err
+		}
+		return recordMutationAuditTx(ctx, tx, Team(c.Team), auditPrincipalActor(p), "runner.metered", prefix)
 	})
 }

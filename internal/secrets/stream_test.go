@@ -62,6 +62,24 @@ func TestStreamHidesReplacementJoinsAndRegistryUpdates(t *testing.T) {
 	}
 }
 
+func TestStreamClosesMatchesCreatedAtReplacementMarkerEdges(t *testing.T) {
+	m := newTestMasker("abcd", "*xyz", "yz**", "**xy")
+	prefix := strings.Repeat(".", 12000)
+	input := "abcdxyz yzabcd abcdxy"
+	for cut := range len(input) + 1 {
+		stream := m.Stream()
+		got := stream.Mask(prefix+input[:cut]) + stream.Mask(input[cut:]) + stream.Flush()
+		for _, spelling := range m.Values() {
+			if strings.Contains(got, spelling) {
+				t.Fatalf("cut %d recreated spelling %q", cut, spelling)
+			}
+		}
+		if got != prefix+m.Mask(input) {
+			t.Fatalf("cut %d differs from whole-text masking", cut)
+		}
+	}
+}
+
 func TestNilMaskerStreamPassesTextThrough(t *testing.T) {
 	var m *Masker
 	s := m.Stream()

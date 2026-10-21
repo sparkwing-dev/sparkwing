@@ -21,7 +21,7 @@ func expansionFixture(t *testing.T) (*Tenant, *time.Time, ExpansionSubmission) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=?,spec_hash='spec',plan_hash='plan',plan_json=?,sealed_at=1 WHERE id='run'`, spec, plan)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',spec_json=? WHERE run_id='run'`, now.UnixNano(), []byte(`{"id":"job","closures":{"generate":["group"]}}`))
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'host','owner',5,?,?,?)`, now.Add(time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','run','claimed','trigger',1,1,'host','owner',5,?,?,?,1)`, now.Add(time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
 	owner := authorityRoot("owner", "a")
 	owner.Grants = []capability.Grant{capability.ExpansionSubmit}
 	owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Generation: 5, Holder: "host"}
@@ -130,7 +130,7 @@ func TestExpansionEvalKeepsSourceAndLeaseFencesSeparate(t *testing.T) {
 			request.Actor.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
-			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4)`, now.Add(time.Minute).UnixNano())
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4,1,1)`, now.Add(time.Minute).UnixNano())
 			switch problem {
 			case "fence_source":
 				request.Actor.Owner.SourceNodeID = "other-job"

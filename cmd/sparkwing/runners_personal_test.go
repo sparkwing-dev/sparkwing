@@ -102,7 +102,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 					t.Fatal("demoted admin changed team setting through CLI")
 				}
 				tenant := teststore.ForTeam(t, state, "personal-test")
-				events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed")
+				events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
 				if err != nil || len(events) != 1 || events[0].Actor != "member" {
 					t.Fatalf("CLI setting audit: %+v %v", events, err)
 				}

@@ -56,8 +56,11 @@ Secrets shorter than four characters or containing `***` are refused when stored
 declared or registered. This also applies to each nonempty list item. Use a plain
 config variable for these values. The old twelve-byte line/list fragment policy
 is removed. Remote environment values still use their separate twelve-byte
-registration threshold. Planning output waits until declarations are known.
-Failed discovery withholds output. Structured attributes are masked as JSON text
+registration threshold. Plain submitted config is preserved when it is too short
+or contains `***`, without registering a mask. Extracted proxy credentials must
+meet the secret requirements. Planning output waits until declarations are known.
+Failed discovery withholds output. A healthy selected pipeline can still plan
+when a sibling fails discovery, with planning output withheld. Structured attributes are masked as JSON text
 and checked for valid JSON, duplicate keys and object shape. A failed check
 replaces the whole attribute payload. Pipeline code run without a Sparkwing host
 is unmasked. See the [masking contract](../internal/secrets/MASKING.md) for

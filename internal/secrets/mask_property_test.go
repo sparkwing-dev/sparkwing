@@ -174,6 +174,7 @@ func TestStreamReplacementClosureProperty(t *testing.T) {
 	candidates := []string{
 		"abcd", "bcde", "abcdxyz", "xyzé", "line\none", `slash/quote"`,
 		"private-token", "two private words", "x%2Fy", "éééé",
+		"*xyz", "ab**", "**xy", "x**y",
 	}
 	for iteration := range 1200 {
 		m := NewMasker()

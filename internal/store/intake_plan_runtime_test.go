@@ -129,7 +129,7 @@ func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*
 		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',1,?)`, now.Add(time.Hour).UnixNano())
 	}
 	persistPlanOwner(t, tenant.s, owner)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, now.Add(time.Hour).UnixNano(), admitted.RunID)
+	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, now.Add(time.Hour))
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
 	raw, err := json.Marshal(plan)
 	if err != nil {
@@ -430,7 +430,7 @@ func TestPlanClassificationNeverShrinks(t *testing.T) {
 	root.Unit = capability.UnitTrigger
 	root.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 	persistPlanOwner(t, tenant.s, root)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, tenant.s.now().Add(time.Hour).UnixNano(), admitted.RunID)
+	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, tenant.s.now().Add(time.Hour))
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
 	resolved, _ := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
 	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
@@ -939,4 +939,9 @@ func TestPlanSealRechecksOwnerAfterJobInsertion(t *testing.T) {
 		t.Fatalf("expired acceptance changed spec: %+v %v", run.Spec, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "nodes", 0)
+}
+
+func seedTriggerClaim(t *testing.T, s *Store, runID, holder, prefix string, generation int64, expiry time.Time) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE id=?`, holder, prefix, generation, s.now().UnixNano(), expiry.UnixNano(), runID)
 }

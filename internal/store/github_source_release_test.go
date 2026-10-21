@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,7 +109,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 			}
 			provider.before = func() { s.clock = func() time.Time { return *node.LeaseExpiresAt } }
 		case 10:
-			rewriteSchemaExec(t, s.db, `CREATE TRIGGER fail_source_audit BEFORE INSERT ON git_credential_releases BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+			rewriteSchemaExec(t, s.db, `CREATE TRIGGER fail_source_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 		case 11:
 			provider.err = errors.New("provider refused")
 		case 12:
@@ -124,7 +125,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		}
 		token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
 		var count int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_releases`).Scan(&count); err != nil {
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released'`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if mode != 0 {
@@ -145,8 +146,8 @@ func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 	}
 	var team, repo, run, node, prefix, credential string
 	var generation, at int64
-	err = tenant.s.db.QueryRow(`SELECT team,repository_key,run_id,node_id,capability_prefix,credential_id,generation,released_at FROM git_credential_releases`).Scan(&team, &repo, &run, &node, &prefix, &credential, &generation, &at)
-	if err != nil || team != "a" || repo != "gh:1" || run != "run" || node != "job" || prefix != auth.Principal.Capability.Prefix || credential != "github_app:7" || generation != auth.Binding.Generation || at != tenant.s.clock().UnixNano() {
+	err = tenant.s.db.QueryRow(`SELECT team,json_extract(attrs, '$.repository_digest'),run_id,json_extract(attrs, '$.node_digest'),json_extract(attrs, '$.capability_digest'),json_extract(attrs, '$.credential_digest'),json_extract(attrs, '$.generation'),ts FROM audit_events WHERE kind='git_credential.released'`).Scan(&team, &repo, &run, &node, &prefix, &credential, &generation, &at)
+	if err != nil || team != "a" || repo != fmt.Sprintf("%x", sha256.Sum256([]byte("gh:1"))) || run != "run" || node != fmt.Sprintf("%x", sha256.Sum256([]byte("job"))) || prefix != fmt.Sprintf("%x", sha256.Sum256([]byte(auth.Principal.Capability.Prefix))) || credential != fmt.Sprintf("%x", sha256.Sum256([]byte("github_app:7"))) || generation != auth.Binding.Generation || at != tenant.s.clock().UnixNano() {
 		t.Fatalf("audit: %s %s %s %s %s %s %d %d %v", team, repo, run, node, prefix, credential, generation, at, err)
 	}
 }
@@ -182,7 +183,8 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			case 2:
 				run.Request.Request.Origin = runspec.OriginTrigger
 			case 3:
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET team='b'`)
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (8,'b',80,'other','Organization',1,1)`)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET team='b',installation_id=8`)
 			case 4:
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)
 			case 5:
@@ -199,7 +201,7 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
 			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
 			var audits int
-			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_releases`).Scan(&audits); err != nil {
+			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released'`).Scan(&audits); err != nil {
 				t.Fatal(err)
 			}
 			if mode == 0 {
@@ -237,7 +239,7 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 				t.Logf("mode=%d token=%+v calls=%d err=%v", mode, token, provider.calls, err)
 				return false
 			}
-			rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
+			rewriteSchemaCount(t, tenant.s.db, "audit_events WHERE kind='git_credential.released'", 0)
 		}
 		return true
 	}
@@ -301,13 +303,13 @@ func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testi
 					t.Logf("scoped mint beyond listing: %v", err)
 					return false
 				}
-				rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 1)
+				rewriteSchemaCount(t, tenant.s.db, "audit_events WHERE kind='git_credential.released'", 1)
 			} else {
 				if err == nil || token.Secret != "" {
 					t.Logf("mode=%d token=%+v err=%v", mode, token, err)
 					return false
 				}
-				rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
+				rewriteSchemaCount(t, tenant.s.db, "audit_events WHERE kind='git_credential.released'", 0)
 			}
 		}
 		return true

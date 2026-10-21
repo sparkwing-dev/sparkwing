@@ -19,12 +19,13 @@ func testGoSDKFakeHostAttributeMasks(t *testing.T) {
 		name, secret, attrs, want string
 	}{
 		{"keys", "attribute-sentinel", `{"attribute-sentinel":"visible","nested":{"prefix-attribute-sentinel":true}}`, `{"***":"visible","nested":{"prefix-***":true}}`},
-		{"numbers", "1234567", `{"pin":1234567,"nested":[12345678,{"pin":1234567}]}`, `{"pin":"***","nested":["***8",{"pin":"***"}]}`},
-		{"large-numbers", "9007199254740993", `{"pin":9007199254740993}`, `{"pin":"***"}`},
+		{"numbers", "1234567", `{"pin":1234567,"nested":[12345678,{"pin":1234567}]}`, `{"masked_attrs":"***"}`},
+		{"large-numbers", "9007199254740993", `{"pin":9007199254740993}`, `{"masked_attrs":"***"}`},
 		{"escaped-values", "attribute\"sentinel\nvalue", `{"nested":[{"value":"attribute\"sentinel\nvalue"}]}`, `{"nested":[{"value":"***"}]}`},
 		{"unmasked-number", "attribute-sentinel", `{"number":9007199254740993,"count":3}`, `{"number":9007199254740993,"count":3}`},
-		{"boolean", "true", `{"flag":true,"other":false}`, `{"flag":"***","other":false}`},
-		{"null", "null", `{"empty":null}`, `{"empty":"***"}`},
+		{"boolean", "true", `{"flag":true,"other":false}`, `{"masked_attrs":"***"}`},
+		{"null", "null", `{"empty":null}`, `{"masked_attrs":"***"}`},
+		{"colliding-keys", "attribute-sentinel", `{"attribute-sentinel":1,"***":2}`, `{"masked_attrs":"***"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{

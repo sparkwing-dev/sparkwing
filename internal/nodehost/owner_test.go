@@ -104,7 +104,7 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state, host, input := newOwnerFixture(t, true)
-		state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
+		state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
 		host.Lease.Interval = time.Second
 		var beats atomic.Int64
 		observed := make(chan struct{}, 1)
@@ -149,7 +149,7 @@ func TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
 	now := time.Now()
 	state.snapshot.Run.CancelRequestedAt = &now
-	state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
+	state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: store.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
 	host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
 		row := snapshot.Nodes[0]
 		return store.ScheduleSnapshot{CancelRequested: true, Nodes: []store.ScheduleNode{{ID: string(row.Ref.NodeID), Status: string(row.Status), Claimed: row.ClaimedBy != "", Outcome: string(row.Outcome)}}}, nil
@@ -448,7 +448,7 @@ func TestOwnerHostRejectedReattachNeverAcquires(t *testing.T) {
 
 func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, SpecHash: "job-hash"}}
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome == "success" {
 			return store.ScheduleDecision{Outcome: "success"}
@@ -512,7 +512,7 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f, h, in := newOwnerFixture(t, true)
-				f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
+				f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, SpecHash: "job-hash"}}
 				h.Lease = lease.Keeper{Interval: time.Second, Lease: time.Hour}
 				h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 					if s.Nodes[0].Ready {
