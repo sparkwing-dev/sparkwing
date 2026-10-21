@@ -99,11 +99,7 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	if !ok {
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
-	boxID, err := nodehost.MachineBoxID()
-	if err != nil {
-		return hereHostSession{}, err
-	}
-	admission := nodehost.MachineAdmission(home, installedVersion(), boxID)
+	admission := nodehost.MachineAdmission(home, installedVersion())
 	if options.URL != wingdclient.APIBaseURL {
 		admission.Controller = options.URL
 	}

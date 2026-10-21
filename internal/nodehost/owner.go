@@ -57,12 +57,13 @@ type OwnerLayerResult struct {
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
-	bindAdmission  func(*OwnerHost, store.Actor)
-	claimAdmission *LocalAdmission
-	retainRemote   bool
-	Snapshots      CapturedEnvironmentLoader
-	Store          OwnerStore
-	Lease          lease.Keeper
+	bindAdmission      func(*OwnerHost, store.Actor)
+	claimAdmission     *LocalAdmission
+	executionAdmission NativeAdmission
+	retainRemote       bool
+	Snapshots          CapturedEnvironmentLoader
+	Store              OwnerStore
+	Lease              lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
 	Renew           func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
 	Computing       func(string) bool

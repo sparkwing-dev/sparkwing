@@ -201,16 +201,21 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 	}
 }
 
-func TestPrivateCapacityRoutesRequireLiveTriggerOwner(t *testing.T) {
+func TestPrivateCapacityRoutesRequireLiveOwnerOrNodeAward(t *testing.T) {
 	for _, operation := range []string{"acquire"} {
 		path := "/api/v1/runs/{run}/local-host/capacity/" + operation
 		route, ok := capability.LookupRoute("POST", path)
-		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 1 {
+		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 2 {
 			t.Fatalf("missing private capacity policy: %s %+v", path, route)
 		}
 		access := route.Access[0]
 		if access.Credential != capability.CredentialClaim || access.Binding != capability.BindRunOfTrigger || access.Liveness != capability.LiveSensitive || !slices.Equal(access.Grants, []capability.Grant{capability.TriggerHost}) {
 			t.Fatalf("capacity authority exceeds owner award: %s %+v", path, access)
 		}
+		node := route.Access[1]
+		if node.Credential != capability.CredentialClaim || node.Binding != capability.BindRun || node.Liveness != capability.LiveSensitive || !slices.Equal(node.Grants, []capability.Grant{capability.NodeReport}) {
+			t.Fatalf("capacity authority exceeds node award: %s %+v", path, node)
+		}
+
 	}
 }

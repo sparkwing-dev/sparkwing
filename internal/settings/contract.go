@@ -70,7 +70,6 @@ type Values struct {
 	runspec.Options
 	Args              map[string]string
 	Guards            *projectconfig.Guards
-	BoxID             *string
 	RunnerPreferences *userconfig.RunnerConfig
 	Origins           map[string]Origin
 }
@@ -123,7 +122,6 @@ type Context struct {
 	Local               bool
 	Detached            bool
 	NumCPU              int
-	Hostname            string
 	Terminal            bool
 	ParentCheckout      string
 	RegisteredCheckouts []string

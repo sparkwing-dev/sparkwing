@@ -133,7 +133,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	claimed := &ClaimedNodeHost{
 		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
-		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.Admission.compute,
+		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.Admission,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
 		return nil, nil, nil, err

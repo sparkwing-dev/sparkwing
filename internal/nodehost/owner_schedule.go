@@ -467,7 +467,14 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 	if err := context.Cause(workCtx); err != nil {
 		return err
 	}
-	err = h.Executor.Execute(workCtx, input)
+	admitted := false
+	err = h.executionAdmission.claimedNode(workCtx, input, func(ctx context.Context) error {
+		admitted = true
+		return h.Executor.Execute(ctx, input)
+	})
+	if err != nil && !admitted {
+		err = claimSetupFailure(workCtx, input, err, h.Mask, h.Store.TransitionNode)
+	}
 	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: errors.Join(err, context.Cause(workCtx))})
 }
 

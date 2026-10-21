@@ -15,6 +15,8 @@ const (
 	storeOutageBudget = 5 * time.Minute
 )
 
+var errQueueTimeout = errors.New("queue timeout")
+
 // CapacityStore supplies tenant-scoped admission and continuous adoption.
 type CapacityStore interface {
 	AdmitCapacity(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error)
@@ -50,7 +52,7 @@ func (a *storeAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 	return body(ctx)
 }
 
-// Node admits before release; terminal transitions release its capacity atomically.
+// Node admits the awarded job; terminal transitions release its capacity atomically.
 func (a *storeAdmission) Node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
 	if _, err := admissionSpec(accepted); err != nil {
 		return err
@@ -68,8 +70,8 @@ func (a *storeAdmission) acquire(ctx context.Context, runID, jobID string, gener
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	if a.Store == nil || a.Owner.Kind != store.ActorRunHost || a.Owner.Owner.RunID != runID || a.Owner.Owner.Holder == "" || a.Owner.Owner.Generation < 1 {
-		return errors.New("store admission requires the current run owner")
+	if a.Store == nil || (a.Owner.Kind != store.ActorHolder && (a.Owner.Kind != store.ActorRunHost || a.Owner.Owner.RunID != runID || a.Owner.Owner.Holder == "" || a.Owner.Owner.Generation < 1)) {
+		return errors.New("store admission requires a live run owner or job award")
 	}
 	if len(groups) == 0 {
 		return nil

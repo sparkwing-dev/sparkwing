@@ -54,11 +54,7 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 	if binding.Principal.Capability.Unit == capability.UnitTrigger {
 		state = localOwnerState{Tenant: binding.Tenant, owner: binding.Principal.Authority}
 	}
-	boxID, err := nodehost.MachineBoxID()
-	if err != nil {
-		return nodehost.NativeServices{}, err
-	}
-	admission := nodehost.MachineAdmission(home, installedVersion(), boxID)
+	admission := nodehost.MachineAdmission(home, installedVersion())
 	services, err := build(ctx, nodehost.WithClient(nodehost.NativeConfig{
 		Admission: nodehost.ComposeNativeAdmission(binding.Tenant, admission, true),
 		Home:      home, Store: state, Parent: owned.AsOperator(), Bindings: owned.AsOperator(),

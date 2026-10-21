@@ -181,8 +181,8 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	}
 	key := scopedConcurrencyKey("db", "run", fixture.Input.RunID, "")
 	capacity, err := fixture.Tenant.GetConcurrencyState(ctx, key)
-	if err != nil || capacity == nil || len(capacity.Holders) != 1 || capacity.Holders[0].NodeID != "job" {
-		t.Fatalf("ready burst lost its controller concurrency: %+v %v", capacity, err)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unclaimed burst acquired concurrency: %+v %v", capacity, err)
 	}
 	if live, _, _ := daemon.counts(); live != 1 {
 		t.Fatalf("ready burst retained extra machine admission: live=%d", live)
@@ -204,7 +204,14 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.report(ctx, input, store.NodeSuccess); err != nil {
+	admission := ComposeNativeAdmission(fixture.Tenant, nil, false)
+	if err := admission.claimedNode(ctx, input, func(ctx context.Context) error {
+		state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
+		if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != "job" {
+			t.Errorf("claimed burst lost concurrency: %+v %v", state, err)
+		}
+		return fixture.report(ctx, input, store.NodeSuccess)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	err = <-done

@@ -40,13 +40,12 @@ func TestOwnerPreservesIndependentLocalAcquisitionFailures(t *testing.T) {
 					fixture := newStoreHostFixture(t, plan)
 					independent := errors.New("admission transport cleanup failed")
 					parent := newFakeDaemon()
-					admission := &LocalAdmission{BoxID: testBox, Daemon: admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
+					admission := &LocalAdmission{Daemon: admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
 						if scope == "job" && !request.SubLease {
 							return parent.Acquire(ctx, request, queued)
 						}
 						if policy == "queue" {
-							queued(wingwire.Queued{RunID: string(request.RunID), Key: request.Semaphores[0].Name})
-							<-ctx.Done()
+							queued(wingwire.Queued{RunID: string(request.RunID), Key: "host"})
 							return nil, independent
 						}
 						return nil, errors.Join(&wingdclient.AdmissionError{Policy: wingwire.PolicySkip, Key: "db"}, independent)
@@ -188,44 +187,6 @@ func assertOwnerRefusal(t *testing.T, f *storeHostFixture, id, policy string) {
 		if err := teststore.SQL(t, f.Store).QueryRowContext(t.Context(), `SELECT failure_reason FROM nodes WHERE run_id=? AND node_id=?`, f.Input.RunID, id).Scan(&reason); err != nil || reason != store.FailureQueueTimeout {
 			t.Errorf("queue reason=%q err=%v", reason, err)
 		}
-	}
-}
-
-func TestOwnerPersistsLocalAdmissionRefusals(t *testing.T) {
-	for _, policy := range []string{"skip", "fail", "queue"} {
-		t.Run(policy, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				plan := capacityPlan(policy, 1, "refused")
-				plan.Jobs[0].Concurrency[0].Scope = new("box")
-				f := newStoreHostFixture(t, plan)
-				daemon := newFakeDaemon()
-				daemon.used[scopedConcurrencyKey("db", "box", f.Input.RunID, testBox)] = 1
-				admission := &LocalAdmission{Daemon: daemon, BoxID: testBox}
-				f.Host.Admit = admission.Node
-				_, err := admission.Run(t.Context(), f.Accepted, func(ctx context.Context) (RunCompletion, error) {
-					entry, err := f.Host.Acquire(ctx, f.Input)
-					if err != nil {
-						return RunCompletion{}, err
-					}
-					err = f.Host.release(ctx, f.Input, f.Accepted, entry, capacityRow(t, f, "refused"), store.DecisionReady, func(context.Context, store.ReconcileRequest) error { t.Error("refused local body ran"); return nil })
-					if err != nil {
-						t.Errorf("local policy escaped scheduling: %v", err)
-					}
-					row := capacityRow(t, f, "refused")
-					want := store.NodeFailed
-					if policy == "skip" {
-						want = store.NodeSkipped
-					}
-					if row.Status != store.StatusDone || row.Outcome != want || row.Attempt != 0 {
-						t.Errorf("local refusal not persisted: status=%s outcome=%s attempt=%d", row.Status, row.Outcome, row.Attempt)
-					}
-					return RunCompletion{}, nil
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-			})
-		})
 	}
 }
 

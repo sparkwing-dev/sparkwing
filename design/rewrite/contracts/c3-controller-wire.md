@@ -928,16 +928,18 @@ available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
 
-The private `capacity/acquire` POST endpoint admits pending jobs with the trigger
-owner's award credential. It requires `trigger.host`, the live `runOfTrigger`
-binding and the selected run. Node, plan, root and foreign-team credentials
-cannot use it. The body contains only the captured work binding: run, job and
+The private `capacity/acquire` POST endpoint admits the unit named by its award.
+A trigger owner uses `trigger.host` and the live `runOfTrigger` binding. A node
+award uses `node.report` and its bound run, job and generation. The store
+rechecks that exact job award in the admission transaction. Plan, root and
+foreign-team credentials cannot use it. The body contains only the captured work binding: run, job and
 generation. Group keys, capacity, cost, policy, cancellation timeout and lease
 are absent.
 
 `Tenant.AdmitCapacity` reads every accepted concurrency declaration and its lease
-bound inside one transaction. Box keys use the persisted machine identity in
-the award's ancestry. Missing host identity is refused. The same transaction
+bound inside one transaction. Box keys use only the persisted execution host on the authenticated award.
+A launcher award waits for authenticated activation to seal that identity.
+Other awards with missing host identity are refused. The same transaction
 adopts live holders, resolves existing waiters and acquires remaining groups
 through the existing semaphore operations. Repeated requests preserve holder
 continuity and queue arrival. Terminal transitions release capacity atomically.

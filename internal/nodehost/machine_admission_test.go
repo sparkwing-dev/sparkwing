@@ -10,19 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestLocalMachineAdmissionUsesCapturedHomeAndSharedBoxSetting(t *testing.T) {
+func TestLocalMachineAdmissionUsesCapturedHomeWithoutReadingMachineConfig(t *testing.T) {
 	path, home := filepath.Join(t.TempDir(), "config.yaml"), t.TempDir()
 	t.Setenv("SPARKWING_CONFIG", path)
-	if err := os.WriteFile(path, []byte("machine:\n  box_id: shared-box\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("malformed: ["), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	boxID, err := MachineBoxID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	admission := MachineAdmission(home, "v0.71.0", boxID)
+	admission := MachineAdmission(home, "v0.71.0")
 	client := admission.Daemon.(machineAdmitter)
-	if admission.BoxID != "shared-box" || client.options.Home != home || client.options.Version != "v0.71.0" || !client.options.NoTakeover {
+	if client.options.Home != home || client.options.Version != "v0.71.0" || !client.options.NoTakeover {
 		t.Fatalf("admission changed its machine or home: %+v", admission)
 	}
 	if err := client.options.Spawn("foreign", "foreign"); err == nil {
@@ -32,26 +28,5 @@ func TestLocalMachineAdmissionUsesCapturedHomeAndSharedBoxSetting(t *testing.T) 
 	cancel()
 	if held, err := client.Acquire(ctx, wingwire.AdmissionRequest{RunID: "run"}, nil); held != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled admission: %v", err)
-	}
-}
-
-func TestLocalMachineAdmissionRefusesBadConfigAndUsesHostnameWhenUnset(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("SPARKWING_CONFIG", path)
-	hostname, err := os.Hostname()
-	if err != nil {
-		t.Fatal(err)
-	}
-	boxID, err := MachineBoxID()
-	if err != nil || boxID != hostname {
-		t.Fatalf("hostname default: %s %v", boxID, err)
-	}
-	for _, body := range []string{"machine:\n  box_id: ''\n", "machine:\n  unexpected: true\n", "machine: ["} {
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := MachineBoxID(); err == nil {
-			t.Fatal("invalid machine config acquired defaults")
-		}
 	}
 }

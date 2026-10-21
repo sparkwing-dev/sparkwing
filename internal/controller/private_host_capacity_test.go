@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
@@ -241,10 +243,10 @@ func TestPrivateCapacityRejectsForeignTeamAndWrongUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct{ name, bearer, run string }{
-		{"wrong unit", string(claim.Bearer), "run"},
-		{"root credential", "runner-secret", "run"},
-		{"foreign team", raw, "foreign"},
+	for _, test := range []struct{ name, bearer, run, job string }{
+		{"wrong unit", string(claim.Bearer), "run", "another-job"},
+		{"root credential", "runner-secret", "run", "build"},
+		{"foreign team", raw, "foreign", "build"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if test.name == "foreign team" {
@@ -254,7 +256,7 @@ func TestPrivateCapacityRejectsForeignTeamAndWrongUnit(t *testing.T) {
 				}
 			}
 			for _, operation := range []string{"acquire"} {
-				body, err := json.Marshal(localhostwire.LocalCapacityRequest{Binding: store.CapacityBinding{RunID: test.run, NodeID: "build", Generation: claim.Node.Generation}})
+				body, err := json.Marshal(localhostwire.LocalCapacityRequest{Binding: store.CapacityBinding{RunID: test.run, NodeID: test.job, Generation: claim.Node.Generation}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -313,4 +315,46 @@ func TestPrivateCapacityRejectsAnotherMachinesBoxWithoutChangingItsHolder(t *tes
 		t.Errorf("another machine's box accepted: HTTP %d", code)
 	}
 	assertOtherCapacityUnchanged(t, tenant, key, before)
+}
+
+func TestPrivateCapacityUsesClaimedJobAward(t *testing.T) {
+	server, ownerClient, tenant, owner, _ := localHostAwardFixture(t)
+	acceptCapacityPlan(t, server, tenant, owner, "run", "queue", 1, 1, "build", "other-job")
+	actor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
+	if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: actor, Policy: store.SourceNone})
+	if err != nil || claim.Kind != store.Execute {
+		t.Fatalf("claim=%+v %v", claim, err)
+	}
+	if err := ownerClient.AdoptClaim(t.Context(), claim); err != nil {
+		t.Fatal(err)
+	}
+	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: claim.Node.Generation}
+	nodeClient, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return string(claim.Bearer), nil }}, "run", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nodeClient.Close()
+	actor = store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, Generation: claim.Node.Generation}
+	for _, host := range []*client.LocalHostClient{ownerClient, nodeClient} {
+		result, err := host.AdmitCapacity(t.Context(), binding, actor)
+		if err != nil || result.Kind != store.AcquireGranted {
+			t.Fatalf("claimed admission=%+v %v", result, err)
+		}
+	}
+	state, err := tenant.GetConcurrencyState(t.Context(), "run:3:run:serial")
+	if err != nil || len(state.Holders) != 1 || state.UsedCost != 1 {
+		t.Fatalf("claim reacquired capacity: %+v %v", state, err)
+	}
+	for _, changed := range []store.CapacityBinding{{RunID: "run", NodeID: "other-job"}, {RunID: "run", NodeID: "build", Generation: claim.Node.Generation + 1}, {RunID: "run", Generation: claim.Node.Generation}} {
+		if code := privateCapacityRequest(t, server, string(claim.Bearer), localhostwire.LocalCapacityRequest{Binding: changed}); code != http.StatusForbidden && code != http.StatusConflict {
+			t.Fatalf("claim widened to %+v: HTTP %d", changed, code)
+		}
+	}
+	if after, err := tenant.GetConcurrencyState(t.Context(), "run:3:run:serial"); err != nil || !reflect.DeepEqual(state, after) {
+		t.Fatalf("refusal changed holder: %+v %v", after, err)
+	}
 }

@@ -256,6 +256,16 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, args...)
 }
 
 func checkCapacityOwnerTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {
+	if fence.actor.Kind == ActorHolder {
+		if fence.binding.NodeID == "" || fence.binding.Generation != fence.actor.Generation {
+			return holderRefusal()
+		}
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID})
+		if err != nil {
+			return err
+		}
+		return checkHolderTx(ctx, tx, team, row, fence.actor, tx.now())
+	}
 	check := checkOwnerTx
 	if fence.binding.NodeID == "" {
 		check = checkOwnerLeaseTx

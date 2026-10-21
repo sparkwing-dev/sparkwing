@@ -147,7 +147,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	}
 }
 
-func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
+func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 	for _, compute := range []bool{false, true} {
 		for _, scope := range []string{"run", "box"} {
 			for _, mode := range []string{"fresh", "ready", "claimed"} {
@@ -171,22 +171,10 @@ func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
 					var machine *LocalAdmission
 					machineLeases := 0
 					if compute {
-						machine = &LocalAdmission{Daemon: d, BoxID: testBox}
+						machine = &LocalAdmission{Daemon: d}
 						machineLeases = 1
 					}
 					configureNativeAdmission(&f.Host, machine, &storeAdmission{Store: f.Tenant, Owner: f.Actor}, false)
-					admitted := make(chan string, 3)
-					bind := f.Host.bindAdmission
-					f.Host.bindAdmission = func(bound *OwnerHost, actor store.Actor) {
-						bind(bound, actor)
-						admit := bound.Admit
-						bound.Admit = func(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
-							return admit(ctx, accepted, row, func(ctx context.Context) error {
-								admitted <- row.Ref.NodeID
-								return body(ctx)
-							})
-						}
-					}
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 					done := make(chan error, 1)
 					joined := make(chan struct{})
@@ -200,16 +188,6 @@ func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
 					}()
 					defer func() { cancel(); <-joined }()
 					for _, id := range []string{"build", "test"} {
-						select {
-						case node := <-admitted:
-							if node != id {
-								t.Fatalf("unexpected remote admission: %s", node)
-							}
-						case err := <-done:
-							t.Fatalf("host returned before remote admission: %v", err)
-						case <-ctx.Done():
-							t.Fatal(context.Cause(ctx))
-						}
 						for {
 							snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
 							if err != nil {
@@ -223,21 +201,22 @@ func TestDispatchRetainsStoreConcurrencyUntilRemoteCompletion(t *testing.T) {
 								t.Fatal(err)
 							}
 						}
-						key := scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
-						state, err := f.Tenant.GetConcurrencyState(ctx, key)
-						if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != id || state.UsedCost != 1 {
-							t.Fatalf("ready remote job lost its concurrency: %+v, %v", state, err)
-						}
-						if live, _, _ := d.counts(); live != machineLeases {
-							t.Fatalf("remote job reserved machine capacity: leases=%d", live)
-						}
 						input, claimed := claims[id]
 						if !claimed {
 							_, input = claimRemote(t, f, id)
 						}
-						if err := f.report(ctx, input, store.NodeSuccess); err != nil {
+						admission := ComposeNativeAdmission(f.Tenant, nil, false)
+						if err := admission.claimedNode(ctx, input, func(ctx context.Context) error {
+							key := scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
+							state, err := f.Tenant.GetConcurrencyState(ctx, key)
+							if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != id {
+								return fmt.Errorf("claimed job lost concurrency: %+v %v", state, err)
+							}
+							return f.report(ctx, input, store.NodeSuccess)
+						}); err != nil {
 							t.Fatal(err)
 						}
+
 					}
 					if err := <-done; err != nil {
 						t.Fatal(err)
@@ -267,7 +246,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 	f := newStoreHostFixture(t, plan)
 	f.Host.Local = func(store.NodeRow) bool { return false }
 	d := newFakeDaemon()
-	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &storeAdmission{Store: f.Tenant, Owner: f.Actor}, false)
+	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d}, &storeAdmission{Store: f.Tenant, Owner: f.Actor}, false)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	done := make(chan error, 1)
 	joined := make(chan struct{})
@@ -290,9 +269,14 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 		}
 	}
 	_, input := claimRemote(t, f, "build")
+	admission := ComposeNativeAdmission(f.Tenant, nil, false)
+	if err := admission.claimedNode(ctx, input, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
 	replacement := newStoreHostFixtureOn(t, f.Store, plan, runspec.Options{})
-	admission := storeAdmission{Store: replacement.Tenant, Owner: replacement.Actor}
-	if err := admission.Node(ctx, replacement.Accepted, capacityRow(t, replacement, "build"), func(context.Context) error { return nil }); err != nil {
+	replacementAdmission := storeAdmission{Store: replacement.Tenant, Owner: replacement.Actor}
+	if err := replacementAdmission.Node(ctx, replacement.Accepted, capacityRow(t, replacement, "build"), func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	f.State.notify()

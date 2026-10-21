@@ -12997,6 +12997,11 @@ paths:
               - trigger.host
             binding: runOfTrigger
             liveness: sensitive
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: run
+            liveness: sensitive
         retry: exact_body
   /api/v1/runs/{run}/local-host/data-authority:
     get:

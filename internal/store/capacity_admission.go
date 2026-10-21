@@ -14,7 +14,7 @@ import (
 
 var errLauncherHostPending = errors.New("launcher execution host awaits activation")
 
-// AdmitCapacity derives all capacity inputs from the accepted unit and its live owner award.
+// AdmitCapacity derives all capacity inputs from the accepted unit and its live execution award.
 // Repeated calls retain holders, resolve waiters and acquire remaining groups in key order.
 func (t *Tenant) AdmitCapacity(ctx context.Context, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error) {
 	var result AcquireSlotResponse

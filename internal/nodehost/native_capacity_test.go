@@ -5,13 +5,16 @@ package nodehost
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -159,8 +162,8 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 	}
 }
 
-func TestNativeClaimedComputeDoesNotReacquireConcurrency(t *testing.T) {
-	capacity, probe, accepted, row := capacityFixture(t)
+func TestNativeClaimedAdmissionAcquiresConcurrencyOnce(t *testing.T) {
+	_, probe, accepted, row := capacityFixture(t)
 	daemon := newFakeDaemon()
 	config, _, _, _ := nativeHostFixture(t)
 	config.Admission = ComposeNativeAdmission(probe, &LocalAdmission{Daemon: daemon}, false)
@@ -168,13 +171,129 @@ func TestNativeClaimedComputeDoesNotReacquireConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := capacity.Node(t.Context(), accepted, row, func(ctx context.Context) error {
-		return claimed.Admission.ClaimedNode(ctx, accepted, row, func(context.Context) error { return nil })
-	}); err != nil {
+	if err := claimed.Admission.claimedNode(t.Context(), NodeInput{Accepted: accepted, NodeID: row.Ref.NodeID, Generation: row.Generation, Execution: row.Execution}, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	requests := daemon.requests()
 	if len(requests) != 1 || len(requests[0].Semaphores) != 0 || len(probe.bindings) != 1 {
 		t.Fatalf("claimed compute reacquired concurrency: machine=%+v store=%+v", requests, probe.bindings)
+	}
+}
+
+func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
+	for _, compute := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local_admission=%t", compute), func(t *testing.T) {
+			plan := capacityPlan("queue", 0, "a", "b")
+			for i := range plan.Jobs {
+				plan.Jobs[i].Concurrency[0].Scope = new("run")
+				plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(0.25), MemoryBytes: new(int64(1024))}
+			}
+			fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}}})
+			config, _, _, _ := nativeHostFixture(t)
+			config.Store = fixture.Tenant
+			daemon := newFakeDaemon()
+			var machine *LocalAdmission
+			if compute {
+				machine = &LocalAdmission{Daemon: daemon}
+			}
+			config.Admission = ComposeNativeAdmission(fixture.Tenant, machine, false)
+			queued := make(chan struct{}, 1)
+			config.Admission.capacity.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
+				if ref.NodeID == "b" {
+					queued <- struct{}{}
+				}
+				return nil
+			}
+			_, claimed, _, err := NewNativeHost(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := scopedConcurrencyKey("db", "run", fixture.Accepted.RunID, "")
+			claimed.Acquire = func(ctx context.Context, spec source.Spec, _ source.Options) (*source.Entry, error) {
+				state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
+				if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 {
+					return nil, fmt.Errorf("source outside concurrency: %+v %v", state, err)
+				}
+				return &source.Entry{Engine: engine.Resolved{Identity: *spec.Engine}, SHA: spec.SHA, RepoKey: spec.RepoKey}, nil
+			}
+			started, release := make(chan string, 2), make(chan struct{})
+			var active atomic.Int32
+			claimed.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				if active.Add(1) != 1 {
+					t.Error("claimed jobs overlapped")
+				}
+				started <- input.NodeID
+				if input.NodeID == "a" {
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					}
+				}
+				active.Add(-1)
+				return fixture.report(ctx, input, store.NodeSuccess)
+			})
+			inputs := make([]NodeInput, 0, 2)
+			for _, id := range []string{"a", "b"} {
+				releaseRemote(t, fixture, id)
+				_, input := claimRemote(t, fixture, id)
+				inputs = append(inputs, input)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			var workers sync.WaitGroup
+			defer func() { cancel(); workers.Wait() }()
+			done := make(chan error, 2)
+			workers.Go(func() { done <- claimed.Execute(ctx, inputs[0]) })
+			select {
+			case id := <-started:
+				if id != "a" {
+					t.Fatal(id)
+				}
+			case err := <-done:
+				t.Fatal(err)
+			case <-ctx.Done():
+				t.Fatal(context.Cause(ctx))
+			}
+			workers.Go(func() { done <- claimed.Execute(ctx, inputs[1]) })
+			select {
+			case <-queued:
+			case id := <-started:
+				t.Fatalf("job %s bypassed concurrency", id)
+			case err := <-done:
+				t.Fatal(err)
+			case <-ctx.Done():
+				t.Fatal(context.Cause(ctx))
+			}
+			state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
+			if err != nil || len(state.Holders) != 1 || len(state.Waiters) != 1 || state.Holders[0].NodeID != "a" || state.Waiters[0].NodeID != "b" {
+				t.Fatalf("contention=%+v %v", state, err)
+			}
+			close(release)
+			for range 2 {
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if id := <-started; id != "b" {
+				t.Fatal(id)
+			}
+			state, err = fixture.Tenant.GetConcurrencyState(ctx, key)
+			if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
+				t.Fatalf("capacity leaked: %+v %v", state, err)
+			}
+			live, granted, released := daemon.counts()
+			want := 0
+			if compute {
+				want = 2
+			}
+			if live != 0 || granted != want || released != want {
+				t.Fatalf("compute=%d/%d/%d", live, granted, released)
+			}
+			for _, request := range daemon.requests() {
+				if len(request.Semaphores) != 0 {
+					t.Fatalf("duplicate concurrency: %+v", request)
+				}
+			}
+		})
 	}
 }

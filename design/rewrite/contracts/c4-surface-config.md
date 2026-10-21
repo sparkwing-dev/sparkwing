@@ -689,7 +689,6 @@ regenerate with `go test ./tests/acceptance -run '^TestCurrentContractSymbolInve
 | `AllowRisk` | [source](../../../internal/settings/resolvers.go) |
 | `ApprovalWait` | [source](../../../internal/settings/resolvers.go) |
 | `Args` | [source](../../../internal/settings/resolvers.go) |
-| `BoxID` | [source](../../../internal/settings/resolvers.go) |
 | `CacheFrom` | [source](../../../internal/settings/resolvers.go) |
 | `ClaimWait` | [source](../../../internal/settings/resolvers.go) |
 | `Code` | [source](../../../internal/settings/contract.go) |
@@ -1141,21 +1140,21 @@ existing owner is an error and never causes another owner to be started.
 Development builds have no published matching release. Their native fixture
 starts an independent local controller with the development CLI first.
 
-`NativeHostConfig.ClaimAdmission` composes the existing `LocalAdmission` into
-independently claimed jobs. `LocalAdmission.ClaimedNode` holds one job-specific
-machine lease before source preparation and through process cleanup. It uses
-the sealed job resources, without creating another run record. Ordinary claimed
-jobs also acquire their local concurrency. Burst jobs leave logical concurrency
-with the requesting owner, including when a registered runner shares its
-machine. Here burst owners retain semaphores through persisted completion and
-acquire compute before requesting a self-claim. While that admission waits,
+`NativeHostConfig.Admission` composes store-owned concurrency with optional
+CPU and memory admission. All claimed jobs, including owner self-claims and
+burst jobs, enter the same concurrency acquisition operation under their job
+award. It admits every accepted group before execution and reuses live holders.
+The store releases holders on terminal transitions. `LocalAdmission` requests
+only CPU and memory. `runner.local_admission` controls those compute requests.
+Logical concurrency stays enabled for every placement. A burst owner acquires
+compute before requesting a self-claim.
+While that admission waits,
 the job stays ready for other ranked claimants. Another claimant's progress
 cancels and joins the machine wait. The store still fences execution after the
 machine lease is acquired.
 
 Machine admission for a Cloud-owned run uses `wingwire.RemoteRunID` with the
-controller address and run ID encoded as separate base64url fields. Job and
-semaphore participants preserve that owner namespace. The local controller
+controller address and run ID encoded as separate base64url fields. Job participants preserve that owner namespace. The local controller
 does not query or finalize those identities in its run store. Resource release,
 eviction and local queue cancellation still operate on the machine lease. The
 Cloud host owns its award and run cancellation. Local run lookup failures remain

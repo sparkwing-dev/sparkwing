@@ -37,7 +37,7 @@ func TestProductionHostingRetainsPrivateTransport(t *testing.T) {
 				return nil, boundary
 			})}
 			connection := client.EngineOptions{URL: "http://private.invalid", HTTP: transport, Launcher: true, Bearer: fixedBearer("ambient-root")}
-			hosting := productionHostingAt(t.TempDir(), "v1.2.3", connection, "", "", "box", false, procenv.SubmitAccept{}, nil)
+			hosting := productionHostingAt(t.TempDir(), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}, nil)
 			if hosting.HTTP != transport || hosting.ControllerURL != connection.URL {
 				t.Fatal("hosting lost its configured transport")
 			}
@@ -70,7 +70,7 @@ func FuzzProductionHostingUsesOnlyAwardedCredential(f *testing.F) {
 			}
 			return nil, boundary
 		})}
-		hosting := productionHostingAt(t.TempDir(), "v1.2.3", client.EngineOptions{URL: "http://private.invalid", HTTP: httpClient, Bearer: fixedBearer(ambient)}, "", "", "box", false, procenv.SubmitAccept{}, nil)
+		hosting := productionHostingAt(t.TempDir(), "v1.2.3", client.EngineOptions{URL: "http://private.invalid", HTTP: httpClient, Bearer: fixedBearer(ambient)}, "", "", false, procenv.SubmitAccept{}, nil)
 		unit := controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, RunID: "run", Capability: bearer}
 		if node {
 			unit.Unit, unit.JobID = capability.UnitNode, "build"

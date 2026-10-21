@@ -377,11 +377,22 @@ var (
 )
 
 // AdmitCapacity admits exactly the unit's persisted concurrency declarations.
-func (c *LocalHostClient) AdmitCapacity(ctx context.Context, binding store.CapacityBinding, _ store.Actor) (store.AcquireSlotResponse, error) {
+func (c *LocalHostClient) AdmitCapacity(ctx context.Context, binding store.CapacityBinding, actor store.Actor) (store.AcquireSlotResponse, error) {
 	var result store.AcquireSlotResponse
-	if c.node != "" || binding.RunID != c.run {
+	if binding.RunID != c.run || c.node != "" && binding.NodeID != c.node {
 		return result, localHostClientRefusal()
 	}
-	err := c.request(ctx, "POST", "/capacity/acquire", "", localhostwire.LocalCapacityRequest{Binding: binding}, &result)
+	if err := c.live(); err != nil {
+		return result, err
+	}
+	transport := c.transport
+	if c.node != "" || actor.Kind == store.ActorHolder {
+		var err error
+		transport, _, err = c.nodeTransport(ctx, controllerwire.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID})
+		if err != nil {
+			return result, err
+		}
+	}
+	err := transport.request(ctx, "POST", "/api/v1/runs/{run}/local-host/capacity/acquire", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host/capacity/acquire", "", localhostwire.LocalCapacityRequest{Binding: binding}, &result)
 	return result, err
 }

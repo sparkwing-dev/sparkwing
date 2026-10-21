@@ -14,7 +14,7 @@ import (
 func TestClaimedNodeAdmissionCoversSourceAndJoinedExecution(t *testing.T) {
 	input, _, host, processes := claimedNodeFixture(t)
 	daemon := newFakeDaemon()
-	host.Admission = &LocalAdmission{Daemon: daemon, BoxID: testBox}
+	host.Admission = ComposeNativeAdmission(nil, &LocalAdmission{Daemon: daemon}, false)
 	acquire := host.Acquire
 	host.Acquire = func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
 		if live, _, _ := daemon.counts(); live != 1 {
@@ -37,10 +37,10 @@ func TestClaimedNodeCancellationWhileQueuedNeverAcquiresSource(t *testing.T) {
 	input, state, host, processes := claimedNodeFixture(t)
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
-	host.Admission = &LocalAdmission{Daemon: daemon, BoxID: testBox}
+	host.Admission = ComposeNativeAdmission(nil, &LocalAdmission{Daemon: daemon}, false)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	host.Admission.Queued = func(context.Context, controllerwire.NodeRef, wingwire.Queued) { cancel() }
+	host.Admission.compute.Queued = func(context.Context, controllerwire.NodeRef, wingwire.Queued) { cancel() }
 	host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 		t.Error("acquired source before admission")
 		return nil, errors.New("unadmitted source acquisition")
@@ -67,7 +67,7 @@ func FuzzClaimedNodeMachineLeasesKeepSeparateJobs(f *testing.F) {
 		}
 		accepted := localAdmissionSeal(t, localAdmissionOptions())
 		daemon := newFakeDaemon()
-		admission := LocalAdmission{Daemon: daemon, BoxID: testBox}
+		admission := LocalAdmission{Daemon: daemon}
 		row := localAdmissionRow(first)
 		row.Ref.RunID = accepted.RunID
 		err := admission.ClaimedNode(t.Context(), accepted, row, func(ctx context.Context) error {

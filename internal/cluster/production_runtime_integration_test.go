@@ -247,7 +247,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
-	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", "box", false, procenv.SubmitAccept{}, nil), unit
+	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}, nil), unit
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
@@ -534,8 +534,8 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 					capacity.Lock()
 					admitted := held
 					capacity.Unlock()
-					if !admitted {
-						return nil, errors.New("job scheduled without its concurrency lease")
+					if admitted {
+						return nil, errors.New("job acquired concurrency before receiving its award")
 					}
 					if compute {
 						state, err := wingdclient.Query(r.Context(), wingdclient.Options{Home: home, Version: "v1.2.3"})
@@ -564,7 +564,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				body, err := json.Marshal(response)
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 			})}}
-			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", "box", compute, procenv.SubmitAccept{}, nil)
+			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", compute, procenv.SubmitAccept{}, nil)
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: connection.URL, HTTP: connection.HTTP, Bearer: fixedBearer(unit.Capability)})
 			if err != nil {
 				t.Fatal(err)

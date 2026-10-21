@@ -37,7 +37,7 @@ type ClaimedNodeHost struct {
 	Executor  NodeHost
 	Mask      func(string) string
 	Masks     *MaskRegistry
-	Admission *LocalAdmission
+	Admission NativeAdmission
 }
 
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
@@ -73,12 +73,8 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if err := context.Cause(ctx); err != nil {
 		return h.setupFailure(ctx, input, err)
 	}
-	if h.Admission == nil {
-		return h.execute(ctx, input, spec)
-	}
-	row := store.NodeRow{Ref: ref, Execution: input.Execution}
 	admitted := false
-	err = h.Admission.ClaimedNode(ctx, input.Accepted, row, func(ctx context.Context) error {
+	err = h.Admission.claimedNode(ctx, input, func(ctx context.Context) error {
 		admitted = true
 		return h.execute(ctx, input, spec)
 	})

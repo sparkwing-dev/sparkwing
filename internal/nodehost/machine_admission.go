@@ -3,45 +3,17 @@ package nodehost
 import (
 	"context"
 	"errors"
-	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // MachineAdmission binds host capacity to the elected local daemon.
-func MachineAdmission(home, version, boxID string) *LocalAdmission {
-	return &LocalAdmission{BoxID: boxID, Daemon: machineAdmitter{options: wingdclient.Options{
+func MachineAdmission(home, version string) *LocalAdmission {
+	return &LocalAdmission{Daemon: machineAdmitter{options: wingdclient.Options{
 		Home: home, Version: version, NoTakeover: true,
 		Spawn: func(string, string) error { return errors.New("local host requires its elected admission controller") },
 	}}}
-}
-
-// MachineBoxID resolves concurrency scope independently of compute admission.
-func MachineBoxID() (string, error) {
-	path, err := userconfig.Path()
-	if err != nil {
-		return "", err
-	}
-	machine, err := userconfig.ReadConfig(path)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-	hostname, err := os.Hostname()
-	if err != nil && (machine.Machine == nil || machine.Machine.BoxID == nil) {
-		return "", err
-	}
-	input := settings.Inputs{Context: settings.Context{Hostname: hostname}}
-	if machine.Machine != nil {
-		input.Machine.BoxID = machine.Machine.BoxID
-	}
-	box, _, err := settings.BoxID(input)
-	if err != nil {
-		return "", err
-	}
-	return box, nil
 }
 
 type machineAdmitter struct{ options wingdclient.Options }

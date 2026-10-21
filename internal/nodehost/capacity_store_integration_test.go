@@ -115,8 +115,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T)
 func TestStoreAdmissionSQLiteCancelOthersStopsOwnerSelfClaimedExecution(t *testing.T) {
 	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
-	admission := storeAdmission{Store: first.Tenant, Owner: first.Actor}
-	first.Host.Admit = admission.Node
+	first.Host.executionAdmission = ComposeNativeAdmission(first.Tenant, nil, false)
 	started := make(chan context.Context, 1)
 	observed := make(chan struct{}, 1)
 	wait := first.Host.Wait

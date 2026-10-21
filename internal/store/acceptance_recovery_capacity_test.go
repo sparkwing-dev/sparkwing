@@ -193,3 +193,44 @@ func TestStoreRecoveryCapacityMaintenance(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
+	f := newRecoveryCapacityFixture(t)
+	ctx := t.Context()
+	competitor, err := f.capacityCompetitor(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "global:deploy", HolderID: "blocker", RunID: competitor, NodeID: "job", Capacity: 1, Cost: 1, Policy: store.OnLimitQueue})
+	if err != nil || blocker.Kind != store.AcquireGranted {
+		t.Fatalf("blocker=%+v %v", blocker, err)
+	}
+	queued, err := f.tenant.AdmitCapacity(ctx, store.CapacityBinding{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Generation: f.holder.Generation}, f.holder)
+	if err != nil || queued.Kind != store.AcquireQueued {
+		t.Fatalf("queue=%+v %v", queued, err)
+	}
+	var arrival int64
+	if err := f.s.DB().QueryRowContext(ctx, `SELECT arrived_at FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, f.tenant.Team(), f.ref.RunID, f.ref.NodeID).Scan(&arrival); err != nil {
+		t.Fatal(err)
+	}
+	for _, live := range []bool{true, false} {
+		until := time.Now().Add(time.Second).UnixNano()
+		if !live {
+			until = time.Now().Add(-time.Second).UnixNano()
+		}
+		if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_waiters SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, until, f.tenant.Team(), f.ref.RunID, f.ref.NodeID); err != nil {
+			t.Fatal(err)
+		}
+		beat, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var retained, renewed int64
+		if err := f.s.DB().QueryRowContext(ctx, `SELECT arrived_at,lease_expires_at FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, f.tenant.Team(), f.ref.RunID, f.ref.NodeID).Scan(&retained, &renewed); err != nil {
+			t.Fatal(err)
+		}
+		if retained != arrival || live && renewed < beat.ExpiresAt.UnixNano() || !live && renewed != until {
+			t.Fatalf("live=%t arrival=%d/%d expiry=%d/%d beat=%s", live, retained, arrival, renewed, until, beat.ExpiresAt)
+		}
+	}
+}

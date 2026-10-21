@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -36,7 +35,7 @@ func burstAdmissionFixture(t *testing.T) (*ownerFixture, OwnerHost, RunInput, *f
 		return OwnerLayerResult{}, nil
 	})
 	d := newFakeDaemon()
-	configureNativeAdmission(&host, &LocalAdmission{Daemon: d, BoxID: testBox}, nil, false)
+	configureNativeAdmission(&host, &LocalAdmission{Daemon: d}, nil, false)
 	return f, host, input, d
 }
 
@@ -121,31 +120,6 @@ func TestBurstSelfClaimCancelledDuringMachineContentionNeverStarts(t *testing.T)
 	}
 }
 
-func TestBurstConcurrencyIsHeldOnceAcrossSelfClaim(t *testing.T) {
-	f, host, input, daemon := burstAdmissionFixture(t)
-	row := f.snapshot.Nodes[0]
-	row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "fail"}}
-	f.snapshot.Nodes[0] = row
-	host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error {
-		requests := daemon.requests()
-		if live, _, _ := daemon.counts(); live != 3 || len(requests) != 3 || len(requests[1].Semaphores) != 1 || len(requests[2].Semaphores) != 0 {
-			t.Fatalf("burst reacquired or lost concurrency: requests=%+v live=%d", requests, live)
-		}
-		return nil
-	})
-	_, err := host.Around(t.Context(), *input.Accepted, func(ctx context.Context) (RunCompletion, error) {
-		return RunCompletion{}, host.release(ctx, input, *input.Accepted, &source.Entry{}, row, store.DecisionReady, func(ctx context.Context, request store.ReconcileRequest) error {
-			return host.execute(ctx, input, *input.Accepted, &source.Entry{Engine: engine.Resolved{Identity: f.snapshot.Run.Spec.Resolved.Engine}}, request)
-		})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if live, granted, released := daemon.counts(); live != 0 || granted != 3 || released != 3 {
-		t.Fatalf("burst concurrency leaked: %d/%d/%d", live, granted, released)
-	}
-}
-
 func TestBurstSelfClaimWaitsForCompetingLocalWorkThenExecutes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f, host, input, daemon := burstAdmissionFixture(t)
@@ -170,55 +144,18 @@ func TestBurstSelfClaimWaitsForCompetingLocalWorkThenExecutes(t *testing.T) {
 	})
 }
 
-func TestBurstRegisteredClaimDoesNotReacquireRequesterConcurrency(t *testing.T) {
-	burstSharedClaimConcurrency(t, "run", "db", 1, 1)
-}
-
-func FuzzBurstClaimChargesRequesterConcurrencyOnce(f *testing.F) {
-	f.Add([]byte("db"), uint8(1), uint8(1), false)
-	f.Add([]byte("path:/db"), uint8(3), uint8(2), true)
-	f.Fuzz(func(t *testing.T, name []byte, size, demand uint8, box bool) {
-		if len(name) > 256 {
-			return
-		}
-		scope := "run"
-		if box {
-			scope = "box"
-		}
-		capacity := 1 + int(size)%8
-		burstSharedClaimConcurrency(t, scope, "db-"+hex.EncodeToString(name), capacity, 1+int(demand)%capacity)
-	})
-}
-
-func burstSharedClaimConcurrency(t *testing.T, scope, group string, capacity, cost int) {
-	t.Helper()
-	f, host, input, daemon := burstAdmissionFixture(t)
-	row := f.snapshot.Nodes[0]
-	row.Execution.Concurrency = []runspec.Concurrency{{Group: group, Scope: scope, Capacity: capacity, Cost: cost, OnLimit: "fail"}}
-	_, err := host.Around(t.Context(), *input.Accepted, func(ctx context.Context) (RunCompletion, error) {
-		return RunCompletion{}, host.Admit(ctx, *input.Accepted, row, func(ctx context.Context) error {
-			return (&LocalAdmission{Daemon: daemon}).ClaimedNode(ctx, *input.Accepted, row, func(context.Context) error {
-				requests := daemon.requests()
-				if len(requests) != 3 || len(requests[1].Semaphores) != 1 || len(requests[2].Semaphores) != 0 || requests[2].Resources.Cores != 4 {
-					t.Fatalf("registered claim did not retain requester's concurrency: %+v", requests)
-				}
-				return nil
-			})
-		})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if live, granted, released := daemon.counts(); live != 0 || granted != 3 || released != 3 {
-		t.Fatalf("registered claim leaked admission: %d/%d/%d", live, granted, released)
-	}
-}
-
 func FuzzBurstReleaseNeverReservesMachineResources(f *testing.F) {
 	f.Add(uint8(4), uint32(1024), true)
 	f.Add(uint8(0), uint32(0), false)
 	f.Fuzz(func(t *testing.T, cores uint8, memory uint32, grouped bool) {
 		_, host, input, daemon := burstAdmissionFixture(t)
+		capacity, probe, _, _ := capacityFixture(t)
+		capacity.Owner = input.Owner
+		configureNativeAdmission(&host, &LocalAdmission{Daemon: daemon}, capacity, false)
+		probe.admit = func(context.Context) (store.AcquireSlotResponse, error) {
+			t.Error("unclaimed release acquired concurrency")
+			return store.AcquireSlotResponse{}, errors.New("not awarded")
+		}
 		var spec runspec.Spec
 		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 			t.Fatal(err)
@@ -258,9 +195,13 @@ func (s burstPlacementStore) ReconcileNode(ctx context.Context, request store.Re
 	return s.ownerFixture.ReconcileNode(ctx, request)
 }
 
-func TestBurstRetainsConcurrencyWhileWaitingForPlacement(t *testing.T) {
+func TestBurstWaitsForPlacementBeforeConcurrency(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f, host, input, daemon := burstAdmissionFixture(t)
+		capacity, probe, _, _ := capacityFixture(t)
+		capacity.Owner = input.Owner
+		configureNativeAdmission(&host, &LocalAdmission{Daemon: daemon}, capacity, false)
+
 		host.Store = burstPlacementStore{f}
 		f.snapshot.Nodes[0].OwnerExecution = &store.OwnerExecution{Allowed: false}
 		row := f.snapshot.Nodes[0]
@@ -280,11 +221,11 @@ func TestBurstRetainsConcurrencyWhileWaitingForPlacement(t *testing.T) {
 		synctest.Wait()
 		select {
 		case err := <-done:
-			t.Fatalf("burst dropped concurrency before its placement settled: %v", err)
+			t.Fatalf("burst did not wait for placement: %v", err)
 		default:
 		}
-		if live, _, _ := daemon.counts(); live != 2 || executed {
-			t.Fatalf("waiting burst lost concurrency or used compute: live=%d executed=%v", live, executed)
+		if live, _, _ := daemon.counts(); live != 1 || executed || len(probe.bindings) != 0 {
+			t.Fatalf("waiting burst acquired job capacity: live=%d executed=%v", live, executed)
 		}
 		f.mu.Lock()
 		f.snapshot.Nodes[0].OwnerExecution = &store.OwnerExecution{Allowed: true}
@@ -293,7 +234,7 @@ func TestBurstRetainsConcurrencyWhileWaitingForPlacement(t *testing.T) {
 		if err := <-done; err != nil || !executed {
 			t.Fatalf("returned capacity did not resume the waiting owner: executed=%v error=%v", executed, err)
 		}
-		if live, granted, released := daemon.counts(); live != 0 || granted != 3 || released != 3 {
+		if live, granted, released := daemon.counts(); live != 0 || granted != 2 || released != 2 || len(probe.bindings) != 1 {
 			t.Fatalf("placement wait leaked admission: %d/%d/%d", live, granted, released)
 		}
 	})

@@ -2,25 +2,24 @@
 
 ## Burst release and machine admission
 
-For a sealed burst request, the owner retains run/box concurrency before
-readiness without acquiring compute resources. Run resource settings still
+For a sealed burst request, readiness acquires neither job concurrency nor
+compute resources. Run resource settings still
 flow into each job's sealed settings. A self-claim acquires a job-specific machine lease before the shared store's
 fenced reconciliation. Waiting for machine capacity leaves the job unclaimed.
 A joined state follower cancels that wait when another claimant advances the
 job. Reconciliation still decides who executes after admission succeeds.
 No attempt starts before both admission and the award. Cleanup joins before release.
 
-Independently claimed burst jobs acquire compute resources without reacquiring
-the requester's logical concurrency. This also covers a registered runner on
-the requesting machine. The owner retains those semaphores until persisted job
-completion. Non-burst claimed-job admission keeps its existing concurrency rule.
+Every claimed job acquires all accepted concurrency groups under its own award
+before source preparation or execution. This also covers burst jobs and owner
+self-claims. The shared store transaction reuses live holders. Terminal
+transitions release them. CPU and memory admission is optional for runners.
 For independently awarded jobs, pre-execution machine-admission failure reports
 through the fenced setup result path, with attempt zero retained. A self-hosting
 owner's preclaim admission transport failure returns an error without claiming
 or finishing the job.
 
-An unclaimed burst job retains its logical concurrency while waiting for
-placement. The owner follows the existing state subscription and retries the
+An unclaimed burst job waits for placement without acquiring job concurrency. The owner follows the existing state subscription and retries the
 fenced reconciliation after persisted state or its execution eligibility
 changes. `StateFollower.Wait` includes the private owner's execution projection
 in its change comparison. A capacity observation only wakes reconciliation.
@@ -1157,10 +1156,10 @@ joined cleanup. Its SDK receives the filtered remote process environment.
 
 ## Burst claimed-job machine admission
 
-`ClaimedNodeHost.Admission` optionally holds the existing machine admission
-lease around source preparation, SDK execution and joined cleanup. Native
-composition supplies it through `NativeHostConfig.ClaimAdmission` for registered
-machines with local admission enabled. Independently claimed jobs have separate
+`ClaimedNodeHost.Admission` holds store-owned concurrency around source
+preparation, SDK execution and joined cleanup. `NativeHostConfig.Admission`
+composes that capacity store with optional CPU and memory admission for
+registered machines with local admission enabled. Independently claimed jobs have separate
 job-specific holders, including when they belong to one run. Admission refusal
 before source acquisition reports the claim's terminal setup result without
 starting an attempt. Cloud Job execution keeps its existing physical allocation.

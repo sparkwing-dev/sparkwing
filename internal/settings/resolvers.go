@@ -97,20 +97,6 @@ func Priority(in Inputs) (int, Origin, error) {
 	return value, origin, err
 }
 
-// BoxID resolves machine.box_id from its permitted sources.
-func BoxID(in Inputs) (string, Origin, error) {
-	fallback := in.Context.Hostname
-
-	value, origin, err := pick(in, "machine.box_id", func(v Values) *string { return v.BoxID }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	if strings.TrimSpace(value) == "" {
-		err = invalid("machine.box_id", origin, "must not be empty")
-	}
-	return value, origin, err
-}
-
 // Publish resolves publish from its permitted sources.
 func Publish(in Inputs) (string, Origin, error) {
 	return pickRun(in, "publish", func(v runspec.Options) runspec.Setting[string] { return v.Publish }, "")

@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -108,7 +106,7 @@ func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
 	}
 }
 
-func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
+func TestAdmissionRunHoldingComputeDoesNotReadConcurrency(t *testing.T) {
 	d := newFakeDaemon()
 	admission := LocalAdmission{Daemon: d}
 	options := localAdmissionOptions()
@@ -117,90 +115,14 @@ func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
 	_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
 		row := localAdmissionRow("g")
 		row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}}
-		if err := admission.Node(ctx, accepted, row, func(context.Context) error { return nil }); err != nil {
-			return RunCompletion{}, err
-		}
-		return RunCompletion{}, admission.Node(ctx, accepted, localAdmissionRow("plain"), func(context.Context) error { return nil })
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reqs := d.requests()
-	if len(reqs) != 2 || !reqs[1].SemaphoresOnly || !strings.HasPrefix(string(reqs[1].RunID), testRunID+"/node-semaphore/") || len(reqs[1].Semaphores) != 1 || reqs[1].Semaphores[0].Name != scopedConcurrencyKey("db", "run", testRunID, "") || reqs[1].Resources != (wingwire.HostResources{}) {
-		t.Fatalf("requests=%+v", reqs)
-	}
-}
-
-func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
-	d := newFakeDaemon()
-	admission := LocalAdmission{Daemon: d, BoxID: "machine"}
-	accepted := localAdmissionSeal(t, localAdmissionOptions())
-	_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
-		row := localAdmissionRow("build")
-		row.Execution.Resources.Value.Cores.Value = 2
-		row.Execution.Concurrency = []runspec.Concurrency{
-			{Group: "b", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"},
-			{Group: "a", Scope: "box", Capacity: 2, Cost: 1, OnLimit: "queue"},
-		}
 		return RunCompletion{}, admission.Node(ctx, accepted, row, func(context.Context) error { return nil })
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	requests := d.requests()
-	if len(requests) != 2 {
-		t.Fatalf("leases=%+v", requests)
+	if reqs := d.requests(); len(reqs) != 1 || len(reqs[0].Semaphores) != 0 {
+		t.Fatalf("requests=%+v", reqs)
 	}
-	request := requests[1]
-	if len(request.Semaphores) != 2 || request.Resources.Cores != 2 || request.SemaphoresOnly {
-		t.Fatalf("claims=%+v", request)
-	}
-	if request.Semaphores[0].Name != scopedConcurrencyKey("a", "box", testRunID, "machine") || request.Semaphores[1].Name != scopedConcurrencyKey("b", "run", testRunID, "machine") {
-		t.Fatalf("scope/order=%+v", request.Semaphores)
-	}
-}
-
-func TestAdmissionDaemonGroupBoundsParallelNodes(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		d := newFakeDaemon()
-		admission := LocalAdmission{Daemon: d, BoxID: testBox}
-		accepted := localAdmissionSeal(t, localAdmissionOptions())
-		_, err := admission.Run(t.Context(), accepted, func(ctx context.Context) (RunCompletion, error) {
-			var workers sync.WaitGroup
-			var active, peak atomic.Int32
-			gate := make(chan struct{})
-			for _, id := range []string{"a", "b", "c", "d"} {
-				workers.Go(func() {
-					row := localAdmissionRow(id)
-					row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "box", Capacity: 2, Cost: 1, OnLimit: "queue"}}
-					err := admission.Node(ctx, accepted, row, func(context.Context) error {
-						n := active.Add(1)
-						for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
-						}
-						<-gate
-						active.Add(-1)
-						return nil
-					})
-					if err != nil {
-						t.Error(err)
-					}
-				})
-			}
-			synctest.Wait()
-			if peak.Load() != 2 || len(d.queued) != 2 {
-				t.Errorf("peak=%d queued=%d", peak.Load(), len(d.queued))
-			}
-			close(gate)
-			workers.Wait()
-			return RunCompletion{}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if live, granted, released := d.counts(); live != 0 || granted != 5 || released != 5 {
-			t.Fatalf("leases=%d/%d/%d", live, granted, released)
-		}
-	})
 }
 
 func TestLocalAdmissionCancelWhileWaitingForHost(t *testing.T) {
@@ -294,7 +216,6 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 				}
 				spec.Resolved.Settings.Jobs[input.NodeID] = input.Execution
 				input.Accepted.Spec, _ = json.Marshal(spec)
-				admission.BoxID = testBox
 			}
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
@@ -393,62 +314,4 @@ func FuzzLocalAdmissionParentBinding(f *testing.F) {
 			t.Fatalf("leases=%d/%d/%d", live, granted, released)
 		}
 	})
-}
-
-func TestLocalAdmissionDaemonQueueCancelTimeoutAndPolicies(t *testing.T) {
-	for _, policy := range []string{"cancel", "timeout", "skip", "fail"} {
-		t.Run(policy, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				d := newFakeDaemon()
-				admission := LocalAdmission{Daemon: d, BoxID: testBox}
-				accepted := localAdmissionSeal(t, localAdmissionOptions())
-				_, err := admission.Run(t.Context(), accepted, func(ctx context.Context) (RunCompletion, error) {
-					row := localAdmissionRow("a")
-					onLimit := policy
-					if policy == "cancel" || policy == "timeout" {
-						onLimit = "queue"
-					}
-					group := runspec.Concurrency{Group: "db", Scope: "box", Capacity: 1, Cost: 1, OnLimit: onLimit}
-					if policy == "timeout" {
-						group.QueueTimeoutMS = new(int64(30))
-					}
-					row.Execution.Concurrency = []runspec.Concurrency{group}
-					d.used[scopedConcurrencyKey("db", "box", testRunID, testBox)] = 1
-					ctx, cancel := context.WithCancel(ctx)
-					defer cancel()
-					done := make(chan error, 1)
-					go func() {
-						done <- admission.Node(ctx, accepted, row, func(context.Context) error { t.Error("ran past full group"); return nil })
-					}()
-					synctest.Wait()
-					if policy == "cancel" {
-						cancel()
-					}
-					failure := <-done
-					if failure == nil || policy == "timeout" && !errors.Is(failure, errQueueTimeout) || policy == "cancel" && !errors.Is(failure, context.Canceled) {
-						t.Fatalf("policy=%s error=%v", policy, failure)
-					}
-					if policy != "cancel" {
-						var decision *AdmissionFailure
-						want, reason := store.NodeFailed, ""
-						if policy == "skip" {
-							want = store.NodeSkipped
-						} else if policy == "timeout" {
-							reason = store.FailureQueueTimeout
-						}
-						if !errors.As(failure, &decision) || decision.Outcome != want || decision.Reason != reason {
-							t.Fatalf("policy=%s lost outcome=%s reason=%q: %v", policy, want, reason, failure)
-						}
-					}
-					return RunCompletion{}, nil
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if live, granted, released := d.counts(); live != 0 || granted != 1 || released != 1 {
-					t.Fatalf("leases=%d/%d/%d", live, granted, released)
-				}
-			})
-		})
-	}
 }
