@@ -31,6 +31,31 @@ type confinementChart struct {
 	resources  []confinementResource
 	identities []string
 	verbs      []string
+	namespaces []string
+}
+
+func (chart *confinementChart) enrollNamespace(object *unstructured.Unstructured) {
+	if namespace := object.GetNamespace(); namespace != "" {
+		chart.namespaces = append(chart.namespaces, namespace)
+	}
+	if object.GetKind() == "Namespace" {
+		chart.namespaces = append(chart.namespaces, object.GetName())
+	}
+}
+
+func TestConfinementEnrollsRenderedNamespaces(t *testing.T) {
+	var chart confinementChart
+	for _, object := range []*unstructured.Unstructured{
+		{Object: map[string]interface{}{"kind": "Namespace", "metadata": map[string]interface{}{"name": "extra"}}},
+		{Object: map[string]interface{}{"kind": "RoleBinding", "metadata": map[string]interface{}{"namespace": "bound"}}},
+	} {
+		chart.enrollNamespace(object)
+	}
+	for _, namespace := range []string{"extra", "bound"} {
+		if !slices.Contains(chart.namespaces, namespace) {
+			t.Errorf("rendered namespace %q excluded from authorization matrix", namespace)
+		}
+	}
 }
 
 type confinementResource struct {
@@ -46,14 +71,23 @@ func TestCompleteChartRBACConfinement(t *testing.T) {
 			cfg := apiServerAuthorizing(t, "RBAC")
 			granted := installConfinementChart(t, cfg, chart)
 			resources := []confinementResource{
-				{"", "pods", "job", false}, {"batch", "jobs", "job", false},
-				{"", "secrets", "credential", false}, {"networking.k8s.io", "networkpolicies", "boundary", false},
+				{"", "pods", "job", false},
+				{"batch", "jobs", "job", false},
+				{"", "secrets", "credential", false},
+				{"networking.k8s.io", "networkpolicies", "boundary", false},
 				{"discovery.k8s.io", "endpointslices", "kubernetes", false},
-				{"", "serviceaccounts", "sparkwing-customer-job", false}, {"", "serviceaccounts/token", "sparkwing-customer-job", false},
-				{"rbac.authorization.k8s.io", "roles", "launcher", false}, {"rbac.authorization.k8s.io", "rolebindings", "launcher", false},
-				{"", "pods/exec", "job", false}, {"", "pods/attach", "job", false}, {"", "pods/log", "job", false},
-				{"", "nodes", "worker", true}, {"karpenter.sh", "nodeclaims", "worker", true}, {"karpenter.sh", "nodepools", "pool", true},
-				{"rbac.authorization.k8s.io", "clusterroles", "launcher", true}, {"rbac.authorization.k8s.io", "clusterrolebindings", "launcher", true},
+				{"", "serviceaccounts", "sparkwing-customer-job", false},
+				{"", "serviceaccounts/token", "sparkwing-customer-job", false},
+				{"rbac.authorization.k8s.io", "roles", "launcher", false},
+				{"rbac.authorization.k8s.io", "rolebindings", "launcher", false},
+				{"", "pods/exec", "job", false},
+				{"", "pods/attach", "job", false},
+				{"", "pods/log", "job", false},
+				{"", "nodes", "worker", true},
+				{"karpenter.sh", "nodeclaims", "worker", true},
+				{"karpenter.sh", "nodepools", "pool", true},
+				{"rbac.authorization.k8s.io", "clusterroles", "launcher", true},
+				{"rbac.authorization.k8s.io", "clusterrolebindings", "launcher", true},
 				{"admissionregistration.k8s.io", "validatingadmissionpolicies", "sparkwing-cloud-pods-cloud-cloud-jobs", true},
 				{"admissionregistration.k8s.io", "validatingadmissionpolicybindings", "sparkwing-cloud-jobs-cloud-cloud-jobs", true},
 				{"admissionregistration.k8s.io", "validatingadmissionpolicies", "foreign-policy", true},
@@ -68,7 +102,9 @@ func TestCompleteChartRBACConfinement(t *testing.T) {
 			for _, identity := range identities {
 				client := impersonate(t, cfg, identity)
 				for _, resource := range resources {
-					namespaces := []string{"cloud-cloud-jobs", "cloud", "foreign", "default", ""}
+					namespaces := append([]string{"cloud-cloud-jobs", "cloud", "foreign", "default", ""}, granted.namespaces...)
+					slices.Sort(namespaces)
+					namespaces = slices.Compact(namespaces)
 					if resource.cluster {
 						namespaces = []string{""}
 					}
@@ -208,6 +244,7 @@ func installConfinementChart(t *testing.T, cfg *rest.Config, chart string) confi
 		if _, err := target.Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("install %s %s/%s: %v", object.GetKind(), object.GetNamespace(), object.GetName(), err)
 		}
+		granted.enrollNamespace(object)
 		// Enroll every rendered resource grant so a new template cannot escape the matrix.
 		if object.GetKind() == "Role" || object.GetKind() == "ClusterRole" {
 			rules, _, err := unstructured.NestedSlice(object.Object, "rules")

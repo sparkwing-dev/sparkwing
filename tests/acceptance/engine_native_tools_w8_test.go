@@ -17,7 +17,7 @@ import (
 )
 
 func TestEngineNativeNPMW8Components(t *testing.T) {
-	if _, err := pipelineentry.NPMCommand(t.Context(), runtime.GOOS, exec.LookPath, "--version"); err != nil {
+	if _, err := pipelineentry.NPMCommand(t.Context(), os.Environ(), runtime.GOOS, exec.LookPath, "--version"); err != nil {
 		t.Skipf("native npm is not installed: %v", err)
 	}
 	if _, err := exec.LookPath("node"); err != nil {

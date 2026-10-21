@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -23,7 +22,7 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 	if created.IsZero() {
 		created = r.StartedAt
 		if created.IsZero() {
-			created = time.Now().UTC()
+			created = Now(s)
 		}
 	}
 	repository := r.DeclaredRepo
@@ -78,7 +77,7 @@ func SeedRunFinish(s *store.Store, ctx context.Context, team store.Team, id, sta
 	if s.Dialect() == store.DialectPostgres {
 		query = `UPDATE runs SET status=$1,error=$2,finished_at=$3 WHERE team=$4 AND id=$5`
 	}
-	result, err := Exec(ctx, s, query, status, message, time.Now().UnixNano(), team, id)
+	result, err := Exec(ctx, s, query, status, message, Now(s).UnixNano(), team, id)
 	if err != nil {
 		return err
 	}
@@ -102,7 +101,7 @@ WHERE team=? AND run_id=? AND node_id=?`
 claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',owner_capability_prefix=''
 WHERE team=$6 AND run_id=$7 AND node_id=$8`
 	}
-	write, err := Exec(ctx, s, query, result.Outcome, result.MaskedError, result.Reason, result.ExitCode, time.Now().UnixNano(), team, ref.RunID, ref.NodeID)
+	write, err := Exec(ctx, s, query, result.Outcome, result.MaskedError, result.Reason, result.ExitCode, Now(s).UnixNano(), team, ref.RunID, ref.NodeID)
 	if err != nil {
 		return err
 	}
@@ -158,7 +157,7 @@ func SeedNodeReady(s *store.Store, ctx context.Context, run, node string) error 
 	if s.Dialect() == store.DialectPostgres {
 		query = `UPDATE nodes SET ready_at=COALESCE(ready_at,$1),queue_started_at=COALESCE(queue_started_at,$2) WHERE run_id=$3 AND node_id=$4`
 	}
-	now := time.Now().UnixNano()
+	now := Now(s).UnixNano()
 	write, err := Exec(ctx, s, query, now, now, run, node)
 	if err != nil {
 		return err

@@ -2,7 +2,6 @@ package teststore
 
 import (
 	"context"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -26,7 +25,7 @@ func SeedTriggerWithRun(s *store.Store, ctx context.Context, team store.Team, v 
 	}
 	now := v.CreatedAt
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = Now(s)
 	}
 	query := `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES (?,?,?,'trigger',?,?,?,?,?,?)`
 	if s.Dialect() == store.DialectPostgres {

@@ -541,13 +541,20 @@ func (h *Harness) hammerCLI() {
 	if h.sparkBin == "" {
 		return
 	}
-	verbs := [][]string{{"runs", "list", "--limit", "5"}, {"info"}, {"queue"}}
+	// runs list starts a detached controller when it hits a daemon-restart gap.
+	// That controller cannot reattach synthetic runs without store rows, and its
+	// production grace/idle periods exceed this harness's convergence window.
+	// Observe admission directly so the harness retains ownership of its daemons.
+	verbs := [][]string{{"daemon", "events", "--limit", "5"}, {"info"}}
 	verb := verbs[h.rng.Intn(len(verbs))]
 	cmd := procenv.Command(
 		append(os.Environ(), "SPARKWING_HOME="+h.home), h.sparkBin, verb...)
 
-	_ = cmd.Run()
-	h.jr.Append(Event{Kind: "cli", Detail: strings.Join(verb, " ")})
+	event := Event{Kind: "cli", Detail: strings.Join(verb, " ")}
+	if err := cmd.Run(); err != nil {
+		event.Fields = map[string]any{"error": err.Error()}
+	}
+	h.jr.Append(event)
 }
 
 func (h *Harness) checkLedger() {

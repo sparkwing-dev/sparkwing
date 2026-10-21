@@ -48,6 +48,13 @@ func packageSpawnFindings(pkg *packages.Package) []string {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.Ident:
+				if instance, ok := pkg.TypesInfo.Instances[node]; ok {
+					for i := 0; i < instance.TypeArgs.Len(); i++ {
+						if rawCommandType(instance.TypeArgs.At(i)) {
+							report(node, "exec.Cmd generic value construction")
+						}
+					}
+				}
 				object := pkg.TypesInfo.Uses[node]
 				if object == nil || object.Pkg() == nil {
 					break
