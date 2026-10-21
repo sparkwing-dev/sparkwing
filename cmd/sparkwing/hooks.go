@@ -640,7 +640,7 @@ func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locate sparkwing executable: %w", err)
 	}
-	cmd := procenv.Command(append(os.Environ(), "SPARKWING_LOG_FORMAT=plain"), self, args...)
+	cmd := procenv.ControlCommand(append(os.Environ(), "SPARKWING_LOG_FORMAT=plain"), self, args...)
 	cmd.Dir = repoRoot
 
 	return cmd, nil

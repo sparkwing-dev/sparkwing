@@ -31,13 +31,13 @@ func FuzzSDKCleanupEnvironment(f *testing.F) {
 		policy := SDKEnvironment{Base: procenv.Base{Local: true, Captured: captured}, Store: st}
 		env, complete, err := policy.jobEnvironments(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner, true)
 		if err != nil {
-			if len(env) != 0 || len(complete) != 0 {
+			if len(slices.Collect(env.Values())) != 0 || len(slices.Collect(complete.Values())) != 0 {
 				t.Fatal("refused projection returned a partial environment")
 			}
 			return
 		}
-		for _, projected := range [][]string{env, complete} {
-			for _, entry := range projected {
+		for _, projected := range []procenv.Env{env, complete} {
+			for entry := range projected.Values() {
 				key, _, _ := strings.Cut(entry, "=")
 				if key == "API_TOKEN" || key == "SPARKWING_NODE_TOKEN" {
 					t.Fatal("credential reached SDK or cleanup environment")
@@ -46,7 +46,7 @@ func FuzzSDKCleanupEnvironment(f *testing.F) {
 		}
 		assignment := name + "=" + value
 		row, _ := procenv.Lookup(name)
-		if !slices.Contains(complete, assignment) || (startup || row.Startup) && !slices.Contains(env, assignment) {
+		if !slices.Contains(slices.Collect(complete.Values()), assignment) || (startup || row.Startup) && !slices.Contains(slices.Collect(env.Values()), assignment) {
 			t.Fatal("cleanup or startup lost its persisted assignment")
 		}
 	})

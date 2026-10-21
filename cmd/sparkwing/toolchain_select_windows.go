@@ -12,7 +12,7 @@ import (
 
 func execToolchain(bin string, args, env []string) error {
 	// #nosec G702 -- the engine resolver verified this executable and its release identity
-	cmd := procenv.Command(
+	cmd := procenv.ControlCommand(
 		env, bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -449,7 +449,7 @@ func (o execOps) Plan(sparkwingDir, pipeline string) (repos.Plan, error) {
 	if err != nil {
 		self = "sparkwing"
 	}
-	cmd := procenv.CommandContext(o.context(), os.Environ(), self, "pipeline", "plan", "--pipeline", pipeline, "-o", "json")
+	cmd := procenv.ControlCommandContext(o.context(), os.Environ(), self, "pipeline", "plan", "--pipeline", pipeline, "-o", "json")
 	cmd.Dir = filepath.Dir(sparkwingDir)
 
 	var stdout, stderr bytes.Buffer
@@ -550,7 +550,7 @@ func runGoModCmd(ctx context.Context, dir string, args ...string) (string, error
 	if err != nil {
 		return "", err
 	}
-	cmd := procenv.CommandContext(ctx, env, "go", args...)
+	cmd := procenv.ControlCommandContext(ctx, env, "go", args...)
 	cmd.Dir = dir
 
 	var out bytes.Buffer

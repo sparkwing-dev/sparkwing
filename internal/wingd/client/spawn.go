@@ -47,7 +47,7 @@ func spawnDetached(bin, home, version string) error {
 
 	logF, logExisted := openDaemonLog(home)
 
-	cmd := procenv.Command(os.Environ(), bin, args...)
+	cmd := procenv.ControlCommand(os.Environ(), bin, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = logF
 	cmd.Stderr = logF

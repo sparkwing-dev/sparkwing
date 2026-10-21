@@ -69,7 +69,7 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 	if directory != "" {
 		commandArgs = append(commandArgs, "-C", directory)
 	}
-	cmd := procenv.CommandContext(ctx, env, "git", append(commandArgs, args...)...)
+	cmd := procenv.ControlCommandContext(ctx, env, "git", append(commandArgs, args...)...)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}

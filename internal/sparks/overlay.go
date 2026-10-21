@@ -152,7 +152,7 @@ func materializeSum(ctx context.Context, workDir, overlayPath, sumPath string) e
 	if err != nil {
 		return err
 	}
-	cmd := procenv.CommandContext(ctx, env, goBin(), "mod", "download",
+	cmd := procenv.ControlCommandContext(ctx, env, goBin(), "mod", "download",
 		"-modfile="+overlayPath, "all")
 	cmd.Dir = workDir
 

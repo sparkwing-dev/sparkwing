@@ -25,9 +25,9 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 				bindError = errors.New("delegation interrupted")
 			}
 			cfg := ProtocolSessionConfig{Revoke: func() error { stale = true; return nil }}
-			cfg.Environments.Build = func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) {
+			cfg.Environments.Build = func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) {
 				projected = true
-				return nil, refused
+				return procenv.Env{}, refused
 			}
 			var err error
 			if owner {

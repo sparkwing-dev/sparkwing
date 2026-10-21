@@ -28,7 +28,7 @@ func RunGo(ctx context.Context, dir string, args []string, options CompileOption
 	if err := errors.Join(err, noticeErr); err != nil {
 		return err
 	}
-	cmd := procenv.Command(env, tool, args...)
+	cmd := procenv.ControlCommand(env, tool, args...)
 	cmd.Dir = dir
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(options.Diagnostics, &captured)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func TestNPMCommandUsesWindowsNodeCLI(t *testing.T) {
@@ -22,7 +24,7 @@ func TestNPMCommandUsesWindowsNodeCLI(t *testing.T) {
 		return "", exec.ErrNotFound
 	}
 	args := []string{"exec", "--offline", "--no", "--", "tsc", "--noEmit", "space value", "a&b", "%PATH%", `quote"value`}
-	command, err := NPMCommand(t.Context(), nil, "windows", lookPath, args...)
+	command, err := NPMCommand(t.Context(), procenv.Env{}, "windows", lookPath, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +35,7 @@ func TestNPMCommandUsesWindowsNodeCLI(t *testing.T) {
 }
 
 func TestNPMCommandPropagatesMissingNpm(t *testing.T) {
-	command, err := NPMCommand(t.Context(), nil, "windows", func(name string) (string, error) {
+	command, err := NPMCommand(t.Context(), procenv.Env{}, "windows", func(name string) (string, error) {
 		if name != "npm" {
 			t.Fatalf("unexpected %s lookup", name)
 		}
@@ -47,7 +49,7 @@ func TestNPMCommandPropagatesMissingNpm(t *testing.T) {
 func TestNPMCommandPreservesUnixNpmInvocation(t *testing.T) {
 	npm := filepath.Join("npm directory with spaces", "npm")
 	for _, goos := range []string{"linux", "darwin"} {
-		command, err := NPMCommand(t.Context(), nil, goos, func(name string) (string, error) {
+		command, err := NPMCommand(t.Context(), procenv.Env{}, goos, func(name string) (string, error) {
 			if name != "npm" {
 				t.Fatalf("unexpected %s lookup", name)
 			}
@@ -63,7 +65,7 @@ func TestNPMCommandPreservesUnixNpmInvocation(t *testing.T) {
 }
 
 func TestNPMCommandPropagatesMissingNode(t *testing.T) {
-	command, err := NPMCommand(t.Context(), nil, "windows", func(name string) (string, error) {
+	command, err := NPMCommand(t.Context(), procenv.Env{}, "windows", func(name string) (string, error) {
 		if name == "npm" {
 			return "npm.cmd", nil
 		}
@@ -75,7 +77,7 @@ func TestNPMCommandPropagatesMissingNode(t *testing.T) {
 }
 
 func TestNPMCommandAllowsNativeWindowsNpm(t *testing.T) {
-	command, err := NPMCommand(t.Context(), nil, "windows", func(name string) (string, error) {
+	command, err := NPMCommand(t.Context(), procenv.Env{}, "windows", func(name string) (string, error) {
 		if name != "npm" {
 			t.Fatalf("unexpected %s lookup", name)
 		}
@@ -95,7 +97,7 @@ func FuzzNPMCommandArguments(f *testing.F) {
 			npm := filepath.Join("tool directory", "npm.cmd")
 			node := filepath.Join("tool directory", "node.exe")
 			arguments := []string{first, second}
-			command, err := NPMCommand(t.Context(), nil, goos, func(name string) (string, error) {
+			command, err := NPMCommand(t.Context(), procenv.Env{}, goos, func(name string) (string, error) {
 				if name == "node" {
 					return node, nil
 				}

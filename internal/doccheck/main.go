@@ -107,7 +107,7 @@ func checkGoBlocks(contentDir, repoRoot string) bool {
 			fmt.Fprintln(os.Stderr, "write:", err)
 			os.Exit(2)
 		}
-		cmd := procenv.Command(append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"), "go", "build", "-buildvcs=false", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
+		cmd := procenv.ControlCommand(append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"), "go", "build", "-buildvcs=false", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
 		cmd.Dir = tmp
 
 		out, berr := cmd.CombinedOutput()
@@ -267,7 +267,7 @@ func writeModule(tmp, repoRoot string) error {
 	if err := os.WriteFile(filepath.Join(tmp, "root.go"), []byte(root), 0o644); err != nil {
 		return err
 	}
-	cmd := procenv.Command(append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"), "go", "mod", "tidy")
+	cmd := procenv.ControlCommand(append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"), "go", "mod", "tidy")
 	cmd.Dir = tmp
 
 	if out, err := cmd.CombinedOutput(); err != nil {

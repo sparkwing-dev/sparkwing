@@ -9,30 +9,27 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-func TestPipelineEnvironmentProvenance(t *testing.T) {
+func TestPipelineProcessesRequirePolicyConstructors(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module " + modulePath + "\n\ngo 1.26.0\n",
 		"internal/procenv/env.go": `package procenv
 import ("context"; "os/exec")
-func Build(base ...[]string) ([]string, error) { return []string{}, nil }
-func Command(env []string, name string) *exec.Cmd { return nil }
-func CommandContext(ctx context.Context, env []string, name string) *exec.Cmd { return nil }
+type Env struct { values []string }
+func Build() (Env,error) { return Env{},nil }
+func Command(env Env, name string) *exec.Cmd { return nil }
+func CommandContext(ctx context.Context, env Env, name string) *exec.Cmd { return nil }
 func HostCommand(name string) *exec.Cmd { return nil }
 func HostCommandContext(ctx context.Context, name string) *exec.Cmd { return nil }
-func AppendEnvironment(cmd *exec.Cmd, values ...string) {}
+func ControlCommand(env []string,name string) *exec.Cmd { return nil }
+func ControlCommandContext(ctx context.Context,env []string,name string) *exec.Cmd { return nil }
 `,
 		"internal/engine/env.go": `package engine
 import ("context"; "os"; p "github.com/sparkwing-dev/sparkwing/internal/procenv")
-func good(ctx context.Context) { env, _ := p.Build(os.Environ()); copy := env; p.Command(copy, "go"); p.Command(append([]string{}, env...), "go"); p.CommandContext(ctx, append(env, "GOWORK=off"), "go") }
-func ambient() { env := os.Environ(); p.Command(env, "go") }
-func overwritten() { env, _ := p.Build(); env = os.Environ(); p.Command(env, "go") }
-func rangeOverwritten() { env, _ := p.Build(); for _, env = range [][]string{os.Environ()} { p.Command(env, "go") } }
-func credentials() { env, _ := p.Build(); p.Command(append(env, "AWS_SECRET_ACCESS_KEY=oops"), "go") }
-func host(ctx context.Context) { p.HostCommand("go"); p.HostCommandContext(ctx, "go") }
-func mutate() { env, _ := p.Build(); p.AppendEnvironment(p.Command(env, "go"), "TOKEN=oops") }
-var factory = p.Command
-var global = p.Command(os.Environ(), "go")
+func good(ctx context.Context) { env,_ := p.Build(); factory := p.Command; factory(env,"go"); p.CommandContext(ctx,env,"go") }
+func host(ctx context.Context) { p.HostCommand("go"); p.HostCommandContext(ctx,"go") }
+func control(ctx context.Context) { p.ControlCommand(os.Environ(),"go"); p.ControlCommandContext(ctx,os.Environ(),"go") }
+var factory = p.HostCommand
 `,
 	}
 	for _, name := range []string{"repos", "pipelineentry", "nodehost", "engine/subpackage"} {
@@ -62,10 +59,10 @@ var global = p.Command(os.Environ(), "go")
 			continue
 		}
 		findings := packageSpawnFindings(pkg)
-		if len(findings) != 9 {
-			t.Fatalf("%s: want 9 policy bypasses, got %d:\n%s", pkg.PkgPath, len(findings), strings.Join(findings, "\n"))
+		if len(findings) != 5 {
+			t.Fatalf("%s: want 5 policy bypasses, got %d:\n%s", pkg.PkgPath, len(findings), strings.Join(findings, "\n"))
 		}
-		for _, want := range []string{"requires procenv.Build provenance", "HostCommand bypasses", "HostCommandContext bypasses", "AppendEnvironment bypasses", "call Command directly"} {
+		for _, want := range []string{"HostCommand", "HostCommandContext", "ControlCommand", "ControlCommandContext"} {
 			if !strings.Contains(strings.Join(findings, "\n"), want) {
 				t.Errorf("missing %q in %v", want, findings)
 			}

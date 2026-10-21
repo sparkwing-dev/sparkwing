@@ -7,7 +7,7 @@ import (
 
 func TestCommandOwnsExplicitEnvironment(t *testing.T) {
 	for _, environment := range [][]string{nil, {}, {"A=one"}} {
-		command := Command(environment, "unused")
+		command := Command(Env{values: environment}, "unused")
 		if command.Env == nil {
 			t.Fatal("nil environment would inherit host credentials")
 		}
@@ -18,7 +18,7 @@ func TestCommandOwnsExplicitEnvironment(t *testing.T) {
 			}
 		}
 	}
-	command := CommandContext(t.Context(), nil, "unused")
+	command := CommandContext(t.Context(), Env{}, "unused")
 	if command.Env == nil {
 		t.Fatal("context command inherits host environment")
 	}

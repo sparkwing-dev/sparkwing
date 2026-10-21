@@ -16,8 +16,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/mod/modfile"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // Report describes the effective Go toolchain and a pipeline module's floor.
@@ -205,7 +206,7 @@ func probe(ctx context.Context, env []string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	cmd := procenv.Command(
+	cmd := procenv.ControlCommand(
 		setEnv(env, "GOWORK", "off"), path, "env", "GOTOOLCHAIN", "GOVERSION", "GOENV")
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer

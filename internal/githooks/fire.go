@@ -185,7 +185,7 @@ func refusingHook(out string) (string, bool) {
 }
 
 func runGitIn(dir string, env []string, args ...string) (string, error) {
-	cmd := procenv.Command(append(os.Environ(), env...), "git", args...)
+	cmd := procenv.ControlCommand(append(os.Environ(), env...), "git", args...)
 	cmd.Dir = dir
 
 	out, err := cmd.CombinedOutput()

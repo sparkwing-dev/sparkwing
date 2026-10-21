@@ -75,12 +75,17 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
 // Git never inherits a repository/index/config override or a credential helper from a caller.
 // Remote installs on a host the run's owner does not own set GOENV=off.
-func Build(k Kind, b Base, rt Runtime) ([]string, error) {
+func Build(k Kind, b Base, rt Runtime) (Env, error) {
+	values, err := build(k, b, rt)
+	return Env{values: values, masker: b.Masker, remote: !b.Local && k != HostChild}, err
+}
+
+func build(k Kind, b Base, rt Runtime) ([]string, error) {
 	if k >= kindCount {
 		return nil, errors.New("unknown process environment kind")
 	}
 	if k == StepTool || k == Cleanup {
-		return inheritAttempt(rt.AttemptEnv, b.Masker)
+		return inheritAttempt(rt.AttemptEnv.values, b.Masker)
 	}
 	if !b.Local && (k == Plan || k == Attempt || k == Eval || k == Install) {
 		if err := ValidateSubmitEnvAllow(b.SubmitEnvAllow); err != nil {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,7 +20,8 @@ import (
 )
 
 const installerFixtureSource = `package main
-import("encoding/json";"fmt";"os";"path/filepath";"strings";"runtime")
+import("encoding/json";"fmt";"os";"path/filepath";"strings";"runtime"
+ "slices")
 var Version="dev"
 func main(){
  if len(os.Args)!=2 || os.Args[1]!="__sdk-install" { os.Exit(20) }
@@ -162,7 +164,7 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: GoSDK, Environment: environment, Masker: masker})
+		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: GoSDK, Environment: slices.Collect(environment.Values()), Masker: masker})
 		if err == nil || strings.Contains(err.Error(), secret) {
 			t.Fatalf("registered install secret survived at seed %d", seed)
 		}

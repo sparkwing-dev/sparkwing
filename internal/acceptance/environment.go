@@ -126,7 +126,12 @@ func environmentPhases() error {
 	if err := expectEnv(attempt, "BODY", "", false); err != nil {
 		return err
 	}
-	rt.AttemptEnv = append(attempt, "BODY=after-plan")
+	rt.Startup = append(rt.Startup, split.Body...)
+	attempt, err = procenv.Build(procenv.Attempt, base, rt)
+	if err != nil {
+		return err
+	}
+	rt.AttemptEnv = attempt
 	for _, kind := range []procenv.Kind{procenv.StepTool, procenv.Cleanup} {
 		env, err := procenv.Build(kind, base, rt)
 		if err != nil {
@@ -199,8 +204,8 @@ func environmentDeadlines() error {
 	return nil
 }
 
-func expectEnv(env []string, name, want string, present bool) error {
-	for _, entry := range env {
+func expectEnv(env procenv.Env, name, want string, present bool) error {
+	for entry := range env.Values() {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok && key == name {
 			if !present || value != want {

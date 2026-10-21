@@ -228,18 +228,18 @@ func TestAcquireUsesSharedEnvironmentPolicyForGitAndInstallation(t *testing.T) {
 			options, resolver, _ := acquisitionOptions(t, filepath.Join(dir, ".sparkwing"))
 			sentinel := errors.New("environment rejected")
 			var kinds []procenv.Kind
-			options.BuildEnvironment = func(kind procenv.Kind, base procenv.Base, rt procenv.Runtime) ([]string, error) {
+			options.BuildEnvironment = func(kind procenv.Kind, base procenv.Base, rt procenv.Runtime) (procenv.Env, error) {
 				kinds = append(kinds, kind)
 				if !reflect.DeepEqual(base, options.Base) || !reflect.DeepEqual(rt, procenv.Runtime{}) {
 					t.Fatal("source supplied ambient or runtime input to shared builder")
 				}
 				if kind == procenv.Git && failure == "git" || kind == procenv.Install && failure == "install" {
-					return []string{"PARTIAL=private"}, sentinel
+					return procenv.Env{}, sentinel
 				}
 				if kind == procenv.Git {
 					return sourcetest.BuildEnvironment(kind, base, rt)
 				}
-				return []string{"PATH=/filtered/install"}, nil
+				return procenv.Build(kind, procenv.Base{Local: true, Captured: []string{"PATH=/filtered/install"}}, rt)
 			}
 			installed := false
 			options.InstallSDK = func(_ context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {

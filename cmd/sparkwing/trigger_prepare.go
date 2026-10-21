@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -30,7 +31,7 @@ type triggerSourceInput struct {
 	snapshot                             *worktreeSnapshot
 	environment                          []string
 	githubID                             func(context.Context, string) (int64, error)
-	buildEnv                             func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	buildEnv                             func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error)
 }
 
 type preparedTriggerSource struct {
@@ -51,7 +52,7 @@ func (c triggerCheckout) read(ctx context.Context, args ...string) (string, erro
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	cmd := procenv.CommandContext(ctx, append(append([]string{}, c.environment...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_LFS_SKIP_SMUDGE=1", "GIT_TERMINAL_PROMPT=0"), "git", append([]string{"-c", "core.hooksPath=" + os.DevNull, "-c", "credential.helper=", "-C", c.directory}, args...)...)
+	cmd := procenv.ControlCommandContext(ctx, append(append([]string{}, c.environment...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_LFS_SKIP_SMUDGE=1", "GIT_TERMINAL_PROMPT=0"), "git", append([]string{"-c", "core.hooksPath=" + os.DevNull, "-c", "credential.helper=", "-C", c.directory}, args...)...)
 	cmd.Stderr = c.diagnostics
 	out, err := cmd.Output()
 	if err != nil {
@@ -112,7 +113,7 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
-	reader := triggerCheckout{directory: checkout, environment: env}
+	reader := triggerCheckout{directory: checkout, environment: slices.Collect(env.Values())}
 	read := func(args ...string) (string, error) { return reader.read(ctx, args...) }
 	checkout, err = read("rev-parse", "--show-toplevel")
 	if err != nil {

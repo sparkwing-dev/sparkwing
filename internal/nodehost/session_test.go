@@ -199,7 +199,7 @@ func startFake(t *testing.T, ctx context.Context, sink *recorder) *ProtocolSessi
 	t.Helper()
 	before := openPipes(t)
 	s, err := StartProtocolSession(ctx, ProtocolSessionConfig{
-		Command: []string{os.Args[0]}, Environment: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
+		Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...),
 		Log: func(_ context.Context, record nodeproto.FrameLog) error { sink.Record(record); return nil }, grace: 500 * time.Millisecond,
 	})
 	if err == nil {

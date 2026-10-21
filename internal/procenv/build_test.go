@@ -25,7 +25,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 	rt := Runtime{RunID: "run", JobID: "job", Runner: RunnerInfo{Name: "granted", Type: "runner", Labels: []string{"linux", "pool=build"}}, Branch: "trunk", Commit: "abc", Repo: "repo", TriggerSource: "push", DryRun: true, GateIndex: gate}
 	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=captured", "SPARKWING_CUSTOM=yes", "SPARKWING_RUNNER_NAME=forged", "CI=no", "SPARKWING_NODE_TOKEN=secret", "AWS_ACCESS_KEY_ID=secret", "MY_API_TOKEN=secret", "SPARKWING_NODE_URL=http://old"}, Ambient: []string{"CUSTOM=daemon"}}
 	for _, kind := range []Kind{Plan, Attempt, Eval} {
-		env, err := Build(kind, b, rt)
+		env, err := buildEntries(kind, b, rt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +47,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 			t.Fatal("attempt missing job identity")
 		}
 	}
-	env, err := Build(Plan, Base{Local: true}, Runtime{})
+	env, err := buildEntries(Plan, Base{Local: true}, Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 func TestRemoteAllowListMasksBeforeExecution(t *testing.T) {
 	masker := secrets.NewMasker()
 	b := Base{Ambient: []string{"PATH=/bin", "HTTP_PROXY=http://alice:password@proxy", "CUSTOM=123456789012", "SHORT=12345678901", "OTHER=not-allowed", "MY_TOKEN=secret", "AWS_SECRET_ACCESS_KEY=secret", "SPARKWING_RUN_ID=forged"}, SubmitEnvAllow: []string{"CUSTOM", "SHORT", "MY_TOKEN", "AWS_SECRET_ACCESS_KEY", "SPARKWING_RUN_ID"}, Masker: masker}
-	env, err := Build(Plan, b, Runtime{RunID: "run"})
+	env, err := buildEntries(Plan, b, Runtime{RunID: "run"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestRemoteAllowListMasksBeforeExecution(t *testing.T) {
 		t.Fatal("short public value masked")
 	}
 	b.Masker = nil
-	if _, err := Build(Plan, b, Runtime{}); err == nil {
+	if _, err := buildEntries(Plan, b, Runtime{}); err == nil {
 		t.Fatal("unmasked remote execution accepted")
 	}
 }
@@ -99,7 +99,7 @@ func TestJobEnvironmentPhases(t *testing.T) {
 	}
 	rt := Runtime{Startup: split.Startup}
 	b := Base{Local: true, Captured: []string{"PATH=/bin"}}
-	plan, err := Build(Plan, b, rt)
+	plan, err := buildEntries(Plan, b, rt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestJobEnvironmentPhases(t *testing.T) {
 		t.Fatal("startup leaked to plan")
 	}
 	for _, kind := range []Kind{Attempt, Eval} {
-		env, err := Build(kind, b, rt)
+		env, err := buildEntries(kind, b, rt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,17 +115,17 @@ func TestJobEnvironmentPhases(t *testing.T) {
 			t.Fatal(env)
 		}
 	}
-	rt.AttemptEnv = []string{"PATH=/bin", "BODY=body", "SPARKWING_JOB_ID=job", "CI=true"}
+	rt.AttemptEnv = Env{values: []string{"PATH=/bin", "BODY=body", "SPARKWING_JOB_ID=job", "CI=true"}}
 	for _, kind := range []Kind{StepTool, Cleanup} {
-		env, err := Build(kind, b, rt)
+		env, err := buildEntries(kind, b, rt)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(env, rt.AttemptEnv) {
+		if !reflect.DeepEqual(env, rt.AttemptEnv.values) {
 			t.Fatal(env)
 		}
 		env[0] = "changed"
-		if rt.AttemptEnv[0] == "changed" {
+		if rt.AttemptEnv.values[0] == "changed" {
 			t.Fatal("aliased attempt env")
 		}
 	}
@@ -147,7 +147,7 @@ func TestValidateAssignments(t *testing.T) {
 		t.Fatal("NUL accepted")
 	}
 	for _, entry := range []string{"MALFORMED", "=bad", "A=bad\x00value"} {
-		if _, err := Build(Plan, Base{Local: true, Captured: []string{entry}}, Runtime{}); err == nil {
+		if _, err := buildEntries(Plan, Base{Local: true, Captured: []string{entry}}, Runtime{}); err == nil {
 			t.Errorf("accepted malformed input %q", entry)
 		}
 	}
@@ -156,7 +156,7 @@ func TestValidateAssignments(t *testing.T) {
 func TestServiceAndInstallPolicies(t *testing.T) {
 	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=yes", "SPARKWING_DEBUG=1", "SPARKWING_HOME=/sw", "XDG_CACHE_HOME=/cache", "GOCACHE=/go", "AWS_REGION=west", "KUBECONFIG=/kube", "SPARKWING_TOOLCHAIN_ACTIVE=1", "SPARKWING_NODE_URL=old"}}
 	for _, kind := range []Kind{DaemonSpawn, Controller, Runner, Launcher, JobContainer, Install, RunHost, NodeHost, HostChild, CLI} {
-		env, err := Build(kind, b, Runtime{RunID: "run"})
+		env, err := buildEntries(kind, b, Runtime{RunID: "run"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +180,7 @@ func TestServiceAndInstallPolicies(t *testing.T) {
 			t.Errorf("kind %d inherits protocol", kind)
 		}
 	}
-	if _, err := Build(Kind(255), b, Runtime{}); err == nil {
+	if _, err := buildEntries(Kind(255), b, Runtime{}); err == nil {
 		t.Fatal("unknown kind accepted")
 	}
 }
@@ -203,7 +203,7 @@ func TestLookupExactBeforePrefix(t *testing.T) {
 func TestInstallReceivesOnlyBase(t *testing.T) {
 	for _, local := range []bool{true, false} {
 		b := Base{Local: local, Captured: []string{"CUSTOM=", "PATH=/bin", "SPARKWING_DEBUG=1"}, Ambient: []string{"CUSTOM=", "PATH=/bin", "SPARKWING_DEBUG=1"}, SubmitEnvAllow: []string{"CUSTOM", "SPARKWING_DEBUG"}}
-		env, err := Build(Install, b, Runtime{RunID: "run", Startup: []Assignment{{Name: "START", Value: "yes", Startup: true}}})
+		env, err := buildEntries(Install, b, Runtime{RunID: "run", Startup: []Assignment{{Name: "START", Value: "yes", Startup: true}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +222,7 @@ func TestEveryBoundaryRejectsCredentialTransport(t *testing.T) {
 		for _, name := range []string{"SPARKWING_NODE_TOKEN", "AWS_ACCESS_KEY_ID", "UNKNOWN_API_TOKEN", "LC_API_TOKEN", "SPARKWING_PROTOCOL_HANDLES"} {
 			entry := name + "=sensitive"
 			b := Base{Local: true, Captured: []string{entry}, Ambient: []string{entry}, SubmitEnvAllow: []string{name}}
-			env, err := Build(kind, b, Runtime{AttemptEnv: []string{entry}})
+			env, err := buildEntries(kind, b, Runtime{AttemptEnv: Env{values: []string{entry}}})
 			if kind == StepTool || kind == Cleanup {
 				if err == nil {
 					t.Fatalf("kind %d accepts %s", kind, name)
@@ -237,14 +237,14 @@ func TestEveryBoundaryRejectsCredentialTransport(t *testing.T) {
 			}
 		}
 	}
-	if _, err := Build(Plan, Base{Local: true}, Runtime{RunID: "run\x00bad"}); err == nil {
+	if _, err := buildEntries(Plan, Base{Local: true}, Runtime{RunID: "run\x00bad"}); err == nil {
 		t.Fatal("invalid runtime value accepted")
 	}
 }
 
 func TestCABasePathsSurviveCredentialShapeFilter(t *testing.T) {
 	b := Base{Ambient: []string{"SSL_CERT_FILE=/ca", "NODE_EXTRA_CA_CERTS=/node", "LC_API_TOKEN=secret"}, Masker: secrets.NewMasker()}
-	env, err := Build(Plan, b, Runtime{})
+	env, err := buildEntries(Plan, b, Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestEnvironmentNameCaseAndDuplicateResolution(t *testing.T) {
 		t.Fatal("lookup case policy differs from platform")
 	}
 	b := Base{Local: true, Captured: []string{"VALUE=first", "VALUE=last", "empty="}}
-	env, err := Build(Plan, b, Runtime{})
+	env, err := buildEntries(Plan, b, Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestEnvironmentNameCaseAndDuplicateResolution(t *testing.T) {
 func TestSnapshotAndRuntimeInputOwnership(t *testing.T) {
 	captured := []string{"CUSTOM=before", "SPARKWING_RUN_ID=forged", "PATH=/bin"}
 	before := append([]string(nil), captured...)
-	env, err := Build(Attempt, Base{Local: true, Captured: captured, Ambient: []string{"CUSTOM=ambient"}}, Runtime{RunID: "claim-run", JobID: "claim-job"})
+	env, err := buildEntries(Attempt, Base{Local: true, Captured: captured, Ambient: []string{"CUSTOM=ambient"}}, Runtime{RunID: "claim-run", JobID: "claim-job"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestSnapshotAndRuntimeInputOwnership(t *testing.T) {
 		t.Fatal("Build changed captured snapshot")
 	}
 	for _, kind := range []Kind{StepTool, Cleanup} {
-		got, err := Build(kind, Base{Local: true}, Runtime{RunID: "other-run", JobID: "other-job", AttemptEnv: env})
+		got, err := buildEntries(kind, Base{Local: true}, Runtime{RunID: "other-run", JobID: "other-job", AttemptEnv: Env{values: env}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -309,7 +309,7 @@ func TestSnapshotAndRuntimeInputOwnership(t *testing.T) {
 	if envMap(env)["CUSTOM"] != "before" {
 		t.Fatal("built environment aliased captured input")
 	}
-	if _, err := Build(Attempt, Base{Local: true}, Runtime{Startup: []Assignment{{Name: "SPARKWING_RUN_ID", Value: "spoofed", Startup: true}}}); err == nil {
+	if _, err := buildEntries(Attempt, Base{Local: true}, Runtime{Startup: []Assignment{{Name: "SPARKWING_RUN_ID", Value: "spoofed", Startup: true}}}); err == nil {
 		t.Fatal("startup spoofed claim identity")
 	}
 }
@@ -317,11 +317,11 @@ func TestSnapshotAndRuntimeInputOwnership(t *testing.T) {
 func TestProxyMaskingErrorsDoNotEchoValues(t *testing.T) {
 	for _, local := range []bool{true, false} {
 		b := Base{Local: local, Captured: []string{"HTTPS_PROXY=http://user:private-password@proxy"}, Ambient: []string{"HTTPS_PROXY=http://user:private-password@proxy"}}
-		if _, err := Build(Plan, b, Runtime{}); err == nil || strings.Contains(err.Error(), "private-password") {
+		if _, err := buildEntries(Plan, b, Runtime{}); err == nil || strings.Contains(err.Error(), "private-password") {
 			t.Fatal("missing masker did not fail safely")
 		}
 		b.Masker = secrets.NewMasker()
-		if _, err := Build(Plan, b, Runtime{}); err != nil {
+		if _, err := buildEntries(Plan, b, Runtime{}); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(b.Masker.Mask("private-password"), "private-password") {
@@ -329,7 +329,7 @@ func TestProxyMaskingErrorsDoNotEchoValues(t *testing.T) {
 		}
 	}
 	b := Base{Local: true, Captured: []string{"HTTPS_PROXY=http://user:private-password@%"}, Masker: secrets.NewMasker()}
-	if _, err := Build(Plan, b, Runtime{}); err == nil || strings.Contains(err.Error(), "private-password") {
+	if _, err := buildEntries(Plan, b, Runtime{}); err == nil || strings.Contains(err.Error(), "private-password") {
 		t.Fatal("malformed proxy diagnostic leaked input")
 	}
 }
@@ -353,7 +353,7 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 			t.Run(tc.name+"/"+tc.value+"/local="+strconv.FormatBool(local), func(t *testing.T) {
 				entry := tc.name + "=" + tc.value
 				b := Base{Local: local, Captured: []string{entry}, Ambient: []string{entry}, SubmitEnvAllow: []string{tc.name}, Masker: secrets.NewMasker()}
-				env, err := Build(Plan, b, Runtime{})
+				env, err := buildEntries(Plan, b, Runtime{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -369,7 +369,7 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 					}
 				}
 				b.Masker = nil
-				if _, err := Build(Plan, b, Runtime{}); err == nil {
+				if _, err := buildEntries(Plan, b, Runtime{}); err == nil {
 					t.Fatal("proxy credentials accepted without masker")
 				}
 			})
@@ -380,7 +380,7 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 func TestSubmitEnvPrefixPatterns(t *testing.T) {
 	b := Base{Ambient: []string{"APP_COLOR=blue", "APP_=empty-suffix", "APP=bare", "APPLICATION=neighbor", "EXACT=literal", "EXACT_MORE=neighbor", "APP_API_TOKEN=secret", "SPARKWING_CUSTOM=public", "SPARKWING_RUN_ID=spoofed", "_CUSTOM=private"}, SubmitEnvAllow: []string{"APP_*", "EXACT", "SPARKWING_*"}, Masker: secrets.NewMasker()}
 	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
-		env, err := Build(kind, b, Runtime{})
+		env, err := buildEntries(kind, b, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,7 +401,7 @@ func TestSubmitEnvPrefixPatterns(t *testing.T) {
 func TestSubmitEnvMalformedPatternsFailBeforeMatching(t *testing.T) {
 	for _, pattern := range []string{"", "*", "APP*", "APP_*_MORE", "APP_**", "APP?", "[APP]", " APP", "APP ", "APP\nOTHER", "APP\x00OTHER", "1APP", "APP=VALUE", "_*", "A_*"} {
 		for _, input := range [][]string{nil, {"APP_NAME=public"}} {
-			_, err := Build(Plan, Base{Ambient: input, SubmitEnvAllow: []string{pattern}}, Runtime{})
+			_, err := buildEntries(Plan, Base{Ambient: input, SubmitEnvAllow: []string{pattern}}, Runtime{})
 			if err == nil {
 				t.Errorf("accepted malformed pattern %q with input %v", pattern, input)
 			}
@@ -427,7 +427,7 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 	}
 	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
 		masker := secrets.NewMasker()
-		env, err := Build(kind, Base{Local: true, Captured: entries, Masker: masker}, Runtime{})
+		env, err := buildEntries(kind, Base{Local: true, Captured: entries, Masker: masker}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -446,7 +446,7 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 			t.Errorf("kind %d masked public Go settings: %q", kind, masked)
 		}
 		hostMasker := secrets.NewMasker()
-		hosted, err := Build(kind, Base{OwnerMachine: true, Ambient: append(slices.Clone(entries), "BUILD_REGION=us-east-1"), Masker: hostMasker}, Runtime{})
+		hosted, err := buildEntries(kind, Base{OwnerMachine: true, Ambient: append(slices.Clone(entries), "BUILD_REGION=us-east-1"), Masker: hostMasker}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,7 +467,7 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 		if masked := hostMasker.Mask(values["GOPATH"]); masked != values["GOPATH"] {
 			t.Errorf("kind %d owner-machine host masked a public Go setting: %q", kind, masked)
 		}
-		remote, err := Build(kind, Base{Ambient: entries, Masker: secrets.NewMasker()}, Runtime{})
+		remote, err := buildEntries(kind, Base{Ambient: entries, Masker: secrets.NewMasker()}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}

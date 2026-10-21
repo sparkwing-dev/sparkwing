@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -30,7 +31,7 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 	if err != nil {
 		return localSourceSelection{}, err
 	}
-	reader := triggerCheckout{directory: root, environment: environment}
+	reader := triggerCheckout{directory: root, environment: slices.Collect(environment.Values())}
 	sha := ""
 	if flags.ref != "" {
 		sha, err = reader.read(ctx, "rev-parse", "--verify", "--end-of-options", flags.ref+"^{commit}")

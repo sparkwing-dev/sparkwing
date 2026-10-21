@@ -78,7 +78,7 @@ type Runtime struct {
 	Branch, Commit, Repo, TriggerSource string
 	GateIndex                           string
 	Startup                             []Assignment
-	AttemptEnv                          []string
+	AttemptEnv                          Env
 }
 
 // Assignment preserves the author's startup marker until host and SDK split job environment delivery.

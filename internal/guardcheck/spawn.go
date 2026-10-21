@@ -52,6 +52,12 @@ func packageSpawnFindings(pkg *packages.Package) []string {
 					break
 				}
 				path, name := object.Pkg().Path(), object.Name()
+				if pipelinePackage(pkg.PkgPath) && path == modulePath+"/internal/procenv" {
+					switch name {
+					case "HostCommand", "HostCommandContext", "ControlCommand", "ControlCommandContext", "ConfigureWindowsBash", "Replace":
+						report(node, "pipeline processes require procenv.Command or CommandContext with procenv.Env, not "+name)
+					}
+				}
 				forbidden := path == "os/exec" && (name == "Command" || name == "CommandContext") || path == "os" && name == "StartProcess" || (path == "syscall" || path == "golang.org/x/sys/unix" || path == "golang.org/x/sys/windows") && (name == "Exec" || name == "ForkExec" || name == "StartProcess" || name == "CreateProcess" || name == "CreateProcessAsUser" || name == "ForkExecWithEnv")
 				if forbidden {
 					report(node, "raw process capability "+path+"."+name)
@@ -102,7 +108,7 @@ func packageSpawnFindings(pkg *packages.Package) []string {
 			return true
 		})
 	}
-	return append(problems, pipelineEnvironmentFindings(pkg)...)
+	return problems
 }
 
 func rawCommandType(t types.Type) bool {
@@ -111,4 +117,15 @@ func rawCommandType(t types.Type) bool {
 	}
 	named, ok := types.Unalias(t).(*types.Named)
 	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "os/exec" && named.Obj().Name() == "Cmd"
+}
+
+// These packages execute repository-controlled code rather than host tooling.
+func pipelinePackage(path string) bool {
+	for _, name := range []string{"repos", "pipelineentry", "nodehost", "engine"} {
+		root := modulePath + "/internal/" + name
+		if path == root || strings.HasPrefix(path, root+"/") {
+			return true
+		}
+	}
+	return false
 }

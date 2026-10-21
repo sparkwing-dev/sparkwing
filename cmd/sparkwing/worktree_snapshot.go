@@ -73,10 +73,11 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, env []string, start 
 }
 
 func captureSnapshot(ctx context.Context, env []string, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string, selection *burstSourceSelection) (*worktreeSnapshot, error) {
-	env, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
+	prepared, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
 		return nil, err
 	}
+	env = slices.Collect(prepared.Values())
 	repoRoot, err := gitOutput(ctx, start, env, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
@@ -823,6 +824,6 @@ func snapshotGitCommand(ctx context.Context, env []string, args ...string) *exec
 		args = append([]string{"-c", "core.longpaths=true"}, args...)
 	}
 	// #nosec G702 -- fixed Git argv; Git callbacks receive the filtered environment.
-	cmd := procenv.CommandContext(ctx, append([]string{}, env...), "git", args...)
+	cmd := procenv.ControlCommandContext(ctx, append([]string{}, env...), "git", args...)
 	return cmd
 }

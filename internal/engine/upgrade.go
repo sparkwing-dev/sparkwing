@@ -284,9 +284,13 @@ func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin Pin, name 
 	if err != nil {
 		return err
 	}
+	environment, err = environment.GoTool("GOWORK=off")
+	if err != nil {
+		return err
+	}
 	if name == "go" {
 		qa, err := QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
-			probe := procenv.Command(append(environment, "GOWORK=off"), "go", args...)
+			probe := procenv.Command(environment, "go", args...)
 			var stdout, stderr bytes.Buffer
 			probe.Dir, probe.Stdout, probe.Stderr = dir, &stdout, &stderr
 			if err := gotoolchain.Run(ctx, probe); err != nil {
@@ -297,18 +301,16 @@ func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin Pin, name 
 		if err != nil {
 			return err
 		}
-		if len(qa) > 0 {
-			base.Captured = append(base.Captured, qa...)
-			if environment, err = procenv.Build(procenv.Install, base, procenv.Runtime{}); err != nil {
-				return err
-			}
+		environment, err = environment.GoTool(qa...)
+		if err != nil {
+			return err
 		}
 	}
 
-	command := procenv.Command(append(environment, "GOWORK=off"), name, args...)
+	command := procenv.Command(environment, name, args...)
 	if name == "npm" {
 		var err error
-		command, err = pipelineentry.NPMCommand(ctx, append(environment, "GOWORK=off"), runtime.GOOS, exec.LookPath, args...)
+		command, err = pipelineentry.NPMCommand(ctx, environment, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return fmt.Errorf("resolve npm: %w", err)
 		}

@@ -242,7 +242,7 @@ func tidySkeleton(ctx context.Context, sparkwingDir string) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	cmd := procenv.CommandContext(ctx, env, "go", "mod", "tidy")
+	cmd := procenv.ControlCommandContext(ctx, env, "go", "mod", "tidy")
 	cmd.Dir = sparkwingDir
 	var captured bytes.Buffer
 	cmd.Stdout = &captured

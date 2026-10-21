@@ -344,6 +344,9 @@ func (chart *confinementChart) enrollBindings(t *testing.T, admin kubernetes.Int
 						}
 					}
 				}
+				if binding.GetKind() != "ClusterRoleBinding" {
+					continue
+				}
 				for _, url := range rule.NonResourceURLs {
 					for _, verb := range rule.Verbs {
 						chart.grants = append(chart.grants, confinementGrant{identity, authorizationv1.SelfSubjectAccessReviewSpec{NonResourceAttributes: &authorizationv1.NonResourceAttributes{Path: url, Verb: verb}}})
@@ -420,5 +423,37 @@ func TestConfinementEnrollsPreexistingRoleGrants(t *testing.T) {
 				t.Errorf("unexpected grant escaped confinement contract: %+v", grant)
 			}
 		}
+	}
+}
+
+func TestConfinementProjectsClusterRoleThroughRoleBinding(t *testing.T) {
+	admin := fake.NewSimpleClientset(&rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "monitoring"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},
+			{NonResourceURLs: []string{"/metrics"}, Verbs: []string{"get"}},
+		},
+	})
+	binding := &unstructured.Unstructured{Object: map[string]interface{}{
+		"kind":     "RoleBinding",
+		"metadata": map[string]interface{}{"namespace": "cloud"},
+		"roleRef":  map[string]interface{}{"kind": "ClusterRole", "name": "monitoring"},
+		"subjects": []interface{}{map[string]interface{}{"kind": "ServiceAccount", "name": "controller"}},
+	}}
+	var chart confinementChart
+	chart.enrollBindings(t, admin, []*unstructured.Unstructured{binding})
+	if len(chart.grants) != 1 {
+		t.Fatalf("resolved grants = %d, want only the namespaced resource grant", len(chart.grants))
+	}
+	grant := chart.grants[0]
+	resource := grant.attributes.ResourceAttributes
+	if resource == nil || resource.Namespace != "cloud" || resource.Resource != "pods" || resource.Subresource != "log" || resource.Verb != "get" {
+		t.Fatalf("resource grant = %+v", resource)
+	}
+	if grant.attributes.NonResourceAttributes != nil {
+		t.Fatalf("RoleBinding enrolled a non-resource grant: %+v", grant.attributes.NonResourceAttributes)
+	}
+	if grant.identity != "system:serviceaccount:cloud:controller" {
+		t.Fatalf("resolved identity = %q", grant.identity)
 	}
 }

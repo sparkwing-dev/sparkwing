@@ -25,7 +25,7 @@ func burstSourceSnapshot(ctx context.Context, env []string, root string, declare
 	if err != nil {
 		return nil, err
 	}
-	tracked, err := gitOutput(ctx, root, gitEnv, "ls-files", "--cached", "-z")
+	tracked, err := gitOutput(ctx, root, slices.Collect(gitEnv.Values()), "ls-files", "--cached", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("inspect burst source approval: %w", snapshotGitError(err))
 	}
@@ -63,7 +63,7 @@ func checkoutDefaultBranch(ctx context.Context, env []string, root string, maske
 	if err != nil {
 		return "", err
 	}
-	reader := triggerCheckout{directory: root, environment: environment}
+	reader := triggerCheckout{directory: root, environment: slices.Collect(environment.Values())}
 	branch, err := reader.read(ctx, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 	if gitExitCode(err, 1) {
 		return "", nil

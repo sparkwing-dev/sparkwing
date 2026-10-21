@@ -547,7 +547,7 @@ func (h *Harness) hammerCLI() {
 	// Observe admission directly so the harness retains ownership of its daemons.
 	verbs := [][]string{{"daemon", "events", "--limit", "5"}, {"info"}}
 	verb := verbs[h.rng.Intn(len(verbs))]
-	cmd := procenv.Command(
+	cmd := procenv.ControlCommand(
 		append(os.Environ(), "SPARKWING_HOME="+h.home), h.sparkBin, verb...)
 
 	event := Event{Kind: "cli", Detail: strings.Join(verb, " ")}

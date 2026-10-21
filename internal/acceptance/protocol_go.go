@@ -18,7 +18,7 @@ const goSDKModule = "github.com/sparkwing-dev/sparkwing"
 
 // GoSDKLinkage lists the public SDK's linked packages and refuses host-owned dependencies.
 func GoSDKLinkage(ctx context.Context) ([]string, error) {
-	command := procenv.CommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "list", "-deps", "-f", "{{.ImportPath}}", goSDKModule+"/sparkwing")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "list", "-deps", "-f", "{{.ImportPath}}", goSDKModule+"/sparkwing")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("list Go SDK imports: %w: %s", err, strings.TrimSpace(string(output)))

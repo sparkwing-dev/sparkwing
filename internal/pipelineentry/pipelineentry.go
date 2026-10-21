@@ -43,7 +43,7 @@ func Binary(path string) Command { return Command{path} }
 func Node(node, entry string) Command { return Command{node, entry} }
 
 // Exec returns the command that starts the SDK process.
-func (c Command) Exec(environment []string) *exec.Cmd {
+func (c Command) Exec(environment procenv.Env) *exec.Cmd {
 	// #nosec G204 -- the pipeline entry the host resolved, run as argv without a shell.
 	return procenv.Command(environment, c[0], append(slices.Clone(c[1:]), ProtocolArg)...)
 }

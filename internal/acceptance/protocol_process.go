@@ -28,7 +28,7 @@ func BuildGoSDKFixture(ctx context.Context) (string, func(), error) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := procenv.CommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
+	build := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
 	if output, err := build.CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("compile protocol fixture: %w: %s", err, strings.TrimSpace(string(output)))
@@ -66,7 +66,7 @@ func StartGoSDKProcess(ctx context.Context, bin string) (*GoSDKProcess, error) {
 			environment = append(environment, item)
 		}
 	}
-	p.command = procenv.CommandContext(ctx, environment, bin, protofd.Arg)
+	p.command = procenv.ControlCommandContext(ctx, environment, bin, protofd.Arg)
 	p.command.Dir = filepath.Dir(bin)
 	p.command.Stdout, p.command.Stderr = &p.stdout, &p.stderr
 	err = goSDKCommandPipes(p.command, requestR, frameW)

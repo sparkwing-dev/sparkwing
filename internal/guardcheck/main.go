@@ -127,7 +127,7 @@ func lintFindings(repo string, fast bool) (map[string][]string, error) {
 	if fast {
 		args = append(args, "--enable-only=depguard")
 	}
-	cmd := procenv.Command(append(os.Environ(), "GOLANGCI_LINT_CACHE="+lintCacheDir(repo)), "golangci-lint", append(args, "./...")...)
+	cmd := procenv.ControlCommand(append(os.Environ(), "GOLANGCI_LINT_CACHE="+lintCacheDir(repo)), "golangci-lint", append(args, "./...")...)
 	cmd.Dir = repo
 
 	var stdout bytes.Buffer

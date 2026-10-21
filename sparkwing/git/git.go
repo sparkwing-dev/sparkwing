@@ -413,7 +413,7 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
 	sdkserve.RequireExecution(ctx, "git "+firstWord(args))
-	cmd := procenv.CommandContext(ctx, env, "git", args...)
+	cmd := procenv.ControlCommandContext(ctx, env, "git", args...)
 	if repoDir != "" {
 		cmd.Dir = repoDir
 	}

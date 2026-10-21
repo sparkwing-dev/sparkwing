@@ -638,5 +638,5 @@ func processCommandContext(ctx context.Context, environment []string, name strin
 	if environment == nil {
 		return procenv.HostCommandContext(ctx, name, args...)
 	}
-	return procenv.CommandContext(ctx, environment, name, args...)
+	return procenv.ControlCommandContext(ctx, environment, name, args...)
 }

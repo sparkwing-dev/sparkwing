@@ -20,7 +20,7 @@ func CloneRepository(ctx context.Context, remote, destination string, depth int,
 		args = append(args, "--depth", strconv.Itoa(depth))
 	}
 	args = append(args, "--", remote, destination)
-	cmd := procenv.CommandContext(ctx, environment, "git", args...)
+	cmd := procenv.ControlCommandContext(ctx, environment, "git", args...)
 	output, err := Output(ctx, cmd, true)
 	if err != nil {
 		return fmt.Errorf("git clone failed: %w: %s", err, strings.TrimSpace(string(output)))

@@ -47,7 +47,7 @@ func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 			ctx, stop := keeper.Run(t.Context())
 			defer stop()
 			<-ready
-			session, err := StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{os.Args[0]}, Environment: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"), grace: time.Minute, Log: func(_ context.Context, log nodeproto.FrameLog) error {
+			session, err := StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...), grace: time.Minute, Log: func(_ context.Context, log nodeproto.FrameLog) error {
 				if pid, err := strconv.Atoi(log.Message); err == nil {
 					entered <- pid
 				}
@@ -124,7 +124,7 @@ func TestFundedBoundKillsUncooperativeCleanupTree(t *testing.T) {
 			pids := make(chan int, 1)
 			done := make(chan error, 1)
 			go func() {
-				done <- cleanups.Run(lease.ExecutionContext(ctx), CleanupScope{Env: os.Environ(), Log: cleanupPIDLog{pids: pids}})
+				done <- cleanups.Run(lease.ExecutionContext(ctx), CleanupScope{Env: testProcessEnv(t, os.Environ()...), Log: cleanupPIDLog{pids: pids}})
 			}()
 			pid := <-pids
 			select {

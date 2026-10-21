@@ -45,7 +45,7 @@ func configureProcessGroup(_ context.Context, cmd *exec.Cmd, _ <-chan struct{}) 
 		return
 	}
 	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
-	procenv.AppendEnvironment(cmd, variable+"="+program)
+	procenv.ConfigureWindowsBash(cmd, program)
 }
 
 func commandResourceUsage(*exec.Cmd) (time.Duration, int64, bool) { return 0, 0, false }

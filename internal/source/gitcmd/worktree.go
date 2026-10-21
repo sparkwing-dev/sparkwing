@@ -13,7 +13,7 @@ import (
 // HookWorktree creates an empty detached worktree for a hook's control and refusal commits.
 func HookWorktree(ctx context.Context, repository, destination string) (func() error, error) {
 	run := func(ctx context.Context, args ...string) error {
-		cmd := procenv.CommandContext(ctx, os.Environ(), "git", append([]string{"-C", repository}, args...)...)
+		cmd := procenv.ControlCommandContext(ctx, os.Environ(), "git", append([]string{"-C", repository}, args...)...)
 		if output, err := Output(ctx, cmd, true); err != nil {
 			return fmt.Errorf("hook worktree failed: %w: %s", err, strings.TrimSpace(string(output)))
 		}

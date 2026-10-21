@@ -174,7 +174,7 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-o", dest, ".")
-	cmd := procenv.Command(env, tool, args...)
+	cmd := procenv.ControlCommand(env, tool, args...)
 	cmd.Dir = sparkwingDir
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(options.Diagnostics, &captured)

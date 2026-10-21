@@ -75,7 +75,7 @@ func goEnvValue(ctx context.Context, environment []string, name string) string {
 	if err != nil {
 		return ""
 	}
-	cmd := procenv.CommandContext(ctx, environment, executable, "env", name)
+	cmd := procenv.ControlCommandContext(ctx, environment, executable, "env", name)
 	cmd.Stderr = io.Discard
 	out, err := cmd.Output()
 	if err != nil {
@@ -221,7 +221,7 @@ func (r *Resolver) resolveViaGoList(ctx context.Context, lib Library) (string, e
 			return "", err
 		}
 	}
-	cmd := procenv.CommandContext(ctx, env, bin, "list", "-m", "-json", lib.Source+"@"+query)
+	cmd := procenv.ControlCommandContext(ctx, env, bin, "list", "-m", "-json", lib.Source+"@"+query)
 	cmd.Dir = r.Dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

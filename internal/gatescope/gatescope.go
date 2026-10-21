@@ -218,7 +218,7 @@ func git(root, index string, args ...string) (string, error) {
 	if index != "" {
 		environment = append(environment, "GIT_INDEX_FILE="+index)
 	}
-	cmd := procenv.Command(environment, "git", append([]string{"-C", root}, args...)...)
+	cmd := procenv.ControlCommand(environment, "git", append([]string{"-C", root}, args...)...)
 	var out strings.Builder
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

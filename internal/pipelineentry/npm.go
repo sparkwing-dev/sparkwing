@@ -11,7 +11,7 @@ import (
 
 // NPMCommand resolves npm for goos and preserves args without a shell. Windows
 // command scripts run through Node's npm-cli.js because CreateProcess cannot run them.
-func NPMCommand(ctx context.Context, environment []string, goos string, lookPath func(string) (string, error), args ...string) (*exec.Cmd, error) {
+func NPMCommand(ctx context.Context, environment procenv.Env, goos string, lookPath func(string) (string, error), args ...string) (*exec.Cmd, error) {
 	npm, err := lookPath("npm")
 	if err != nil {
 		return nil, err

@@ -11,7 +11,7 @@ import (
 )
 
 func restartRunner(executable string, args, environment []string) error {
-	command := procenv.Command(
+	command := procenv.ControlCommand(
 		environment, executable, args...)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := command.Run(); err != nil {

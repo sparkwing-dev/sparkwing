@@ -46,7 +46,7 @@ type cleanupList struct {
 // environment, Dir its repository root, and Log the node's log.
 type CleanupScope struct {
 	Dir string
-	Env []string
+	Env procenv.Env
 	Log io.Writer
 }
 
@@ -65,7 +65,7 @@ func checkCleanup(argv []string, description string) string {
 }
 
 // safety: failures name argv[0] only, since later arguments may carry secrets.
-func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io.Writer) error {
+func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log io.Writer) error {
 	name := c.argv[0]
 	if c.description != "" {
 		fmt.Fprintf(log, "cleanup %s: %s\n", name, c.description)
@@ -105,12 +105,12 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 
 // safety: the node's PATH picks the program, not the host's; relative entries
 // are skipped so the host's working directory never decides it.
-func lookPathIn(name string, env []string) (string, error) {
+func lookPathIn(name string, env procenv.Env) (string, error) {
 	if strings.ContainsAny(name, `/\`) {
 		return name, nil
 	}
 	var path string
-	for _, kv := range env {
+	for kv := range env.Values() {
 		k, v, _ := strings.Cut(kv, "=")
 		if k == "PATH" || (runtime.GOOS == "windows" && strings.EqualFold(k, "PATH")) {
 			path = v

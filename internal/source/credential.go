@@ -113,7 +113,7 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 			ownerEnvironment = append(ownerEnvironment, item)
 		}
 	}
-	probe := procenv.CommandContext(ctx, ownerEnvironment, "git", "config", "--get-urlmatch", "credential.helper", remote)
+	probe := procenv.ControlCommandContext(ctx, ownerEnvironment, "git", "config", "--get-urlmatch", "credential.helper", remote)
 	probe.Dir = g.workspace
 	helper, err := gitcmd.Output(ctx, probe, false)
 	if gitExit(err, 1) || err == nil && strings.TrimSpace(string(helper)) == "" {
@@ -122,7 +122,7 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 	if err != nil {
 		return Credential{}, errors.New("read owner source credential configuration failed")
 	}
-	cmd := procenv.CommandContext(ctx, ownerEnvironment, "git", "credential", "fill")
+	cmd := procenv.ControlCommandContext(ctx, ownerEnvironment, "git", "credential", "fill")
 	cmd.Dir = g.workspace
 	cmd.Stdin = strings.NewReader("url=" + remote + "\n\n")
 	out, err := gitcmd.Output(ctx, cmd, false)
