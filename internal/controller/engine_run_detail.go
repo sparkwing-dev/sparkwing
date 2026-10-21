@@ -80,13 +80,13 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	}
 	nodes := make(map[string]store.NodeRow, len(facts.Snapshot.Nodes))
 	for _, row := range facts.Snapshot.Nodes {
-		if row.Ref.RunID != run.ID || row.Ref.NodeID == "" {
+		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
 			return controllerwire.RunDetail{}, errors.New("invalid persisted status job")
 		}
-		if _, exists := nodes[row.Ref.NodeID]; exists {
+		if _, exists := nodes[string(row.Ref.NodeID)]; exists {
 			return controllerwire.RunDetail{}, errors.New("duplicate persisted status job")
 		}
-		nodes[row.Ref.NodeID] = row
+		nodes[string(row.Ref.NodeID)] = row
 		detail.Jobs = append(detail.Jobs, snapshotJob(row))
 	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)
@@ -126,8 +126,8 @@ func statusAttempts(target capability.Target, nodes map[string]store.NodeRow, ro
 		id := row.Identity
 		node, exists := nodes[id.NodeID]
 		key := attemptKey{id.NodeID, id.Attempt}
-		if !exists || id.Team != target.Team || id.RunID != target.RunID || id.Attempt <= 0 || id.Attempt > node.Attempt ||
-			id.Generation <= 0 || id.Generation > node.Generation || seen[key] {
+		if !exists || id.Team != target.Team || id.RunID != target.RunID || id.Attempt <= 0 || runspec.AttemptOrdinal(id.Attempt) > node.Attempt ||
+			id.Generation <= 0 || runspec.ClaimGeneration(id.Generation) > node.Generation || seen[key] {
 			return nil, errors.New("invalid persisted status attempt")
 		}
 		seen[key] = true

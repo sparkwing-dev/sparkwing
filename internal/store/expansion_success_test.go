@@ -218,13 +218,13 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 					if mode == "decrypt_error" {
 						return "", errors.New("private diagnostic")
 					}
-					return "42", nil
+					return "4242", nil
 				})
 			}
 			contracts := tenant.s.plans.(fakePlanContracts)
 			validate := contracts.validate
 			contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				if !ctx.Secrets.ContainsSecret("job-42") {
+				if !ctx.Secrets.ContainsSecret("job-4242") {
 					t.Fatal("stored secret not registered")
 				}
 				return validate(raw, ctx)

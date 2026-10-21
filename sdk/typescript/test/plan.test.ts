@@ -431,3 +431,9 @@ test("child targets compose parent and explicit repositories", () => {
     { pipeline: "deploy" }, { pipeline: "publish", repository: "gh:123" }, { pipeline: "smoke" },
   ]);
 });
+
+test("list arguments trim Unicode White_Space as the Go parser does", () => {
+  const list = [{ name: "items", type: "[]string" as const }];
+  const raw = "\u1680alpha\u2000,\u3000,\u202fbravo\u205f";
+  assert.deepEqual(resolveArgs(list, { items: raw }), { items: "alpha,bravo" });
+});

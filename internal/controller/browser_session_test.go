@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -103,6 +104,67 @@ func (f *browserFixture) cookieRequest(method, path, body string) *http.Request 
 		req.Header.Set("X-CSRF-Token", f.csrf)
 	}
 	return req
+}
+
+func TestBrowserSessionExpiryUsesStoreClock(t *testing.T) {
+	for _, skew := range []time.Duration{24 * time.Hour, -365 * 24 * time.Hour} {
+		t.Run(skew.String(), func(t *testing.T) {
+			now := time.Now().Add(skew)
+			f := newBrowserFixture(t, nil, teststore.WithClock(func() time.Time { return now }))
+			f.srv.WithSessionMaxLifetime(time.Minute)
+			for _, path := range []string{"/api/v1/auth/session", "/api/v1/team/members"} {
+				if rec := f.serve(f.cookieRequest(http.MethodGet, path, "")); rec.Code != http.StatusOK {
+					t.Fatalf("fresh session at %s: %d %s", path, rec.Code, rec.Body)
+				}
+			}
+			now = now.Add(time.Minute)
+			for _, endpoint := range []struct{ method, path string }{
+				{http.MethodGet, "/api/v1/auth/session"},
+				{http.MethodPost, "/api/v1/auth/logout"},
+			} {
+				rec := f.serve(f.cookieRequest(endpoint.method, endpoint.path, ""))
+				if rec.Code != http.StatusUnauthorized {
+					t.Fatalf("session at its absolute lifetime: %d %s", rec.Code, rec.Body)
+				}
+			}
+		})
+	}
+}
+
+func TestBrowserLogoutUsesStoreClock(t *testing.T) {
+	now := time.Now().Add(24 * time.Hour)
+	f := newBrowserFixture(t, nil, teststore.WithClock(func() time.Time { return now }))
+	if rec := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/auth/logout", "")); rec.Code != http.StatusNoContent {
+		t.Fatalf("fresh session logout: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestBrowserSensitiveChangesUseStoreClock(t *testing.T) {
+	for _, change := range []string{"console", "identity-link"} {
+		t.Run(change, func(t *testing.T) {
+			now := time.Now().Add(24 * time.Hour)
+			f := newBrowserFixture(t, &controller.Dashboard{}, teststore.WithClock(func() time.Time { return now }))
+			f.srv.WithOperatorAccounts([]string{"alice"}).WithGitHubSignIn(githubauth.New(githubauth.GitHub("client", "secret")), []string{dashOrigin + "/auth/github/callback"})
+			f.h = f.srv.Handler()
+			for _, stale := range []bool{false, true} {
+				if stale {
+					now = now.Add(11 * time.Minute)
+				}
+				request := f.cookieRequest(http.MethodPut, "/api/v1/operator/credits/settings", `{"warm_cpu_class_cores":1}`)
+				if change == "identity-link" {
+					request = f.cookieRequest(http.MethodPost, "/auth/github/link", "csrf_token="+f.csrf)
+					request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				}
+				want := http.StatusOK
+				if stale {
+					want = http.StatusForbidden
+				}
+				if rec := f.serve(request); rec.Code != want {
+					t.Fatalf("stale=%v: %d %s, want %d", stale, rec.Code, rec.Body, want)
+				}
+			}
+		})
+	}
 }
 
 func TestBrowserCookieAuthenticatesTheSessionsPrincipal(t *testing.T) {

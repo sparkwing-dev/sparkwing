@@ -462,7 +462,7 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
         })
         .memo(() => noMemo)
         .generate((generated, output) => {
-          generated.job("generated", () => output);
+          generated.job("generated", () => output).withArgs({ name: "token", type: "[]string", secret: true, default: "alpha-secret,beta-secret" });
         });
     },
   });
@@ -488,6 +488,8 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
     assert.deepEqual(called, ["before", "verify", "failed"]);
     const expansion = await host.send({ id: "generate", op: "eval", closure: closures.generate[0], input: "recorded memo output" });
     assert.equal(expansion.result.value[0].id, "generated");
+    assert.equal(expansion.result.declarations_known, true);
+    assert.deepEqual(expansion.result.arguments, [{ name: "token", type: "[]string", required: false, default: "alpha-secret,beta-secret", secret: true, job_id: "generated" }]);
     assert.ok(expansion.result.value[0].groups.includes(closures.generate[0]));
     const again = await host.send({ id: "again", op: "eval", closure: closures.generate[0], input: "changed" });
     assert.deepEqual(again.result.value, expansion.result.value);
@@ -869,67 +871,27 @@ test("generated argument binding fails before child code is registered", async (
   }
 });
 
-test("typed secret list fragments register before planning callbacks", async () => {
+test("declared secrets do not call Mask during planning", async () => {
   resetPipelines();
-  const registered: string[] = [];
+  let calls = 0;
   definePipeline({
     name: "fixture",
-    args: [{ name: "tokens", type: "[]string", secret: true, default: "default-private,1" }],
+    args: [{ name: "tokens", type: "[]string", secret: true, default: "default-private,supplied-private" }],
     plan(plan) {
-      assert.deepEqual(registered, ["default-private", "supplied-private"]);
       plan.job("build", () => null).withArgs({ name: "extra", type: "[]string", secret: true, default: "job-private-value" });
     },
   });
-  const host = await setup(
-    fakeServices({
-      mask: async (value) => {
-        registered.push(value);
-      },
-    }),
-  );
+  const host = await setup(fakeServices({ mask: async () => { calls++; } }));
   try {
-    const reply = await host.send({ ...planRequest, args: { tokens: "supplied-private,1" } });
+    const reply = await host.send({ ...planRequest, args: { tokens: "supplied-private" } });
     assert.equal(reply.ok, true, JSON.stringify(reply));
-    assert.deepEqual(registered, ["default-private", "supplied-private", "job-private-value"]);
+    assert.equal(calls, 0);
   } finally {
     await host.close();
   }
 });
 
-test("generated typed secret lists register before generated jobs run", async () => {
-  resetPipelines();
-  const registered: string[] = [];
-  definePipeline({
-    name: "fixture",
-    plan(plan) {
-      plan
-        .job("build", () => null)
-        .generate((generated) => {
-          generated
-            .job("child", () => null)
-            .withArgs({ name: "tokens", type: "[]string", secret: true, default: "first-private,second-private" });
-        });
-    },
-  });
-  const host = await setup(
-    fakeServices({
-      mask: async (value) => {
-        registered.push(value);
-      },
-    }),
-  );
-  try {
-    const planned = await host.send(planRequest);
-    assert.equal(planned.ok, true, JSON.stringify(planned));
-    const reply = await host.send({ id: "generate", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
-    assert.equal(reply.result.error, undefined, JSON.stringify(reply));
-    assert.deepEqual(registered, ["first-private", "second-private"]);
-  } finally {
-    await host.close();
-  }
-});
-
-test("generator error codes containing a secret use sdk_error", async () => {
+test("standalone generator returns author error for host sanitization", async () => {
   resetPipelines();
   definePipeline({
     name: "fixture",
@@ -946,7 +908,7 @@ test("generator error codes containing a secret use sdk_error", async () => {
   try {
     const planned = await host.send(planRequest);
     const reply = await host.send({ id: "generate", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
-    assert.equal(reply.result.error.code, "sdk_error");
+    assert.equal(reply.result.error.code, "failure-private-code");
   } finally {
     await host.close();
   }

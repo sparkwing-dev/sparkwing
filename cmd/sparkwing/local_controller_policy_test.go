@@ -291,7 +291,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil || accepted.Spec.Hash == "" {
 		t.Fatalf("plan acceptance: %v", err)
 	}
-	if _, err := host.TransitionRun(ctx, store.RunTransition{RunID: admitted.RunID, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := host.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(admitted.RunID), To: store.RunRunning, Cause: store.RunStart}); err != nil {
 		t.Fatal("run start:", err)
 	}
 	claim, err := ownerEngine.ReconcileJob(ctx, admitted.RunID, "build", controllerwire.ReconcileRequest{Policy: string(store.SourceNone)})
@@ -309,8 +309,8 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 			t.Error(err)
 		}
 	})
-	ref := controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "build"}
-	started, err := node.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64)})
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "build"}
+	started, err := node.TransitionNode(ctx, store.StartNode{Ref: ref, SourceAttempt: new(runspec.AttemptOrdinal)})
 	if err != nil {
 		t.Fatal("node start:", err)
 	}
@@ -359,10 +359,10 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil || closeErr != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(data), "production local log") {
 		t.Fatalf("log read: HTTP %d %s: %v %v", response.StatusCode, data, err, closeErr)
 	}
-	if _, err := node.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &started.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	if _, err := node.TransitionNode(ctx, store.ReportNode{Ref: ref, SourceAttempt: new(started.Attempt), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal("node finish:", err)
 	}
-	if _, err := host.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunTransition{RunID: admitted.RunID, To: store.RunSuccess, Cause: store.RunFinish}}); err != nil {
+	if _, err := host.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: runspec.RunID(admitted.RunID), Cause: store.RunFinish}}); err != nil {
 		t.Fatal("run finish:", err)
 	}
 	detail, err := engine.ReadRun(ctx, admitted.RunID)

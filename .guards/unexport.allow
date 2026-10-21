@@ -71,7 +71,7 @@ internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
 internal/runspec	4
-internal/secrets	6
+internal/secrets	5
 internal/secretsource	2
 internal/sessionledger	8
 internal/settings	55
@@ -80,7 +80,7 @@ internal/sparks	5
 internal/sparkwingruntime	5
 internal/storage/logseg	24
 internal/storage/s3	1
-internal/store	265
+internal/store	262
 internal/store/internal/storetest	1
 internal/store/teststore	5
 internal/tokenpark	3

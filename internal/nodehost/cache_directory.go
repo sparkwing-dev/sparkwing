@@ -28,7 +28,7 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	// safety: the host archives and restores this directory, so job-declared values and a
 	// job-chosen go binary must not pick it on a host the run's owner does not own.
 	if e.Base.Local {
-		env, err = e.job(ctx, procenv.StepTool, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+		env, err = e.job(ctx, procenv.StepTool, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 	} else {
 		env, err = procenv.Build(procenv.Install, e.Base, procenv.Runtime{})
 	}

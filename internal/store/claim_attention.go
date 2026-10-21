@@ -58,11 +58,11 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 		if !facts.Observable && !here {
 			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now().UnixNano(), c.Team, observation.CapabilityPrefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now(ctx).UnixNano(), c.Team, observation.CapabilityPrefix)
 		return err
 	})
 }
@@ -115,7 +115,7 @@ func registeredAgentsTx(ctx context.Context, tx *storeTx, team Team) ([]Register
 }
 
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
-	now := tx.now()
+	now := tx.now(ctx)
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
  AND `+liveCredentialSQL("")+` ORDER BY prefix`, team, now.UnixNano(), now.UnixNano())

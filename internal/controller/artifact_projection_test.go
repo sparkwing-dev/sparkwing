@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -43,7 +45,7 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 	}
 	for _, row := range snapshot.Nodes {
 		var declaration nodeproto.JobSpec
-		if json.Unmarshal(row.Spec, &declaration) != nil || declaration.ID != row.Ref.NodeID {
+		if json.Unmarshal(row.Spec, &declaration) != nil || runspec.NodeID(declaration.ID) != row.Ref.NodeID {
 			t.Fatalf("persisted mask namespace has an invalid job: %s", row.Ref.NodeID)
 		}
 	}

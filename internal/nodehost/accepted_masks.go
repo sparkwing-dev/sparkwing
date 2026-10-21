@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -14,18 +15,17 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 	if r == nil {
 		return nil
 	}
-	names := append([]string{}, request.Request.SecretArgs.Value...)
+	inputs := runspec.Resolved{Args: request.Request.RequestedArgs}
 	if resolved != nil {
-		names = append(names, resolved.SecretArgs...)
+		inputs = *resolved
 	}
-	for _, name := range names {
-		if err := r.Register(request.Request.RequestedArgs[name]); err != nil {
+	projection, err := runspec.BuildSecretRegistration(request.Request, inputs)
+	if err != nil {
+		return err
+	}
+	for _, value := range projection.Values {
+		if err := r.Register(value); err != nil {
 			return err
-		}
-		if resolved != nil {
-			if err := r.Register(resolved.Args[name]); err != nil {
-				return err
-			}
 		}
 	}
 	if plan == nil {
@@ -35,7 +35,7 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 	namespace.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
 	for _, row := range nodes {
 		var job nodeproto.JobSpec
-		if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || job.ID != row.Ref.NodeID {
+		if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || runspec.NodeID(job.ID) != row.Ref.NodeID {
 			return errors.New("persisted mask namespace has an invalid job")
 		}
 		namespace.Jobs = append(namespace.Jobs, job)
@@ -50,6 +50,13 @@ func (r *MaskRegistry) initializeSeal(accepted AcceptedRun) error {
 	var spec runspec.Spec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
 		return errors.New("mask initialization requires an accepted seal")
+	}
+	projection, err := runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(projection.Values, spec.Resolved.SecretRegistration.Values) {
+		return errors.New("accepted masking projection differs from its sealed inputs")
 	}
 	return r.initialize(spec.Request, &spec.Resolved, nil, nil)
 }
@@ -80,5 +87,22 @@ func (r *MaskRegistry) initializeAccepted(ctx context.Context, state EvaluationS
 	if persistedHash != acceptedHash {
 		return errors.New("mask initialization differs from persisted acceptance")
 	}
-	return r.initialize(snapshot.Run.Spec.Request, &snapshot.Run.Spec.Resolved, &persisted.Plan, snapshot.Nodes)
+	return r.initializeSnapshot(snapshot, persisted)
+}
+
+func (r *MaskRegistry) initializeSnapshot(snapshot store.RunSnapshot, accepted AcceptedRun) error {
+	if r == nil {
+		return nil
+	}
+	if err := r.initializeSeal(accepted); err != nil {
+		return err
+	}
+	for _, expansion := range snapshot.Expansions {
+		for _, value := range expansion.Registration.Values {
+			if err := r.Register(value); err != nil {
+				return err
+			}
+		}
+	}
+	return r.initialize(snapshot.Run.Spec.Request, &snapshot.Run.Spec.Resolved, &accepted.Plan, snapshot.Nodes)
 }

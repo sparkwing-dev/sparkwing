@@ -45,6 +45,7 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 							spec.Resolved.SecretArgs = []string{"default_token"}
 							spec.Resolved.Args = map[string]string{"default_token": value}
 						}
+						spec.Resolved.SecretRegistration, _ = runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 						input.Accepted.Spec, _ = json.Marshal(spec)
 						_, claimed, _, buildErr := NewNativeHost(config)
 						if buildErr != nil {
@@ -66,6 +67,7 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 							spec.Request.Request.RequestedArgs = nil
 							spec.Resolved.Args = map[string]string{"default_token": value}
 							spec.Resolved.SecretArgs = []string{"default_token"}
+							spec.Resolved.SecretRegistration, _ = runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 							state.snapshot.Run.Request = spec.Request
 							input.SealedRequest, _ = json.Marshal(spec.Request.Request)
 							accepted, acceptErr := ownerAccepted(state.snapshot.Run)

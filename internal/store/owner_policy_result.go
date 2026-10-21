@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
@@ -23,7 +25,7 @@ const (
 // OwnerPolicyResult binds a declared decision to its captured work generation.
 type OwnerPolicyResult struct {
 	Kind       OwnerPolicyKind
-	Generation int64
+	Generation runspec.ClaimGeneration
 }
 
 func (p OwnerPolicyResult) outcome() NodeState {
@@ -39,7 +41,7 @@ func (p OwnerPolicyResult) outcome() NodeState {
 	}
 }
 
-func checkNodeOwnerPolicy(row NodeRow, change NodeTransition) error {
+func checkNodeOwnerPolicy(row NodeRow, change nodeTransition) error {
 	policy, result := change.Extra.OwnerPolicy, change.Extra.Result
 	if policy == nil || policy.Generation < 0 || policy.Generation != row.Generation || row.ReadyAt != nil || result == nil || policy.outcome() == "" || policy.outcome() != change.To {
 		return holderRefusal()
@@ -57,21 +59,15 @@ func checkNodeOwnerPolicy(row NodeRow, change NodeTransition) error {
 }
 
 func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunRow, change RunTransition, now time.Time) error {
-	if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID, now); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID); err != nil {
 		return err
 	}
 	policy := change.OwnerPolicy
 	if policy == nil || policy.Generation != change.Actor.Owner.Generation || row.Spec == nil || row.CancelRequestedAt != nil {
 		return holderRefusal()
 	}
-	want := RunFailed
-	if policy.Kind == PolicyAdmissionSkip {
-		want = RunSuccess
-	} else if policy.Kind != PolicyAdmissionFail && policy.Kind != PolicyQueueTimeout {
+	if policy.Kind != PolicyAdmissionSkip && policy.Kind != PolicyAdmissionFail && policy.Kind != PolicyQueueTimeout {
 		return errors.New("invalid plan admission policy result")
-	}
-	if change.To != want {
-		return errors.New("plan verdict disagrees with admission policy")
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
 	if err != nil {
@@ -84,13 +80,14 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 		if node.Status != StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
 			return errors.New("plan admission refusal requires unreleased work")
 		}
-		_, err := transitionNodeStateTx(ctx, tx, team, NodeTransition{
-			Ref: node.Ref, Actor: change.Actor, To: policy.outcome(), Cause: CauseOwnerPolicy,
-			Extra: TransitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: node.Generation}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
-		}, tx.now())
+		_, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{
+			Ref: node.Ref, Actor: change.Actor, To: policy.outcome(), Cause: causeOwnerPolicy,
+			Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: node.Generation}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
+		})
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err = tx.ExecContext(ctx, `UPDATE nodes SET expansion=CASE WHEN outcome IN ('success','memoized') THEN 'failed' ELSE 'none' END WHERE team=? AND run_id=? AND expansion='expected'`, team, row.ID)
+	return err
 }

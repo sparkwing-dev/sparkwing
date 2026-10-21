@@ -87,7 +87,9 @@ func scanPublication(ctx context.Context, root string, bundle *os.File, environm
 		})
 		value = strings.Join(lines, "\n")
 		if len(value) >= 8 {
-			masker.Register(value)
+			if err := masker.Register(value); err != nil {
+				return err
+			}
 		}
 	}
 	patterns := slices.DeleteFunc(masker.Values(), func(pattern string) bool { return len(pattern) < 8 })

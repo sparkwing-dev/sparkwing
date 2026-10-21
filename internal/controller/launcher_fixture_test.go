@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -36,7 +37,7 @@ func LauncherFixtureClaim(t *testing.T, st *store.Store, runID, nodeID string) s
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "launcher:" + runID, CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	unit := store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: nodeID}
+	unit := store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)}
 	if nodeID == store.PlanNodeID {
 		unit.Kind, unit.NodeID = capability.UnitPlan, ""
 	}

@@ -176,11 +176,16 @@ func concurrencyFuzzOp(t *testing.T, ctx context.Context, s *store.Store, rng *r
 		if req.Policy == store.OnLimitCancelOthers && rng.Intn(2) == 0 {
 			req.CancelTimeout = time.Minute
 		}
-		if rng.Intn(5) == 0 {
-			req.Lease = time.Nanosecond
-		}
+		expire := rng.Intn(5) == 0
 		if _, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, req); err != nil {
 			return fmt.Errorf("acquire %+v: %w", req, err)
+		}
+		if expire {
+			for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
+				if _, err := teststore.SQL(t, s).ExecContext(ctx, storetest.Rebind(s, `UPDATE `+table+` SET lease_expires_at=0 WHERE team=? AND key=? AND run_id=? AND node_id=?`), store.DefaultTeam, key, run, node); err != nil {
+					return fmt.Errorf("expire %s %s/%s: %w", key, run, node, err)
+				}
+			}
 		}
 	case 4:
 		if _, _, err := tenantFor(t, s, store.DefaultTeam).HeartbeatConcurrencySlot(ctx, key, holderID, 0); err != nil && !errors.Is(err, store.ErrLockHeld) {

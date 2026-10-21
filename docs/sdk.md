@@ -358,6 +358,15 @@ separate host responsibility.
 
 ## Secrets and masking
 
+Masking is provided by the Go host. Neither SDK masks output or sends automatic
+mask registrations. Pipeline code run without a Sparkwing host is unmasked.
+The host registers accepted secret arguments, defaults and normalized list items
+before execution. Stored secrets and OIDC tokens are registered before release.
+Secret values need at least four characters and must not contain `***`. This
+includes each nonempty list item. Use a plain config variable for smaller values.
+Stdout and stderr are masked before line splitting. Describe and generator output
+waits for declarations. Failed discovery withholds that output.
+
 A pipeline implements `Secrets() any` to declare a typed secrets struct. Fields
 use `sw:"NAME,required"` or `sw:"NAME,optional"`. Required is the default.
 Declarations appear in describe. The host checks required names, and execution

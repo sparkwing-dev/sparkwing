@@ -521,7 +521,7 @@ func TestProtocolSessionChild(t *testing.T) {
 					os.Exit(6)
 				}
 				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}}})
-				reply(request, nodeproto.EvalResult{Value: raw})
+				reply(request, nodeproto.EvalResult{Value: raw, DeclarationsKnown: true})
 			default:
 				os.Exit(7)
 			}
@@ -769,7 +769,8 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 		binding.Routes.Bearer = "private-test-bearer-child"
 		return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 	}
-	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error {
+	deps.Masks = NewMaskRegistry(deps.Masker)
+	cfg := ProtocolSessionConfig{Masks: deps.Masks, Log: func(context.Context, nodeproto.FrameLog) error { return nil }, Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error {
 		if !revoked {
 			return errors.New("routes still live during cleanup")
 		}
@@ -781,7 +782,7 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, failure, err := h.Expand(t.Context(), in)
+	body, _, failure, err := h.Expand(t.Context(), in)
 	if err != nil || failure != nil {
 		t.Fatalf("failure = %+v, error = %v", failure, err)
 	}
@@ -834,7 +835,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				case "attempt":
 					process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 				case "evaluation":
-					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
+					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 				case "planning":
 					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci"}, Debug: debug}, log)
 				}

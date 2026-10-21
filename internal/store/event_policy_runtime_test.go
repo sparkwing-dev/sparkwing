@@ -20,7 +20,7 @@ func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), tx.now())
+		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), transactionTime(t, tx))
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -98,13 +98,13 @@ func TestStoreDataEventsPreserveFundingAndFreeShare(t *testing.T) {
 	if err := appendBytes(500); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.HoldByOperator(t.Context(), "operator", "held", s.now()); err != nil {
+	if _, err := tenant.HoldByOperator(t.Context(), "operator", "held"); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendBytes(1); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("held team retained funded share: %v", err)
 	}
-	if _, err := tenant.ReleaseOperatorHolds(t.Context(), "operator", "released", s.now()); err != nil {
+	if _, err := tenant.ReleaseOperatorHolds(t.Context(), "operator", "released"); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendBytes(1); err != nil {

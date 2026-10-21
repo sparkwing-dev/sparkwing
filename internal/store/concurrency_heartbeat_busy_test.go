@@ -29,7 +29,7 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	if err := tenant.TestOnlySeedRun(ctx, Run{ID: "r1", Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := seed.db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation) VALUES ('default','r1','n1','pending','{}','{}',1)`); err != nil {
+	if _, err := seed.db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation,claimed_by,lease_expires_at) VALUES ('default','r1','n1','pending','{}','{}',1,'machine',?)`, time.Now().Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AcquireConcurrencySlot(ctx, AcquireSlotRequest{

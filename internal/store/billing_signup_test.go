@@ -23,7 +23,8 @@ func TestBillingModelLaunchWaitlistsThe101stSignup(t *testing.T) {
 	if !last.Account.Waitlisted || last.Account.ActiveTeam != "" || last.WaitlistReason != "launch_capacity" {
 		t.Fatalf("101st signup=%+v", last)
 	}
-	if _, err := s.ApproveWaitlisted(t.Context(), []string{last.Account.ID}, "operator", now); err != nil {
+	s.SetTestClock(t, func() time.Time { return now })
+	if _, err := s.ApproveWaitlisted(t.Context(), []string{last.Account.ID}, "operator"); err != nil {
 		t.Fatal(err)
 	}
 	last = signUpAt(t, s, googleProfile("100", "signup100@example.test"), store.SignUpConditions{}, now)

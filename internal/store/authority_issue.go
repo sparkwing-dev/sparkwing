@@ -104,7 +104,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 
 func encodeAwardUnit(unit UnitRef) (string, error) {
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {
-		return unit.RunID, nil
+		return string(unit.RunID), nil
 	}
 	body, err := json.Marshal(unit)
 	return string(body), err
@@ -112,7 +112,7 @@ func encodeAwardUnit(unit UnitRef) (string, error) {
 
 func decodeAwardUnit(kind capability.UnitKind, id string) (UnitRef, error) {
 	if kind == capability.UnitTrigger || kind == capability.UnitPlan {
-		return UnitRef{Kind: kind, RunID: id}, nil
+		return UnitRef{Kind: kind, RunID: runspec.RunID(id)}, nil
 	}
 	var unit UnitRef
 	if err := json.Unmarshal([]byte(id), &unit); err != nil {
@@ -145,7 +145,7 @@ func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capabi
 	if err := tx.operator.lockUnitsTx(ctx, tx, []UnitRef{unit}); err != nil {
 		return awardRow{}, err
 	}
-	row := awardRow{run: unit.RunID, node: unit.NodeID}
+	row := awardRow{run: string(unit.RunID), node: string(unit.NodeID)}
 	switch spec.Unit {
 	case capability.UnitTrigger, capability.UnitPlan:
 		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at,created_at,cancel_requested_at FROM triggers WHERE id = ? AND unit_kind = ?"+tx.forUpdate(), unit.RunID, string(spec.Unit)).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease, &row.created, &row.cancel)
@@ -196,14 +196,14 @@ func (op *Operator) lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRe
 		if err != nil {
 			return err
 		}
-		locks = append(locks, lock{tier: lockRun, team: team, run: unit.RunID})
+		locks = append(locks, lock{tier: lockRun, team: team, run: string(unit.RunID)})
 		switch unit.Kind {
 		case capability.UnitTrigger, capability.UnitPlan:
-			locks = append(locks, lock{tier: lockTrigger, team: team, run: unit.RunID})
+			locks = append(locks, lock{tier: lockTrigger, team: team, run: string(unit.RunID)})
 		case capability.UnitEval:
-			locks = append(locks, lock{lockEval, team, unit.RunID, unit.NodeID, unit.SourceGeneration})
+			locks = append(locks, lock{lockEval, team, string(unit.RunID), string(unit.NodeID), unit.SourceGeneration})
 		case capability.UnitNode:
-			locks = append(locks, lock{tier: lockNode, team: team, run: unit.RunID, node: unit.NodeID})
+			locks = append(locks, lock{tier: lockNode, team: team, run: string(unit.RunID), node: string(unit.NodeID)})
 		}
 	}
 	compare := func(a, b lock) int {
@@ -291,7 +291,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		if spec.HereRunID != row.run || spec.Unit != capability.UnitTrigger {
 			return capability.Capability{}, authorityError(apierr.BadRequest, "here award names another run")
 		}
-	} else if row.generation <= 0 || row.holder != claimant.Capability.Subject.ID || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() {
+	} else if row.generation <= 0 || row.holder != claimant.Capability.Subject.ID || !row.lease.Valid || row.lease.Int64 <= tx.now(ctx).UnixNano() {
 		return capability.Capability{}, authorityError(apierr.LockHeld, "unit is not held by claimant")
 	}
 	parent := chain[len(chain)-1].principal
@@ -338,12 +338,12 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		if _, err := lockLedgerTx(ctx, tx, Team(row.team)); err != nil {
 			return capability.Capability{}, err
 		}
-		standing, err := trustStandingTx(ctx, tx, Team(row.team), tx.now())
+		standing, err := trustStandingTx(ctx, tx, Team(row.team), tx.now(ctx))
 		if err != nil {
 			return capability.Capability{}, err
 		}
 		if standing.MaxJobDuration > 0 {
-			began := tx.now()
+			began := tx.now(ctx)
 			if c.Unit == capability.UnitNode {
 				var awarded sql.NullInt64
 				if err := tx.QueryRowContext(ctx, `SELECT MIN(awarded_at) FROM billing_awards WHERE team=? AND run_id=? AND node_id=? AND unit_kind=? AND executor_class='cloud'`, row.team, row.run, row.node, c.Unit).Scan(&awarded); err != nil {
@@ -354,7 +354,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 				}
 			}
 			deadline := began.Add(standing.MaxJobDuration)
-			if !deadline.After(tx.now()) {
+			if !deadline.After(tx.now(ctx)) {
 				return capability.Capability{}, authorityError(apierr.BadRequest, "job reached "+standing.Tier+" standing maximum duration")
 			}
 
@@ -501,7 +501,7 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 	if c.Binding.Expansion != nil {
 		generation = c.Binding.Expansion.Generation
 	}
-	if row.prefix != spec.BootstrapPrefix || row.holder != c.Binding.Holder || row.generation != generation || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() {
+	if row.prefix != spec.BootstrapPrefix || row.holder != c.Binding.Holder || row.generation != generation || !row.lease.Valid || row.lease.Int64 <= tx.now(ctx).UnixNano() {
 		return capability.Capability{}, authorityError(apierr.LockHeld, "bootstrap unit fence has ended")
 	}
 	if err := tx.operator.revokeAuthorityTx(ctx, tx, ref); err != nil {
@@ -559,7 +559,7 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	}
 	c.Prefix = raw[:CredentialPrefixLength]
 	c.Digest = sha256.Sum256([]byte(raw))
-	c.IssuedAt = tx.now()
+	c.IssuedAt = tx.now(ctx)
 	var origin *CapabilityOrigin
 	if len(provision) > 0 && provision[0] != nil {
 		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal}

@@ -59,11 +59,11 @@ func receiptSnapshot(snapshot store.RunSnapshot) (*store.Run, []*store.Node, err
 	nodes := make([]*store.Node, 0, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
 		var declaration nodeproto.JobSpec
-		if err := json.Unmarshal(row.Spec, &declaration); err != nil || declaration.ID != row.Ref.NodeID {
+		if err := json.Unmarshal(row.Spec, &declaration); err != nil || runspec.NodeID(declaration.ID) != row.Ref.NodeID {
 			return nil, nil, errors.New("invalid persisted receipt job")
 		}
 		nodes = append(nodes, &store.Node{
-			RunID: row.Ref.RunID, NodeID: row.Ref.NodeID,
+			RunID: string(row.Ref.RunID), NodeID: string(row.Ref.NodeID),
 			Status: string(row.Status), Outcome: string(row.Outcome), StatusDetail: row.StatusDetail,
 			StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, Deps: declaration.Needs,
 		})

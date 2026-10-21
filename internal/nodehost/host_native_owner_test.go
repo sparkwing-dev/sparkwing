@@ -56,7 +56,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 			}
 			spec.Resolved.Settings.Options.NoMemo.Value = id == "memo_no_read"
 			accepted := AcceptedRun{RunID: "run", Spec: marshalEventFixture(t, spec), SpecHash: string(spec.Hash), Plan: plan, PlanHash: string(planHash)}
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: jobID}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
+			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
 			if id == "source" {
 				st.node.Status, st.node.Outcome, st.node.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
 			}
@@ -100,7 +100,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 			}
 			switch jobID {
 			case "source":
-				body, failure, err := host.Expand(ctx, input)
+				body, _, failure, err := host.Expand(ctx, input)
 				if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.SDKError || !strings.Contains(failure.MaskedError, "generator refused") {
 					t.Fatalf("failed generator became topology: body=%s failure=%+v error=%v", body, failure, err)
 				}

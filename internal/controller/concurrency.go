@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -312,7 +314,7 @@ func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request, a ca
 	if body.RunID == "" {
 		return invalidEngineBody("run_id is required")
 	}
-	cancelled, err := tenant.CancelAuthorizedWaiter(r.Context(), a, key, controllerwire.NodeRef{RunID: body.RunID, NodeID: body.NodeID})
+	cancelled, err := tenant.CancelAuthorizedWaiter(r.Context(), a, key, controllerwire.NodeRef{RunID: runspec.RunID(body.RunID), NodeID: runspec.NodeID(body.NodeID)})
 	if err != nil {
 		return concurrencyError(err)
 	}

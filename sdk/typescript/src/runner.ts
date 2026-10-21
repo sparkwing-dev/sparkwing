@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { Readable } from "node:stream";
 import type { Args, Context, Failure, JobResult, PipelineDef, RunContext, RunnerInfo, Trigger } from "../index.d.ts";
-import { describe } from "./describe.ts";
+import { argument, describe, type DescribeArg } from "./describe.ts";
 import { resolveArgs } from "./args.ts";
 import { Generated, lookupPipeline, Plan, type Closure } from "./plan.ts";
 import type { JobSpec } from "./plan-wire.ts";
@@ -14,7 +14,6 @@ import { jsonOutput, jsonValue, readRequests, stringMap, validateRequest, writeR
 import { NodeRoutes, type HostServices, type ProcessRoutes } from "./routes.ts";
 import { runScope } from "./scope.ts";
 import { StepState } from "./step-state.ts";
-import { PlanningDiagnostics } from "./diagnostics.ts";
 
 export interface ServeOptions {
   input: Readable;
@@ -58,6 +57,7 @@ class Session {
   readonly #active = new Map<string, Active>();
   readonly #steps = new Map<string, StepState>();
   readonly #generated = new Map<string, unknown>();
+  readonly #generatedArguments = new Map<string, DescribeArg[]>();
   #evalReady: Promise<void> = Promise.resolve();
   readonly #originalEnv = new Map<string, string | undefined>();
   constructor(options: ServeOptions) {
@@ -190,25 +190,17 @@ class Session {
     const definition = lookupPipeline(String(req.pipeline));
     if (!definition) throw failure("unknown_pipeline", "pipeline is not registered");
     const rawArgs = stringMap(req.args, "args");
-    const plan = new Plan(
-      new PlanningDiagnostics(
-        definition.args,
-        rawArgs,
-        this.#services ? (value) => this.#services!.mask(value, new AbortController().signal) : undefined,
-      ),
-    );
-    return plan.diagnostics.run(async () => {
-      const args = resolvedArgs(definition.args ?? [], rawArgs, true);
-      const run = this.#run(object(req.run, "run"), args);
-      if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
-      await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
-      const doc = plan.toDoc();
-      const allSpecs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
-      resolvedArgs(allSpecs, rawArgs, definition.extra === true);
-      plan.seal();
-      this.#planned = { plan, run, definition, rawArgs };
-      return doc;
-    });
+    const plan = new Plan();
+    const args = resolvedArgs(definition.args ?? [], rawArgs, true);
+    const run = this.#run(object(req.run, "run"), args);
+    if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
+    await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
+    const doc = plan.toDoc();
+    const allSpecs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
+    resolvedArgs(allSpecs, rawArgs, definition.extra === true);
+    plan.seal();
+    this.#planned = { plan, run, definition, rawArgs };
+    return doc;
   }
   #current(): Planned {
     if (!this.#planned) throw failure("no_plan", "operation requires a successful plan");
@@ -321,11 +313,11 @@ class Session {
       const ctx = this.#context(req, spec, signal, closure.step?.id, closure.kind === "generate");
       try {
         const value = await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req));
-        return { value: jsonValue(value) ?? null };
+        return { value: jsonValue(value) ?? null, ...(closure.kind === "generate" ? { declarations_known: true, arguments: this.#generatedArguments.get(closure.id) ?? [] } : {}) };
       } catch (error) {
         return {
           value: null,
-          error: errorFields(closure.kind === "generate" ? plan.diagnostics.error(error, "", undefined, "sdk_error") : error),
+          error: errorFields(error),
         };
       }
     } finally {
@@ -339,22 +331,16 @@ class Session {
       if (this.#generated.has(closure.id)) return structuredClone(this.#generated.get(closure.id));
       const { definition, plan, rawArgs } = this.#current();
       const generated = new Generated(closure.generator.source, closure.id, plan);
-      const jobs = await plan.diagnostics.run(
-        async () => {
-          await closure.fn(generated, req.input ?? null, ctx);
-          ctx.signal.throwIfAborted();
-          resolvedArgs(
-            [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
-            rawArgs,
-            definition.extra === true,
-          );
-          return generated.toDoc().jobs;
-        },
-        "",
-        undefined,
-        "sdk_error",
+      await closure.fn(generated, req.input ?? null, ctx);
+      ctx.signal.throwIfAborted();
+      resolvedArgs(
+        [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
+        rawArgs,
+        definition.extra === true,
       );
+      const jobs = generated.toDoc().jobs;
       plan.insert(generated);
+      this.#generatedArguments.set(closure.id, generated.jobs().flatMap((job) => job.argSpecs().map((spec) => argument(spec, job.id))));
       this.#generated.set(closure.id, jobs);
       return jobs;
     }

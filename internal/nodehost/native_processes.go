@@ -90,6 +90,7 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 		return p.Log(ctx, service.RunID, service.Job.ID, record)
 	}}
 	config.Log = logs.write
+	config.output, config.Masks = logs, service.Masks
 	config.RunCleanups = func(ctx context.Context, scope CleanupScope) error {
 		sink := &nativeCleanupSink{ctx: ctx, logs: logs}
 		output := &LineWriter{sink: sink, level: LevelInfo, stream: service.Masks.masker.Stream()}

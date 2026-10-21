@@ -64,8 +64,8 @@ func TestEngineClientRoutes(t *testing.T) {
 		{"expand", "POST", "/api/v1/runs/r1/jobs/j1/expansion", controllerwire.ExpansionAccepted{SourceGeneration: 3, State: "succeeded", Jobs: []controllerwire.ExpandedJob{}}, func(c controllerwire.Controller) (any, error) {
 			return c.AcceptExpansion(ctx, "r1", "j1", controllerwire.ExpansionSubmission{SourceGeneration: 3, Body: json.RawMessage(`{"jobs":[]}`)})
 		}},
-		{"finish", "POST", "/api/v1/runs/r1/finish", controllerwire.Applied{StateSeq: 6}, func(c controllerwire.Controller) (any, error) {
-			return c.Finish(ctx, "r1", controllerwire.FinishRequest{Outcome: "success"})
+		{"finish", "POST", "/api/v1/runs/r1/finish", controllerwire.Applied{StateSeq: 6, Outcome: "cancelled", Reason: "operator cancelled"}, func(c controllerwire.Controller) (any, error) {
+			return c.Finish(ctx, "r1", controllerwire.FinishRequest{})
 		}},
 		{"cancel", "POST", "/api/v1/runs/r1/cancel", controllerwire.Applied{CancelRequested: true}, func(c controllerwire.Controller) (any, error) {
 			return c.Cancel(ctx, "r1", controllerwire.CancelRequest{Reason: "stop"})
@@ -192,7 +192,8 @@ func TestEngineClientRequiredFieldsAndAdditions(t *testing.T) {
 		name  string
 		value json.RawMessage
 	}{
-		{"id", nil}, {"number", json.RawMessage(`null`)},
+		{"id", nil},
+		{"number", json.RawMessage(`null`)},
 		{"jobs", json.RawMessage(`[{"id":"j1"}]`)},
 		{"inputs", json.RawMessage(`null`)},
 	} {
@@ -259,7 +260,8 @@ func TestEngineClientLauncherSelection(t *testing.T) {
 		{Kinds: []capability.UnitKind{capability.UnitNode, capability.UnitPlan, capability.UnitEval}},
 		{Kinds: []capability.UnitKind{capability.UnitNode}, RunID: "r1", JobID: "j1"},
 	} {
-		c, err := NewEngineClient(EngineOptions{URL: "http://controller", Launcher: true,
+		c, err := NewEngineClient(EngineOptions{
+			URL: "http://controller", Launcher: true,
 			HTTP: &http.Client{Transport: engineTransport(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path != "/api/v1/launcher/claim" {
 					t.Fatalf("launcher selected %s", r.URL.Path)
@@ -272,7 +274,8 @@ func TestEngineClientLauncherSelection(t *testing.T) {
 					t.Fatal("launcher selection changed")
 				}
 				return engineResponse(200, `{}`), nil
-			})}})
+			})},
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

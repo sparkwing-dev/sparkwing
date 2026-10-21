@@ -173,6 +173,8 @@ func TestSecretClassificationCannotShrinkAtSecondSeal(t *testing.T) {
 	s := fixture(t)
 	r := s.Request.Request
 	r.SecretArgs = Optional[[]string]{Set: true, Value: []string{"token"}}
+	r.RequestedArgs["count"] = "4242"
+	s.Resolved.Args["count"] = "4242"
 	request, err := SealRequest(r, IntakeFacts{RunID: "run"})
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +182,7 @@ func TestSecretClassificationCannotShrinkAtSecondSeal(t *testing.T) {
 	for _, names := range [][]string{{}, {"count"}} {
 		resolved := s.Resolved
 		resolved.SecretArgs = names
+		resolved.SecretRegistration.Values = nil
 		if _, err := SealSpec(SealInput{Request: request, Resolved: resolved, Plan: []byte(`{}`)}); err == nil {
 			t.Error("second seal discarded intake secret classification")
 		}
@@ -195,6 +198,7 @@ func TestSecretClassificationCannotShrinkAtSecondSeal(t *testing.T) {
 	for _, names := range [][]string{{"token"}, {"token", "count"}} {
 		resolved := s.Resolved
 		resolved.SecretArgs = names
+		resolved.SecretRegistration.Values = nil
 		if _, err := SealSpec(SealInput{Request: request, Resolved: resolved, Plan: []byte(`{}`)}); err != nil {
 			t.Fatalf("preserved classification refused: %v", err)
 		}

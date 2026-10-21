@@ -55,7 +55,7 @@ func TestBurstCancelledOwnerRenewalRetainsReportingAuthority(t *testing.T) {
 			}
 		})
 	}
-	if _, err := owner.Finish(t.Context(), created.RunID, controllerwire.FinishRequest{Outcome: "cancelled"}); err != nil {
+	if _, err := owner.Finish(t.Context(), created.RunID, controllerwire.FinishRequest{}); err != nil {
 		t.Fatalf("cancelled owner could not finish: %v", err)
 	}
 	detail, err := c.ReadRun(t.Context(), created.RunID)

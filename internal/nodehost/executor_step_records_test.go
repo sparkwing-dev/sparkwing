@@ -111,8 +111,8 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 		input, st, deps, _ := executorFixture(t)
 		input.Authority.Holder, st.row.ClaimedBy = "holder:"+identity, "holder:"+identity
 		input.Authority.CapabilityPrefix, st.row.CapabilityPrefix = "cap:"+identity, "cap:"+identity
-		input.Generation, st.row.Generation = int64(ordinal)+1, int64(ordinal)+1
-		input.Attempt, st.row.Attempt = int64(ordinal), int64(ordinal)
+		input.Generation, st.row.Generation = runspec.ClaimGeneration(ordinal)+1, runspec.ClaimGeneration(ordinal)+1
+		input.Attempt, st.row.Attempt = runspec.AttemptOrdinal(int64(ordinal)), runspec.AttemptOrdinal(int64(ordinal))
 		masker := secrets.NewMasker()
 		masker.Register(secret)
 		deps.Masker = masker
@@ -156,7 +156,7 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 			t.Fatal("step diagnostics are absent")
 		}
 		for _, report := range records.reports {
-			if report.Actor != executorActor(input) || report.Attempt.Attempt != input.Attempt+1 || report.Attempt.Generation != input.Generation || report.Attempt.RunID != input.Accepted.RunID || report.Attempt.NodeID != input.NodeID {
+			if report.Actor != executorActor(input) || runspec.AttemptOrdinal(report.Attempt.Attempt) != input.Attempt+1 || runspec.ClaimGeneration(report.Attempt.Generation) != input.Generation || report.Attempt.RunID != input.Accepted.RunID || report.Attempt.NodeID != input.NodeID {
 				t.Fatal("step changed its awarded fence")
 			}
 			for _, form := range forms {
@@ -221,7 +221,7 @@ func TestNodeExecutorPersistsStepStatesAndFences(t *testing.T) {
 					defer records.mu.Unlock()
 					started := false
 					for _, report := range records.reports {
-						started = started || report.StepID == r.Step && report.State == "running" && report.Attempt.Attempt == in.Attempt
+						started = started || report.StepID == r.Step && report.State == "running" && runspec.AttemptOrdinal(report.Attempt.Attempt) == in.Attempt
 					}
 					if !started {
 						t.Error("body ran before its running record committed")
@@ -242,7 +242,7 @@ func TestNodeExecutorPersistsStepStatesAndFences(t *testing.T) {
 			}
 			states := map[int64]map[string][]string{}
 			for _, report := range records.reports {
-				if report.Attempt.RunID != input.Accepted.RunID || report.Attempt.NodeID != input.NodeID || report.Attempt.Generation != input.Generation || report.Actor.Holder != input.Authority.Holder || report.Actor.Generation != input.Generation || report.Actor.CapabilityPrefix != input.Authority.CapabilityPrefix || report.Actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}) {
+				if report.Attempt.RunID != input.Accepted.RunID || report.Attempt.NodeID != input.NodeID || runspec.ClaimGeneration(report.Attempt.Generation) != input.Generation || report.Actor.Holder != input.Authority.Holder || report.Actor.Generation != input.Generation || report.Actor.CapabilityPrefix != input.Authority.CapabilityPrefix || report.Actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}) {
 					t.Fatalf("step lost its attempt fence: %+v", report)
 				}
 				if strings.Contains(report.MaskedError, "private") || report.State == "running" && report.StartedAt == nil || report.State != "running" && report.FinishedAt == nil {
@@ -261,10 +261,10 @@ func TestNodeExecutorPersistsStepStatesAndFences(t *testing.T) {
 			} else if mode == "dry_run" {
 				want["first"], want["second"] = []string{"running", "skipped"}, []string{"running", "skipped"}
 			}
-			if !reflect.DeepEqual(states[input.Attempt+1], want) {
+			if !reflect.DeepEqual(states[int64(input.Attempt)+1], want) {
 				t.Fatalf("step states=%v, want=%v", states, want)
 			}
-			if mode == "retry" && !reflect.DeepEqual(states[input.Attempt+2], map[string][]string{"first": {"running", "passed"}, "second": {"running", "passed"}}) {
+			if mode == "retry" && !reflect.DeepEqual(states[int64(input.Attempt)+2], map[string][]string{"first": {"running", "passed"}, "second": {"running", "passed"}}) {
 				t.Fatalf("retry reused previous step rows: %v", states)
 			}
 		})

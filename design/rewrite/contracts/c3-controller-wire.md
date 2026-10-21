@@ -338,7 +338,7 @@ one envelope and use `apierr.DecodeInner`.
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
 | `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
 | `LauncherObservation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
-| `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body or structured failure and the persisted topology/settings. |
+| `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body with private `registration`, or a structured failure, and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |
 | `RunDetail`, `JobDetail`, `AttemptDetail` | Shared safe status response. Inputs come from `runspec.DisplayRequest` or `DisplaySpec`. |
@@ -1223,14 +1223,17 @@ producer rows into the persisted job namespace used by mask initialization.
 
 ## Owner cancellation drain
 
-Once scheduling starts, owner renewal keeps its lease live after a run
-cancellation request. The persisted scheduling graph cancels each executor and
-waits for terminal results before owner completion. Cancellation during source
-preparation still stops preparation. Lost authority, renewal silence, the parent
-deadline and an explicit host stop still terminate the owner context. Claimed
-executor renewal continues to cancel its execution context on a cancellation beat.
-An owner waits for a holder with persisted cancellation intent instead of
-submitting the same cancellation again on each scheduling pass.
+Cancellation records a stored drain deadline five minutes after the first
+request. Node, owner, eval and concurrency-slot leases use the same lease bound,
+which is the earliest authority, cancellation and funded deadline. Renewing an
+owner for scheduling may clear the cancellation flag sent to its keeper, but
+never extends this deadline. A holder that ignores cancellation is reaped when
+its lease expires. Funding refusal retains its shorter one-slice deadline.
+
+The finish request carries a reason and masked error, with no outcome. The store
+derives the terminal verdict from the accepted plan and persisted job results.
+Preparation without an accepted plan finishes failed, or cancelled when the run
+has cancellation intent. Terminal outcomes absorb replay.
 
 ## Detached request trace
 
@@ -1278,3 +1281,13 @@ OperatorManager adds ReadOperatorTeam(ctx, team) returning OperatorTeam with
 team and display_name. It uses the existing GET /api/v1/operator/teams/{team}
 route. C2 defines the deployment authorization and identity-only projection.
 The CLI derives node placement through the launcher's shared hash owner.
+
+## Private expansion mask registrations
+
+Expansion submissions and accepted owner snapshots carry `registration` beside
+the generated plan body. It is a `runspec.SecretRegistration`, never a member
+projection. The store validates its normalized values, binds body and registration
+to one acceptance digest, and returns the original private projection on replay.
+`BodyHash` still hashes only the generated plan body for SDK replay. Missing or
+changed registration refuses acceptance or reconstruction. Public plan JSON and
+member receipts never carry these values.

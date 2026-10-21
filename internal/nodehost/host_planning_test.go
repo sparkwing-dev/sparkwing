@@ -19,7 +19,7 @@ import (
 )
 
 func TestPlanningDefaults(t *testing.T) {
-	for _, secret := range []string{"private-sdk-default", "42"} {
+	for _, secret := range []string{"private-sdk-default", "4242"} {
 		for _, field := range []string{"job", "group", "step", "concurrency", "safe"} {
 			t.Run(secret+"/"+field, func(t *testing.T) { checkPlanningDefaults(t, secret, field) })
 		}

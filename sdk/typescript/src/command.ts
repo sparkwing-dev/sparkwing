@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
-import { StringDecoder } from "node:string_decoder";
 import type { Cmd, Context, ExecOptions, ExecResult } from "../index.d.ts";
 import { assertExecution, projectRoot } from "./scope.ts";
 
@@ -230,8 +230,9 @@ function collectCommand(ctx: Context, child: ChildProcess, options: CommandOptio
       cause ??= error;
       kill();
     };
-    const stdout = collectStream(child.stdout, "stdout", options.stdout, options.capture === true, emit, onError);
-    const stderr = collectStream(child.stderr, "stderr", options.stderr, options.capture === true, emit, onError);
+    const commandID = randomUUID();
+    const stdout = collectStream(child.stdout, "stdout", `${commandID}:stdout`, options.stdout, options.capture === true, emit, onError);
+    const stderr = collectStream(child.stderr, "stderr", `${commandID}:stderr`, options.stderr, options.capture === true, emit, onError);
     child.on("error", (error) => {
       cause ??= error;
     });
@@ -257,27 +258,18 @@ function collectCommand(ctx: Context, child: ChildProcess, options: CommandOptio
 function collectStream(
   stream: ChildProcess["stdout"],
   name: "stdout" | "stderr",
+  streamID: string,
   callback: CommandOptions["stdout"],
   silent: boolean,
   emit: Emitter,
   onError: (error: unknown) => void,
 ): () => string {
   const chunks: Buffer[] = [];
-  const decoder = new StringDecoder("utf8");
-  let pending = "";
-  const lines = (text: string) => {
-    pending += text;
-    let newline: number;
-    while ((newline = pending.indexOf("\n")) !== -1) {
-      emit("exec_line", { stream: name, line: pending.slice(0, newline).replace(/\r$/, "") });
-      pending = pending.slice(newline + 1);
-    }
-  };
   stream?.on("data", (chunk: Buffer) => {
     chunks.push(Buffer.from(chunk));
     try {
       callback?.(chunk);
-      if (!silent) lines(decoder.write(chunk));
+      if (!silent) emit("exec_chunk", { stream: streamID, source: name, data: chunk.toString("base64") });
     } catch (error) {
       onError(error);
     }
@@ -286,8 +278,7 @@ function collectStream(
   stream?.once("end", () => {
     if (silent) return;
     try {
-      lines(decoder.end());
-      if (pending) emit("exec_line", { stream: name, line: pending });
+      emit("exec_chunk", { stream: streamID, source: name, end: true });
     } catch (error) {
       onError(error);
     }

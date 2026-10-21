@@ -106,7 +106,8 @@ func TestGitHubConnectRechecksBindingAndStoreClock(t *testing.T) {
 	if err != nil || out.ConnectedBy != a.Principal.Capability.Subject.ID || out.Team != tenant.Team() || !out.CreatedAt.Equal(*now) {
 		t.Fatalf("binding = %+v: %v", out, err)
 	}
-	account, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "99", Email: "foreign@example.test", EmailVerified: true}, SignUpConditions{}, *now)
+	s.SetTestClock(t, func() time.Time { return *now })
+	account, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "99", Email: "foreign@example.test", EmailVerified: true}, SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}

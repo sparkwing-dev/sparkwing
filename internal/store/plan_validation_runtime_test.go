@@ -16,7 +16,7 @@ import (
 
 func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchHost)
-	for _, secret := range []Secret{{Name: "TEAM_ONLY", Value: "v"}, {Name: "ELSEWHERE", Value: "v", Pipeline: "release"}, {Name: "OWN", Value: "v", Pipeline: "p"}, {Name: "SHARED", Value: "v", Shared: true}} {
+	for _, secret := range []Secret{{Name: "TEAM_ONLY", Value: "valid-secret"}, {Name: "ELSEWHERE", Value: "valid-secret", Pipeline: "release"}, {Name: "OWN", Value: "valid-secret", Pipeline: "p"}, {Name: "SHARED", Value: "valid-secret", Shared: true}} {
 		if err := seedSecret(t, tenant, secret, *now); err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
 	for range 32 {
 		secret := fmt.Sprintf("%s-%x", []string{"s", "\"", "\\", "\n", "é", "😀", ":"}[random.IntN(7)], random.Uint64())
 		if random.IntN(4) == 0 {
-			secret = "x"
+			secret = "xxxx"
 		}
 		tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
 		tenant.s.plans = nil

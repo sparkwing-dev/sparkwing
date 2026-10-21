@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 16 adds generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
+
 - **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
 
 - **auth:** Switching teams preserves each session's original membership fence, so removal and a later rejoin cannot revive an old session's access.
@@ -307,6 +309,8 @@ unlock.
 - **store (Breaking):** Secret calls require an explicit tenant
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
+
+- **masking (Breaking):** The Go host owns masking for both SDKs, including byte streams before line splitting and structured payloads before trusted envelopes are built. Accepted runs seal one registration projection, including normalized list items. Secrets under four characters or containing `***` are refused with guidance to use a plain config variable. SDKs no longer mask standalone execution or send automatic registrations. Explicit `Mask` remains. Failed declaration discovery withholds output. Schema baseline 17 retains private generator registrations for fresh hosts. See [migration](docs/migrations/_unreleased.md#host-provided-masking).
 
 - **controller (Breaking):** Member tokens expire within 90 days and end with their minting session. Administration requires `--allow-team-admin` and expires within 30 days. Personal runners recheck their enrollment authority, and removing then re-adding a member cannot revive old credentials. Shared runners remain team-owned after their registrar leaves. Invitations recheck their inviter at acceptance
 - **credentials (Breaking):** Stored git credentials name a repository, with host-wide access requiring an explicit administrator choice. Actions runners use the workflow token for checkout. Each Actions workflow run attempt exchanges its identity once. Source URLs reject credentials in queries and fragments

@@ -227,7 +227,7 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 			}
 			authorized := capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "forged", RunID: "foreign"}}
 			got, err := server.Exchange(t.Context(), authorized)
-			if err != nil || got.Claim.Unit != kind || got.Claim.RunID != "run" || got.Claim.JobID != target.NodeID || got.Claim.Purpose != principal.Capability.Purpose || got.Claim.Delivery != capability.DeliveryDirect || got.Claim.Capability == "" || got.Claim.Capability == string(claim.Bearer) || got.Claim.LeaseExpiresAt != claim.Award.LeaseExpiresAt || got.Claim.Runner.Name != "launcher" || got.Claim.Runner.Type != "cloud" {
+			if err != nil || got.Claim.Unit != kind || got.Claim.RunID != "run" || got.Claim.JobID != string(target.NodeID) || got.Claim.Purpose != principal.Capability.Purpose || got.Claim.Delivery != capability.DeliveryDirect || got.Claim.Capability == "" || got.Claim.Capability == string(claim.Bearer) || got.Claim.LeaseExpiresAt != claim.Award.LeaseExpiresAt || got.Claim.Runner.Name != "launcher" || got.Claim.Runner.Type != "cloud" {
 				t.Fatalf("exchange identity: unit=%s run=%s job=%s delivery=%s, %v", got.Claim.Unit, got.Claim.RunID, got.Claim.JobID, got.Claim.Delivery, err)
 			}
 			if replay, err := server.Exchange(t.Context(), authorized); err == nil || replay.Claim.Capability != "" {

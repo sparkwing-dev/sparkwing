@@ -51,13 +51,14 @@ func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 }
 
 func TestNodeExecutorReplanUsesRegisteredName(t *testing.T) {
-	input, _, deps, _ := executorFixture(t)
+	input, state, deps, _ := executorFixture(t)
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 		t.Fatal(err)
 	}
 	spec.Request.Request.Pipeline, spec.Resolved.Entrypoint = "deploy-prod", "Deploy"
 	input.Accepted.Spec, _ = json.Marshal(spec)
+	state.accepted = &input.Accepted
 	start := deps.Start
 	planned := false
 	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {

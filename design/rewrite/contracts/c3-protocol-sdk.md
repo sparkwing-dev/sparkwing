@@ -888,7 +888,8 @@ a host decoder. Empty expansion is an explicit jobs array. Evaluation, drift,
 validation and cleanup failures discard the entire proposed body and return one
 masked `ExpansionFailure`. Owner cancellation or lease loss returns an error and
 leaves settlement to live authority. `OwnerHost` submits the body or failure once
-through `AcceptExpansion`. The evaluator writes no topology or lifecycle state.
+through `AcceptExpansion`, including the private registration projection returned
+with a successful body. The evaluator writes no topology or lifecycle state.
 
 `EvaluationDependencies.Start` supplies the environment and delegated route
 binding. `ProtocolSessionConfig.StartEvaluation` provides the native process
@@ -1197,3 +1198,36 @@ Remote machine admission uses the controller-scoped holder codec in C4. It
 creates no local run record and gives the local controller no authority to read
 or cancel a Cloud run. Existing award renewal, masking and source authorization
 remain in force while a claimed job waits for machine admission.
+
+## Host masking ownership (decision 43)
+
+`internal/secrets` owns the only matcher and encoded-spelling derivation. SDKs
+contain no masker and perform no automatic Mask RPCs. Explicit `Mask` remains
+synchronous. Without a host, pipeline execution is unmasked.
+
+The accepted run seals `Resolved.SecretRegistration`, including every discovered
+secret default, list argument kinds, raw/effective values and normalized list
+items. Go argument parsing and projection use `argvalue.List`. TypeScript uses
+the same comma split, Unicode White_Space trim and empty-item omission contract.
+All registrations precede author execution. Lazily issued values are registered
+before release. Refuse fewer than four characters or `***` in a secret, including
+individual list items. Refusals direct authors to a plain config variable.
+
+Stdout/stderr bytes enter the stream masker before line splitting. Decode protocol
+frames before sanitizing payloads and constructing trusted envelopes. Attribute
+JSON is masked as text, then checked for valid syntax, unique keys at every
+nesting level and object shape. Failure replaces the whole attribute payload
+with `{"masked_attrs":"***"}`. Trusted envelope keys never pass through matching.
+
+Describe output remains gated until all declarations are known. Generator eval
+replies carry `arguments` and `declarations_known`. The host gates generator output
+before invoking the callback, registers its declared values on success and only
+then releases output. Failed discovery withholds output and author error details.
+Accepted expansions retain their private registration projection for reconstruction.
+The test host consumes these same host projections and presentation adapters.
+
+SDK command helpers forward each child stdout/stderr stream through `FrameLog`
+`stream`, base64 `stream_data`, and `stream_end` fields. They never split those
+bytes into lines. Base64 preserves incomplete UTF-8 bytes across frames. The host
+decodes each stream, masks it and then emits ordinary `exec_line` records with
+the command's step attribution. Standalone SDK execution remains unmasked.

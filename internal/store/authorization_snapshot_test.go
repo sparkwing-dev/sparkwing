@@ -26,9 +26,12 @@ type authorizationLock struct {
 
 type authorizationConnection struct {
 	driver.Conn
-	options  driver.TxOptions
-	locks    []authorizationLock
-	rowsOpen bool
+	options     driver.TxOptions
+	locks       []authorizationLock
+	rowsOpen    bool
+	beforeLock  func(string)
+	beforeQuery func(string) error
+	beforeExec  func(string)
 }
 
 func (c *authorizationConnection) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
@@ -40,12 +43,20 @@ func (c *authorizationConnection) QueryContext(ctx context.Context, query string
 	if c.rowsOpen {
 		return nil, errors.New("conn busy: query before closing rows")
 	}
+	if c.beforeQuery != nil {
+		if err := c.beforeQuery(query); err != nil {
+			return nil, err
+		}
+	}
 	for _, suffix := range []string{" FOR NO KEY UPDATE", " FOR UPDATE", " FOR SHARE", " FOR KEY SHARE"} {
 		if strings.HasSuffix(query, suffix) {
 			if c.options.ReadOnly {
 				return nil, errors.New("row lock in read-only authorization transaction")
 			}
 			c.locks = append(c.locks, authorizationLock{query: query, args: append([]driver.NamedValue(nil), args...)})
+			if c.beforeLock != nil {
+				c.beforeLock(query)
+			}
 			query = strings.TrimSuffix(query, suffix)
 		}
 	}
@@ -72,6 +83,9 @@ func (r *authorizationRows) Close() error {
 }
 
 func (c *authorizationConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if c.beforeExec != nil {
+		c.beforeExec(query)
+	}
 	if c.options.ReadOnly {
 		return nil, errors.New("write in read-only authorization transaction")
 	}

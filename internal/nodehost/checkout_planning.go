@@ -136,6 +136,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 		return out, err
 	}
 	resolved.Args, resolved.SecretArgs = prepared.Args, prepared.SecretArgs
+	resolved.SecretRegistration = prepared.SecretRegistration
 	resolved.SecretNames = []string{}
 	names := map[string]bool{}
 	for _, declaration := range prepared.Description.Secrets {

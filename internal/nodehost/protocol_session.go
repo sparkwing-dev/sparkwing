@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -30,6 +32,8 @@ import (
 // return when its context ends.
 // Revoke removes route authority before Close joins the process.
 type ProtocolSessionConfig struct {
+	output          *planningLogs
+	Masks           *MaskRegistry
 	Command         []string
 	Directory       string
 	Environment     []string
@@ -59,7 +63,7 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 	}
 	cfg.Debug = debug
 	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, sdkWorkingDirectory(input.Entry), activity
-	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
+	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
 	}
@@ -99,6 +103,7 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 	}
 	cfg.Debug = input.Debug
 	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, sdkWorkingDirectory(input.Entry), log
+	cfg.output = input.output
 	if err := context.Cause(ctx); err != nil {
 		return nil, cfg.failedStartup(err)
 	}
@@ -190,6 +195,10 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	}
 	if cfg.ValidateRequest == nil {
 		cfg.ValidateRequest = nodeproto.Request.Validate
+	}
+	if cfg.output == nil && cfg.Masks != nil && cfg.Log != nil {
+		logs := &planningLogs{known: true, debug: cfg.Debug, masker: cfg.Masks.masker, sink: cfg.Log}
+		cfg.output, cfg.Log = logs, logs.write
 	}
 	var parent, child []*os.File
 	for range 4 {
@@ -479,12 +488,41 @@ func protocolScanner(file *os.File) *bufio.Scanner {
 func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	defer s.streams.Done()
 	defer file.Close()
-	scanner := protocolScanner(file)
-	for scanner.Scan() {
-		s.emitProtocolLog(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: scanner.Text()})
+	buffer := make([]byte, 32<<10)
+	var writer *LineWriter
+	if s.cfg.output == nil {
+		var masker *secrets.Masker
+		if s.cfg.Masks != nil {
+			masker = s.cfg.Masks.masker
+		}
+		writer = &LineWriter{sink: protocolTextSink{s: s}, level: level, stream: masker.Stream()}
 	}
-	if scanner.Err() != nil && !errors.Is(scanner.Err(), os.ErrClosed) {
-		s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK text stream exceeds its read limit or failed"))
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			if s.cfg.output != nil {
+				if writeErr := s.cfg.output.text(s.logCtx, level, string(buffer[:n]), false); writeErr != nil {
+					s.failProtocol(writeErr)
+					return
+				}
+			} else {
+				_, _ = writer.Write(buffer[:n])
+			}
+		}
+		if err != nil {
+			if err != io.EOF && !errors.Is(err, os.ErrClosed) {
+				s.failProtocol(protocolSessionError(apierr.ProtocolError, "read SDK text stream failed"))
+				return
+			}
+			break
+		}
+	}
+	if s.cfg.output != nil {
+		if err := s.cfg.output.text(s.logCtx, level, "", true); err != nil {
+			s.failProtocol(err)
+		}
+	} else {
+		writer.Flush()
 	}
 }
 
@@ -577,6 +615,9 @@ func (s *ProtocolSession) Close() error {
 		if errors.Is(err, errProtocolSessionClosed) {
 			err = nil
 		}
+		if s.cfg.output != nil {
+			err = errors.Join(err, s.cfg.output.finish(s.executionCtx))
+		}
 		s.closeErr = errors.Join(revokeErr, err, s.reapErr)
 	})
 	return s.closeErr
@@ -606,3 +647,9 @@ func protocolSessionError(code apierr.Code, message string) error {
 }
 
 var _ ExecutorProcess = (*ProtocolSession)(nil)
+
+type protocolTextSink struct{ s *ProtocolSession }
+
+func (w protocolTextSink) Text(level, text string) {
+	w.s.emitProtocolLog(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: text})
+}

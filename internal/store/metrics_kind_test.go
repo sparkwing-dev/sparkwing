@@ -22,7 +22,7 @@ func TestMetricKindsRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+	got, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil || len(got) != len(samples) {
 		t.Fatalf("samples = %v, %v", got, err)
 	}
@@ -44,7 +44,7 @@ func TestMetricKindsRejectInvalidCombinations(t *testing.T) {
 			t.Fatalf("accepted %+v", sample)
 		}
 	}
-	got, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+	got, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil || len(got) != 0 {
 		t.Fatalf("invalid samples persisted: %v, %v", got, err)
 	}

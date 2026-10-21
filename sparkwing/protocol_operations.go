@@ -2,10 +2,10 @@ package sparkwing
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"runtime/debug"
 	"slices"
@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type sdkOperations struct{}
@@ -29,6 +28,13 @@ func recoveredError(value any) *apierr.Error {
 		}
 	}
 	return sdkError(apierr.SDKError, fmt.Sprint(value))
+}
+
+func planningFailure(value any) error {
+	if failure, ok := value.(error); ok {
+		return failure
+	}
+	return fmt.Errorf("%v", value)
 }
 
 func sdkVersion() string {
@@ -49,7 +55,6 @@ func (sdkOperations) Document(plan any) nodeproto.PlanDoc { return planDocument(
 
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context {
 	ctx = sdkserve.WithServices(ctx, s)
-	ctx = context.WithValue(ctx, planningMaskServicesKey{}, s)
 	ctx = context.WithValue(ctx, keyLogger, protocolLogger{s: s})
 	ctx = context.WithValue(ctx, runnerCtxKey{}, &RunnerInfo{Name: runner.Name, Type: runner.Type, Labels: append([]string(nil), runner.Labels...)})
 	ctx = context.WithValue(ctx, dryRunKey{}, rc.DryRun)
@@ -83,21 +88,17 @@ func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runne
 }
 
 func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error) {
-	diagnostics := &planningDiagnostics{ctx: ctx, args: maps.Clone(args)}
 	defer func() {
 		if value := recover(); value != nil {
 			built = nil
 			document = nodeproto.PlanDoc{}
 			failure = planningFailure(value)
 		}
-		failure = diagnostics.sanitize(failure, apierr.PlanFailed, "")
 	}()
 	reg, ok := lookup(name)
 	if !ok {
 		return nil, nodeproto.PlanDoc{}, sdkError(apierr.UnknownPipeline, "pipeline is not registered")
 	}
-	diagnostics.collect(reg.Schema)
-	ctx = withPlanningDiagnostics(ctx, diagnostics)
 	rc := RunContext{RunID: run.RunID, Pipeline: run.Pipeline, StartedAt: run.StartedAt, NoMemo: run.NoMemo, DryRun: run.DryRun}
 	if run.Git != nil {
 		g := run.Git
@@ -125,13 +126,12 @@ func (sdkOperations) Plan(ctx context.Context, name string, args map[string]stri
 		return nil, nodeproto.PlanDoc{}, sdkError(code, err.Error())
 	}
 	p.registration = reg
-	p.secretInputs = slices.Clone(diagnostics.values)
 	doc := planDocument(p)
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return nil, doc, sdkError(apierr.PlanFailed, "plan cannot be encoded")
 	}
-	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs)}); err != nil {
+	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: hostSecretMatcher(ctx)}); err != nil {
 		return nil, doc, err
 	}
 	return p, doc, nil
@@ -238,18 +238,6 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	if n == nil || (req.Job != "" && n.id != req.Job && !generatorClosure(n, req.Closure)) {
 		return result, sdkError(apierr.UnknownClosure, "closure is not declared for the bound job")
 	}
-	if generatorClosure(n, req.Closure) {
-		if p.diagnostics == nil {
-			p.diagnostics = &planningDiagnostics{ctx: ctx, args: p.args, values: slices.Clone(p.secretInputs)}
-		}
-		p.diagnostics.ctx = ctx
-		defer func() {
-			err = p.diagnostics.sanitize(err, apierr.SDKError, "")
-			if result.Error != nil {
-				result.Error = p.diagnostics.sanitize(result.Error, apierr.SDKError, "").(*apierr.Error)
-			}
-		}()
-	}
 	if step := closureStep(n, req.Closure); step != nil {
 		if err := n.work.beginStep(req.Attempt, step, req.Settled); err != nil {
 			return result, err
@@ -279,6 +267,10 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 		return result, nil
 	}
 	result.Value, err = json.Marshal(value)
+	if err == nil && generatorClosure(n, req.Closure) {
+		result.DeclarationsKnown = true
+		result.Arguments = slices.Clone(p.generatedArguments[req.Closure])
+	}
 	return result, err
 }
 
@@ -340,7 +332,6 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			return prior, nil
 		}
 		expansion := NewPlan()
-		expansion.diagnostics = p.diagnostics
 		base := jsonResolverFromContext(ctx)
 		ctx = context.WithValue(ctx, keyJSONRefResolver, func(ctx context.Context, j string) ([]byte, error) {
 			if j == n.id && len(input) > 0 {
@@ -371,9 +362,8 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			return nil, err
 		}
 		existing := planDocument(p)
-		p.secretInputs = slices.Clone(p.diagnostics.values)
 		if _, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
-			Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs),
+			Placement: nodeproto.PlacementLocal, Secrets: hostSecretMatcher(ctx),
 			Expansion: true, ExistingJobs: existing.Jobs, ExistingConcurrency: existing.Concurrency, SourceJob: n.id,
 		}); err != nil {
 			return nil, err
@@ -389,7 +379,19 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		if err := resolveAndBindJobArgs(expansion, p.args); err != nil {
 			return nil, sdkError(apierr.InvalidArgs, err.Error())
 		}
+		var arguments []nodeproto.ArgumentDescription
+		for _, field := range expansion.declaredArguments() {
+			arguments = append(arguments, nodeproto.ArgumentDescription{
+				Name: field.Name, Short: field.Short, Type: field.Type, Required: field.Required,
+				Description: field.Desc, Default: declaredDefault(field.Default), Enum: field.Enum,
+				Secret: field.Secret, JobID: field.JobID,
+			})
+		}
 		p.mu.Lock()
+		if p.generatedArguments == nil {
+			p.generatedArguments = map[string][]nodeproto.ArgumentDescription{}
+		}
+		p.generatedArguments[g.id] = arguments
 		for _, child := range expansion.nodes {
 			p.nodes = append(p.nodes, child)
 			p.byID[child.id] = child
@@ -425,7 +427,7 @@ func (l protocolLogger) Emit(r LogRecord) {
 			panic(err)
 		}
 	}
-	l.s.Emit(nodeproto.FrameLog{TS: r.TS.Format(time.RFC3339Nano), Level: r.Level, Step: r.Step, Event: r.Event, Message: r.Msg, Attrs: attrs})
+	l.s.Emit(nodeproto.FrameLog{TS: r.TS.Format(time.RFC3339Nano), Level: r.Level, Step: r.Step, Event: r.Event, Message: r.Msg, Attrs: attrs, Stream: r.streamID, StreamData: base64.StdEncoding.EncodeToString(r.streamData), StreamEnd: r.streamEnd})
 }
 
 func closureJob(p *Plan, id string) *JobNode {
@@ -501,22 +503,15 @@ func generatorClosure(job *JobNode, closure string) bool {
 	return slices.ContainsFunc(job.generators, func(generator *Generator) bool { return generator.id == closure })
 }
 
-type combinedSecrets struct {
-	values *secrets.Masker
-	host   nodeproto.SecretMatcher
-}
+type noHostSecrets struct{}
 
-func (s combinedSecrets) ContainsSecret(id string) bool {
-	return s.values.ContainsSecret(id) || (s.host != nil && s.host.ContainsSecret(id))
-}
+func (noHostSecrets) ContainsSecret(string) bool { return false }
 
-func declarationSecrets(ctx context.Context, values []diagnosticSecret) nodeproto.SecretMatcher {
-	host, _ := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher)
-	masker := secrets.NewMasker()
-	for _, value := range values {
-		value.register(masker)
+func hostSecretMatcher(ctx context.Context) nodeproto.SecretMatcher {
+	if matcher, ok := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher); ok {
+		return matcher
 	}
-	return combinedSecrets{values: masker, host: host}
+	return noHostSecrets{}
 }
 
 func referenceError(err error, latest bool) error {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func zeroEvalFixture(t *testing.T) (*Store, *Tenant, UnitClaim, capability.Issued) {
@@ -57,8 +58,8 @@ func TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog(t *testing.T) {
 	if err := s.AsOperator().CheckBinding(t.Context(), authenticated.Principal, capability.BindReadSet, target); err != nil {
 		t.Fatal(err)
 	}
-	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: claim.Award.Generation, Source: &blob.LogSource{NodeID: "job", Generation: 0}}}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: int64(claim.Award.Generation), Source: &blob.LogSource{NodeID: "job", Generation: 0}}}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	commit := SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Final: true}
 	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
@@ -89,8 +90,8 @@ func FuzzZeroSourceEvalCannotBorrowAnotherFence(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, field uint8, value uint32) {
 		s, tenant, claim, issued := zeroEvalFixture(t)
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-		subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: claim.Award.Generation, Source: &blob.LogSource{NodeID: "job", Generation: 0}}}
+		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+		subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: int64(claim.Award.Generation), Source: &blob.LogSource{NodeID: "job", Generation: 0}}}
 		switch field % 5 {
 		case 0:
 			subject.Unit.Source.Generation = 1 + int64(value)

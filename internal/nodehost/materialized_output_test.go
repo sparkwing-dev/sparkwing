@@ -32,7 +32,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 		t.Run(map[bool]string{false: "recorded", true: "missing"}[missing], func(t *testing.T) {
 			input, state, deps, process := evaluationFixture(t)
 			input.Generation, state.row.Generation, state.row.Attempt, state.row.Outcome = 0, 0, 0, store.NodeMemoized
-			key := blob.MaterializedRecordKey("a", state.row.Ref.RunID, state.row.Ref.NodeID, 4, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
+			key := blob.MaterializedRecordKey("a", string(state.row.Ref.RunID), string(state.row.Ref.NodeID), 4, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
 			state.row.OutputRecord = &key
 			if missing {
 				state.row.OutputRecord = nil
@@ -64,7 +64,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			body, failure, err := host.Expand(t.Context(), input)
+			body, _, failure, err := host.Expand(t.Context(), input)
 			if err != nil || (failure != nil) != missing || !missing && (records.reads != 1 || string(body) != `{"jobs":[]}`) || missing && records.reads != 0 {
 				t.Fatalf("body=%s failure=%+v reads=%d: %v", body, failure, records.reads, err)
 			}
@@ -90,7 +90,7 @@ func TestOwnerEvaluationGivesAnUntypedSourceANullResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body, failure, err := host.Expand(t.Context(), input); err != nil || failure != nil || string(body) != `{"jobs":[]}` {
+	if body, _, failure, err := host.Expand(t.Context(), input); err != nil || failure != nil || string(body) != `{"jobs":[]}` {
 		t.Fatalf("untyped source expansion: %s %+v %v", body, failure, err)
 	}
 }

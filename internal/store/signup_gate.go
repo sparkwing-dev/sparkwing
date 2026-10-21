@@ -202,34 +202,31 @@ func writeSignUpGateTx(ctx context.Context, tx *storeTx, g SignUpGate) error {
 	return err
 }
 
-func (s *Store) updateSignUpGate(ctx context.Context, change func(*SignUpGate) error) (SignUpGate, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return SignUpGate{}, err
-	}
-	defer rollbackOrLog(tx)
-	g, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect+tx.forUpdate()))
-	if err != nil {
-		return SignUpGate{}, err
-	}
-	if err := change(&g); err != nil {
-		return SignUpGate{}, err
-	}
-	if err := writeSignUpGateTx(ctx, tx, g); err != nil {
-		return SignUpGate{}, err
-	}
-	return g, tx.Commit()
+func (s *Store) updateSignUpGate(ctx context.Context, change func(*storeTx, *SignUpGate) error) (SignUpGate, error) {
+	return inTxResult(ctx, s, func(tx *storeTx) (SignUpGate, error) {
+		g, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect+tx.forUpdate()))
+		if err != nil {
+			return SignUpGate{}, err
+		}
+		if err := change(tx, &g); err != nil {
+			return SignUpGate{}, err
+		}
+		if err := writeSignUpGateTx(ctx, tx, g); err != nil {
+			return SignUpGate{}, err
+		}
+		return g, nil
+	})
 }
 
 // SetSignUpMode records the operator's mode. Opening the gate also restarts
 // the velocity windows, so the burst that closed it does not close it again
 // on the next sign-up.
-func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string, now time.Time) (SignUpGate, error) {
+func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string) (SignUpGate, error) {
 	if _, err := ParseSignUpMode(string(mode)); err != nil {
 		return SignUpGate{}, err
 	}
-	return s.updateSignUpGate(ctx, func(g *SignUpGate) error {
-		g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(reason), setBy, now
+	return s.updateSignUpGate(ctx, func(tx *storeTx, g *SignUpGate) error {
+		g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(reason), setBy, tx.now(ctx)
 		return nil
 	})
 }
@@ -241,7 +238,7 @@ func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignU
 		limits.FreeTeamMembers < 0 {
 		return SignUpGate{}, fmt.Errorf("%w: sign-up limits are zero or more", ErrInvalidInput)
 	}
-	return s.updateSignUpGate(ctx, func(g *SignUpGate) error {
+	return s.updateSignUpGate(ctx, func(tx *storeTx, g *SignUpGate) error {
 		g.Limits = limits
 		return nil
 	})
@@ -249,10 +246,16 @@ func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignU
 
 // SignUpCounts reads the accounts created in the last hour and the last day,
 // and how many wait on the list.
-func (o *Operator) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error) {
+func (o *Operator) SignUpCounts(ctx context.Context) (out SignUpCounts, err error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackOrLog(tx)
+
 	var c SignUpCounts
-	at := now.UTC().UnixNano()
-	err := o.s.queryRow(ctx, `
+	at := tx.now(ctx).UTC().UnixNano()
+	err = tx.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
@@ -435,10 +438,10 @@ func (s *Store) waitlisted(ctx context.Context, order string, limit, offset int)
 // waitlist is skipped, so approving twice admits once. Each admission records
 // an account.admitted business event naming actor. It returns the accounts it
 // admitted.
-func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error) {
+func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string) ([]Account, error) {
 	out := []Account{}
 	for _, id := range ids {
-		acct, ok, err := s.approveOne(ctx, id, actor, now)
+		acct, ok, err := s.approveOne(ctx, id, actor)
 		if err != nil {
 			return out, err
 		}
@@ -450,7 +453,7 @@ func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor strin
 }
 
 // ApproveOldestWaitlisted admits the n accounts that have waited longest.
-func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error) {
+func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string) ([]Account, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("%w: approve at least one account", ErrInvalidInput)
 	}
@@ -462,15 +465,15 @@ func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string
 	for _, w := range waiting {
 		ids = append(ids, w.ID)
 	}
-	return s.ApproveWaitlisted(ctx, ids, actor, now)
+	return s.ApproveWaitlisted(ctx, ids, actor)
 }
 
 // safety: a personal slug can lose a race to a concurrent sign-in, and the
 // retry re-reads what the winner took, as a first sign-in does.
-func (s *Store) approveOne(ctx context.Context, id, actor string, now time.Time) (Account, bool, error) {
+func (s *Store) approveOne(ctx context.Context, id, actor string) (Account, bool, error) {
 	var last error
 	for range 5 {
-		acct, ok, err := s.approveOneOnce(ctx, id, actor, now)
+		acct, ok, err := s.approveOneOnce(ctx, id, actor)
 		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken)) {
 			return acct, ok, err
 		}
@@ -479,13 +482,13 @@ func (s *Store) approveOne(ctx context.Context, id, actor string, now time.Time)
 	return Account{}, false, last
 }
 
-func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.Time) (Account, bool, error) {
+func (s *Store) approveOneOnce(ctx context.Context, id, actor string) (Account, bool, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
-	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, now)
+	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, tx.now(ctx))
 	if err != nil {
 		return Account{}, false, err
 	}

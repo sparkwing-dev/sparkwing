@@ -79,6 +79,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					spec.Request.Request.SecretArgs = runspec.Optional[[]string]{}
 					spec.Resolved.Args = map[string]string{"default_token": value}
 					spec.Resolved.SecretArgs = []string{"default_token"}
+					spec.Resolved.SecretRegistration, _ = runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 					input.Accepted.Spec, _ = json.Marshal(spec)
 					persistNativeAcceptance(t, state, input.Accepted)
 					authorities, parent, lookup, delegation, services := processAuthorityFixture(t)
@@ -87,7 +88,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					config.Processes.Log = func(ctx context.Context, _, _ string, frame nodeproto.FrameLog) error { return sink(ctx, frame) }
 					config.Processes.Session = ProtocolSessionConfig{Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec}
 					config.Executor.Bind = func(ctx context.Context, in NodeInput) (ProcessGrant, error) {
-						delegation.Binding = capability.Binding{Kind: capability.BindingNode, RunID: in.Accepted.RunID, NodeID: in.NodeID, Holder: in.Authority.Holder, Generation: in.Generation, Attempt: in.Attempt}
+						delegation.Binding = capability.Binding{Kind: capability.BindingNode, RunID: in.Accepted.RunID, NodeID: in.NodeID, Holder: in.Authority.Holder, Generation: int64(in.Generation), Attempt: int64(in.Attempt)}
 						parent.snapshot.Authorities[0].Principal.Capability.Binding = delegation.Binding
 						parent.snapshot.Binding.Current = delegation.Binding
 						services.RunID, services.Job = in.Accepted.RunID, in.Accepted.Plan.Jobs[0]

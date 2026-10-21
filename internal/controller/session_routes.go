@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -100,7 +99,7 @@ func (s *Server) validateSessionFlow(session *store.Session) error {
 	if session == nil || session.AccountID == "" {
 		return sessionUnavailable()
 	}
-	if s.sessionExpired(session.CreatedAt, time.Now().UTC()) {
+	if s.sessionExpired(session.CreatedAt, session.Now) {
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: errSessionLifetimeExceeded.Error()}
 	}
 	return nil

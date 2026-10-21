@@ -144,7 +144,6 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 			return nil, fmt.Errorf("sparkwing: factory for pipeline %q returned nil", name)
 		}
 		plan := NewPlan()
-		plan.diagnostics, _ = ctx.Value(planningDiagnosticsKey{}).(*planningDiagnostics)
 		plan.setInputs(in)
 		if err := p.Plan(sdkserve.DeclarationContext(ctx), plan, in, rc); err != nil {
 			return nil, err

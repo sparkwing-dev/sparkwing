@@ -188,18 +188,21 @@ type JobTransitionRequest struct {
 }
 
 type Applied struct {
-	Replayed        bool  `json:"replayed"`
-	CancelRequested bool  `json:"cancel_requested"`
-	StateSeq        int64 `json:"state_seq"`
-	Generation      int64 `json:"generation"`
-	Attempt         int64 `json:"attempt"`
+	Outcome         string `json:"outcome,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	Replayed        bool   `json:"replayed"`
+	CancelRequested bool   `json:"cancel_requested"`
+	StateSeq        int64  `json:"state_seq"`
+	Generation      int64  `json:"generation"`
+	Attempt         int64  `json:"attempt"`
 }
 
 // ExpansionSubmission carries one expansion body or failure under its source generation.
 type ExpansionSubmission struct {
-	SourceGeneration int64           `json:"source_generation"`
-	Body             json.RawMessage `json:"body,omitempty"`
-	Failure          *apierr.Error   `json:"failure,omitempty"`
+	SourceGeneration int64                      `json:"source_generation"`
+	Body             json.RawMessage            `json:"body,omitempty"`
+	Registration     runspec.SecretRegistration `json:"registration,omitempty"`
+	Failure          *apierr.Error              `json:"failure,omitempty"`
 }
 
 type ExpandedJob struct {
@@ -266,16 +269,16 @@ type ExecutionJob struct {
 
 // AcceptedExpansion retains exact accepted declarations for reconstruction, including empty groups.
 type AcceptedExpansion struct {
-	SourceJob        string          `json:"source_job"`
-	SourceGeneration int64           `json:"source_generation"`
-	Body             json.RawMessage `json:"body"`
-	BodyHash         string          `json:"body_hash"`
+	SourceJob        string                     `json:"source_job"`
+	SourceGeneration int64                      `json:"source_generation"`
+	Body             json.RawMessage            `json:"body"`
+	BodyHash         string                     `json:"body_hash"`
+	Registration     runspec.SecretRegistration `json:"registration,omitempty"`
 }
 
 type FinishRequest struct {
-	Outcome string        `json:"outcome"`
-	Reason  string        `json:"reason,omitempty"`
-	Error   *apierr.Error `json:"error,omitempty"`
+	Reason string        `json:"reason,omitempty"`
+	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 type CancelRequest struct {

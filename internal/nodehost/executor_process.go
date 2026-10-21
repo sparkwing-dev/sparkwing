@@ -110,7 +110,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			err = errors.New("recovery execution requires the persisted source failure")
 			return h.failure(err), err
 		}
-		source := controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: job.OnFailureOf}
+		source := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(job.OnFailureOf)}
 		row, readErr := h.deps.Store.ReadNode(ctx, source)
 		if readErr != nil {
 			return h.failure(readErr), readErr
@@ -119,7 +119,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			err = executorError(apierr.SpecDrift, "recovery source is not a failed job")
 			return h.failure(err), err
 		}
-		failure, readErr := h.deps.ReadFailure(ctx, source, row.Generation)
+		failure, readErr := h.deps.ReadFailure(ctx, source, int64(row.Generation))
 		if readErr != nil {
 			return h.failure(readErr), readErr
 		}

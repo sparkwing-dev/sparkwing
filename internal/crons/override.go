@@ -72,10 +72,10 @@ func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (
 	if perr != nil {
 		return Row{}, fmt.Errorf("%s: this override does not evaluate: %w", DisplayName(sched), perr)
 	}
-	if err := s.Schedules.SetCronOverride(ctx, sched.ID, override, now); err != nil {
+	if err := s.Schedules.SetCronOverride(ctx, sched.ID, override); err != nil {
 		return Row{}, err
 	}
-	if err := s.Schedules.SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now), now); err != nil {
+	if err := s.Schedules.SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now)); err != nil {
 		return Row{}, err
 	}
 	return s.reload(ctx, sched.ID)
@@ -89,12 +89,12 @@ func (s *Service) ClearOverride(ctx context.Context, id string) (Row, error) {
 		return Row{}, err
 	}
 	now := s.now()
-	if err := s.Schedules.ClearCronOverride(ctx, id, now); err != nil {
+	if err := s.Schedules.ClearCronOverride(ctx, id); err != nil {
 		return Row{}, err
 	}
 	sched.Override = nil
 	if eval, perr := prepare(sched); perr == nil {
-		if err := s.Schedules.SetCronScheduleNextDue(ctx, id, eval.nextAfter(now), now); err != nil {
+		if err := s.Schedules.SetCronScheduleNextDue(ctx, id, eval.nextAfter(now)); err != nil {
 			return Row{}, err
 		}
 	}

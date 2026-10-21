@@ -71,7 +71,7 @@ func TestOwnerExpansion(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Name: "trigger", Holder: "owner", Generation: 9}
+			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
 			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}}
 			if mode == "cycle" {
@@ -111,11 +111,11 @@ func TestOwnerExpansion(t *testing.T) {
 			}
 			entry := &source.Entry{Engine: resolved}
 			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}
-				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || input.NodeID != row.Ref.NodeID || input.Generation != row.Generation || input.SpecHash != row.SpecHash || input.RouteBinding.RunID != row.Ref.RunID || input.RouteBinding.JobID != row.Ref.NodeID {
+				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || runspec.NodeID(input.NodeID) != row.Ref.NodeID || runspec.ClaimGeneration(input.Generation) != row.Generation || input.SpecHash != row.SpecHash || runspec.RunID(input.RouteBinding.RunID) != row.Ref.RunID || runspec.NodeID(input.RouteBinding.JobID) != row.Ref.NodeID {
 					t.Fatal("expansion lost acquired code or persisted evaluation identity")
 				}
 				return evaluator.Expand(ctx, input)

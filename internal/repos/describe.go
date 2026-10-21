@@ -3,7 +3,6 @@ package repos
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -163,14 +162,7 @@ func (e maskedSessionError) As(target any) bool {
 	if !errors.As(e.error, &original) {
 		return false
 	}
-	body, err := json.Marshal(original)
-	if err == nil {
-		if masked, err := apierr.DecodeInner(e.masker.MaskJSON(body)); err == nil {
-			*result = masked
-			return true
-		}
-	}
-	*result = &apierr.Error{Code: apierr.Internal, Message: "pipeline process failed"}
+	*result = e.masker.Error(original)
 	return true
 }
 

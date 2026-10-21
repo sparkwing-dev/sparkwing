@@ -72,7 +72,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 			return response.RunID, err
 		}
 	}
-	_, err = controller.Finish(ctx, response.RunID, controllerwire.FinishRequest{Outcome: string(local.State)})
+	_, err = controller.Finish(ctx, response.RunID, controllerwire.FinishRequest{})
 	return response.RunID, err
 }
 
@@ -89,7 +89,7 @@ func publicationPlan(state store.LocalPublication) (nodeproto.PlanDoc, error) {
 			return plan, err
 		}
 		for _, job := range body.Jobs {
-			generated[expansion.Source.NodeID] = append(generated[expansion.Source.NodeID], job.ID)
+			generated[string(expansion.Source.NodeID)] = append(generated[string(expansion.Source.NodeID)], job.ID)
 		}
 	}
 	for _, node := range state.Nodes {
@@ -111,7 +111,7 @@ func publicationPlan(state store.LocalPublication) (nodeproto.PlanDoc, error) {
 func publishLocalJob(ctx context.Context, controller controllerwire.Controller, publisher ProfileData, input PublicationInput, node store.NodeRow) error {
 	id := node.Ref.NodeID
 	result := controllerwire.JobResult{Outcome: string(node.Outcome), Reason: node.StatusDetail}
-	if stored, ok := input.State.Results[id]; ok {
+	if stored, ok := input.State.Results[string(id)]; ok {
 		result.Reason, result.MaskedError, result.Failure, result.ExitCode = stored.Reason, stored.MaskedError, stored.Failure, stored.ExitCode
 	}
 	if node.Attempt > 0 || node.OutputRecord != nil || node.ManifestRecord != nil {
@@ -122,9 +122,9 @@ func publishLocalJob(ctx context.Context, controller controllerwire.Controller, 
 		if node.StartedAt != nil {
 			started = *node.StartedAt
 		}
-		attempt := runspec.AttemptIdentity{Team: publisher.Team, RunID: publisher.Authority.Upload.Value.RunID, NodeID: id, Attempt: max(1, node.Attempt), Generation: max(1, node.Generation)}
+		attempt := runspec.AttemptIdentity{Team: publisher.Team, RunID: publisher.Authority.Upload.Value.RunID, NodeID: string(id), Attempt: int64(max(1, node.Attempt)), Generation: int64(max(1, node.Generation))}
 		imported := runspec.PublishedAttempt{Attempt: attempt.Attempt, Generation: attempt.Generation, StartedAt: started, FinishedAt: *node.FinishedAt, Outcome: result.Outcome, Executor: "local"}
-		if _, err := controller.TransitionJob(ctx, attempt.RunID, id, controllerwire.JobTransitionRequest{To: "pending", Cause: "publish_attempt", Publication: &imported}); err != nil {
+		if _, err := controller.TransitionJob(ctx, attempt.RunID, string(id), controllerwire.JobTransitionRequest{To: "pending", Cause: "publish_attempt", Publication: &imported}); err != nil {
 			return err
 		}
 		bytes, records, authority, err := publisher.PublicationStorage(attempt)
@@ -132,7 +132,7 @@ func publishLocalJob(ctx context.Context, controller controllerwire.Controller, 
 			return err
 		}
 		for _, selected := range input.State.Records {
-			if selected.Record.Key.Scope.Job != id {
+			if runspec.NodeID(selected.Record.Key.Scope.Job) != id {
 				continue
 			}
 			key, err := publishLocalRecord(ctx, bytes, records, authority, attempt, input.OpenBlob, selected)
@@ -151,7 +151,7 @@ func publishLocalJob(ctx context.Context, controller controllerwire.Controller, 
 			}
 		}
 	}
-	_, err := controller.TransitionJob(ctx, publisher.Authority.Upload.Value.RunID, id, controllerwire.JobTransitionRequest{To: result.Outcome, Cause: "publish", Result: &result})
+	_, err := controller.TransitionJob(ctx, publisher.Authority.Upload.Value.RunID, string(id), controllerwire.JobTransitionRequest{To: result.Outcome, Cause: "publish", Result: &result})
 	return err
 }
 
@@ -201,7 +201,7 @@ func publishLocalLogs(ctx context.Context, publisher ProfileData, reader control
 	}()
 	cursor := ""
 	for {
-		page, err := reader.ReadLogs(ctx, ref.RunID, controllerwire.LogQuery{Job: ref.NodeID, Cursor: cursor, NoEvents: true})
+		page, err := reader.ReadLogs(ctx, string(ref.RunID), controllerwire.LogQuery{Job: string(ref.NodeID), Cursor: cursor, NoEvents: true})
 		if err != nil {
 			return err
 		}

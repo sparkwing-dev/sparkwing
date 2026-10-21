@@ -153,7 +153,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	}
 	var first controllerwire.Applied
 	for i := range 2 {
-		w = engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{"outcome":"success"}`, http.StatusOK)
+		w = engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{}`, http.StatusOK)
 		var result controllerwire.Applied
 		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Replayed != (i == 1) || i == 1 && result.StateSeq != first.StateSeq {
 			t.Fatalf("finish %d: %s %v", i, w.Body, err)
@@ -165,7 +165,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bodyDigest := sha256.Sum256([]byte(`{"outcome":"success"}`))
+			bodyDigest := sha256.Sum256([]byte(`{}`))
 			snapshot.Binding.Result = &capability.RecordedResult{
 				Actor:  snapshot.Authorities[0].Principal.Authority,
 				Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: "run", Generation: claimed.Claim.Binding.Generation, Digest: hex.EncodeToString(bodyDigest[:]),
@@ -176,10 +176,10 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 			h = server.WithAuthorization(authorization).Handler()
 		}
 	}
-	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{"outcome":"failed"}`, http.StatusUnauthorized)
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{"reason":"different"}`, http.StatusUnauthorized)
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/heartbeat", `{}`, http.StatusUnauthorized)
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || string(run.State) != "success" || run.FinishedAt == nil {
+	if err != nil || string(run.State) != "failed" || run.FinishedAt == nil {
 		t.Fatalf("finished run: %+v %v", run, err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
@@ -188,7 +188,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	}
 	var finished int
 	for _, event := range events {
-		if event.Kind == "run_success" {
+		if event.Kind == "run_failed" {
 			finished++
 		}
 	}

@@ -45,7 +45,7 @@ func TestHostCanonicalErrorMasksNumericDetails(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Forbidden, Details: map[string]any{"count": json.Number("123456789"), "flag": true}}
 	var rendered *apierr.Error
 	err := maskHostError(failure, testMasker("123456789", "true"))
-	if !errors.As(err, &rendered) || rendered.Details["count"] != "***" || rendered.Details["flag"] != "***" {
+	if !errors.As(err, &rendered) || rendered.Details["masked_attrs"] != "***" || len(rendered.Details) != 1 {
 		t.Fatal("scalar details bypassed masking")
 	}
 }

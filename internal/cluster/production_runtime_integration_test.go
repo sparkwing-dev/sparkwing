@@ -224,7 +224,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: binding.Holder, Generation: binding.Generation}}}
+			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}}
 			if unit.Accepted != nil {
 				snapshot.Run.Spec, snapshot.Run.Plan = &unit.Accepted.Spec, unit.Accepted.Plan
 				snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
@@ -243,7 +243,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Status: store.StatusPending, Generation: unit.Binding.Generation, ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Status: store.StatusPending, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
 	if unit.Unit == capability.UnitEval {
 		row.Status, row.Outcome, row.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
 		row.ClaimedBy, row.CapabilityPrefix = "", ""
@@ -259,7 +259,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 			unit.CloudResources = &match.Resources{Cores: 1, MemoryBytes: 1 << 30}
 			expires := time.Now().Add(time.Hour)
 			unit.ParentCapabilityExpiry = &expires
-			binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation, ParentCapabilityExpiry: expires}
+			binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ParentCapabilityExpiry: expires}
 			if kind == capability.UnitPlan {
 				unit.Purpose, unit.JobID, unit.Binding.Kind, unit.Binding.NodeID = capability.PurposePlan, "", capability.BindingRun, ""
 				unit.Accepted, unit.Engine = nil, nil
@@ -268,7 +268,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 				unit.Purpose, unit.SourceGeneration = capability.PurposeEval, unit.Binding.Generation
 				unit.Binding.Expansion = &capability.LeaseRef{Kind: kind, ID: unit.UnitID, Holder: "eval-holder", Generation: 2}
 				binding.Kind, binding.Holder, binding.Generation = launcher.CloudEval, "eval-holder", 2
-				binding.SourceNodeID, binding.SourceGeneration = unit.JobID, unit.SourceGeneration
+				binding.SourceNodeID, binding.SourceGeneration = runspec.NodeID(unit.JobID), runspec.ClaimGeneration(unit.SourceGeneration)
 			}
 			var spec source.Spec
 			var err error

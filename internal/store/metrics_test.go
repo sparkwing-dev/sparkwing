@@ -26,7 +26,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 		}
 	}
 
-	samples, err := f.tenant.ListNodeMetrics(ctx, f.ref.RunID, f.ref.NodeID)
+	samples, err := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 	if err := f.tenant.WriteMetric(ctx, a, dup); err != nil {
 		t.Fatalf("duplicate insert returned error: %v", err)
 	}
-	after, _ := f.tenant.ListNodeMetrics(ctx, f.ref.RunID, f.ref.NodeID)
+	after, _ := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
 	if len(after) != 3 {
 		t.Errorf("duplicate insert changed count: %d", len(after))
 	}
@@ -90,15 +90,15 @@ SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
 		t.Fatalf("a marker past the marker headroom = %v, want ErrNodeMetricLimit", err)
 	}
 
-	first, err := f.tenant.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, time.Time{}, 3)
+	first, err := f.tenant.ListNodeMetricsPage(ctx, string(f.ref.RunID), string(f.ref.NodeID), time.Time{}, 3)
 	if err != nil || len(first) != 3 || first[0].CPUMillicores != 0 || first[2].CPUMillicores != 2 {
 		t.Fatalf("first page = %+v, %v", first, err)
 	}
-	second, err := f.tenant.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, first[2].TS, 3)
+	second, err := f.tenant.ListNodeMetricsPage(ctx, string(f.ref.RunID), string(f.ref.NodeID), first[2].TS, 3)
 	if err != nil || len(second) != 3 || second[0].CPUMillicores != 3 {
 		t.Fatalf("second page = %+v, %v", second, err)
 	}
-	all, err := f.tenant.ListNodeMetrics(ctx, f.ref.RunID, f.ref.NodeID)
+	all, err := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil || len(all) != store.MaxNodeMetricSamples+store.MaxNodeMetricMarkers {
 		t.Fatalf("every sample = %d, %v", len(all), err)
 	}

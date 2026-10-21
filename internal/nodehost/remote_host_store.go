@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -15,7 +16,7 @@ type PrivateHostState interface {
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
-	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 }
 
 // RemoteHostStore joins authenticated execution state with shared controller operations.
@@ -80,7 +81,7 @@ func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepRepor
 		NodeController(context.Context, controllerwire.NodeRef) (controllerwire.Controller, error)
 	}); ok {
 		var err error
-		controller, err = nodes.NodeController(ctx, controllerwire.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID})
+		controller, err = nodes.NodeController(ctx, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -93,9 +94,8 @@ func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepRepor
 
 func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
 	change := request.Transition
-	if request.Unit != change.Actor.Owner ||
-		(change.To != store.RunSuccess && change.To != store.RunFailed && change.To != store.RunCancelled) {
-		return store.Applied{}, errors.New("host finish requires its owner and terminal verdict")
+	if request.Unit != change.Actor.Owner {
+		return store.Applied{}, errors.New("host finish requires its owner")
 	}
 	if s.Finish != nil {
 		return s.Finish(ctx, request)
@@ -103,17 +103,18 @@ func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request store.Fi
 	if change.Cause != store.RunFinish {
 		return store.Applied{}, errors.New("host finish requires a supported terminal cause")
 	}
-	body := controllerwire.FinishRequest{Outcome: string(change.To), Reason: change.Reason}
+	body := controllerwire.FinishRequest{Reason: change.Reason}
 	if change.MaskedError != "" {
 		body.Error = &apierr.Error{Code: apierr.Internal, Message: change.MaskedError}
 	}
-	response, err := s.controller.Finish(ctx, change.RunID, body)
+	response, err := s.controller.Finish(ctx, string(change.RunID), body)
 	if err != nil {
 		return store.Applied{}, err
 	}
 	return store.Applied{
+		Outcome: store.RunState(response.Outcome), Reason: response.Reason,
 		Replayed: response.Replayed, CancelRequested: response.CancelRequested, StateSeq: response.StateSeq,
-		Generation: response.Generation, Attempt: response.Attempt,
+		Generation: runspec.ClaimGeneration(response.Generation), Attempt: runspec.AttemptOrdinal(response.Attempt),
 	}, nil
 }
 

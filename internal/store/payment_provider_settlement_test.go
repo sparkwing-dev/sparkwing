@@ -67,7 +67,8 @@ func TestLostDisputeBeforeDelayedPaymentReversesGrant(t *testing.T) {
 			if err != nil || len(freeze.Disputes) != 1 {
 				t.Fatalf("dispute hold=%+v: %v", freeze, err)
 			}
-			if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed", now); err != nil {
+			tenant.s.SetTestClock(t, func() time.Time { return now })
+			if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed"); err != nil {
 				t.Fatal(err)
 			}
 			for _, event := range events {
@@ -314,7 +315,8 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 	if got, err := s.settlePaymentFacts(t.Context(), old); err != nil || !got.Replayed {
 		t.Fatalf("old object replay: %+v: %v", got, err)
 	}
-	standing, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	standing, err := tenant.SpendStanding(t.Context())
 	if err != nil || standing.Card.PaymentMethod != "new-method" {
 		t.Fatalf("replay replaced current card: %+v: %v", standing.Card, err)
 	}
@@ -322,7 +324,8 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), stale); err != nil {
 		t.Fatalf("stale setup: %v", err)
 	}
-	standing, err = tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	standing, err = tenant.SpendStanding(t.Context())
 	if err != nil || standing.Card.PaymentMethod != "new-method" {
 		t.Fatalf("stale setup replaced current card: %+v: %v", standing.Card, err)
 	}
@@ -446,7 +449,8 @@ func TestProviderRefillSuccessAfterFailureGrantsOnce(t *testing.T) {
 	if err != nil || got.RefillFailed != "card_declined" {
 		t.Fatalf("failed refill = %+v, %v", got, err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Failure != "card_declined" || st.Billing.Tier == "Held" {
 		t.Fatalf("after a failed refill: %+v, %v; want the failure recorded and no hold", st.Refill, err)
 	}
@@ -462,7 +466,8 @@ func TestProviderRefillSuccessAfterFailureGrantsOnce(t *testing.T) {
 		}
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 1)
-	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "" || st.BalanceMicro != e.AmountMinor*MicroCreditsPerCent {
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.Failure != "" || st.BalanceMicro != e.AmountMinor*MicroCreditsPerCent {
 		t.Fatalf("after the retried success: %+v, %v", st, err)
 	}
 }

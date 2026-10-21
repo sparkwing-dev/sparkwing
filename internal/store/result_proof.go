@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -14,7 +16,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 	if proof == nil {
 		return nil
 	}
-	if proof.Actor != actor.Authority || proof.Method != "POST" || proof.RunID != ref.RunID || proof.NodeID != ref.NodeID || proof.ClaimID != "" || proof.Generation != actor.Generation || len(proof.Digest) != 64 {
+	if proof.Actor != actor.Authority || proof.Method != "POST" || runspec.RunID(proof.RunID) != ref.RunID || runspec.NodeID(proof.NodeID) != ref.NodeID || proof.ClaimID != "" || runspec.ClaimGeneration(proof.Generation) != actor.Generation || len(proof.Digest) != 64 {
 		return holderRefusal()
 	}
 	if _, err := hex.DecodeString(proof.Digest); err != nil {
@@ -39,7 +41,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 	if c.Unit != capability.UnitNode {
 		attempt = c.Binding.Attempt
 	}
-	if c.Team != string(team) || c.Binding.RunID != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix || proof.Attempt != attempt {
+	if c.Team != string(team) || runspec.RunID(c.Binding.RunID) != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix || proof.Attempt != attempt {
 		return holderRefusal()
 	}
 	return nil
@@ -49,7 +51,7 @@ func persistPlanResultProofTx(ctx context.Context, tx *storeTx, team Team, reque
 	if request.Actor.Result == nil {
 		return nil
 	}
-	if err := validateResultProofTx(ctx, tx, team, request.Actor, controllerwire.NodeRef{RunID: request.RunID}, 0); err != nil {
+	if err := validateResultProofTx(ctx, tx, team, request.Actor, controllerwire.NodeRef{RunID: runspec.RunID(request.RunID)}, 0); err != nil {
 		return err
 	}
 	if request.Actor.Result.Pattern != "/api/v1/runs/{run}/plan" {

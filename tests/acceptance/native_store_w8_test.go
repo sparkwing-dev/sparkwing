@@ -191,7 +191,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 						<-ctx.Done()
 						return nil, context.Cause(ctx)
 					}
-					if direct && !reflect.DeepEqual(input.GrantedRunner, expected) || input.GrantedRunner.Name != "runner" || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != binding.Principal.Capability.Binding.Generation {
+					if direct && !reflect.DeepEqual(input.GrantedRunner, expected) || input.GrantedRunner.Name != "runner" || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != runspec.ClaimGeneration(binding.Principal.Capability.Binding.Generation) {
 						t.Error("native owner received a changed runner or fence")
 					}
 					if _, err := binding.Tenant.ReadSnapshot(ctx, input.RunID); err != nil {
@@ -321,7 +321,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if mode == "remote_cancel" {
-		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != unit.Binding.Generation || run.State == store.RunSuccess || run.State == store.RunFailed || run.State == store.RunCancelled || !bound || !acquired || !closed {
+		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || run.State == store.RunSuccess || run.State == store.RunFailed || run.State == store.RunCancelled || !bound || !acquired || !closed {
 			t.Fatalf("cancelled acquisition finished or abandoned its claim: state=%s error=%v host error=%v", run.State, err, executionErr)
 		}
 		return

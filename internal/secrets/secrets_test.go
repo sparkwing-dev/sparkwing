@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestContainsSecretChecksIdentifiersEvenWhenMaskingWouldNotChangeThem(t *tes
 	}
 	m.Register("***")
 	m.Register("private/value")
-	for _, identifier := range []string{"***", "job-private/value", "job-private%2Fvalue"} {
+	for _, identifier := range []string{"job-private/value", "job-private%2Fvalue"} {
 		if !m.ContainsSecret(identifier) {
 			t.Fatalf("registered secret was accepted in %q", identifier)
 		}
@@ -185,33 +186,17 @@ func TestNewCipherWithPrevious_RejectsAShortPreviousKey(t *testing.T) {
 	}
 }
 
-func TestMaskerMultilineComponentsKeepLiteralMatchingPolicy(t *testing.T) {
+func TestMaskerRejectsUnsafeValues(t *testing.T) {
 	m := NewMasker()
-	value := "xy\n \r\nlonger-private-xy\n"
-	m.Register(value)
-	before := m.Values()
-	m.Register(value)
-	if !slices.Equal(before, m.Values()) || slices.Contains(before, "xy") || !slices.Contains(before, "longer-private-xy") || slices.Contains(before, " ") {
-		t.Fatalf("registration not deduplicated: %q", m.Values())
+	for _, value := range []string{"", "abc", "ééé", "long***secret"} {
+		if err := m.Register(value); err == nil || !strings.Contains(err.Error(), "plain config variable") {
+			t.Fatalf("Register(%q) = %v", value, err)
+		}
 	}
-	if !slices.Contains(before, value) {
-		t.Fatal("whole value not retained")
+	if len(m.Values()) != 0 {
+		t.Fatalf("refused values registered: %q", m.Values())
 	}
-	if got := m.Mask("longer-private-xy xy ordinary"); got != "*** xy ordinary" {
-		t.Fatalf("longest/literal matching=%q", got)
-	}
-	if got := m.Mask("ordinary xy text"); got != "ordinary xy text" {
-		t.Fatalf("short component rule=%q", got)
-	}
-	if got := m.Mask(" \r"); got != " \r" {
-		t.Fatal("blank component became a mask pattern")
-	}
-	spaces := NewMasker()
-	spaces.Register(" left-private \r\nright-private\r\n")
-	if spaces.Mask("left-private") != "left-private" || spaces.Mask(" left-private ") != "***" || spaces.Mask("right-private") != "***" {
-		t.Fatal("line whitespace was changed beyond CRLF normalization")
-	}
-	if m.Mask("longer-private-") != "longer-private-" {
-		t.Fatal("partial-prefix matching was introduced")
+	if err := m.Register("éééé"); err != nil {
+		t.Fatal(err)
 	}
 }

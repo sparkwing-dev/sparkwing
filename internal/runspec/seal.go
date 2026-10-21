@@ -3,14 +3,26 @@ package runspec
 import (
 	"errors"
 	"maps"
+	"reflect"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // SealRequest snapshots authorized intake values without resolving their precedence.
 func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
+	for _, name := range request.SecretArgs.Value {
+		value, present := request.RequestedArgs[name]
+		if !present {
+			return SealedRequest{}, errors.New("secret argument classification names an absent argument")
+		}
+		if err := secrets.Validate(value); err != nil {
+			return SealedRequest{}, err
+		}
+	}
 	if request.Burst != nil {
 		if err := request.Burst.Validate(); err != nil {
 			return SealedRequest{}, err
@@ -85,6 +97,19 @@ func SealSpec(input SealInput) (Spec, error) {
 	if !validResolvedClassification(input.Request.Request, input.Resolved) {
 		return Spec{}, errors.New("resolved secret argument classification is missing or invalid")
 	}
+	for _, name := range input.Resolved.SecretArgs {
+		if _, present := input.Resolved.Args[name]; !present {
+			return Spec{}, errors.New("resolved secret argument classification names an absent argument")
+		}
+	}
+	registration, err := BuildSecretRegistration(input.Request.Request, input.Resolved)
+	if err != nil {
+		return Spec{}, err
+	}
+	if len(input.Resolved.SecretRegistration.Values) > 0 && !slices.Equal(input.Resolved.SecretRegistration.Values, registration.Values) {
+		return Spec{}, drift()
+	}
+	input.Resolved.SecretRegistration = registration
 	if branch := input.Request.Request.Git.DefaultBranch; branch.Set && input.Resolved.DefaultBranch.Set && branch.Value != input.Resolved.DefaultBranch.Value {
 		return Spec{}, errors.New("resolved default branch differs from sealed intake")
 	}
@@ -114,6 +139,10 @@ func verifySpec(s Spec) error {
 	}
 	if err := verifyRequest(s.Request); err != nil {
 		return err
+	}
+	projection, err := BuildSecretRegistration(s.Request.Request, s.Resolved)
+	if err != nil || !reflect.DeepEqual(projection, s.Resolved.SecretRegistration) {
+		return drift()
 	}
 	h, err := CanonicalHash(s)
 	if err != nil {

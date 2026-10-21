@@ -3,111 +3,95 @@ package secrets
 import (
 	"encoding/json"
 	"fmt"
-	"sync"
+	"strings"
 	"testing"
 )
 
-func newTestMasker(values ...string) *Masker {
+func TestAttributesMasksSerializedJSON(t *testing.T) {
 	m := NewMasker()
-	for _, v := range values {
-		m.Register(v)
+	if err := m.Register("private-token"); err != nil {
+		t.Fatal(err)
 	}
-	return m
-}
-
-func TestMask_OverlappingSecretsLeaveNoTail(t *testing.T) {
-	for name, m := range map[string]*Masker{
-		"short registered first": newTestMasker("abc", "abcdef"),
-		"long registered first":  newTestMasker("abcdef", "abc"),
+	for input, want := range map[string]string{
+		`{"token":"private-token"}`:              `{"token":"***"}`,
+		`{"private-token":1}`:                    `{"***":1}`,
+		`{"a":"ordinary"}`:                       `{"a":"ordinary"}`,
+		`{"private-token":1,"***":2}`:            maskedAttributes,
+		`{"nested":{"private-token":1,"***":2}}`: maskedAttributes,
+		`{"broken":"private-token}`:              maskedAttributes,
+		`["private-token"]`:                      maskedAttributes,
 	} {
-		if got := m.Mask("token=abcdef"); got != "token=***" {
-			t.Errorf("%s: Mask = %q, want token=***", name, got)
-		}
-		if got := m.Mask("token=abc"); got != "token=***" {
-			t.Errorf("%s: Mask of the short secret = %q, want token=***", name, got)
+		if got := string(m.Attributes([]byte(input))); got != want {
+			t.Errorf("Attributes(%q) = %q, want %q", input, got, want)
 		}
 	}
 }
 
-func TestMaskJSONReachesKeysNumbersAndEscapes(t *testing.T) {
-	m := newTestMasker("s3cr3t", "1234567", "a<b")
-	for raw, want := range map[string]string{
-		`{"s3cr3t":"ok","n":3}`:        `{"***":"ok","n":3}`,
-		`{"v":"s3cr3t","w":"a<b"}`:     `{"v":"***","w":"***"}`,
-		`{"pin":1234567}`:              `{"pin":"***"}`,
-		`{ "safe": 9007199254740993 }`: `{"safe":9007199254740993}`,
-		`not json s3cr3t`:              `not json ***`,
-	} {
-		if got := string(m.MaskJSON([]byte(raw))); got != want {
-			t.Errorf("MaskJSON(%s) = %s, want %s", raw, got, want)
-		}
-	}
-	var nilMasker *Masker
-	if got := string(nilMasker.MaskJSON([]byte(`{"a":1}`))); got != `{"a":1}` {
-		t.Errorf("nil masker changed the payload: %s", got)
-	}
-}
-
-func TestMaskJSONReturnsCanonicalPayload(t *testing.T) {
-	for name, m := range map[string]*Masker{
-		"registered": newTestMasker("private-token"),
-		"empty":      NewMasker(),
-		"nil":        nil,
-	} {
-		t.Run(name, func(t *testing.T) {
-			raw := []byte(`{ "x": "private-token", "x": "healthy", "n": 9007199254740993 }`)
-			if got := string(m.MaskJSON(raw)); got != `{"n":9007199254740993,"x":"healthy"}` {
-				t.Fatalf("uninspected payload returned: %s", got)
-			}
-		})
-	}
-}
-
-func TestMaskJSONConcurrentRegistrationKeepsRegisteredSecretHidden(t *testing.T) {
-	const secret = "registered\"private\nvalue"
+func TestAttributesRejectsDuplicatesAndInvalidShapeWithoutRegistrations(t *testing.T) {
 	m := NewMasker()
-	m.Register(secret)
-	payload, err := json.Marshal(map[string]any{"token": secret, "count": 12345})
+	for _, input := range []string{`{"a":1,"a":2}`, `{"a":{"b":1,"b":2}}`, `{"a":[{"b":1,"b":2}]}`, `null`, `{"a":1} true`} {
+		if got := string(m.Attributes([]byte(input))); got != maskedAttributes {
+			t.Errorf("Attributes(%q) = %q", input, got)
+		}
+	}
+	if got := string(m.Attributes([]byte(`{"a":1}`))); got != `{"a":1}` {
+		t.Fatal(got)
+	}
+}
+
+func TestAttributesFallsBackWhenMaskingBreaksJSONSyntax(t *testing.T) {
+	m := NewMasker()
+	if err := m.Register("1234"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(m.Attributes([]byte(`{"n":1234}`))); got != maskedAttributes {
+		t.Fatal(got)
+	}
+	if strings.Contains(string(m.Attributes([]byte(`{"n":1234}`))), "1234") {
+		t.Fatal("secret survived")
+	}
+}
+
+func TestAttributesHidesEscapedSecretsAfterJSONDecode(t *testing.T) {
+	m := NewMasker()
+	if err := m.Register("private"); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		`{"value":"p\u0072iv\u0061te"}`,
+		`{"p\u0072ivate":"ok"}`,
+		`{"nested":[{"value":"p\u0072iv\u0061te"}]}`,
+		`{"value":"p\\u0072ivate"}`,
+	} {
+		sanitized := m.Attributes([]byte(raw))
+		var decoded any
+		if err := json.Unmarshal(sanitized, &decoded); err != nil {
+			t.Fatalf("%s: %v", sanitized, err)
+		}
+		if strings.Contains(fmt.Sprint(decoded), "private") {
+			t.Fatalf("decoded leak: %s -> %#v", raw, decoded)
+		}
+		if strings.Contains(fmt.Sprint(decoded), `p\u0072ivate`) {
+			t.Fatalf("escaped spelling survived: %s -> %#v", raw, decoded)
+		}
+	}
+}
+
+func TestAttributesMasksDoubleEscapedOverlap(t *testing.T) {
+	m := NewMasker()
+	if err := m.Register("abababababab"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{"nested": []string{`abababababab\u0061babababab`}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		for i := 0; i < 50; i++ {
-			m.Register(fmt.Sprintf("other-private-%d", i))
-		}
-	})
-	wg.Go(func() {
-		for i := 0; i < 50; i++ {
-			var decoded struct {
-				Token string
-				Count int
-			}
-			if err := json.Unmarshal(m.MaskJSON(payload), &decoded); err != nil {
-				t.Error(err)
-				return
-			}
-			if decoded.Token != "***" || decoded.Count != 12345 {
-				t.Error("registered secret or numeric data changed under concurrent registration")
-				return
-			}
-		}
-	})
-	wg.Wait()
-}
-
-// A short secret whose JSON spelling escapes a character is masked in JSON,
-// though its other encodings are too short to register.
-func TestMaskJSONMasksAShortEscapedSecret(t *testing.T) {
-	m := newTestMasker(`a"`)
-	if got := string(m.MaskJSON([]byte(`{"token":"a\""}`))); got != `{"token":"***"}` {
-		t.Fatalf("MaskJSON = %s", got)
+	sanitized := m.Attributes(raw)
+	var decoded map[string][]string
+	if err := json.Unmarshal(sanitized, &decoded); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestMaskDetailsOmitsCollidingDataKeys(t *testing.T) {
-	m := newTestMasker("private-token")
-	if got := m.MaskDetails(map[string]any{"private-token": 1, "***": 2}); got != nil {
-		t.Fatalf("colliding details did not fit the typed object: %#v", got)
+	if len(decoded["nested"]) != 1 || decoded["nested"][0] != "***" {
+		t.Fatalf("escaped overlap survived: %s -> %#v", sanitized, decoded)
 	}
 }

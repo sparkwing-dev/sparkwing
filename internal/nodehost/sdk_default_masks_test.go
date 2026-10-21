@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestSDKPlanningIntakeSecretDefaultsAreMaskedBeforeLogRelease(t *testing.T) {
@@ -17,7 +18,7 @@ func FuzzSDKPlanningIntakeSecretDefaults(f *testing.F) {
 		f.Add(value)
 	}
 	f.Fuzz(func(t *testing.T, value string) {
-		if value == "" || len(value) > 128 || strings.ToValidUTF8(value, "�") != value {
+		if secrets.Validate(value) != nil || len(value) > 128 || strings.ToValidUTF8(value, "�") != value {
 			t.Skip()
 		}
 		checkIntakeSecretDefault(t, value)

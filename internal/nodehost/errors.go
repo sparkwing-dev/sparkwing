@@ -42,7 +42,8 @@ func maskHostError(err error, masker *secrets.Masker) error {
 	masked := maskedRunError{err: err, text: boundedNodeErrText(masker.Mask(err.Error()))}
 	var canonical *apierr.Error
 	if errors.As(err, &canonical) {
-		masked.canonical = &apierr.Error{Code: maskedFailureCode(canonical.Code, masker.Mask), Message: masked.text, Details: masker.MaskDetails(canonical.Details)}
+		masked.canonical = masker.Error(canonical)
+		masked.canonical.Message = masked.text
 		if canonical.Hint != "" {
 			masked.canonical.Hint = boundedNodeErrText(masker.Mask(canonical.Hint))
 		}

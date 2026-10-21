@@ -258,7 +258,7 @@ type ScheduleRepositoryResolver interface {
 // the one this arming carries, so a schedule armed before the host recorded
 // an owner gains one on its next push. Ids are unique within a team; a
 // collision with another of the team's schedules is [ErrCronScheduleTaken].
-func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
+func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
 	}
@@ -299,7 +299,7 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 	var wasCreated bool
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		storedRow, wasCreated, err = t.armCronScheduleTx(ctx, tx, sched, repository, args, now)
+		storedRow, wasCreated, err = t.armCronScheduleTx(ctx, tx, sched, repository, args, tx.now(ctx))
 		return err
 	})
 	return storedRow, wasCreated, err
@@ -417,95 +417,119 @@ func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, 
 // SetCronSchedulePaused pauses or resumes a schedule. A paused
 // schedule still advances its cursor, so resuming does not replay the
 // instants that passed while it was paused.
-func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error {
-	return t.s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules SET paused = ?, updated_at = ? WHERE team = ? AND id = ?`,
-		boolToInt(paused), now.UnixNano(), string(t.team), id)
+func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return updateCronScheduleTx(ctx, tx, id,
+			`UPDATE cron_schedules SET paused = ?, updated_at = ? WHERE team = ? AND id = ?`,
+			boolToInt(paused), tx.now(ctx).UnixNano(), string(t.team), id)
+	})
 }
 
 // SetCronScheduleDeclared records whether the repository still
 // declares this schedule.
-func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error {
-	return t.s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules SET declared = ?, updated_at = ? WHERE team = ? AND id = ?`,
-		boolToInt(declared), now.UnixNano(), string(t.team), id)
+func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return updateCronScheduleTx(ctx, tx, id,
+			`UPDATE cron_schedules SET declared = ?, updated_at = ? WHERE team = ? AND id = ?`,
+			boolToInt(declared), tx.now(ctx).UnixNano(), string(t.team), id)
+	})
 }
 
 // WithdrawGitHubCronRepository stops only this team's App schedules for one
 // installation and repository, keeping their cursor, overrides and history.
-func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error) {
-	res, err := t.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ? AND declared = 1`,
-		now.UnixNano(), string(t.team), installationID, repositoryID)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64) (out int64, err error) {
+	err = t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+			WHERE team = ? AND github_installation_id = ? AND github_repository_id = ? AND declared = 1`,
+			tx.now(ctx).UnixNano(), string(t.team), installationID, repositoryID)
+		if err != nil {
+			return err
+		}
+		out, err = res.RowsAffected()
+		return err
+	})
+	return out, err
 }
 
 // WithdrawGitHubCronInstallation stops every App schedule this installation
 // armed for the team without touching manually pushed rows.
-func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error) {
-	res, err := t.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		now.UnixNano(), string(t.team), installationID)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64) (out int64, err error) {
+	err = t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
+			tx.now(ctx).UnixNano(), string(t.team), installationID)
+		if err != nil {
+			return err
+		}
+		out, err = res.RowsAffected()
+		return err
+	})
+	return out, err
 }
 
 // WithdrawOtherGitHubCronInstallations stops this team's App schedules for a
 // repository that another of its installations armed.
-func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error) {
-	res, err := t.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-		WHERE team = ? AND github_repository_id = ? AND github_repository_id > 0
-		  AND github_installation_id != ? AND declared = 1`,
-		now.UnixNano(), string(t.team), repositoryID, installationID)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64) (out int64, err error) {
+	err = t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+			WHERE team = ? AND github_repository_id = ? AND github_repository_id > 0
+			  AND github_installation_id != ? AND declared = 1`,
+			tx.now(ctx).UnixNano(), string(t.team), repositoryID, installationID)
+		if err != nil {
+			return err
+		}
+		out, err = res.RowsAffected()
+		return err
+	})
+	return out, err
 }
 
 // RenameGitHubCronRepository changes the clone URL under a stable App schedule
 // identity, so a rename keeps its history and no second schedule appears.
-func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error {
-	_, err := t.s.exec(ctx, `UPDATE cron_schedules SET repo_path = ?, updated_at = ?
+func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET repo_path = ?, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ?`,
-		repoURL, now.UnixNano(), string(t.team), installationID, repositoryID)
-	if isUniqueViolation(err) {
-		return fmt.Errorf("%w: a schedule already uses %s", ErrCronScheduleTaken, repoURL)
-	}
-	return err
+			repoURL, tx.now(ctx).UnixNano(), string(t.team), installationID, repositoryID)
+		if isUniqueViolation(err) {
+			return fmt.Errorf("%w: a schedule already uses %s", ErrCronScheduleTaken, repoURL)
+		}
+		return err
+	})
 }
 
 // SetCronScheduleNextDue republishes the next matching instant, nil
 // when the expression never matches again.
-func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error {
-	return t.s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules SET next_due_at = ?, updated_at = ? WHERE team = ? AND id = ?`,
-		nullNanos(next), now.UnixNano(), string(t.team), id)
+func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return updateCronScheduleTx(ctx, tx, id,
+			`UPDATE cron_schedules SET next_due_at = ?, updated_at = ? WHERE team = ? AND id = ?`,
+			nullNanos(next), tx.now(ctx).UnixNano(), string(t.team), id)
+	})
 }
 
 // SetCronScheduleLock pins a schedule to a commit and the pipeline
 // binary built from it, so an updated checkout cannot change what an
 // unattended run executes. A zero [CronLock] unlocks the schedule,
 // which then follows the checkout again.
-func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error {
-	return t.s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules
+func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return updateCronScheduleTx(ctx, tx, id,
+			`UPDATE cron_schedules
             SET locked_ref = ?, locked_binary = ?, locked_digest = ?, updated_at = ?
           WHERE team = ? AND id = ?`,
-		lock.Ref, lock.Binary, lock.Digest, now.UnixNano(), string(t.team), id)
+			lock.Ref, lock.Binary, lock.Digest, tx.now(ctx).UnixNano(), string(t.team), id)
+	})
 }
 
 // SetCronOverride replaces this host's edit of the declaration whole:
 // every field the override leaves unset returns to what the repository
 // declares. Base and SetAt come from the argument, and SetAt defaults
 // to now when it is zero.
-func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error { return t.setCronOverrideTx(ctx, tx, id, o, now) })
+func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return t.setCronOverrideTx(ctx, tx, id, o, tx.now(ctx))
+	})
 }
 
 func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, o CronOverride, now time.Time) error {
@@ -549,79 +573,72 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
 
 // ClearCronOverride drops this host's edit, returning the schedule to
 // what the repository declares.
-func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error {
-	return t.s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules
+func (t *Tenant) ClearCronOverride(ctx context.Context, id string) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return updateCronScheduleTx(ctx, tx, id,
+			`UPDATE cron_schedules
             SET override_cron = NULL, override_tz = NULL, override_overlap = NULL,
                 override_catch_up_ns = NULL, override_args = NULL, override_base = NULL,
                 override_set_at = NULL, updated_at = ?
           WHERE team = ? AND id = ?`,
-		now.UnixNano(), string(t.team), id)
+			tx.now(ctx).UnixNano(), string(t.team), id)
+	})
 }
 
 // DeleteCronSchedule disarms one schedule and drops its fire history,
 // leaving every sibling schedule of the same pipeline armed. An id
 // unknown in t's team is an error wrapping [ErrNotFound].
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), id); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM cron_fires WHERE team = ? AND schedule_id = ?`, string(t.team), id); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM cron_schedules WHERE team = ? AND id = ?`, string(t.team), id)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return notFound("cron schedule", id)
-	}
-	return tx.Commit()
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM cron_fires WHERE team = ? AND schedule_id = ?`, string(t.team), id); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM cron_schedules WHERE team = ? AND id = ?`, string(t.team), id)
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return notFound("cron schedule", id)
+		}
+		return nil
+	})
 }
 
 // DeleteCronSchedulesForRepo disarms every schedule of one repository
 // checkout in t's team and returns how many rows went, so a caller can
 // report an uninstall that found nothing.
-func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM cron_fires
+func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (int, error) {
+		if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM cron_fires
           WHERE team = ?
             AND schedule_id IN (SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ?)`,
-		string(t.team), string(t.team), repoPath); err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
-	if err != nil {
-		return 0, err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return int(affected), nil
+			string(t.team), string(t.team), repoPath); err != nil {
+			return 0, err
+		}
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		return int(affected), nil
+	})
 }
 
 // ResolveCronDue advances the schedule past one due instant: the cursor
@@ -633,14 +650,16 @@ func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string
 // A fired outcome also stamps last_fired_at, last_run_id and
 // last_outcome; every other outcome stamps last_outcome alone, leaving
 // the last successful launch on the row. fire.ID is minted when empty.
-func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {
+func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire) (err error) {
 	if fire != nil && fire.Outcome == "" {
 		return fmt.Errorf("ResolveCronDue: fire outcome required")
 	}
 	if fire != nil && !knownCronOutcome(fire.Outcome) {
 		return fmt.Errorf("ResolveCronDue: unknown outcome %q", fire.Outcome)
 	}
-	return t.s.inTx(ctx, func(tx *storeTx) error { return t.resolveCronDueTx(ctx, tx, id, cursor, next, fire, now) })
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return t.resolveCronDueTx(ctx, tx, id, cursor, next, fire, tx.now(ctx))
+	})
 }
 
 func (t *Tenant) resolveCronDueTx(ctx context.Context, tx *storeTx, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {
@@ -784,25 +803,22 @@ func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error {
 	if !tick.At.IsZero() {
 		atNS = tick.At.UnixNano()
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	for _, kv := range [][2]string{
-		{metaKeyCronLastTickAt, strconv.FormatInt(atNS, 10)},
-		{metaKeyCronLastTickHost, tick.Host},
-		{metaKeyCronLastTickVersion, tick.Version},
-		{metaKeyCronLastTickError, tick.Error},
-	} {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO settings (key, value) VALUES (?, ?)
-			 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-			kv[0], []byte(kv[1])); err != nil {
-			return err
+	return o.s.inTxOnce(ctx, func(tx *storeTx) error {
+		for _, kv := range [][2]string{
+			{metaKeyCronLastTickAt, strconv.FormatInt(atNS, 10)},
+			{metaKeyCronLastTickHost, tick.Host},
+			{metaKeyCronLastTickVersion, tick.Version},
+			{metaKeyCronLastTickError, tick.Error},
+		} {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO settings (key, value) VALUES (?, ?)
+				 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+				kv[0], []byte(kv[1])); err != nil {
+				return err
+			}
 		}
-	}
-	return tx.Commit()
+		return nil
+	})
 }
 
 // GetCronTick returns the last recorded tick, zero-valued when this
@@ -840,8 +856,8 @@ func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error) {
 	return tick, rows.Err()
 }
 
-func (s *Store) updateCronSchedule(ctx context.Context, id, query string, args ...any) error {
-	res, err := s.exec(ctx, query, args...)
+func updateCronScheduleTx(ctx context.Context, tx *storeTx, id, query string, args ...any) error {
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -980,18 +996,16 @@ func nanosToTime(ns sql.NullInt64) *time.Time {
 	return &at
 }
 
-// rollbackUnlessDone rolls a transaction back on the way out; a transaction
-// already committed reports ErrTxDone, which is the expected case and dropped,
-// while any other rollback failure becomes the function's error.
+// rollbackUnlessDone preserves a rollback failure when nothing else failed.
 func rollbackUnlessDone(tx *storeTx, err *error) {
-	if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) && *err == nil {
+	if rerr := tx.Rollback(); rerr != nil && *err == nil {
 		*err = rerr
 	}
 }
 
 // closeRowsInto closes a result set on the way out and surfaces a close
 // failure as the function's error when nothing else already failed.
-func closeRowsInto(rows *sql.Rows, err *error) {
+func closeRowsInto(rows rowCursor, err *error) {
 	if cerr := rows.Close(); cerr != nil && *err == nil {
 		*err = cerr
 	}

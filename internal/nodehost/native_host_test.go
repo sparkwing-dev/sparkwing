@@ -34,7 +34,7 @@ func (s nativeHostState) ReadSnapshot(ctx context.Context, runID string) (store.
 	return s.ClaimStore.ReadSnapshot(ctx, runID)
 }
 
-func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	return s.ClaimStore.TransitionNode(ctx, change)
 }
 
@@ -98,7 +98,7 @@ func TestNativeHostDefaultExpansionUsesSharedEvaluator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, failure, err := owner.Expand(t.Context(), input, state.row, StorageBinding{})
+	body, _, failure, err := owner.Expand(t.Context(), input, state.row, StorageBinding{})
 	if err != nil || len(body) != 0 || failure == nil || failure.MaskedError != refused.Error() {
 		t.Fatalf("body=%s failure=%+v error=%v", body, failure, err)
 	}

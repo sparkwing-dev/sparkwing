@@ -22,7 +22,14 @@ func TestTestHostMaskingConformance(t *testing.T) {
 			attrs, _ := json.Marshal(map[string]any{"nested": []string{v.Input}})
 			host.emit(t.Context(), nodeproto.FrameLog{Step: v.Input, Message: v.Input, Attrs: attrs}, "job")
 			record := host.records[0]
-			if record.Step != v.Want || record.Msg != v.Want || record.Attrs["nested"].([]any)[0] != v.Want {
+			expected := host.masker.Log(nodeproto.FrameLog{Step: v.Input, Message: v.Input, Attrs: attrs})
+			var expectedAttrs map[string]any
+			if err := json.Unmarshal(expected.Attrs, &expectedAttrs); err != nil {
+				t.Fatal(err)
+			}
+			gotAttrs, _ := json.Marshal(record.Attrs)
+			wantAttrs, _ := json.Marshal(expectedAttrs)
+			if record.Step != expected.Step || record.Msg != expected.Message || string(gotAttrs) != string(wantAttrs) {
 				t.Fatalf("test host differs from production: %+v", record)
 			}
 		})

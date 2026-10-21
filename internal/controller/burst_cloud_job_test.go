@@ -122,7 +122,7 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 	proof.ExchangeCloud = func(options client.EngineOptions, bootstrap controllerwire.ClaimedUnit) controllerwire.ClaimedUnit {
 		destination := filepath.Join(t.TempDir(), "cloud-source")
 		init := launcher.SourceInit{Bind: func(ctx context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
-			access, err := client.NewSourceAccess(options, award.Binding.RunID, award.Source)
+			access, err := client.NewSourceAccess(options, string(award.Binding.RunID), award.Source)
 			return source.Options{Access: access, BundleTransport: options.HTTP.Transport, BuildEnvironment: sourcetest.BuildEnvironment}, nil, err
 		}}
 		if err := init.Run(t.Context(), published, destination); err != nil {

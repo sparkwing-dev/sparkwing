@@ -32,7 +32,7 @@ func FuzzRetryMaterializationUsesCommittedSelection(f *testing.F) {
 		tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, Actor, controllerwire.NodeRef, MaterializeSource) (materializedRecords, error) {
 			return materializedRecords{}, nil
 		})
-		request.Source = &MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: run, NodeID: job}, StateSeq: seq}}
+		request.Source = &MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, StateSeq: seq}}
 		result, err := tenant.ReconcileNode(t.Context(), request)
 		want := mode == "failed" && selected && run == "source" && job == "job" && seq == 1
 		if (err == nil) != want || want && result.Kind != Materialize {

@@ -243,7 +243,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()
-	res, err := s.operator.ResolveSignIn(ctx, profile, s.signUpConditions(ctx), now)
+	res, err := s.operator.ResolveSignIn(ctx, profile, s.signUpConditions(ctx))
 	if errors.Is(err, store.ErrAccountExists) {
 		return nil, "", refuse(http.StatusConflict, "", errAccountExistsSignIn.Error())
 	}
@@ -316,7 +316,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, a capability.A
 			resp.ActiveTeam = &active
 		}
 	}
-	invites, err := reader.OpenInvitationsForEmail(ctx, acct.Email, time.Now().UTC())
+	invites, err := reader.OpenInvitationsForEmail(ctx, acct.Email)
 	if err != nil {
 		return engineLookupError(err)
 	}

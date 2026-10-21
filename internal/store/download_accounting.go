@@ -46,27 +46,20 @@ func (e *DownloadCapError) Error() string {
 func (e *DownloadCapError) Unwrap() error { return ErrDownloadCap }
 
 // ChargeDownload admits under the shared quota lock and records additive replica usage atomically.
-func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error) {
+func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (DownloadCharged, error) {
 	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return DownloadCharged{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := t.chargeDownloadTx(ctx, tx, c)
-	if err != nil {
-		return DownloadCharged{}, err
-	}
-	return out, tx.Commit()
+	return inTxResult(ctx, t.s, func(tx *storeTx) (DownloadCharged, error) {
+		return t.chargeDownloadTx(ctx, tx, c)
+	})
 }
 
 func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCharge) (DownloadCharged, error) {
 	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,'download',?,?) ON CONFLICT(team,quota) DO NOTHING`, t.team, now.Format("2006-01-02"), now.UnixNano()); err != nil {
 		return DownloadCharged{}, err
 	}
@@ -75,7 +68,7 @@ func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCh
 	if err := tx.QueryRowContext(ctx, "SELECT period,used FROM quota_admission WHERE team=? AND quota='download'"+tx.forUpdate(), t.team).Scan(&prior, &used); err != nil {
 		return DownloadCharged{}, err
 	}
-	now = tx.now()
+	now = tx.now(ctx)
 	day := now.Format("2006-01-02")
 	if prior != day {
 		used = 0

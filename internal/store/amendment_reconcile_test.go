@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestReconcileMaterializeOnlyMissDoesNotAwardOrRelease(t *testing.T) {
@@ -56,7 +57,7 @@ func TestReconcileMaterializeOnlyHitCommitsSourceResult(t *testing.T) {
 
 func TestRunHostCancelPreservesHolderResultRights(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeCancelled, Cause: CauseCancel}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeCancelled, Cause: causeCancel}
 	first, err := tenant.TransitionNode(t.Context(), change)
 	if err != nil || !first.CancelRequested {
 		t.Fatalf("owner cancellation: %+v, %v", first, err)
@@ -69,7 +70,7 @@ func TestRunHostCancelPreservesHolderResultRights(t *testing.T) {
 	if err != nil || row.Status != StatusRunning || row.CapabilityPrefix != "claim" || row.CancelRequestedAt == nil {
 		t.Fatalf("holder overwritten: %+v, %v", row, err)
 	}
-	change.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
+	change.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 	change.Cause = CauseReport
 	change.SourceAttempt = sourceAttempt(3)
 	if _, err := tenant.TransitionNode(t.Context(), change); err != nil {

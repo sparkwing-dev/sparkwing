@@ -27,7 +27,7 @@ import (
 type NodeTransitionStore interface {
 	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	RecordStep(context.Context, store.StepReport) error
 }
 
@@ -94,6 +94,12 @@ type nodeExecutor struct {
 func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("node executor requires store, process, engine and masking adapters")
+	}
+	if deps.Masks == nil {
+		deps.Masks = NewMaskRegistry(deps.Masker)
+	}
+	if deps.Masks.masker != deps.Masker {
+		return nil, errors.New("host requires one shared masking registry")
 	}
 	if deps.ValidatePlan == nil {
 		deps.ValidatePlan = nodeproto.ValidatePlan
@@ -172,11 +178,11 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "accepted plan hash does not match its declarations")
 	}
-	row, err = h.deps.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, err = h.deps.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return spec, row, job, err
 	}
-	if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != input.NodeID || row.Generation != input.Generation || row.Attempt != input.Attempt || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix {
+	if row.Ref.RunID != runspec.RunID(input.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(input.NodeID) || row.Generation != input.Generation || row.Attempt != input.Attempt || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix {
 		return spec, row, job, executorError(apierr.LockHeld, "node execution no longer holds the accepted claim")
 	}
 	constructed, err := NewNodeInput(input.Accepted, row, input.Engine, input.GrantedRunner)
@@ -243,9 +249,10 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 	if input.Attempt == math.MaxInt64 {
 		return input, &executorTransitionError{err: errors.New("attempt ordinal exhausted")}
 	}
-	expected := input.Attempt + 1
-	applied, err := h.transition(ctx, input, store.CauseStart, store.NodeRunning, store.TransitionExtra{Attempt: &store.NodeAttempt{
-		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: expected, Generation: input.Generation},
+	sourceAttempt := input.Attempt
+	expected := sourceAttempt + 1
+	applied, err := h.transition(ctx, input, store.StartNode{SourceAttempt: &sourceAttempt, Attempt: &store.NodeAttempt{
+		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(expected), Generation: int64(input.Generation)},
 		Holder:   input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, ExecutorName: input.GrantedRunner.Name, ExecutorKind: input.GrantedRunner.Type,
 	}})
 	if err != nil {
@@ -273,7 +280,9 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 		}
 		wait := executorBackoff(input.Execution.RetryBackoff.Value, retry+1)
 		retryAt := time.Now().Add(wait)
-		applied, err := h.transition(ctx, *input, store.CauseRetry, store.NodeRunning, store.TransitionExtra{Result: &result, RetryAt: &retryAt})
+		result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
+		sourceAttempt := input.Attempt
+		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &sourceAttempt, Result: &result, RetryAt: &retryAt})
 		if err != nil {
 			return result, err
 		}
@@ -302,15 +311,12 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 	}
 }
 
-func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause store.TransitionCause, to store.NodeState, extra store.TransitionExtra) (store.Applied, error) {
+func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command store.NodeCommand) (store.Applied, error) {
 	if err := context.Cause(ctx); err != nil {
 		return store.Applied{}, err
 	}
-	if extra.Result != nil {
-		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Masker.Mask)
-		extra.Result = &result
-	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
+	command = store.BindNodeCommand(command, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, executorActor(input))
+	applied, err := h.deps.Store.TransitionNode(ctx, command)
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}
@@ -318,7 +324,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 }
 
 func executorActor(input NodeInput) store.Actor {
-	return store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}
+	return store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
 }
 
 func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store.NodeResult, runErr error) error {
@@ -342,7 +348,8 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 	// safety: a cancelled context cannot send the final fenced report; the store still verifies current authority.
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := h.transition(reportCtx, input, store.CauseReport, result.Outcome, store.TransitionExtra{Result: &result})
+	result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
+	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
 	return errors.Join(runErr, err)
 }
 
@@ -425,7 +432,7 @@ func (h *nodeExecutor) bindStorage(ctx context.Context, input NodeInput) (NodeIn
 		return input, err
 	}
 	authority := binding.Authority
-	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}
+	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(input.Attempt), Generation: int64(input.Generation)}
 	if binding.Bytes == nil || binding.Records == nil || authority.CapabilityRef == "" || authority.Principal == "" || !authority.Attempt.Set || authority.Attempt.Value != attempt || authority.Repo == "" || spec.Request.Request.Git.Repository.Key != "" && authority.Repo != spec.Request.Request.Git.Repository.Key {
 		return input, errors.New("storage binding differs from its committed job attempt")
 	}

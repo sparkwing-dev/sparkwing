@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -41,8 +43,8 @@ func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request, a cap
 	attempts := make([]controllerwire.AttemptDetail, 0)
 	found := false
 	for _, row := range view.Snapshot.Nodes {
-		nodes[row.Ref.NodeID] = row
-		if row.Ref.NodeID == a.Target.NodeID {
+		nodes[string(row.Ref.NodeID)] = row
+		if row.Ref.NodeID == runspec.NodeID(a.Target.NodeID) {
 			found = true
 		}
 	}
@@ -67,7 +69,7 @@ func (s *Server) handleJobSteps(w http.ResponseWriter, r *http.Request, a capabi
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if _, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}); err != nil {
+	if _, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}); err != nil {
 		return engineLookupError(err)
 	}
 	all, err := tenant.ListNodeSteps(r.Context(), a.Target.RunID)
@@ -95,7 +97,7 @@ func (s *Server) handleJobActivity(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if err := tenant.WriteActivity(r.Context(), controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, engineActor(a), body.Detail); err != nil {
+	if err := tenant.WriteActivity(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a), body.Detail); err != nil {
 		return engineLookupError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -128,7 +130,7 @@ func (s *Server) handleJobDebugPause(w http.ResponseWriter, r *http.Request, a c
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if _, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}); err != nil {
+	if _, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}); err != nil {
 		return engineLookupError(err)
 	}
 	pause, err := tenant.GetActiveDebugPause(r.Context(), a.Target.RunID, a.Target.NodeID)

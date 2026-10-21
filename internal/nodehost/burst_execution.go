@@ -19,7 +19,7 @@ func (h *OwnerHost) executeBurst(ctx context.Context, run RunInput, accepted Acc
 		if err != nil {
 			return err
 		}
-		row, ok := ownerNode(before, request.Ref.NodeID)
+		row, ok := ownerNode(before, string(request.Ref.NodeID))
 		if !ok {
 			return errors.New("burst admission lost its job")
 		}
@@ -95,8 +95,8 @@ func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, r
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
-		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID),
-		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
+		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID)),
+		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
 		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
 	return a.hold(ctx, row.Ref, request, func(ctx context.Context, held Lease) error {

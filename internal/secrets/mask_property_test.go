@@ -11,6 +11,16 @@ import (
 	"testing"
 )
 
+func newTestMasker(values ...string) *Masker {
+	m := NewMasker()
+	for _, value := range values {
+		if err := m.Register(value); err != nil {
+			panic(err)
+		}
+	}
+	return m
+}
+
 func TestMaskMergesOverlappingSecrets(t *testing.T) {
 	m := newTestMasker("abcXYZ", "XYZdef")
 	if got := m.Mask("abcXYZdef"); got != "***" {
@@ -66,9 +76,10 @@ func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
 		rest := in
 		for len(rest) > 0 {
 			n := 1 + r.Intn(len(rest))
-			streamed.WriteString(pieces.Mask(rest[:n], n == len(rest)))
+			streamed.WriteString(pieces.Mask(rest[:n]))
 			rest = rest[n:]
 		}
+		streamed.WriteString(pieces.Flush())
 		assertNoSecretVisible(t, iter, secrets, in, streamed.String())
 	}
 }
@@ -153,5 +164,51 @@ func TestCachedRegistersBeforeAnotherReaderSeesTheValue(t *testing.T) {
 	<-done
 	if got := masker.Mask("secret-value"); got != "***" {
 		t.Fatalf("Mask = %q", got)
+	}
+}
+
+// Concatenated emissions, including a final EOF flush, must never expose any
+// registered spelling even when matching or replacement crosses a chunk edge.
+func TestStreamReplacementClosureProperty(t *testing.T) {
+	random := rand.New(rand.NewSource(43109))
+	candidates := []string{
+		"abcd", "bcde", "abcdxyz", "xyzé", "line\none", `slash/quote"`,
+		"private-token", "two private words", "x%2Fy", "éééé",
+	}
+	for iteration := range 1200 {
+		m := NewMasker()
+		count := 1 + random.Intn(4)
+		for range count {
+			if err := m.Register(candidates[random.Intn(len(candidates))]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var input strings.Builder
+		for range 1 + random.Intn(6) {
+			input.WriteString([]string{"a", "b", "*", "\n", `\\u0061`, "%2f", "\"", "public"}[random.Intn(8)])
+			input.WriteString(candidates[random.Intn(len(candidates))])
+		}
+		data := input.String()
+		stream := m.Stream()
+		var result strings.Builder
+		for len(data) > 0 {
+			n := 1 + random.Intn(min(len(data), 9))
+			result.WriteString(stream.Mask(data[:n]))
+			data = data[n:]
+			if random.Intn(23) == 0 {
+				if err := m.Register("late-secret"); err != nil {
+					t.Fatal(err)
+				}
+				result.WriteString(stream.Mask("late-secret"))
+			}
+		}
+		result.WriteString(stream.Flush())
+		rendered := result.String()
+		decoded := jsonDecodedView(rendered)
+		for _, spelling := range m.Values() {
+			if strings.Contains(rendered, spelling) || strings.Contains(decoded, spelling) {
+				t.Fatalf("iteration %d: spelling %q survived in %q", iteration, spelling, rendered)
+			}
+		}
 	}
 }

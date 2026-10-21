@@ -97,7 +97,7 @@ type EnvVarDocer interface {
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
-var ErrSecretMissing = errors.New("secret missing")
+var ErrSecretMissing = secrets.ErrSecretMissing
 func Error(ctx context.Context, format string, args ...any)
 type Example struct {
 	Comment string
@@ -433,8 +433,8 @@ type Workable interface {
 func WriteFile(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
-func (s combinedSecrets) ContainsSecret(id string) bool
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
+func (noHostSecrets) ContainsSecret(string) bool
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
 func (l protocolLogger) Emit(r LogRecord)
@@ -447,4 +447,3 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error)
 func (sdkOperations) Prepare(built any, request nodeproto.Request) error
 func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.RunResult, err error)
-func (s secretSet) ContainsSecret(id string) bool

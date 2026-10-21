@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"slices"
 	"strconv"
@@ -14,72 +16,45 @@ import (
 	"unicode/utf8"
 )
 
-type registration struct {
-	value string
-	list  bool
-}
-
 type Masker struct {
 	mu     sync.RWMutex
-	raw    map[registration]struct{}
+	raw    map[string]struct{}
 	values []string
 	known  map[string]struct{}
 }
 
 func NewMasker() *Masker { return &Masker{} }
 
-// Register protects a raw secret and its eligible line fragments and encodings.
-func (m *Masker) Register(value string) { m.register(value, false) }
+// ErrInvalidValue is safe to present when discovery cannot classify author output.
+var ErrInvalidValue = errors.New("secret value must contain at least 4 characters and must not contain ***; use a plain config variable instead")
 
-// RegisterList also protects eligible comma-separated items of a []string argument.
-func (m *Masker) RegisterList(value string) { m.register(value, true) }
-
-const minFragmentLength = 12
-
-// ListFragments returns eligible derived items from a list-typed argument.
-func ListFragments(value string) []string {
-	var parts []string
-	for _, part := range strings.Split(value, ",") {
-		part = strings.TrimSpace(part)
-		if len(part) >= minFragmentLength {
-			parts = append(parts, part)
-		}
+// Validate refuses values that cannot be masked safely as independent secrets.
+func Validate(value string) error {
+	if utf8.RuneCountInString(value) < 4 || strings.Contains(value, "***") {
+		return ErrInvalidValue
 	}
-	return parts
+	return nil
 }
 
-func (m *Masker) register(value string, list bool) {
-	if value == "" {
-		return
+// Register protects one secret and its encoded spellings.
+func (m *Masker) Register(value string) error {
+	if err := Validate(value); err != nil {
+		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	raw := registration{value, list}
-	if _, ok := m.raw[raw]; ok {
-		return
+	if _, ok := m.raw[value]; ok {
+		return nil
 	}
 	if m.raw == nil {
-		m.raw = map[registration]struct{}{}
+		m.raw = map[string]struct{}{}
 	}
-	m.raw[raw] = struct{}{}
-	literals := []string{value}
-	if list {
-		literals = append(literals, ListFragments(value)...)
+	m.raw[value] = struct{}{}
+	m.add(value)
+	for _, encoded := range encodedForms(value) {
+		m.add(encoded)
 	}
-	for _, literal := range slices.Clone(literals) {
-		for _, line := range strings.Split(literal, "\n") {
-			line = strings.TrimSuffix(line, "\r")
-			if len(line) >= minFragmentLength && strings.TrimSpace(line) != "" {
-				literals = append(literals, line)
-			}
-		}
-	}
-	for _, literal := range literals {
-		m.add(literal)
-		for _, encoded := range encodedForms(literal) {
-			m.add(encoded)
-		}
-	}
+	return nil
 }
 
 func (m *Masker) add(value string) {
@@ -103,7 +78,7 @@ func (m *Masker) Merge(other *Masker) {
 	}
 	other.mu.RLock()
 	values := slices.Clone(other.values)
-	raw := make([]registration, 0, len(other.raw))
+	raw := make([]string, 0, len(other.raw))
 	for entry := range other.raw {
 		raw = append(raw, entry)
 	}
@@ -111,7 +86,7 @@ func (m *Masker) Merge(other *Masker) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.raw == nil {
-		m.raw = map[registration]struct{}{}
+		m.raw = map[string]struct{}{}
 	}
 	for _, entry := range raw {
 		m.raw[entry] = struct{}{}
@@ -120,9 +95,6 @@ func (m *Masker) Merge(other *Masker) {
 		m.add(value)
 	}
 }
-
-// safety: shorter encodings of short secrets would mask ordinary log text.
-const minEncodedFormLen = 4
 
 func encodedForms(value string) []string {
 	jsonHTML, err := json.Marshal(value)
@@ -136,8 +108,6 @@ func encodedForms(value string) []string {
 		return nil
 	}
 	query := url.QueryEscape(value)
-	// safety: a JSON spelling differs from value only by a backslash escape, which ordinary text rarely holds,
-	// so it registers at any length; JSON masking sees no other spelling of a short secret.
 	jsonForms := []string{trimJSONString(string(jsonHTML)), trimJSONString(jsonPlain.String()), trimJSONString(strconv.Quote(value)), trimJSONString(strconv.QuoteToASCII(value))}
 	candidates := []string{
 		query,
@@ -158,7 +128,7 @@ func encodedForms(value string) []string {
 		}
 	}
 	for _, c := range candidates {
-		if len(c) >= minEncodedFormLen && c != value && !slices.Contains(out, c) {
+		if c != value && !slices.Contains(out, c) {
 			out = append(out, c)
 		}
 	}
@@ -210,21 +180,13 @@ func (m *Masker) Mask(s string) string {
 }
 
 func maskPatterns(s string, values []string) string {
-	marker := maskMarker(values)
 	for {
 		spans := maskSpans(s, values)
 		if len(spans) == 0 {
 			return s
 		}
-		s = replaceSpans(s, spans, marker)
+		s = replaceSpans(s, spans, "***")
 	}
-}
-
-func maskMarker(values []string) string {
-	if len(maskSpans("***", values)) > 0 {
-		return ""
-	}
-	return "***"
 }
 
 func replaceSpans(s string, spans []span, marker string) string {
@@ -249,26 +211,32 @@ func maskSpans(s string, values []string) []span {
 	}
 	var found []span
 	for _, v := range values {
-		for at := 0; ; {
-			i := strings.Index(s[at:], v)
-			if i < 0 {
-				break
+		if strings.Contains(v, "%") {
+			for at := 0; at+len(v) <= len(s); at++ {
+				if percentEqual(s[at:at+len(v)], v) {
+					found = append(found, span{at, at + len(v)})
+				}
 			}
-			found = append(found, span{at + i, at + i + len(v)})
-			at += i + 1
+		} else {
+			for at := 0; ; {
+				i := strings.Index(s[at:], v)
+				if i < 0 {
+					break
+				}
+				found = append(found, span{at + i, at + i + len(v)})
+				at += i + 1
+			}
 		}
 	}
 	if strings.IndexByte(s, '\\') >= 0 {
 		decoded, units := unescapeJSON(s)
-		for _, v := range values {
-			for at := 0; ; {
-				i := strings.Index(decoded[at:], v)
-				if i < 0 {
-					break
-				}
-				found = append(found, span{units[at+i].lo, units[at+i+len(v)-1].hi})
-				at += i + 1
+		found = appendDecodedSpans(found, decoded, units, values)
+		if strings.IndexByte(decoded, '\\') >= 0 {
+			second, secondUnits := unescapeJSON(decoded)
+			for i, unit := range secondUnits {
+				secondUnits[i] = span{units[unit.lo].lo, units[unit.hi-1].hi}
 			}
+			found = appendDecodedSpans(found, second, secondUnits, values)
 		}
 	}
 	if len(found) == 0 {
@@ -285,6 +253,45 @@ func maskSpans(s string, values []string) []span {
 		merged = append(merged, sp)
 	}
 	return merged
+}
+
+func appendDecodedSpans(found []span, decoded string, units []span, values []string) []span {
+	for _, value := range values {
+		if strings.Contains(value, "%") {
+			for at := 0; at+len(value) <= len(decoded); at++ {
+				if percentEqual(decoded[at:at+len(value)], value) {
+					found = append(found, span{units[at].lo, units[at+len(value)-1].hi})
+				}
+			}
+			continue
+		}
+		for at := 0; ; {
+			i := strings.Index(decoded[at:], value)
+			if i < 0 {
+				break
+			}
+			found = append(found, span{units[at+i].lo, units[at+i+len(value)-1].hi})
+			at += i + 1
+		}
+	}
+	return found
+}
+
+// percentEqual folds only the hex digits of percent escapes. Ordinary letters
+// remain case-sensitive, including letters adjacent to an escape.
+func percentEqual(text, pattern string) bool {
+	for i := 0; i < len(pattern); i++ {
+		if text[i] == pattern[i] {
+			continue
+		}
+		if i > 0 && pattern[i-1] == '%' || i > 1 && pattern[i-2] == '%' {
+			if text[i]|0x20 == pattern[i]|0x20 && pattern[i]|0x20 >= 'a' && pattern[i]|0x20 <= 'f' {
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func unescapeJSON(s string) (string, []span) {
@@ -344,67 +351,67 @@ func hex4(s string) (rune, bool) {
 	return rune(n), err == nil
 }
 
-// MaskJSON masks arbitrary data keys, strings and scalar values in canonical JSON.
-// Invalid JSON is masked as text; numbers keep their exact spelling.
-func (m *Masker) MaskJSON(raw []byte) []byte {
-	var values []string
-	if m != nil {
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-		values = m.values
+const maskedAttributes = `{"masked_attrs":"***"}`
+
+// Attributes masks serialized attribute JSON. An invalid object, including one
+// with duplicate keys after masking, becomes a single safe placeholder.
+func (m *Masker) Attributes(raw []byte) []byte {
+	masked := []byte(m.Mask(string(raw)))
+	if !validAttributeObject(masked) {
+		return []byte(maskedAttributes)
 	}
-	mask := func(text string) string { return maskPatterns(text, values) }
+	return masked
+}
+
+func validAttributeObject(raw []byte) bool {
 	if !json.Valid(raw) {
-		return []byte(mask(string(raw)))
+		return false
 	}
-	var value any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	if decoder.Decode(&value) != nil {
-		return []byte(mask(string(raw)))
+	first, err := decoder.Token()
+	if err != nil || first != json.Delim('{') {
+		return false
 	}
-	var visit func(any) any
-	visit = func(value any) any {
-		switch v := value.(type) {
-		case map[string]any:
-			out := make(map[string]any, len(v))
-			keys := make([]string, 0, len(v))
-			for key := range v {
-				keys = append(keys, key)
+	if !uniqueJSONValue(decoder, '{') {
+		return false
+	}
+	_, err = decoder.Token()
+	return err == io.EOF
+}
+
+func uniqueJSONValue(decoder *json.Decoder, open json.Delim) bool {
+	keys := map[string]struct{}{}
+	for decoder.More() {
+		if open == '{' {
+			key, err := decoder.Token()
+			if err != nil {
+				return false
 			}
-			slices.Sort(keys)
-			for _, key := range keys {
-				masked := mask(key)
-				if _, collision := out[masked]; collision {
-					return maskMarker(values)
-				}
-				out[masked] = visit(v[key])
+			name, ok := key.(string)
+			if !ok {
+				return false
 			}
-			return out
-		case []any:
-			for i, child := range v {
-				v[i] = visit(child)
+			if _, seen := keys[name]; seen {
+				return false
 			}
-		case string:
-			return mask(v)
-		case json.Number, bool, nil:
-			text := "null"
-			if v != nil {
-				text = fmt.Sprint(v)
+			keys[name] = struct{}{}
+		}
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		if child, ok := token.(json.Delim); ok {
+			if child != '{' && child != '[' {
+				return false
 			}
-			if masked := mask(text); masked != text {
-				return masked
+			if !uniqueJSONValue(decoder, child) {
+				return false
 			}
 		}
-		return value
 	}
-	var out bytes.Buffer
-	encoder := json.NewEncoder(&out)
-	encoder.SetEscapeHTML(false)
-	if encoder.Encode(visit(value)) != nil {
-		return []byte(`{"masked_attrs":"***"}`)
-	}
-	return bytes.TrimSuffix(out.Bytes(), []byte("\n"))
+	close, err := decoder.Token()
+	return err == nil && close == json.Delim(map[json.Delim]rune{'{': '}', '[': ']'}[open])
 }
 
 // Values returns a copy of all raw and derived masking patterns.
@@ -429,91 +436,85 @@ func (m *Masker) ContainsSecret(identifier string) bool {
 	return len(maskSpans(identifier, m.values)) > 0
 }
 
-// Stream masks one text stream that arrives as lines, and as pieces of a line
-// too long to hold whole, so a value split across pieces is still masked.
-// One goroutine owns a Stream.
+// Stream masks an ordered byte stream. One goroutine owns each Stream.
 type Stream struct {
-	m       *Masker
-	held    string
-	covered int
+	m        *Masker
+	pending  string
+	rendered string
 }
 
-// Stream returns a stream masked with m's values; a nil m masks nothing.
 func (m *Masker) Stream() *Stream { return &Stream{m: m} }
 
-// Mask masks text and returns what can be shown now. Text ends a line when
-// lineEnd is set and is a piece of one otherwise; a piece keeps back the tail
-// that could start a value until the next text arrives.
-func (s *Stream) Mask(text string, lineEnd bool) string {
-	text = s.held + text
-	cut, spans := s.safeCut(text)
-	if lineEnd {
-		cut = len(text)
-	}
-	skip := s.covered
-	for _, sp := range spans {
-		if skip > 0 && sp.lo < skip {
-			skip = max(skip, sp.hi)
-		}
-	}
-	s.held, s.covered = text[cut:], max(0, skip-cut)
-	if skip >= cut {
-		return ""
-	}
-	for _, sp := range spans {
-		if sp.lo < cut && cut < sp.hi {
-			s.covered = sp.hi - cut
-			return s.m.Mask(text[skip:sp.lo]) + s.m.Mask("***")
-		}
-	}
-	return s.m.Mask(text[skip:cut])
-}
-
-// Drop forgets the held tail of a line whose rest was lost, so no later line
-// completes a value the tail starts.
-func (s *Stream) Drop() { s.held, s.covered = "", 0 }
-
-// Retain raw overlap so the next piece can extend a match already shown as a mask.
-func (s *Stream) safeCut(text string) (int, []span) {
+// Mask accepts raw bytes before line splitting and returns only text that can
+// no longer join a subsequent chunk into a known spelling.
+func (s *Stream) Mask(chunk string) string {
+	s.pending += chunk
 	if s.m == nil {
-		return len(text), nil
+		out := s.pending
+		s.pending = ""
+		return out
 	}
 	s.m.mu.RLock()
-	longest := 0
-	for _, v := range s.m.values {
-		longest = max(longest, len(v))
-	}
-	spans := maskSpans(text, s.m.values)
+	values := slices.Clone(s.m.values)
 	s.m.mu.RUnlock()
-	if strings.IndexByte(text, '\\') >= 0 {
-		longest *= len(`\u0000`)
+	if len(values) == 0 {
+		out := s.pending
+		s.pending = ""
+		return out
 	}
-	cut := max(0, len(text)-max(0, longest-1))
-	if strings.IndexByte(text, '\\') >= 0 {
-		_, units := unescapeJSON(text)
-		for _, u := range units {
-			if u.lo < cut && cut < u.hi {
-				return u.lo, spans
-			}
+	longest := longestPattern(values)
+	// Two JSON escape views can expand each pattern byte to six bytes twice.
+	// Saturate at the pending size to avoid overflow for exceptionally long values.
+	reserve := len(s.pending)
+	if longest <= reserve/36 {
+		reserve = longest * 36
+	}
+	cut := max(0, len(s.pending)-reserve)
+	if cut == 0 {
+		return ""
+	}
+	for _, sp := range maskSpans(s.pending, values) {
+		if sp.lo < cut && cut < sp.hi {
+			cut = sp.lo
 		}
 	}
-	return cut, spans
+	if cut == 0 {
+		return ""
+	}
+	sanitized := maskPatterns(s.pending[:cut], values)
+	s.pending = s.pending[cut:]
+	s.rendered = maskPatterns(s.rendered+sanitized, values)
+	emit := max(0, len(s.rendered)-reserve)
+	if emit == 0 {
+		return ""
+	}
+	// Keep an entire match when the chosen output boundary falls within it.
+	for _, sp := range maskSpans(s.rendered, values) {
+		if sp.lo < emit && emit < sp.hi {
+			emit = sp.lo
+		}
+	}
+	out := s.rendered[:emit]
+	s.rendered = s.rendered[emit:]
+	return out
 }
 
-// MaskDetails projects JSON error details through the run's masker without mutating the source.
-func (m *Masker) MaskDetails(details map[string]any) map[string]any {
-	if details == nil {
-		return nil
+// Flush releases the final masked tail at EOF.
+func (s *Stream) Flush() string {
+	if s.m == nil {
+		out := s.rendered + s.pending
+		s.rendered, s.pending = "", ""
+		return out
 	}
-	raw, err := json.Marshal(details)
-	if err != nil {
-		return nil
-	}
-	var out map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(m.MaskJSON(raw)))
-	decoder.UseNumber()
-	if decoder.Decode(&out) != nil {
-		return nil
-	}
+	out := s.m.Mask(s.rendered + s.pending)
+	s.rendered, s.pending = "", ""
 	return out
+}
+
+func longestPattern(values []string) int {
+	longest := 0
+	for _, value := range values {
+		longest = max(longest, len(value))
+	}
+	return longest
 }

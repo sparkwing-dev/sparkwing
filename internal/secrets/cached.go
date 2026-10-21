@@ -43,7 +43,9 @@ func (c *Cached) Resolve(ctx context.Context, name string) (string, bool, error)
 		return "", false, err
 	}
 	if masked && c.masker != nil {
-		c.masker.Register(v)
+		if err := c.masker.Register(v); err != nil {
+			return "", false, err
+		}
 	}
 	c.mu.Lock()
 	c.cache[name] = cachedEntry{value: v, masked: masked}

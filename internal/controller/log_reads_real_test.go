@@ -34,11 +34,11 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 	engine, tenant := engineRuntimeStore(t)
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	actor := engineActor(authorized)
-	started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64(0))})
+	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: started.Attempt, Generation: started.Generation}}
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: int64(started.Attempt), Generation: int64(started.Generation)}}
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{41}, 32)})
 	if err != nil {
 		t.Fatal(err)

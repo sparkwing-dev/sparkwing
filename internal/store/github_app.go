@@ -151,7 +151,7 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 	return scanGitHubAppInstallations(rows)
 }
 
-func scanGitHubAppInstallations(rows *sql.Rows) (_ []GitHubAppInstallation, err error) {
+func scanGitHubAppInstallations(rows rowCursor) (_ []GitHubAppInstallation, err error) {
 	defer closeRowsInto(rows, &err)
 	var out []GitHubAppInstallation
 	for rows.Next() {
@@ -195,7 +195,7 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 		if err != nil {
 			return err
 		}
-		team = Team(owner)
+		team = owner
 		t := &Tenant{s: o.s, team: team}
 		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
 	})
@@ -204,7 +204,7 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 
 // SetGitHubAppInstallationSuspended records GitHub's suspension of
 // installation. An unbound installation is ErrNotFound.
-func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error {
+func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool) error {
 	flag := 0
 	if suspended {
 		flag = 1
@@ -223,13 +223,13 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-			WHERE team = ? AND installation_id = ?`, flag, now.UTC().UnixNano(), team, installation); err != nil {
+			WHERE team = ? AND installation_id = ?`, flag, tx.now(ctx).UTC().UnixNano(), team, installation); err != nil {
 			return err
 		}
 		if suspended {
 			if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-				now.UnixNano(), team, installation); err != nil {
+				tx.now(ctx).UnixNano(), team, installation); err != nil {
 				return err
 			}
 		}
@@ -241,7 +241,7 @@ const githubAppTriggerCols = `repository_id, pipeline, repository, installation_
        branches, base_branches, created_by, created_at, on_pr_closed, on_pr_labeled, pr_labels, on_pr_ready_for_review,
        on_release_published, on_release_prereleased, release_tag_patterns, on_branch_create, on_branch_delete, runner`
 
-func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
+func (t *Tenant) scanGitHubAppTriggers(rows rowCursor) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}
@@ -436,20 +436,24 @@ const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 // BindGitHubAppDeliveryEvent ties digest to the first event it arrived as and
 // reports whether event is that one. The binding is kept apart from the
 // processed record, so binding a delivery does not make it seen.
-func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error) {
-	if err := o.s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
-		return false, err
-	}
-	key := "event:" + digest
-	if _, err := o.s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, key, delivery, now.Unix(), event); err != nil {
-		return false, err
-	}
-	var bound string
-	if err := o.s.queryRow(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
-		return false, err
-	}
-	return bound == event, nil
+func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string) (out bool, err error) {
+	err = o.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if err = forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
+			return err
+		}
+		key := "event:" + digest
+		if _, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
+			ON CONFLICT (digest) DO NOTHING`, key, delivery, tx.now(ctx).Unix(), event); err != nil {
+			return err
+		}
+		var bound string
+		if err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
+			return err
+		}
+		out = bound == event
+		return nil
+	})
+	return out, err
 }
 
 // GitHubAppDeliverySeen reports whether a delivery with digest was processed
@@ -463,18 +467,20 @@ func (o *Operator) GitHubAppDeliverySeen(ctx context.Context, digest string) (bo
 // RecordGitHubAppDelivery remembers that a delivery with digest was
 // processed. It and [Store.BindGitHubAppDeliveryEvent] forget digests and
 // event bindings older than [GitHubAppDeliveryRetention].
-func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
-	if err := o.s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
+func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
+		ON CONFLICT (digest) DO NOTHING`, digest, delivery, tx.now(ctx).Unix())
 		return err
-	}
-	_, err := o.s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
-	return err
+	})
 }
 
-func (s *Store) forgetExpiredGitHubAppDeliveries(ctx context.Context, now time.Time) error {
-	_, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		now.Add(-GitHubAppDeliveryRetention).Unix())
+func forgetExpiredGitHubAppDeliveriesTx(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
+		tx.now(ctx).Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
 
@@ -611,7 +617,7 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		tx.now().UnixNano(), string(t.team), installation); err != nil {
+		tx.now(ctx).UnixNano(), string(t.team), installation); err != nil {
 		return err
 	}
 	return nil

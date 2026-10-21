@@ -11,10 +11,10 @@ import (
 
 // Vector describes registrations and their expected text and JSON projections.
 type Vector struct {
-	Name                       string
-	Values, Lists, MergeValues []string
-	Input, Want                string
-	JSONInput, JSONWant        string
+	Name                string
+	Values, MergeValues []string
+	Input, Want         string
+	JSONInput, JSONWant string
 }
 
 // Load rejects unknown fields so sinks cannot silently ignore new registrations.
@@ -30,7 +30,7 @@ func Load(path string) ([]Vector, error) {
 	return vectors, err
 }
 
-// Masker applies the vector's raw, list and merged registrations to a fresh registry.
+// Masker applies the vector's raw and merged registrations to a fresh registry.
 func (v Vector) Masker() *secrets.Masker {
 	m, merged := secrets.NewMasker(), secrets.NewMasker()
 	for _, value := range v.MergeValues {
@@ -39,9 +39,6 @@ func (v Vector) Masker() *secrets.Masker {
 	m.Merge(merged)
 	for _, value := range v.Values {
 		m.Register(value)
-	}
-	for _, value := range v.Lists {
-		m.RegisterList(value)
 	}
 	return m
 }

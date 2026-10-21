@@ -85,7 +85,7 @@ func requireBlobMemoTx(ctx context.Context, tx *storeTx, a blobActor) error {
 
 func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Digest) (blob.ReadSet, error) {
 	set := blob.ReadSet{Reader: a.authority.Attempt.Value}
-	rows, err := tx.QueryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now().UnixNano(), digest, digest, digest)
+	rows, err := tx.QueryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now(ctx).UnixNano(), digest, digest, digest)
 	if err != nil {
 		return set, err
 	}
@@ -282,20 +282,9 @@ func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node s
 
 // ReadableBlobs answers existence only within the transaction's authorized read set.
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error) {
-	result := blob.Presence{}
-	if !request.Budget.Deadline.IsZero() && !t.s.now().Before(request.Budget.Deadline) {
-		return result, blob.ErrBudget
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return result, err
-	}
-	defer rollbackOrLog(tx)
-	result, err = readableBlobsTx(ctx, tx, t.team, request)
-	if err != nil {
-		return result, err
-	}
-	return result, tx.Commit()
+	return inTxResult(ctx, t.s, func(tx *storeTx) (blob.Presence, error) {
+		return readableBlobsTx(ctx, tx, t.team, request)
+	})
 }
 
 func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.HasManyRequest) (blob.Presence, error) {
@@ -317,8 +306,8 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-			return blob.Presence{}, blob.ErrBudget
+		if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+			return blob.Presence{}, err
 		}
 		if seen[digest] {
 			continue
@@ -341,14 +330,14 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 			result.Present = append(result.Present, digest)
 		}
 	}
-	if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-		return blob.Presence{}, blob.ErrBudget
+	if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+		return blob.Presence{}, err
 	}
 	return result, nil
 }
 
 func blobCandidateSelectedTx(ctx context.Context, tx *storeTx, team string, c blobReadCandidate) (bool, error) {
-	row, err := readNodeTx(ctx, tx, Team(team), controllerwire.NodeRef{RunID: c.run, NodeID: c.node})
+	row, err := readNodeTx(ctx, tx, Team(team), controllerwire.NodeRef{RunID: runspec.RunID(c.run), NodeID: runspec.NodeID(c.node)})
 	if err != nil {
 		return false, err
 	}
@@ -368,4 +357,19 @@ func blobCandidateSelectedTx(ctx context.Context, tx *storeTx, team string, c bl
 		}
 	}
 	return false, nil
+}
+
+// Budgets measure elapsed work, independently of the authorization snapshot.
+func (tx *storeTx) checkBlobBudget(ctx context.Context, budget blob.Budget) error {
+	if budget.Deadline.IsZero() {
+		return nil
+	}
+	now, err := tx.readClock(ctx)
+	if err != nil {
+		return err
+	}
+	if !now.Before(budget.Deadline) {
+		return blob.ErrBudget
+	}
+	return nil
 }

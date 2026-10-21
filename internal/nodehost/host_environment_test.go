@@ -71,7 +71,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 			case "attempt":
 				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 			case "eval":
-				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
+				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 			}
 			if process != nil || !errors.Is(err, boundary) || built != 1 || revoked != 1 {
 				t.Fatalf("process=%v error=%v builds=%d revocations=%d", process, err, built, revoked)

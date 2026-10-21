@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -102,7 +101,7 @@ func operatorTeamView(ctx context.Context, t *store.Tenant) (operatorTeamJSON, e
 	info, err := t.Info(ctx)
 	members, merr := t.Members(ctx)
 	credit, cerr := t.CreditState(ctx, creditsBurnWindow)
-	standing, serr := t.BillingStanding(ctx, time.Now())
+	standing, serr := t.BillingStanding(ctx)
 	freeze, ferr := t.CreditFreeze(ctx)
 	events, eerr := t.BusinessEvents(ctx, "")
 	if err := errors.Join(err, merr, cerr, serr, ferr, eerr); err != nil {
@@ -246,7 +245,7 @@ func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request, 
 	}
 	ctx := r.Context()
 	waiting, err := s.operator.NewestWaitlisted(ctx, limit, offset)
-	counts, cerr := s.operator.SignUpCounts(ctx, time.Now())
+	counts, cerr := s.operator.SignUpCounts(ctx)
 	if err := errors.Join(err, cerr); err != nil {
 		return err
 	}

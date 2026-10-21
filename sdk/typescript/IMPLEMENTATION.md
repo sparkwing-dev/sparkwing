@@ -44,9 +44,9 @@ is needed. No other cross-area DESIGN finding was found in this review.
 
 ## Mechanisms and assumptions
 
-- PlanningDiagnostics replaces the describe-only replacement because masking
-  only one message path leaves hints, nested values, keys and generated
-  declarations exposed. Its removal would restore the old catches.
+- The host sanitizes decoded protocol payloads and presentation output. The SDK
+  sends generator argument declarations on successful evaluation, so the host
+  can register their secret values before releasing gated output.
 - The checked frame writer replaces separate reply/log serialization because
   payload length alone excludes envelope and escaping costs. Typed-output
   validation stays separate. There is no new protocol limit.

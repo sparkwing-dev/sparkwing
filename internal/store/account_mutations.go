@@ -48,11 +48,11 @@ func selectAccountTeamTx(ctx context.Context, tx *storeTx, p capability.Principa
 	if err := authenticateSessionTeamTx(ctx, tx, p.Authority.ID, team, p.Capability.Subject.ID); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE sessions SET team=? WHERE hash=? AND account_id=? AND COALESCE(team,'')=? AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?`, team, p.Authority.ID, p.Capability.Subject.ID, p.Capability.Team, tx.now().UnixNano())
+	result, err := tx.ExecContext(ctx, `UPDATE sessions SET team=? WHERE hash=? AND account_id=? AND COALESCE(team,'')=? AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?`, team, p.Authority.ID, p.Capability.Subject.ID, p.Capability.Team, tx.now(ctx).UnixNano())
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET active_team=?,updated_at=? WHERE id=?`, team, tx.now().UnixNano(), p.Capability.Subject.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET active_team=?,updated_at=? WHERE id=?`, team, tx.now(ctx).UnixNano(), p.Capability.Subject.ID)
 	return err
 }
 
@@ -78,7 +78,7 @@ func (o *Operator) CreateAccountTeam(ctx context.Context, a capability.Authorize
 		if input.CreatedBy != "" && input.CreatedBy != p.Capability.Subject.ID {
 			return bindingRefusal()
 		}
-		out, err = createAccountTeamTx(ctx, tx, p.Capability.Subject.ID, input.Slug, input.DisplayName, tx.now())
+		out, err = createAccountTeamTx(ctx, tx, p.Capability.Subject.ID, input.Slug, input.DisplayName, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Aut
 		if lookupErr != nil {
 			return lookupErr
 		}
-		out, err = tx.operator.acceptAccountInvitationTx(ctx, tx, p.Capability.Subject.ID, id, tx.now())
+		out, err = tx.operator.acceptAccountInvitationTx(ctx, tx, p.Capability.Subject.ID, id)
 		if err != nil {
 			return err
 		}
@@ -126,10 +126,11 @@ func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Autho
 		if err != nil {
 			return err
 		}
-		if tx.now().Before(p.Capability.IssuedAt) || tx.now().Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
+		now := tx.now(ctx)
+		if now.Before(p.Capability.IssuedAt) || now.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
 			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
-		ended, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now())
+		ended, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now(ctx))
 		return err
 	})
 	if err != nil {

@@ -116,7 +116,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			t.Cleanup(func() { _ = authorities.Close() })
 			var issuedLookup capability.CredentialLookup
 			deps.Bind = func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
-				delegation.Binding = capability.Binding{Kind: capability.BindingNode, RunID: input.Accepted.RunID, NodeID: input.NodeID, Holder: input.Authority.Holder, Generation: input.Generation, Attempt: input.Attempt}
+				delegation.Binding = capability.Binding{Kind: capability.BindingNode, RunID: input.Accepted.RunID, NodeID: input.NodeID, Holder: input.Authority.Holder, Generation: int64(input.Generation), Attempt: int64(input.Attempt)}
 				parent.snapshot.Authorities[0].Principal.Capability.Binding = delegation.Binding
 				parent.snapshot.Binding.Current = delegation.Binding
 				services.RunID, services.Job = input.Accepted.RunID, input.Accepted.Plan.Jobs[0]

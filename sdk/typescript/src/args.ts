@@ -1,5 +1,9 @@
 import type { ArgSpec, Args } from "../index.d.ts";
 
+export function splitList(value: string): string[] {
+  return value.split(",").map((item) => item.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "")).filter(Boolean);
+}
+
 const types = new Set(["string", "bool", "int", "int64", "float64", "duration", "[]string"]);
 const booleans = new Set(["1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"]);
 const integer = /^[+-]?\d+$/;
@@ -46,11 +50,7 @@ function validateValue(spec: ArgSpec, value: string): string {
         valid = validDuration(value);
         break;
       case "[]string":
-        value = value
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean)
-          .join(",");
+        value = splitList(value).join(",");
         break;
     }
   if (!valid) throw new Error(`argument --${spec.name} must be ${spec.type}`);

@@ -13,6 +13,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -56,9 +58,9 @@ func TestRetryTargetSchedulesOnlyUnfinishedGeneratedWork(t *testing.T) {
 		mu.Unlock()
 		return f.report(ctx, input, store.NodeSuccess)
 	})
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		t.Fatal("recorded expansion evaluated again")
-		return nil, nil, nil
+		return nil, runspec.SecretRegistration{}, nil, nil
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -74,8 +76,8 @@ func (s retryMissingOutput) ReconcileNode(ctx context.Context, request store.Rec
 	if request.Policy != store.SourceManualRetry {
 		return s.OwnerStore.ReconcileNode(ctx, request)
 	}
-	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, request.Ref.RunID)
-	row, ok := ownerNode(snapshot, request.Ref.NodeID)
+	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, string(request.Ref.RunID))
+	row, ok := ownerNode(snapshot, string(request.Ref.NodeID))
 	if !request.MaterializeOnly || !ok || request.Source == nil {
 		return store.ReconciledNode{}, executorError(apierr.BadRequest, "retry miss requires a materialization probe")
 	}
@@ -101,9 +103,9 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 		mu.Unlock()
 		return f.report(ctx, input, store.NodeSuccess)
 	})
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: retryGeneratedJobs()})
-		return body, nil, err
+		return body, runspec.SecretRegistration{}, nil, err
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -136,7 +138,7 @@ func TestMaterializedGeneratorEvaluationKeepsTheJobTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 		start := time.Now()
-		body, failure, err := host.Expand(t.Context(), input)
+		body, _, failure, err := host.Expand(t.Context(), input)
 		if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.DeadlineExceeded || !strings.Contains(failure.MaskedError, "timeout") || time.Since(start) != 400*time.Millisecond {
 			t.Fatalf("body=%s failure=%+v elapsed=%s error=%v", body, failure, time.Since(start), err)
 		}
@@ -173,7 +175,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		Masker:     secrets.NewMasker(),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 		ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
-			if ref.RunID != f.Accepted.RunID || ref.NodeID != "targets" || generation != sourceInput.Generation {
+			if ref.RunID != runspec.RunID(f.Accepted.RunID) || ref.NodeID != "targets" || runspec.ClaimGeneration(generation) != sourceInput.Generation {
 				t.Fatal("reconstruction read outside its accepted source")
 			}
 			return json.RawMessage(`["good","bad"]`), nil

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -39,11 +40,11 @@ func (c *nodeClaims) adopt(ctx context.Context, result store.ReconciledNode) err
 		return err
 	}
 	row, claim := result.Node, result.Claim
-	if result.Kind != store.Execute || claim == nil || len(result.Bearer) == 0 || row.OwnerCapabilityPrefix != owner.Capability.Prefix || row.Ref.RunID != owner.Capability.Binding.RunID || row.Ref.NodeID == "" || row.Generation != claim.Generation || row.CapabilityPrefix != claim.CapabilityPrefix || row.ClaimedBy != claim.Holder {
+	if result.Kind != store.Execute || claim == nil || len(result.Bearer) == 0 || row.OwnerCapabilityPrefix != owner.Capability.Prefix || row.Ref.RunID != runspec.RunID(owner.Capability.Binding.RunID) || row.Ref.NodeID == "" || row.Generation != claim.Generation || row.CapabilityPrefix != claim.CapabilityPrefix || row.ClaimedBy != claim.Holder {
 		return nodeClaimMismatch()
 	}
-	award := nodeClaim{raw: string(result.Bearer), prefix: row.CapabilityPrefix, generation: row.Generation}
-	if _, err := c.authenticate(ctx, owner, award, row.Ref.NodeID, row.Attempt); err != nil {
+	award := nodeClaim{raw: string(result.Bearer), prefix: row.CapabilityPrefix, generation: int64(row.Generation)}
+	if _, err := c.authenticate(ctx, owner, award, string(row.Ref.NodeID), int64(row.Attempt)); err != nil {
 		return err
 	}
 	c.masker.Register(award.raw)
@@ -52,7 +53,7 @@ func (c *nodeClaims) adopt(ctx context.Context, result store.ReconciledNode) err
 	if c.nodes == nil {
 		c.nodes = make(map[string]nodeClaim)
 	}
-	c.nodes[row.Ref.NodeID] = award
+	c.nodes[string(row.Ref.NodeID)] = award
 	return nil
 }
 
@@ -106,11 +107,11 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 		return nodehost.ProcessGrant{}, err
 	}
 	fence := principal.Capability.Binding
-	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: fence.RunID, NodeID: node})
+	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)})
 	if err != nil {
 		return nodehost.ProcessGrant{}, err
 	}
-	if row.Ref != (controllerwire.NodeRef{RunID: fence.RunID, NodeID: node}) || row.Generation != generation || row.Attempt != attempt || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
+	if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)}) || row.Generation != runspec.ClaimGeneration(generation) || row.Attempt != runspec.AttemptOrdinal(attempt) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
 	var job nodeproto.JobSpec
@@ -132,7 +133,7 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 	if err != nil {
 		return nodehost.ProcessGrant{}, err
 	}
-	if services.RunID != row.Ref.RunID || services.Job.ID != job.ID || !completeServices(services) {
+	if runspec.RunID(services.RunID) != row.Ref.RunID || services.Job.ID != job.ID || !completeServices(services) {
 		return nodehost.ProcessGrant{}, errors.New("local process services are incomplete or belong to another job")
 	}
 	return c.processes.Delegate(ctx, lookup, capability.DelegateSpec{
@@ -146,7 +147,7 @@ func completeServices(s nodehost.ProcessServices) bool {
 }
 
 func (c *nodeClaims) annotate(ctx context.Context, input nodehost.NodeInput, body nodeproto.AnnotationRequest) error {
-	principal, err := c.principal(ctx, input.NodeID, input.Generation, input.Attempt)
+	principal, err := c.principal(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 	if err != nil {
 		return err
 	}

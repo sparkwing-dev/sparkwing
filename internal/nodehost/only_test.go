@@ -54,7 +54,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"setup", "build-linux", "build-mac", "deploy", "notify"} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,8 +114,8 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				doc.Jobs[1].NeedsGenerated = []string{"children"}
 			}
 			fixture := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "consumer"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
-			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
-				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), nil, nil
+			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), runspec.SecretRegistration{}, nil, nil
 			}
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				return fixture.report(ctx, input, store.NodeSuccess)
@@ -127,7 +127,7 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
 			for _, id := range []string{"prerequisite", "consumer", "outside"} {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
+				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
 				want := store.NodeSuccess
 				if id == "outside" {
 					want = store.NodeSkipped
@@ -137,7 +137,7 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				}
 			}
 			if generated {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "child"})
+				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "child"})
 				if err != nil || row.Outcome != store.NodeSuccess {
 					t.Errorf("generated child: row=%+v error=%v", row, err)
 				}
@@ -177,7 +177,7 @@ func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
 				if slices.Contains(state.trace, "acquire") || state.finished.Unit.RunID != "" {
 					t.Fatal("invalid resumed window acquired source or finished its accepted topology")
 				}
-			} else if state.finished.Transition.To != store.RunFailed {
+			} else if state.finished.Transition.RunID == "" {
 				t.Fatal("invalid initial window left its owner unfinished")
 			}
 		})
@@ -202,7 +202,7 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		attempt, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+		attempt, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 		if err != nil {
 			t.Fatal(err)
 		}

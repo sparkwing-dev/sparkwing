@@ -977,3 +977,27 @@ separate operations; no database transaction stays open across a provider call.
 
 - PostgreSQL keeps one database role that owns the tables and runs the app. The append-only trigger stops application code from changing audit history; it does not stop a holder of the app's database credentials, who could disable it (and could already read every secret). Docs say "append-only against application code", not "tamper-proof". The no-op REVOKE is removed rather than kept as an implied control.
 - Separate owner and runtime roles (migrations as owner, controller as a restricted role) are post-launch hardening.
+
+## 2026-10-21 Korey decision 41: webhook deliveries are never retried automatically
+
+- A push that arrives while the team is out of credits does not queue. It is recorded as a run that did not start because credits were exhausted, visible in the run list, with a "run now" action once the team has funds. Matches GitHub Actions, where a workflow over a spending limit fails to start rather than waiting.
+- A stored delivery whose processing fails (temporary or permanent) is not retried automatically. It is marked failed with its reason and listed for team admins on the team settings page ("pushes we couldn't process") with a manual "process again" action, like GitHub's Recent deliveries -> Redeliver. Retention purges failed rows on the same schedule as completed ones.
+
+## 2026-10-21 Korey decision 42: a job's predicate runs inside its concurrency slot on the executing host
+
+- SkipIf and memo checks run as the first step of the job, on the host that executes it, under the job's actual award, after the job's concurrency groups are acquired there. A skip releases the groups and ends the job. The coordinator never acquires job groups for evaluation. This keeps the guarantee that a predicate sees the state its group protects (e.g. "skip if already deployed" under a deploy group) and removes the cross-host wait cycle. Cost: a job that will skip still queues behind its group and briefly holds a machine.
+
+## 2026-10-21 Korey decision 43: one host-side masker; short secrets refused
+
+- Masking is owned by the Go host alone (design: simplicity/HOST-EGRESS-MASKING.md). Output is masked as a byte stream at host egress before it is split into lines, persisted, sent or displayed; protocol payloads are sanitized before the host builds trusted envelopes. The host registers every secret from the sealed accepted run (one normalized registration projection, list items included) before author code runs, and registers lazily issued values (stored secrets, OIDC tokens) before releasing them. SDKs contain no masker and send no automatic registrations; explicit Mask for author-generated credentials remains. Pipeline code run without a Sparkwing host gets no masking.
+- A secret value shorter than 4 characters, or containing `***`, is refused when stored or declared, with an error saying to use a plain config variable instead. This applies to each item of a list secret. Matches CircleCI, which does not mask values under 4 characters.
+
+## 2026-10-21 Korey decision 44: runner sizes are labels; one claim query; receipts for every delivery effect
+
+- Arbitrary CPU/memory matching is removed. Runner size is a label: Cloud runners carry a fixed set of size labels (e.g. `sparkwing-4cpu`), self-hosted runners advertise any labels, and a job runs only where a runner has every label it requests (GitHub larger-runner model). Billing prices by the size label's class.
+- Every claimant (cloud launcher, pool launcher, self-hosted, personal, burst) selects work through one eligibility predicate in SQL, ordered by fair share then arrival, with no persisted scan state and fit rechecked at award. One per-team fault ledger counts faults and authorizes quarantine. Funding admission uses placement and billing policy, never transient occupancy (design: simplicity/CLAIMS-AND-DELIVERY-EFFECTS.md).
+- Every effect a webhook delivery causes writes a receipt keyed by (delivery, targeted effect) in the effect's transaction; reprocessing skips applied effects. Schedule publication is fenced by a per-repository generation captured before source fetch; the process-local lock is removed.
+
+## 2026-10-21 Korey decision 45: one admission owner in the store
+
+- All logical concurrency capacity is held by one durable admission module in the controller's store (the local store in local mode) (design: simplicity/CONTROLLER-ONLY-ADMISSION.md). Owners and hosts never acquire; they ask to start work under an award and receive admit, wait, skip or fail. Each level's group set is granted atomically with one arrival sequence; reservation identity belongs to the work, not the coordinator, so handoff never moves it. Decisions 37, 38 and 42 stand.

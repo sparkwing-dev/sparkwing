@@ -17,13 +17,18 @@ type expansionAcceptance struct {
 	selection     secretSelection
 	state         ExpansionState
 	hash          string
+	bodyHash      string
 	body, failure []byte
+	registration  []byte
 	plan          nodeproto.PlanDoc
 }
 
 func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot) (expansionAcceptance, error) {
 	var result expansionAcceptance
 	if request.Failure != nil {
+		if len(request.Registration.Defaults) > 0 || len(request.Registration.ListArgs) > 0 || len(request.Registration.Values) > 0 {
+			return result, authorityError(apierr.BadRequest, "failed expansion cannot register secrets")
+		}
 		result.state = ExpansionFailed
 		var err error
 		result.failure, err = json.Marshal(request.Failure)
@@ -51,7 +56,23 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		return result, err
 	}
 	result.selection = selection
-	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec, selection)
+	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec, selection, snapshot.Expansions...)
+	if err != nil {
+		return result, err
+	}
+	registration, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: request.Registration})
+	if err != nil {
+		return result, authorityError(apierr.PlanInvalid, err.Error())
+	}
+	if len(request.Registration.Values) > 0 && !slices.Equal(request.Registration.Values, registration.Values) {
+		return result, authorityError(apierr.SpecDrift, "expansion secret registration differs from declarations")
+	}
+	for _, value := range registration.Values {
+		if err := secrets.Register(value); err != nil {
+			return result, authorityError(apierr.PlanInvalid, err.Error())
+		}
+	}
+	result.registration, err = json.Marshal(registration)
 	if err != nil {
 		return result, err
 	}
@@ -59,9 +80,9 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
 		return result, err
 	}
-	validation := nodeproto.ValidationContext{Placement: RequestPlacement(snapshot.Run.Request.Request), Secrets: secrets, Expansion: true, SourceJob: request.Source.NodeID, ExistingConcurrency: plan.Concurrency}
+	validation := nodeproto.ValidationContext{Placement: RequestPlacement(snapshot.Run.Request.Request), Secrets: secrets, Expansion: true, SourceJob: string(request.Source.NodeID), ExistingConcurrency: plan.Concurrency}
 	for _, node := range snapshot.Nodes {
-		if priorJobs[node.Ref.NodeID] {
+		if priorJobs[string(node.Ref.NodeID)] {
 			continue
 		}
 		var job nodeproto.JobSpec
@@ -83,7 +104,15 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err != nil {
 		return result, err
 	}
-	hash, err := tx.store.planServices().CanonicalHash(json.RawMessage(result.body))
+	bodyHash, err := tx.store.planServices().CanonicalHash(json.RawMessage(result.body))
+	if err != nil {
+		return result, err
+	}
+	result.bodyHash = string(bodyHash)
+	hash, err := tx.store.planServices().CanonicalHash(struct {
+		Body         json.RawMessage
+		Registration runspec.SecretRegistration
+	}{result.body, registration})
 	result.hash, result.state = string(hash), ExpansionAccepted
 	return result, err
 }
@@ -91,7 +120,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]NodeRow, error) {
 	var result []NodeRow
 	for _, job := range plan.Jobs {
-		index := slices.IndexFunc(snapshot.Nodes, func(node NodeRow) bool { return node.Ref.NodeID == job.ID })
+		index := slices.IndexFunc(snapshot.Nodes, func(node NodeRow) bool { return node.Ref.NodeID == runspec.NodeID(job.ID) })
 		if index < 0 {
 			return nil, errors.New("accepted expansion job is missing")
 		}
@@ -129,7 +158,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 		if len(job.Closures.Generate) > 0 {
 			expansion = ExpansionExpected
 		}
-		node := NodeRow{Ref: controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: job.ID}, Status: StatusPending, Spec: spec, SpecHash: string(hash), Execution: execution, Expansion: expansion}
+		node := NodeRow{Ref: controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: spec, SpecHash: string(hash), Execution: execution, Expansion: expansion}
 		if err := insertNodeTx(ctx, tx, team, node); err != nil {
 			return nil, err
 		}
@@ -141,7 +170,11 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 			snapshot.Nodes[i].Expansion, snapshot.Nodes[i].ExpansionDigest = ExpansionAccepted, accepted.hash
 		}
 	}
-	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: request.SourceGeneration, Body: accepted.body, BodyHash: accepted.hash})
+	var registration runspec.SecretRegistration
+	if err := json.Unmarshal(accepted.registration, &registration); err != nil {
+		return nil, err
+	}
+	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.bodyHash, Registration: registration})
 	if _, err := snapshot.Scheduling(); err != nil {
 		return nil, err
 	}

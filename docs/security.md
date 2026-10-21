@@ -44,13 +44,24 @@ An authorized pipeline can use and disclose its secrets. Masking covers values
 registered with the host and their supported encodings. Arbitrary transformations,
 network exfiltration and files outside the host's output path are outside that
 protection. Registered secrets are refused in job, step, group and approval IDs
-because stored identifiers cannot be masked safely. The Go SDK, host diagnostics
-and test host share one masker. Registration derives nonblank lines and, for `[]string` arguments, comma-separated
-items. Each derived fragment needs 12 UTF-8 bytes. Explicit raw secrets are masked
-at any length. Arbitrary data keys use the full registry. Go toolchain variables
-passed to the requester's own hosted machine follow the same 12-byte environment
-threshold. Extracted proxy credentials are masked at any length. See the
-[masking contract](../internal/secrets/MASKING.md) for encodings and overlap rules.
+because stored identifiers cannot be masked safely. One Go host module masks every presentation payload. Stdout and stderr
+are masked as byte streams before line splitting. Protocol frames are decoded
+first, then their payloads are sanitized before trusted envelopes are built.
+The accepted run seals one registration projection containing raw arguments,
+secret defaults, effective values and every normalized list item. Stored secrets
+and OIDC tokens are registered before the host releases them. Explicit `Mask`
+registers author-generated values before subsequent output.
+
+Secrets shorter than four characters or containing `***` are refused when stored,
+declared or registered. This also applies to each nonempty list item. Use a plain
+config variable for these values. The old twelve-byte line/list fragment policy
+is removed. Remote environment values still use their separate twelve-byte
+registration threshold. Planning output waits until declarations are known.
+Failed discovery withholds output. Structured attributes are masked as JSON text
+and checked for valid JSON, duplicate keys and object shape. A failed check
+replaces the whole attribute payload. Pipeline code run without a Sparkwing host
+is unmasked. See the [masking contract](../internal/secrets/MASKING.md) for
+encodings and overlap rules.
 
 ## Authentication and authorization
 

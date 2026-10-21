@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -33,10 +34,10 @@ func (s *EngineController) handleJobs(w http.ResponseWriter, r *http.Request, a 
 	jobs := make([]controllerwire.JobDetail, 0, len(snapshot.Nodes))
 	seen := make(map[string]bool, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
-		if row.Ref.RunID != snapshot.Run.ID || row.Ref.NodeID == "" || seen[row.Ref.NodeID] {
+		if row.Ref.RunID != runspec.RunID(snapshot.Run.ID) || string(row.Ref.NodeID) == "" || seen[string(row.Ref.NodeID)] {
 			return errors.New("invalid persisted job snapshot")
 		}
-		seen[row.Ref.NodeID] = true
+		seen[string(row.Ref.NodeID)] = true
 		jobs = append(jobs, snapshotJob(row))
 	}
 	writeJSON(w, http.StatusOK, jobs)
@@ -78,10 +79,10 @@ func debugJobResponse(target capability.Target, view store.RunView) (controllerw
 	var selected *store.NodeRow
 	for i := range view.Snapshot.Nodes {
 		row := &view.Snapshot.Nodes[i]
-		if row.Ref.RunID != run.ID || row.Ref.NodeID == "" {
+		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
 			return controllerwire.DebugJob{}, errors.New("invalid persisted debug job")
 		}
-		if row.Ref.NodeID == target.NodeID {
+		if row.Ref.NodeID == runspec.NodeID(target.NodeID) {
 			if selected != nil {
 				return controllerwire.DebugJob{}, errors.New("duplicate persisted debug job")
 			}
@@ -96,7 +97,7 @@ func debugJobResponse(target capability.Target, view store.RunView) (controllerw
 		found := false
 		for _, attempt := range view.Attempts {
 			id := attempt.Identity
-			if id.Team != target.Team || id.RunID != run.ID || id.NodeID != target.NodeID || id.Attempt != selected.Attempt || id.Generation != selected.Generation || attempt.FinishedAt != nil {
+			if id.Team != target.Team || id.RunID != run.ID || id.NodeID != target.NodeID || runspec.AttemptOrdinal(id.Attempt) != selected.Attempt || runspec.ClaimGeneration(id.Generation) != selected.Generation || attempt.FinishedAt != nil {
 				continue
 			}
 			if found || attempt.CapabilityPrefix != selected.CapabilityPrefix || attempt.Holder != selected.ClaimedBy {

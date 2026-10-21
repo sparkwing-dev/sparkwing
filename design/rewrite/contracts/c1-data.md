@@ -1375,7 +1375,8 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
-`NodeTransition.SourceAttempt` is a required nonnegative ordinal pointer for
+`StartNode`, `RetryNode`, `ReportNode` and `ReleaseNode` carry a
+`SourceAttempt` field. It is a required nonnegative ordinal pointer for
 holder start, retry, report and unstarted release. It names the persisted ordinal
 before the edge. Initial start supplies an explicit zero. A resumed claim supplies
 the last ordinal it retained through disruption. Start and retry return the new
@@ -2228,7 +2229,7 @@ local publication transport and physical bytes remain integration obligations.
 
 | Export | Purpose |
 |---|---|
-| `AcceptedExpansionRow` | Keeps accepted expansion bytes, source fence and body hash in a consistent snapshot. |
+| `AcceptedExpansionRow` | Keeps accepted expansion bytes, private secret registration, source fence, body hash and combined acceptance digest in a consistent snapshot. |
 | `RunSnapshot.Scheduling` | Projects declarations and persisted state into the scheduling graph. |
 | `ScheduleNode`, `ScheduleExpansion`, `ScheduleSnapshot` | Carry the accepted graph, including empty generator groups. |
 | `DecisionKind`, `NodeDecision`, `ScheduleDecision`, `Decide` | Define one pure graph decision consumed by both owners. |
@@ -3221,10 +3222,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `NodeTransitions` | NodeTransitions returns fresh data so callers cannot mutate the store's legal transition table. Insertions start at pending with state_seq=0 through AcceptPlan or AcceptExpansion and are not edges. |
 | `NodeResult` | NodeResult references authorized records; raw digests alone never authorize output attachment. |
 | `MaterializeSource` | MaterializeSource preserves the read edge that permits copying another result. |
-| `TransitionExtra` | TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused. |
 | `ApprovalResolution` | ApprovalResolution records the resolver and policy result in the same transaction as the node edge. |
 | `ClaimAward` | ClaimAward identifies an award already derived by the store; callers cannot choose its team or grants. |
-| `NodeTransition` | NodeTransition has no caller-selected event kind or clock; the edge determines both. |
+| `NodeCommand` | A closed set of named operations fixes each edge and its payload before normalization. |
 | `Applied` | Applied distinguishes an identical replay from a state change or a cooperative cancellation request. |
 | `IllegalTransitionReason` | IllegalTransitionReason maps stale authority to lock_held and invalid edges to illegal_transition. |
 | `ErrIllegalTransition` | ErrIllegalTransition refuses a failed write loudly; a zero-row mutation is never success. |
@@ -4191,3 +4191,76 @@ environments without known provenance. Child intake copies its parent's
 environment and provenance in the ancestry transaction. A supplied snapshot or
 provenance that differs from the parent fails with `spec_drift`. Retry retains
 the original seal. Invocation origin never selects environment storage.
+
+## Fenced completion and transaction clocks
+
+Successful transaction construction captures database time. Failure to read that
+clock aborts construction before any transaction body runs. Read transactions
+keep that instant and one database snapshot. Mutation authority and lease checks
+read fresh database time after lock waits or policy work through `storeTx.now`.
+A failed clock read poisons the transaction: later SQL returns that error,
+commit rolls back, and transaction callbacks cannot hide it behind success
+or a different refusal. Mutation transactions expose no stored snapshot
+timestamp, and lifecycle guards accept no caller-supplied time.
+Transaction cursors must close or reach exhaustion before another statement or
+clock read. The transaction owner enforces this for both database dialects;
+a violation poisons the transaction and rolls back its writes. Pending single-row
+queries also retain their cursor until scanned. Retained-storage sampling reads
+its database clock before opening the inventory cursor.
+Lifecycle, identity, billing and schedule mutations
+use store time instead of a caller clock. Schedule due times and provider event
+timestamps remain domain facts.
+Capacity decisions read time after waiting for locks, before counting holders
+or promoting waiters.
+Blob lookup budgets read elapsed database time through one budget check. They
+do not reuse the authorization snapshot. Cache lookup exhaustion remains a miss.
+Browser flow expiry and recent sign-in checks use the same snapshot as the
+session authority read.
+
+Runs, nodes and triggers store a generated `drain_deadline_at` from their first
+`cancel_requested_at` plus five minutes. The database derives it in the same
+write, including concurrency supersession. Cancellation clamps existing work and
+slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
+bounds. The schema baseline is version 16.
+The shared capacity writer applies the bound to each holder and waiter,
+including controller reconciliation.
+Node capacity follows the later live claim or owner lease; plan capacity follows
+the latest owner or claimed-job lease because jobs can outlive their owner during
+recovery. Cancellation still bounds the whole run, and a live owner cannot extend
+a metered node's funded horizon. The holder's own lease must remain continuous;
+renewal never revives expired capacity.
+
+`Tenant.TransitionNode` accepts the closed `NodeCommand` interface. `StartNode`,
+`RetryNode`, `ReportNode` and `ReleaseNode` carry the captured attempt. Start,
+retry, ready, release and cancel commands fix their destination. Approval timeout
+reads its verdict from the persisted policy. Each command exposes only its own
+payload. `BindNodeCommand` supplies authenticated transport authority without
+changing the operation. The private normalizer retains the transition table as
+the single state owner. Controller and local transports decode through
+`NodeCommandPayload`, which rejects fields that the selected command cannot
+carry. Materialization and publication command types remain private to the store.
+Node rows and execution inputs keep claim generations and
+attempt ordinals distinct. Actor generations and command source attempts use
+those same types. Lifecycle commands retain typed run and node identifiers.
+Holder actors carry complete `NodeFence` values, and owner references carry
+`EvalFence` values. Guards compare the captured target and generations together.
+Run completion carries no requested outcome. Admission refusal first persists
+its job outcomes and resolves expansions, then derives the run verdict through
+the shared scheduler. Existing required-job failures retain their effect.
+Completion returns the committed outcome and reason, which the host reports
+and the foreground CLI uses for its exit status.
+
+## Sealed masking projection (decision 43)
+
+The accepted run seals `Resolved.SecretRegistration`. It retains secret defaults
+from every discovered pipeline, selected list argument kinds, and the complete
+raw/default/effective/item registration set. `BuildSecretRegistration` is the
+single derivation owner. Seal validation recomputes the projection and refuses
+drift. Accepted expansions extend this projection privately for generated args.
+Controllers and execution hosts use it rather than infer list semantics from
+joined values. Display receipts continue to use the accepted spec's latest secret
+classification.
+
+Secret storage and declaration entry points refuse values under four characters
+or containing `***`, including each nonempty normalized list item. Plain config
+variables remain available for such values.

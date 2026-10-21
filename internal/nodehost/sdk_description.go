@@ -18,8 +18,8 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 	}
 	complete := true
 	seen := map[string]bool{}
-	for i := range doc.Pipelines {
-		pipeline := &doc.Pipelines[i]
+	registration := runspec.SecretRegistration{}
+	for _, pipeline := range doc.Pipelines {
 		if pipeline.Name == "" || seen[pipeline.Name] {
 			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
 		}
@@ -32,24 +32,14 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
 		}
 		args := map[string]bool{}
-		defaults := runspec.Resolved{Args: map[string]string{}}
 		for _, arg := range pipeline.Args {
 			if arg.Name == "" || args[arg.Name] {
 				return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has ambiguous arguments")
 			}
 			args[arg.Name] = true
 			if arg.Secret && arg.Default != nil {
-				if arg.Type == "[]string" {
-					if err := p.Masks.registerList(*arg.Default); err != nil {
-						return PreparedPlanning{}, false, err
-					}
-				}
-				defaults.Args[arg.Name] = *arg.Default
-				defaults.SecretArgs = append(defaults.SecretArgs, arg.Name)
+				registration.Defaults = append(registration.Defaults, runspec.SecretValue{Raw: *arg.Default, List: arg.Type == "[]string"})
 			}
-		}
-		if err := p.Masks.initialize(runspec.SealedRequest{}, &defaults, nil, nil); err != nil {
-			return PreparedPlanning{}, false, err
 		}
 	}
 	selected, found := (nodeproto.DescribeDoc{Pipelines: doc.Pipelines}).Pipeline(input.Entrypoint)
@@ -67,20 +57,30 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 		if _, present := prepared.Args[arg.Name]; !present && arg.Default != nil {
 			prepared.Args[arg.Name] = *arg.Default
 		}
+		if arg.Type == "[]string" {
+			registration.ListArgs = append(registration.ListArgs, arg.Name)
+		}
 		if arg.Secret || slices.Contains(input.SecretArgs, arg.Name) {
-			if arg.Type == "[]string" {
-				if err := p.Masks.registerList(prepared.Args[arg.Name]); err != nil {
-					return PreparedPlanning{}, false, err
-				}
+			if arg.Default != nil {
+				registration.Defaults = append(registration.Defaults, runspec.SecretValue{Raw: *arg.Default, List: arg.Type == "[]string"})
 			}
 			if !slices.Contains(prepared.SecretArgs, arg.Name) {
 				prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
 			}
 		}
 	}
-	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, &runspec.Resolved{Args: prepared.Args, SecretArgs: prepared.SecretArgs}, nil, nil); err != nil {
+	resolved := runspec.Resolved{Args: prepared.Args, SecretArgs: prepared.SecretArgs, SecretRegistration: registration}
+	projection, err := runspec.BuildSecretRegistration(runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}, resolved)
+	if err != nil {
 		return PreparedPlanning{}, false, err
 	}
+	prepared.SecretRegistration = projection
+	for _, value := range projection.Values {
+		if err := p.Masks.Register(value); err != nil {
+			return PreparedPlanning{}, false, err
+		}
+	}
+
 	return prepared, complete, nil
 }
 

@@ -61,7 +61,7 @@ func TestOwnerReaperJobHeartbeatCannotReplaceOwnerLease(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"build", "test", "deploy"} {
-		node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: id})
+		node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)})
 		if err != nil || node.Outcome != NodeCancelled || node.FinishedAt == nil || node.StateSeq != 1 {
 			t.Fatalf("orphaned dependent %s: %+v, %v", id, node, err)
 		}

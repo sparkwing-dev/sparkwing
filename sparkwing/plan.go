@@ -17,10 +17,9 @@ import (
 // Build a Plan via [NewPlan], attach jobs with [Job], and chain
 // dependencies with [JobNode.Needs].
 type Plan struct {
-	diagnostics               *planningDiagnostics
 	evalGate                  chan struct{}
 	generated                 map[string][]nodeproto.JobSpec
-	secretInputs              []diagnosticSecret
+	generatedArguments        map[string][]nodeproto.ArgumentDescription
 	registration              *registration
 	source                    *Checkout
 	prioritySet, claimWaitSet bool
@@ -156,7 +155,6 @@ func Job(p *Plan, id string, x any) *JobNode {
 	job := coerceJobArg("Job", id, x)
 	registerJobArgs(p, id, x)
 	n := newNode("Job", id, job)
-	n.diagnostics = p.diagnostics
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
 	return n
@@ -207,7 +205,6 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 // JobNode is a [Plan] entry wrapping a [Workable].
 // Inner-DAG modifiers belong to [WorkStep].
 type JobNode struct {
-	diagnostics                                                         *planningDiagnostics
 	memoKey                                                             MemoKeyFn
 	memoOptions                                                         memoOptions
 	declaredEnv                                                         map[string]nodeproto.EnvValue
@@ -388,9 +385,7 @@ func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode {
 // OnFailure declares and returns a recovery job that runs when this job fails.
 func (n *JobNode) OnFailure(id string, x any) *JobNode {
 	job := coerceRecoveryArg("OnFailure", id, x)
-	n.diagnostics.collectJob(job)
 	n.onFailure = newNode("OnFailure", id, job)
-	n.onFailure.diagnostics = n.diagnostics
 	return n.onFailure
 }
 

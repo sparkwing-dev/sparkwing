@@ -76,7 +76,7 @@ func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: retry.RunID}, Available: match.Resources{Cores: 8}})
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(retry.RunID)}, Available: match.Resources{Cores: 8}})
 			if err != nil || claim.Team != own.Team() {
 				t.Fatalf("own retry claim: %+v, %v", claim, err)
 			}

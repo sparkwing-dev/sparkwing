@@ -14,22 +14,24 @@ import (
 )
 
 func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
+	now := time.Unix(1700000000, 37).UTC()
 	s := authorityStore(t)
 	a, b := &Tenant{s: s, team: "a"}, &Tenant{s: s, team: "b"}
 	random := rand.New(rand.NewPCG(323, 907))
-	now := time.Unix(1700000000, 37).UTC()
 	for i := range 32 {
 		path := fmt.Sprintf("/repos/shared-%d-%d", i, random.Uint64())
 		var expected []CronSchedule
 		for _, tenant := range []*Tenant{a, b} {
+			s.SetTestClock(t, func() time.Time { return now })
 			row, created, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
 				ID: fmt.Sprintf("%s-%d", tenant.team, i), RepoPath: path,
 				Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC",
-			}, now)
+			})
 			if err != nil || !created {
 				t.Fatalf("arm: %+v, %v, %v", row, created, err)
 			}
-			if err := tenant.ResolveCronDue(t.Context(), row.ID, now, nil, &CronFire{Outcome: CronOutcomeMissed, DueAt: now, DecidedAt: now}, now); err != nil {
+			s.SetTestClock(t, func() time.Time { return now })
+			if err := tenant.ResolveCronDue(t.Context(), row.ID, now, nil, &CronFire{Outcome: CronOutcomeMissed, DueAt: now, DecidedAt: now}); err != nil {
 				t.Fatal(err)
 			}
 			row, err = tenant.GetCronSchedule(t.Context(), row.ID)
@@ -41,15 +43,34 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 		for j, tenant := range []*Tenant{a, b} {
 			foreign := expected[1-j]
 			mutations := []func() error{
-				func() error { return tenant.SetCronSchedulePaused(t.Context(), foreign.ID, true, now) },
-				func() error { return tenant.SetCronScheduleDeclared(t.Context(), foreign.ID, false, now) },
-				func() error { return tenant.SetCronScheduleNextDue(t.Context(), foreign.ID, &now, now) },
-				func() error { return tenant.SetCronScheduleLock(t.Context(), foreign.ID, CronLock{Ref: "forged"}, now) },
-				func() error { return tenant.SetCronOverride(t.Context(), foreign.ID, CronOverride{}, now) },
-				func() error { return tenant.ClearCronOverride(t.Context(), foreign.ID, now) },
+				func() error {
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.SetCronSchedulePaused(t.Context(), foreign.ID, true)
+				},
+				func() error {
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.SetCronScheduleDeclared(t.Context(), foreign.ID, false)
+				},
+				func() error {
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.SetCronScheduleNextDue(t.Context(), foreign.ID, &now)
+				},
+				func() error {
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.SetCronScheduleLock(t.Context(), foreign.ID, CronLock{Ref: "forged"})
+				},
+				func() error {
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.SetCronOverride(t.Context(), foreign.ID, CronOverride{})
+				},
+				func() error {
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.ClearCronOverride(t.Context(), foreign.ID)
+				},
 				func() error { return tenant.DeleteCronSchedule(t.Context(), foreign.ID) },
 				func() error {
-					return tenant.ResolveCronDue(t.Context(), foreign.ID, now, nil, &CronFire{Outcome: CronOutcomeMissed, DueAt: now, DecidedAt: now}, now)
+					s.SetTestClock(t, func() time.Time { return now })
+					return tenant.ResolveCronDue(t.Context(), foreign.ID, now, nil, &CronFire{Outcome: CronOutcomeMissed, DueAt: now, DecidedAt: now})
 				},
 			}
 			random.Shuffle(len(mutations), func(x, y int) { mutations[x], mutations[y] = mutations[y], mutations[x] })
@@ -67,7 +88,8 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 			}
 			forged := foreign
 			forged.RepoPath += "/forged"
-			if own, created, err := tenant.ArmCronSchedule(t.Context(), forged, now); err != nil || !created || own.Team != tenant.team {
+			s.SetTestClock(t, func() time.Time { return now })
+			if own, created, err := tenant.ArmCronSchedule(t.Context(), forged); err != nil || !created || own.Team != tenant.team {
 				t.Fatalf("arming a foreign id in this team: %+v, %v, %v", own, created, err)
 			}
 			if err := tenant.DeleteCronSchedule(t.Context(), foreign.ID); err != nil {
@@ -91,8 +113,9 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 }
 
 func TestCronSchedulePersistsCanonicalRepository(t *testing.T) {
-	tenant := &Tenant{s: authorityStore(t), team: "a"}
+	s := authorityStore(t)
 	now := time.Unix(1700000000, 37).UTC()
+	tenant := &Tenant{s: s, team: "a"}
 	for i, input := range []runspec.RepoInput{
 		{RemoteURL: "/repos/work/../project"},
 		{RemoteURL: "ssh://git@example.com:2222/Owner/Repo.git"},
@@ -106,7 +129,8 @@ func TestCronSchedulePersistsCanonicalRepository(t *testing.T) {
 		if input.GitHubRepositoryID.Set {
 			schedule.GitHubInstallationID, schedule.GitHubRepositoryID = 42, input.GitHubRepositoryID.Value
 		}
-		if _, _, err := tenant.ArmCronSchedule(t.Context(), schedule, now); err != nil {
+		s.SetTestClock(t, func() time.Time { return now })
+		if _, _, err := tenant.ArmCronSchedule(t.Context(), schedule); err != nil {
 			t.Fatal(err)
 		}
 		var key string
@@ -120,7 +144,7 @@ func TestArmCronScheduleDerivesIdentityRatherThanCallerKeyProperty(t *testing.T)
 	property := func(value uint16) bool {
 		s := authorityStore(t)
 		tenant := &Tenant{s: s, team: "a"}
-		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "derived", RepoPath: "https://git.example.com/acme/repo.git", RepositoryKey: runspec.RepoKey(fmt.Sprintf("gh:%d", int(value)+1)), Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"}, time.Now())
+		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "derived", RepoPath: "https://git.example.com/acme/repo.git", RepositoryKey: runspec.RepoKey(fmt.Sprintf("gh:%d", int(value)+1)), Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"})
 		return err == nil && row.RepositoryKey == "git:git.example.com/acme/repo"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
@@ -150,7 +174,7 @@ func TestArmCronScheduleUsesTrustedPolicyIdentityWithoutAppConsent(t *testing.T)
 			}
 			return runspec.Repository{Key: "gh:701"}, nil
 		}}
-		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "manual", RepoPath: "https://github.com/acme/repo.git", RepositoryKey: "gh:999", Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"}, time.Now())
+		row, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "manual", RepoPath: "https://github.com/acme/repo.git", RepositoryKey: "gh:999", Pipeline: "ci", Cron: "* * * * *", TZ: "UTC"})
 		if refused {
 			if err == nil {
 				t.Fatal("failed identity lookup armed a schedule")

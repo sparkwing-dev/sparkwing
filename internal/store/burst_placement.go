@@ -49,7 +49,8 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 	if err != nil || account == "" {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, tx.now().UnixNano(), tx.now().UnixNano())
+	now := tx.now(ctx)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +115,7 @@ func automatedLineageTx(ctx context.Context, tx *storeTx, team Team, run string)
 }
 
 func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, unit UnitRef) error {
-	seal, err := sealedRequestTx(ctx, tx, team, unit.RunID)
+	seal, err := sealedRequestTx(ctx, tx, team, string(unit.RunID))
 	burst := seal.Request.Burst
 	if err != nil || burst == nil {
 		return err
@@ -126,12 +127,12 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 	here := false
 	for _, ancestor := range chain {
 		a := ancestor.principal.Capability
-		here = here || a.Purpose == capability.PurposeHere && a.Binding.RunID == unit.RunID
+		here = here || a.Purpose == capability.PurposeHere && a.Binding.RunID == string(unit.RunID)
 	}
 	root := chain[len(chain)-1].principal.Capability
 	cloud, eligible := facts.Cloud, here || facts.Cloud || facts.Personal
 	if facts.Personal {
-		if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
+		if err := checkPersonalMachineTx(ctx, tx, chain, string(unit.RunID)); err != nil {
 			return err
 		}
 	}
@@ -148,7 +149,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 		}
 		profile.Class = match.ClassCloud
 	}
-	preferences, err := burstPreferencesTx(ctx, tx, team, unit.RunID, *burst)
+	preferences, err := burstPreferencesTx(ctx, tx, team, string(unit.RunID), *burst)
 	if err != nil {
 		return err
 	}

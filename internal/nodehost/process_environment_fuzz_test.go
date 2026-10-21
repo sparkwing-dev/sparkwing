@@ -29,7 +29,7 @@ func FuzzSDKCleanupEnvironment(f *testing.F) {
 		job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: value, Startup: startup}}}
 		st.row.Spec, _ = json.Marshal(job)
 		policy := SDKEnvironment{Base: procenv.Base{Local: true, Captured: captured}, Store: st}
-		env, complete, err := policy.jobEnvironments(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, true)
+		env, complete, err := policy.jobEnvironments(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner, true)
 		if err != nil {
 			if len(env) != 0 || len(complete) != 0 {
 				t.Fatal("refused projection returned a partial environment")

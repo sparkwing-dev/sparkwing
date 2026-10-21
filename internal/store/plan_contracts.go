@@ -58,7 +58,7 @@ type PlanSecretOpener interface {
 	OpenPlanSecret(context.Context, Team, Secret) (string, error)
 }
 
-func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection) (*secrets.Masker, error) {
+func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection, prior ...AcceptedExpansionRow) (*secrets.Masker, error) {
 	values := secrets.NewMasker()
 	if spec.Request.Request.Origin != runspec.OriginLocal && len(spec.Request.Request.Env.Names) > 0 {
 		submitted, err := (&Tenant{s: tx.store, team: team}).readSubmittedEnvironmentTx(ctx, tx, spec.Request.RunID)
@@ -74,14 +74,25 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		if err != nil {
 			return nil, err
 		}
-		values.Register(value)
-	}
-	for _, name := range spec.Resolved.SecretArgs {
-		value, exists := spec.Resolved.Args[name]
-		if !exists {
-			return nil, authorityError(apierr.PlanInvalid, "secret argument classification names an absent argument")
+		if err := values.Register(value); err != nil {
+			return nil, authorityError(apierr.PlanInvalid, err.Error())
 		}
-		values.Register(value)
+	}
+	registration, err := runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
+	if err != nil {
+		return nil, authorityError(apierr.PlanInvalid, err.Error())
+	}
+	for _, value := range registration.Values {
+		if err := values.Register(value); err != nil {
+			return nil, authorityError(apierr.PlanInvalid, err.Error())
+		}
+	}
+	for _, expansion := range prior {
+		for _, value := range expansion.Registration.Values {
+			if err := values.Register(value); err != nil {
+				return nil, authorityError(apierr.PlanInvalid, err.Error())
+			}
+		}
 	}
 	rows, err := selectedSecretsTx(ctx, tx, team, "", selection)
 	if err != nil {
@@ -99,7 +110,9 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		if err != nil {
 			return nil, authorityError(apierr.Unavailable, "plan secret decryption failed")
 		}
-		values.Register(value)
+		if err := values.Register(value); err != nil {
+			return nil, authorityError(apierr.PlanInvalid, err.Error())
+		}
 	}
 	return values, nil
 }

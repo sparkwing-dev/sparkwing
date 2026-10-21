@@ -246,7 +246,9 @@ func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) e
 		if masker == nil {
 			return errors.New("environment requires a secret masker")
 		}
-		masker.Register(value)
+		if err := masker.Register(value); err != nil {
+			return err
+		}
 	}
 	return nil
 }

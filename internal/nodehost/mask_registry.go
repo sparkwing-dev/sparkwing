@@ -29,13 +29,9 @@ func (r *MaskRegistry) ContainsSecret(identifier string) bool {
 // Register refuses collisions before changing any sink; success is synchronous.
 func (r *MaskRegistry) Register(value string) error {
 	candidate := secrets.NewMasker()
-	candidate.Register(value)
-	return r.register(candidate)
-}
-
-func (r *MaskRegistry) registerList(value string) error {
-	candidate := secrets.NewMasker()
-	candidate.RegisterList(value)
+	if err := candidate.Register(value); err != nil {
+		return err
+	}
 	return r.register(candidate)
 }
 

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -60,7 +59,7 @@ func TestLedgerTablesAreWrittenOnlyThroughTheLedger(t *testing.T) {
 // Returning rows is still a mutation; each execution surface must refuse it before it reaches SQL.
 func TestAssembledLedgerWritesAreRefusedAtRunTime(t *testing.T) {
 	s := authorityStore(t)
-	queryError := func(rows *sql.Rows, err error) error {
+	queryError := func(rows rowCursor, err error) error {
 		if err != nil {
 			return err
 		}

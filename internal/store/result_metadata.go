@@ -55,14 +55,15 @@ func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref contro
 	if !slices.Contains(p.Capability.Grants, capability.NodeReport) {
 		return NodeRow{}, authorityError(apierr.Forbidden, "job reporting grant is required")
 	}
-	if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil {
+	if err := lockStateRunTx(ctx, tx, team, string(ref.RunID)); err != nil {
 		return NodeRow{}, err
 	}
 	row, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil {
 		return row, err
 	}
-	if err := checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
+
+	if err := checkHolderTx(ctx, tx, team, row, actor); err != nil {
 		return row, err
 	}
 	if row.Attempt <= 0 {
@@ -74,7 +75,7 @@ func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref contro
 	if err != nil {
 		return row, err
 	}
-	if writer != actor.CapabilityPrefix || generation != row.Generation {
+	if writer != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != row.Generation {
 		return row, holderRefusal()
 	}
 	return row, nil
@@ -98,19 +99,16 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 	if err := boundedResultText(report.MaskedError); err != nil {
 		return err
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID}, report.Actor)
-	if err != nil {
-		return err
-	}
-	if row.Attempt != report.Attempt.Attempt || row.Generation != report.Attempt.Generation {
-		return holderRefusal()
-	}
-	return writeStepTx(ctx, tx, t.team, row, report)
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)}, report.Actor)
+		if err != nil {
+			return err
+		}
+		if row.Attempt != runspec.AttemptOrdinal(report.Attempt.Attempt) || row.Generation != runspec.ClaimGeneration(report.Attempt.Generation) {
+			return holderRefusal()
+		}
+		return writeStepTx(ctx, tx, t.team, row, report)
+	})
 }
 
 func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, report StepReport) error {
@@ -126,11 +124,11 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 		start = sql.NullInt64{Int64: report.StartedAt.UnixNano(), Valid: true}
 	}
 	if !start.Valid {
-		start = sql.NullInt64{Int64: tx.now().UnixNano(), Valid: true}
+		start = sql.NullInt64{Int64: tx.now(ctx).UnixNano(), Valid: true}
 	}
 	end := sql.NullInt64{}
 	if report.State != "running" {
-		end = sql.NullInt64{Int64: tx.now().UnixNano(), Valid: true}
+		end = sql.NullInt64{Int64: tx.now(ctx).UnixNano(), Valid: true}
 		if report.FinishedAt != nil {
 			end.Int64 = report.FinishedAt.UnixNano()
 		}
@@ -148,7 +146,7 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 		if state != report.State || message != report.MaskedError || started != start || finished != end {
 			return authorityError(apierr.IllegalTransition, "finished step is immutable")
 		}
-		return tx.Commit()
+		return nil
 	}
 	if exists && started != start {
 		return authorityError(apierr.Conflict, "step start time is immutable")
@@ -157,7 +155,7 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 type storedAnnotation struct {
@@ -183,47 +181,44 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 	if int64(len(encoded)) > limits.AnnotationBytes {
 		return authorityError(apierr.PayloadTooLarge, "annotation exceeds the byte limit")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
-	if err != nil {
-		return err
-	}
-	var count, total int64
-	err = tx.QueryRowContext(ctx, `SELECT annotation_count,(SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM nodes WHERE team = ? AND run_id = ?) + (SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM node_steps WHERE team = ? AND run_id = ?) FROM runs WHERE team = ? AND id = ?`, t.team, row.Ref.RunID, t.team, row.Ref.RunID, t.team, row.Ref.RunID).Scan(&count, &total)
-	if err != nil {
-		return err
-	}
-	if count >= int64(limits.MaxAnnotations) || total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
-		return authorityError(apierr.LimitExceeded, "run annotation limit exceeded")
-	}
-	var existing []byte
-	query, args := resultTarget(row, t.team, annotation.StepID)
-	table, where, _ := strings.Cut(query, " WHERE ")
-	if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
-		return err
-	}
-	var entries []storedAnnotation
-	if len(existing) > 0 {
-		if err := json.Unmarshal(existing, &entries); err != nil {
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
+		if err != nil {
 			return err
 		}
-	}
-	entries = append(entries, entry)
-	body, err := json.Marshal(entries)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET annotations_json = ? WHERE "+where, append([]any{body}, args...)...); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?", annotation.Message, t.team, row.Ref.RunID); err != nil {
-		return err
-	}
-	return tx.Commit()
+		var count, total int64
+		err = tx.QueryRowContext(ctx, `SELECT annotation_count,(SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM nodes WHERE team = ? AND run_id = ?) + (SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM node_steps WHERE team = ? AND run_id = ?) FROM runs WHERE team = ? AND id = ?`, t.team, row.Ref.RunID, t.team, row.Ref.RunID, t.team, row.Ref.RunID).Scan(&count, &total)
+		if err != nil {
+			return err
+		}
+		if count >= int64(limits.MaxAnnotations) || total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
+			return authorityError(apierr.LimitExceeded, "run annotation limit exceeded")
+		}
+		var existing []byte
+		query, args := resultTarget(row, t.team, annotation.StepID)
+		table, where, _ := strings.Cut(query, " WHERE ")
+		if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
+			return err
+		}
+		var entries []storedAnnotation
+		if len(existing) > 0 {
+			if err := json.Unmarshal(existing, &entries); err != nil {
+				return err
+			}
+		}
+		entries = append(entries, entry)
+		body, err := json.Marshal(entries)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET annotations_json = ? WHERE "+where, append([]any{body}, args...)...); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?", annotation.Message, t.team, row.Ref.RunID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // WriteSummary stores bounded masked markdown under the current writer binding.
@@ -231,29 +226,26 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 	if err := boundedResultText(summary.Markdown); err != nil {
 		return err
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	row, err := checkMetadataWriterTx(ctx, tx, t.team, summary.Ref, summary.Actor, summary.StepID)
-	if err != nil {
-		return err
-	}
-	query, args := resultTarget(row, t.team, summary.StepID)
-	table, where, _ := strings.Cut(query, " WHERE ")
-	result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET summary = ? WHERE "+where, append([]any{summary.Markdown}, args...)...)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return ErrNotFound
-	}
-	return tx.Commit()
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		row, err := checkMetadataWriterTx(ctx, tx, t.team, summary.Ref, summary.Actor, summary.StepID)
+		if err != nil {
+			return err
+		}
+		query, args := resultTarget(row, t.team, summary.StepID)
+		table, where, _ := strings.Cut(query, " WHERE ")
+		result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET summary = ? WHERE "+where, append([]any{summary.Markdown}, args...)...)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func resultTarget(row NodeRow, team Team, step string) (string, []any) {

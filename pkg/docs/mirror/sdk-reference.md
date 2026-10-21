@@ -198,14 +198,14 @@ type Cmd struct {
 
 - `func Bash(ctx context.Context, line string) *Cmd` -- Bash starts building a shell command (run via "bash -c").
 - `func Exec(ctx context.Context, name string, args ...string) *Cmd` -- Exec starts building an argv command (no shell).
-- `func (c *Cmd) Capture() (ExecResult, error)` -- Capture executes the command silently -- no per-line log records, just the exec_start banner.
+- `func (c *Cmd) Capture() (ExecResult, error)` -- Capture executes the command silently -- no output log records, just the exec_start banner.
 - `func (c *Cmd) Dir(path string) *Cmd` -- Dir sets the working directory for the command.
 - `func (c *Cmd) Env(key, value string) *Cmd` -- Env adds (or overrides) a single environment variable.
 - `func (c *Cmd) EnvMap(env map[string]string) *Cmd` -- EnvMap merges a map of environment variables into the command.
 - `func (c *Cmd) JSON(out any) error` -- JSON runs the command silently and decodes stdout into out via encoding/json.
 - `func (c *Cmd) Lines() ([]string, error)` -- Lines runs the command silently and returns stdout split on "\n", with each line trimmed and blanks dropped.
 - `func (c *Cmd) MustBeEmpty(reason string) error` -- MustBeEmpty runs the command silently and returns nil only if its stdout (after TrimSpace) is empty.
-- `func (c *Cmd) Run() (ExecResult, error)` -- Run executes the command, streaming stdout/stderr line-by-line to the logger installed in ctx.
+- `func (c *Cmd) Run() (ExecResult, error)` -- Run executes the command, forwarding stdout/stderr bytes to the logger installed in ctx.
 - `func (c *Cmd) String() (string, error)` -- String runs the command silently and returns TrimSpace(stdout).
 
 ### type ConcurrencyGroup
@@ -579,6 +579,8 @@ type JobNode struct {
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
+- `func (n *JobNode) StartsChildren(pipelines ...string) *JobNode` -- StartsChildren appends pipelines in the parent repository that this job may start with RunAndAwait.
+- `func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode` -- StartsChildrenIn declares child pipelines in a canonical repository key such as "gh:123" or "git:host/org/repo".
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
 - `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify checks a postcondition after each successful action attempt.
 
@@ -607,6 +609,7 @@ type LogRecord struct {
     Event string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
     Msg   string         `json:"msg,omitempty"`
     Attrs map[string]any `json:"attrs,omitempty"`
+    // contains filtered or unexported fields
 }
 ```
 
@@ -1170,5 +1173,5 @@ var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 ```
 
 ```
-var ErrSecretMissing = errors.New("secret missing")
+var ErrSecretMissing = secrets.ErrSecretMissing
 ```

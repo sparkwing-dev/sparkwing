@@ -60,9 +60,11 @@ func (s logHostStore) FinishRunAndUnit(ctx context.Context, request store.Finish
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
-func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeTransition) (store.Applied, error) {
-	if request.Cause == store.CauseReport || request.Cause == store.CauseRetry || request.Cause == store.CauseRelease {
-		if err := s.logs.closeNode(context.WithoutCancel(ctx), request.Ref.NodeID); err != nil {
+func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (store.Applied, error) {
+	switch request.(type) {
+	case store.ReportNode, store.RetryNode, store.ReleaseNode:
+		ref, _ := store.NodeCommandAuthority(request)
+		if err := s.logs.closeNode(context.WithoutCancel(ctx), string(ref.NodeID)); err != nil {
 			return store.Applied{}, err
 		}
 	}
@@ -99,26 +101,29 @@ func (l *localLogs) subject(ctx context.Context, node string) (capability.Princi
 		subject.Unit.Source = &blob.LogSource{NodeID: b.NodeID, Generation: b.Generation}
 	}
 	if node != "" {
-		row, err := l.readNode(ctx, controllerwire.NodeRef{RunID: l.run, NodeID: node})
+		row, err := l.readNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)})
 		if err != nil {
 			return p, blob.LogSubject{}, err
 		}
-		if row.Ref != (controllerwire.NodeRef{RunID: l.run, NodeID: node}) {
+		if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)}) {
 			return p, blob.LogSubject{}, nodeClaimMismatch()
 		}
 		if row.Status == store.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {
-			p, err = l.claims.principal(ctx, node, row.Generation, row.Attempt)
+			p, err = l.claims.principal(ctx, node, int64(row.Generation), int64(row.Attempt))
 			if err != nil {
 				return p, blob.LogSubject{}, err
 			}
 			subject.Kind, subject.Unit = blob.LogJobAttempt, nil
-			subject.Attempt = &runspec.AttemptIdentity{Team: p.Capability.Team, RunID: l.run, NodeID: node, Generation: row.Generation, Attempt: row.Attempt}
+			subject.Attempt = &runspec.AttemptIdentity{Team: p.Capability.Team, RunID: l.run, NodeID: node, Generation: int64(row.Generation), Attempt: int64(row.Attempt)}
 		}
 	}
 	return p, subject, subject.Validate()
 }
 
 func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
+	if frame.Stream != "" || frame.StreamData != "" || frame.StreamEnd {
+		return errors.New("raw SDK streams require the host egress adapter")
+	}
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
@@ -130,7 +135,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(frame)
+	body, err := json.Marshal(l.masker.Log(frame))
 	if err != nil {
 		return err
 	}
@@ -154,7 +159,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 		}
 		l.sinks[string(key)] = sink
 	}
-	return sink.Append(l.masker.MaskJSON(body), "", 0, 0)
+	return sink.Append(body, "", 0, 0)
 }
 
 func (l *localLogs) close(ctx context.Context) error {

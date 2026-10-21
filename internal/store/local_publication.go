@@ -45,7 +45,7 @@ func (t *Tenant) readLocalPublication(ctx context.Context, run string, reads *bl
 		if err != nil {
 			return LocalPublication{}, err
 		}
-		result.Results[node.Ref.NodeID] = terminal
+		result.Results[string(node.Ref.NodeID)] = terminal
 		for _, key := range []*blob.RecordKey{node.OutputRecord, node.ManifestRecord} {
 			if key == nil {
 				continue

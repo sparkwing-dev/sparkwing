@@ -95,7 +95,7 @@ func TestMeteredPlanRenewalExcludesSchedulingWait(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunTransition{RunID: "run", To: RunFailed, Cause: RunFinish, Actor: actor}}
+	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: "run", Cause: RunFinish, Actor: actor}}
 	if _, err := (&Tenant{s: s, team: "a"}).FinishRunAndUnit(t.Context(), finish); err != nil {
 		t.Fatal(err)
 	}

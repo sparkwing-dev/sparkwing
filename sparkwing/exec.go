@@ -1,7 +1,6 @@
 package sparkwing
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
@@ -218,14 +218,14 @@ func (c *Cmd) EnvMap(env map[string]string) *Cmd {
 	return c
 }
 
-// Run executes the command, streaming stdout/stderr line-by-line to
-// the logger installed in ctx. Returns an ExecResult on success, or
+// Run executes the command, forwarding stdout/stderr bytes to
+// the logger installed in ctx. The host masks and splits them into lines. Returns an ExecResult on success, or
 // an *ExecError on non-zero exit / failure to start.
 func (c *Cmd) Run() (ExecResult, error) {
 	return c.execute(false)
 }
 
-// Capture executes the command silently -- no per-line log records,
+// Capture executes the command silently -- no output log records,
 // just the exec_start banner. The full stdout/stderr are returned in
 // the ExecResult; on failure, the *ExecError carries the captured
 // streams.
@@ -436,8 +436,9 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	limiter := newDiagnosticOutputLimiter(ctx)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go streamLines(ctx, &wg, outR, "info", logger, &outBuf, limiter)
-	go streamLines(ctx, &wg, errR, "info", logger, &errBuf, limiter)
+	commandID := commandStreamSequence.Add(1)
+	go streamChunks(ctx, &wg, outR, "info", logger, &outBuf, limiter, fmt.Sprintf("exec-%d-stdout", commandID))
+	go streamChunks(ctx, &wg, errR, "info", logger, &errBuf, limiter, fmt.Sprintf("exec-%d-stderr", commandID))
 	go func() {
 		wg.Wait()
 		close(streamsDone)
@@ -535,34 +536,32 @@ func closeFiles(files ...*os.File) {
 	}
 }
 
-func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level string, logger Logger, buf *strings.Builder, limiter *diagnosticOutputLimiter) {
+var commandStreamSequence atomic.Uint64
+
+func streamChunks(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level string, logger Logger, buf *strings.Builder, limiter *diagnosticOutputLimiter, streamID string) {
 	defer wg.Done()
 	defer r.Close()
 	node := nodeFromContext(ctx)
 	silent := isSilent(ctx)
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
-		if limiter != nil {
-			var keep bool
-			line, keep = limiter.filter(line)
-			if !keep {
-				continue
+	chunk := make([]byte, 32<<10)
+	for {
+		n, err := r.Read(chunk)
+		if n > 0 {
+			raw := append([]byte(nil), chunk[:n]...)
+			if !silent {
+				logger.Emit(recordEnvelope(ctx, LogRecord{TS: time.Now(), Level: level, JobID: node, Event: "exec_line", streamID: streamID, streamData: raw}))
 			}
+			if limiter != nil {
+				raw = limiter.capture(raw)
+			}
+			_, _ = buf.Write(raw)
 		}
-		buf.WriteString(line)
-		buf.WriteByte('\n')
-		if silent {
-			continue
+		if err != nil {
+			break
 		}
-		logger.Emit(recordEnvelope(ctx, LogRecord{
-			TS:    time.Now(),
-			Level: level,
-			JobID: node,
-			Event: "exec_line",
-			Msg:   line,
-		}))
+	}
+	if !silent {
+		logger.Emit(recordEnvelope(ctx, LogRecord{TS: time.Now(), Level: level, JobID: node, Event: "exec_line", streamID: streamID, streamEnd: true}))
 	}
 }
 
@@ -583,27 +582,26 @@ func newDiagnosticOutputLimiter(ctx context.Context) *diagnosticOutputLimiter {
 	return &diagnosticOutputLimiter{policy: policy, remaining: policy.OutputLimit}
 }
 
-func (l *diagnosticOutputLimiter) filter(line string) (string, bool) {
+func (l *diagnosticOutputLimiter) capture(raw []byte) []byte {
 	if !l.policy.Expired() {
-		return line, true
+		return raw
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	need := len(line) + 1
-	markerBytes := len(diagnosticTruncationMarker) + 1
-	if need+markerBytes <= l.remaining {
-		l.remaining -= need
-		return line, true
-	}
 	if l.marked {
-		return "", false
+		return nil
+	}
+	markerBytes := len(diagnosticTruncationMarker)
+	if len(raw)+markerBytes <= l.remaining {
+		l.remaining -= len(raw)
+		return raw
 	}
 	l.marked = true
 	if markerBytes > l.remaining {
-		return "", false
+		return nil
 	}
 	l.remaining -= markerBytes
-	return diagnosticTruncationMarker, true
+	return []byte(diagnosticTruncationMarker)
 }
 
 func renderCommand(name string, args []string) string {
