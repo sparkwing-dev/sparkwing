@@ -33,3 +33,38 @@ exit: 0
 NOT RUN: full suite, full rewrite_integration suite, PostgreSQL and socket-dependent tests; harness lead owns these.
 Candidate context unavailable: Xwing tried to mkdir ~/.xwing/locks/sessions.index, outside sandbox writes. No candidate installed or real HOME used.
 Integration merge: HEAD and bw-3095-rewrite identical (rev-list 0 0); git merge could not write read-only ORIG_HEAD metadata.
+
+WS15 session 2 verification (after bc8e884eb)
+Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-WS15
+Integration: git merge-base --is-ancestor bw-3095-rewrite HEAD succeeded; no merge needed.
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing run ./internal/guardcheck /home/bombuntu/.xwing/envs/1084/sparkwing
+Additional environment: GOLANGCI_LINT_CACHE=/home/bombuntu/.xwing/envs/1084/sparkwing/.cache/golangci-lint
+guardcheck: every guard matches its allow-list
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials -count=1
+ok github.com/sparkwing-dev/sparkwing/internal/credentials 0.173s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestOpenExistingSchemaErrors|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok internal/credentials 0.155s
+ok internal/capability 0.103s
+ok internal/store 1.317s
+ok internal/controller 1.247s
+ok internal/crons 3.162s
+ok cmd/sparkwing-controller 0.672s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test -tags rewrite_integration ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestOpenExistingSchemaErrors|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok internal/credentials 0.219s
+ok internal/capability 0.076s
+ok internal/store 1.538s
+ok internal/controller 0.630s
+ok internal/crons 1.977s
+ok cmd/sparkwing-controller 0.316s
+exit: 0
+
+git diff --check: passed.
+NOT RUN: full suites, PostgreSQL or socket-dependent checks; harness lead owns these.
+No web changes. Xwing candidate context still cannot create its session index lock in this sandbox.

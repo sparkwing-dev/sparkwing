@@ -23,7 +23,7 @@ func TestEpochSurvivesRestartAndRotates(t *testing.T) {
 	if err != nil || again != next {
 		t.Fatalf("rotated restart: %q %v", again, err)
 	}
-	if err := os.WriteFile(EpochPath(dir), []byte("broken"), 0o600); err != nil {
+	if err := os.WriteFile(epochPath(dir), []byte("broken"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadOrCreateEpoch(dir); err == nil {

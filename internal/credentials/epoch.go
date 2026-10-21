@@ -12,13 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
-// EpochPath names the restore fence beside the deployment's secrets-key.
-func EpochPath(dir string) string { return filepath.Join(dir, "credential-epoch") }
+func epochPath(dir string) string { return filepath.Join(dir, "credential-epoch") }
 
 // LoadOrCreateEpoch loads the external credential fence, creating it on first startup.
 // A restored database must retain this file from the current deployment.
 func LoadOrCreateEpoch(dir string) (string, error) {
-	path := EpochPath(dir)
+	path := epochPath(dir)
 	body, err := os.ReadFile(path)
 	if err == nil {
 		return parseEpoch(body)
@@ -61,7 +60,7 @@ func RotateEpoch(dir string) (string, error) {
 	if err := errors.Join(writeErr, f.Sync(), f.Close()); err != nil {
 		return "", err
 	}
-	if err := os.Rename(f.Name(), EpochPath(dir)); err != nil {
+	if err := os.Rename(f.Name(), epochPath(dir)); err != nil {
 		return "", err
 	}
 	return epoch, fssecure.SyncDir(dir)
