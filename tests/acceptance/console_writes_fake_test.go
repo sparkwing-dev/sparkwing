@@ -40,7 +40,7 @@ func (f consoleStoreFake) ConsoleSetBillingTrust(ctx context.Context, a capabili
 	if err != nil {
 		return store.BillingStanding{}, err
 	}
-	return tenant.BillingStanding(ctx, time.Now())
+	return tenant.BillingStanding(ctx)
 }
 
 func (f consoleStoreFake) ConsoleFreeze(ctx context.Context, a capability.Authorized, reason string) (store.TeamCreditFreeze, error) {
@@ -48,7 +48,7 @@ func (f consoleStoreFake) ConsoleFreeze(ctx context.Context, a capability.Author
 	if err != nil {
 		return store.TeamCreditFreeze{}, err
 	}
-	if _, err := tenant.HoldByOperator(ctx, a.Principal.Capability.Subject.ID, reason, time.Now()); err != nil {
+	if _, err := tenant.HoldByOperator(ctx, a.Principal.Capability.Subject.ID, reason); err != nil {
 		return store.TeamCreditFreeze{}, err
 	}
 	return tenant.CreditFreeze(ctx)
@@ -60,9 +60,9 @@ func (f consoleStoreFake) ConsoleUnfreeze(ctx context.Context, a capability.Auth
 		return store.TeamCreditFreeze{}, err
 	}
 	if hold != "" {
-		_, err = tenant.ReleaseCreditFreezes(ctx, hold, a.Principal.Capability.Subject.ID, reason, time.Now())
+		_, err = tenant.ReleaseCreditFreezes(ctx, hold, a.Principal.Capability.Subject.ID, reason)
 	} else {
-		_, err = tenant.ReleaseOperatorHolds(ctx, a.Principal.Capability.Subject.ID, reason, time.Now())
+		_, err = tenant.ReleaseOperatorHolds(ctx, a.Principal.Capability.Subject.ID, reason)
 	}
 	if err != nil {
 		return store.TeamCreditFreeze{}, err
@@ -71,5 +71,5 @@ func (f consoleStoreFake) ConsoleUnfreeze(ctx context.Context, a capability.Auth
 }
 
 func (f consoleStoreFake) ConsoleDeleteAccount(ctx context.Context, a capability.Authorized) (store.AccountDeletion, error) {
-	return f.store.DeleteAccount(ctx, a.Target.AccountID, time.Now())
+	return f.store.DeleteAccount(ctx, a.Target.AccountID)
 }

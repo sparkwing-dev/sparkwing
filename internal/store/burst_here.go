@@ -31,7 +31,7 @@ func hereObserverTx(ctx context.Context, tx *storeTx, p capability.Principal) (b
 		return true, nil
 	}
 	var prefix string
-	err = tx.QueryRowContext(ctx, `SELECT capability_prefix FROM triggers WHERE team=? AND id=? AND generation=? AND claimed_by=? AND lease_expires_at>?`, c.Team, c.Binding.RunID, c.Binding.Generation, c.Binding.Holder, tx.now().UnixNano()).Scan(&prefix)
+	err = tx.QueryRowContext(ctx, `SELECT capability_prefix FROM triggers WHERE team=? AND id=? AND generation=? AND claimed_by=? AND lease_expires_at>?`, c.Team, c.Binding.RunID, c.Binding.Generation, c.Binding.Holder, tx.now(ctx).UnixNano()).Scan(&prefix)
 	if err == sql.ErrNoRows {
 		return false, holderRefusal()
 	}
@@ -71,11 +71,11 @@ func (o *Operator) RecordHereAvailability(ctx context.Context, authority capabil
 		if !validMatchingResources(available) || available.Cores > demand.Capacity.Cores && demand.Capacity.Cores > 0 || available.MemoryBytes > demand.Capacity.MemoryBytes && demand.Capacity.MemoryBytes > 0 {
 			return authorityError(apierr.BadRequest, "invalid here availability")
 		}
-		body, err := json.Marshal(runnerPoll{UnitDemand: demand, ObservedAt: tx.now()})
+		body, err := json.Marshal(runnerPoll{UnitDemand: demand, ObservedAt: tx.now(ctx)})
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now().UnixNano(), p.Capability.Team, p.Capability.Prefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now(ctx).UnixNano(), p.Capability.Team, p.Capability.Prefix)
 		return err
 	})
 	return err

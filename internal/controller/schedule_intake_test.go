@@ -17,7 +17,7 @@ func TestScheduleIntakeRequiresStoredConsent(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	tenant := teststore.ForTeam(t, st, store.DefaultTeam)
 	now := time.Now().UTC()
-	row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "raw-nightly", RepoPath: "https://gitlab.com/acme/repo.git", Pipeline: "nightly", Cron: "* * * * *", Where: store.CronWhereController, GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567", ArmedBy: "owner@example.com"}, now)
+	row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "raw-nightly", RepoPath: "https://gitlab.com/acme/repo.git", Pipeline: "nightly", Cron: "* * * * *", Where: store.CronWhereController, GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567", ArmedBy: "owner@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}

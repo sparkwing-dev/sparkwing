@@ -135,7 +135,7 @@ func (s *Server) githubAppConnectBegin(ctx context.Context, p capability.Authori
 		return githubAppConnectGrant{}, err
 	}
 	state, err := s.githubApp.signState(githubConnectState{
-		Team: string(p.Target.Team), Account: p.Principal.Capability.Subject.ID, Expires: time.Now().Add(githubAppStateTTL).Unix(),
+		Team: p.Target.Team, Account: p.Principal.Capability.Subject.ID, Expires: time.Now().Add(githubAppStateTTL).Unix(),
 		Nonce: nonce, Verifier: verifierDigest(verifier),
 	})
 	if err != nil {
@@ -386,7 +386,7 @@ func (s *Server) bindGitHubAppInstallation(ctx context.Context, writer GitHubCon
 		text := fmt.Sprintf("GitHub App installation %d (%s) was moved from Sparkwing team %s to team %s by a verified current GitHub administrator. Its subscriptions, automation consent and schedules were withdrawn from your team. A team owner who administers the GitHub account can reconnect it.", inst.ID, inst.Account.Login, bound.Reclaimed.Team, bound.Team)
 		s.mailRecipients(ctx, bound.Reclaimed.OwnerEmails, "GitHub App installation moved to another team", text, strings.TrimRight(s.dashboardURL, "/")+"/team/github")
 	}
-	s.logger.Info("github app installation connected", "team", string(p.Target.Team), "installation_id", inst.ID,
+	s.logger.Info("github app installation connected", "team", p.Target.Team, "installation_id", inst.ID,
 		"account", inst.Account.Login, "account_type", inst.Account.Type, "by", p.Principal.Capability.Subject.ID, "github_user", githubUser)
 	return bound, nil
 }
@@ -409,7 +409,7 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Author
 	now := time.Now()
 	st, err := s.githubApp.openState(flow.State, flow.Verifier, p, now)
 	if err != nil {
-		s.logger.Info("github app connect refused", "team", string(p.Target.Team), "account", p.Principal.Capability.Subject.ID, "reason", err.Error())
+		s.logger.Info("github app connect refused", "team", p.Target.Team, "account", p.Principal.Capability.Subject.ID, "reason", err.Error())
 		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", err.Error())
 	}
 	if err := writer.ConsumeGitHubConnect(ctx, p, st.Nonce, time.Unix(st.Expires, 0)); err != nil {

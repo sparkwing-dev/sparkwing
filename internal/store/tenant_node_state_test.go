@@ -12,7 +12,7 @@ import (
 func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t))
 	foreign := tenantFor(t, f.s, "globex")
-	start := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}
+	start := store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}
 	if _, err := foreign.TransitionNode(t.Context(), start); err == nil {
 		t.Fatal("foreign tenant started the job")
 	}
@@ -26,10 +26,10 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 		}
 		metadataStep(t, f, step, "running")
 	}
-	if steps, err := foreign.ListNodeSteps(t.Context(), f.ref.RunID); err != nil || len(steps) != 0 {
+	if steps, err := foreign.ListNodeSteps(t.Context(), string(f.ref.RunID)); err != nil || len(steps) != 0 {
 		t.Fatalf("foreign steps = %v, %v", steps, err)
 	}
-	if steps, err := f.tenant.ListNodeSteps(t.Context(), f.ref.RunID); err != nil || len(steps) != 2 {
+	if steps, err := f.tenant.ListNodeSteps(t.Context(), string(f.ref.RunID)); err != nil || len(steps) != 2 {
 		t.Fatalf("owner steps = %v, %v", steps, err)
 	}
 }
@@ -71,10 +71,10 @@ func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 	if err := acme.WriteMetric(ctx, a, sample); err != nil {
 		t.Fatalf("an identical retry: %v", err)
 	}
-	if got, err := globex.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, time.Time{}, 0); err != nil || len(got) != 0 {
+	if got, err := globex.ListNodeMetricsPage(ctx, string(f.ref.RunID), string(f.ref.NodeID), time.Time{}, 0); err != nil || len(got) != 0 {
 		t.Fatalf("globex.ListNodeMetricsPage = %v, %v, want none", got, err)
 	}
-	if got, err := acme.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, time.Time{}, 0); err != nil || len(got) != 1 {
+	if got, err := acme.ListNodeMetricsPage(ctx, string(f.ref.RunID), string(f.ref.NodeID), time.Time{}, 0); err != nil || len(got) != 1 {
 		t.Fatalf("acme.ListNodeMetricsPage = %v, %v, want the one sample", got, err)
 	}
 }
@@ -83,7 +83,7 @@ func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 func TestTenantFinishRejectsForeignAndMissingJobs(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	foreign := tenantFor(t, f.s, "foreign")
-	change := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}
+	change := store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}
 	before, err := f.tenant.ReadNode(t.Context(), f.ref)
 	if err != nil {
 		t.Fatal(err)

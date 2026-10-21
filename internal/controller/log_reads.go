@@ -10,6 +10,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
@@ -128,7 +130,7 @@ func logIncompleteLine(reason string) []byte {
 
 func logNodeSettled(view store.RunView, nodeID string) (settled, found bool) {
 	for _, row := range view.Snapshot.Nodes {
-		if row.Ref.NodeID == nodeID {
+		if row.Ref.NodeID == runspec.NodeID(nodeID) {
 			return view.Snapshot.Run.FinishedAt != nil || row.Status == store.StatusDone && row.Outcome != store.NodeFailed, true
 		}
 	}

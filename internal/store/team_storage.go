@@ -79,8 +79,27 @@ func (s *Store) inTxOnce(ctx context.Context, fn func(*storeTx) error) (err erro
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := fn(tx); err != nil {
+	err = fn(tx)
+	if tx.err != nil && !errors.Is(err, tx.err) {
+		return tx.err
+	}
+	if err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// A result is usable only after the transaction that authorized it commits.
+func inTxResult[T any](ctx context.Context, s *Store, fn func(*storeTx) (T, error)) (T, error) {
+	var out T
+	err := s.inTxOnce(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = fn(tx)
+		return err
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return out, nil
 }

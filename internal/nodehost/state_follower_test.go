@@ -40,7 +40,7 @@ func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 					return row, nil
 				}},
 				Subscribe: func(_ context.Context, run string) (StateSubscription, error) {
-					if run != ref.RunID {
+					if runspec.RunID(run) != ref.RunID {
 						t.Fatalf("subscribed to %q", run)
 					}
 					subscribed = true

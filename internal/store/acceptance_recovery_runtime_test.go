@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -62,8 +63,8 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 		t.Fatal(err)
 	}
 	f.plan = plan
-	f.owner, f.ref = plan.Actor, controllerwire.NodeRef{RunID: plan.RunID, NodeID: "job"}
-	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: f.ref, Actor: f.owner, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	f.owner, f.ref = plan.Actor, controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "job"}
+	if _, err := f.tenant.TransitionNode(ctx, store.ReadyNode{Ref: f.ref, Actor: f.owner}); err != nil {
 		t.Fatal(err)
 	}
 	authority := plan.Seal.Request.AuthorityRef
@@ -76,7 +77,7 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 		t.Fatal(err)
 	}
 	f.holderBearer = string(claim.Bearer)
-	f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	row, err := f.tenant.ReadNode(ctx, f.ref)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 		t.Fatal(err)
 	}
 	if started {
-		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}); err != nil {
+		if _, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -122,7 +123,7 @@ func (f storeRecoveryFixture) refuseLateReports(ctx context.Context) error {
 		return err
 	}
 	for _, actor := range []store.Actor{f.owner, f.holder} {
-		change := store.NodeTransition{Ref: f.ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport}
+		change := store.ReportNode{Ref: f.ref, Actor: actor, Outcome: store.NodeSuccess}
 		if actor.Kind == store.ActorHolder {
 			change.SourceAttempt = acceptanceAttempt(before.Attempt)
 		}
@@ -141,13 +142,13 @@ func (f storeRecoveryFixture) refuseLateReports(ctx context.Context) error {
 }
 
 func checkRecoveryEvents(ctx context.Context, f *storeRecoveryFixture, want []string) error {
-	events, err := f.tenant.ReadStateEvents(ctx, f.ref.RunID, 0, 100)
+	events, err := f.tenant.ReadStateEvents(ctx, string(f.ref.RunID), 0, 100)
 	if err != nil {
 		return err
 	}
 	var kinds []string
 	for _, event := range events {
-		if event.NodeID != f.ref.NodeID || event.StateSeq <= f.seq {
+		if runspec.NodeID(event.NodeID) != f.ref.NodeID || event.StateSeq <= f.seq {
 			continue
 		}
 		kinds = append(kinds, event.Kind)
@@ -179,7 +180,7 @@ func checkRecoveryUnstarted(t *testing.T) error {
 		if err != nil {
 			return err
 		}
-		if len(units) != 1 || !units[0].Requeued || units[0].Disruptions != 0 || units[0].Generation != before.Generation {
+		if len(units) != 1 || !units[0].Requeued || units[0].Disruptions != 0 || runspec.ClaimGeneration(units[0].Generation) != before.Generation {
 			return fmt.Errorf("unstarted lapse consumed recovery budget: %+v", units)
 		}
 		kinds = append(kinds, "job_requeued")
@@ -205,9 +206,9 @@ func checkRecoveryUnstarted(t *testing.T) error {
 			return fmt.Errorf("unstarted work did not reclaim without an attempt: %+v", next)
 		}
 		kinds = append(kinds, "job_ready", "job_claimed")
-		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, Holder: next.Claim.Holder, Generation: next.Claim.Generation}
+		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: next.Node.Ref.RunID, NodeID: next.Node.Ref.NodeID, Holder: next.Claim.Holder, Generation: next.Claim.Generation}}
 	}
-	applied, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)})
+	applied, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return err
 	}
@@ -233,11 +234,11 @@ func checkRecoveryStartedCap(t *testing.T) error {
 	ref := f.ref
 	var kinds []string
 	for ordinal := 1; ordinal <= 3; ordinal++ {
-		started, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(int64(ordinal - 1))})
+		started, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(int64(ordinal - 1))})
 		if err != nil {
 			return err
 		}
-		if started.Attempt != int64(ordinal) || started.Generation != f.holder.Generation {
+		if int64(started.Attempt) != int64(ordinal) || started.Generation != f.holder.Generation {
 			return fmt.Errorf("execution ordinal or generation reset: %+v", started)
 		}
 		kinds = append(kinds, "job_started")
@@ -261,7 +262,7 @@ func checkRecoveryStartedCap(t *testing.T) error {
 		if err != nil {
 			return err
 		}
-		if row.Attempt != int64(ordinal) || row.ApplicationRetries != 0 || row.Disruptions != ordinal || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.LeaseExpiresAt != nil || row.Generation != started.Generation {
+		if row.Attempt != runspec.AttemptOrdinal(ordinal) || row.ApplicationRetries != 0 || row.Disruptions != ordinal || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.LeaseExpiresAt != nil || row.Generation != started.Generation {
 			return fmt.Errorf("lapse changed execution history or kept a claim: %+v", row)
 		}
 		var outcome, reason string
@@ -283,11 +284,11 @@ func checkRecoveryStartedCap(t *testing.T) error {
 			kinds = append(kinds, "job_failed")
 			continue
 		}
-		if next.Kind != store.Execute || next.Claim == nil || len(next.Bearer) == 0 || next.Claim.Generation != started.Generation+1 || next.Node.Attempt != int64(ordinal) {
+		if next.Kind != store.Execute || next.Claim == nil || len(next.Bearer) == 0 || next.Claim.Generation != started.Generation+1 || next.Node.Attempt != runspec.AttemptOrdinal(ordinal) {
 			return fmt.Errorf("started lapse did not reclaim its next generation: %+v", next)
 		}
 		kinds = append(kinds, "job_requeued", "job_ready", "job_claimed")
-		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, Holder: next.Claim.Holder, Generation: next.Claim.Generation}
+		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: next.Node.Ref.RunID, NodeID: next.Node.Ref.NodeID, Holder: next.Claim.Holder, Generation: next.Claim.Generation}}
 	}
 	var attempts, runs int
 	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM node_attempts WHERE team=?`), f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
@@ -306,7 +307,7 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 	ctx := t.Context()
 	f := newStoreRecoveryFixture(t, false)
 	ref := f.ref
-	started, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)})
+	started, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil || started.Attempt != 1 {
 		return fmt.Errorf("first execution: %+v %v", started, err)
 	}
@@ -314,7 +315,7 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 	if err != nil {
 		return err
 	}
-	retry := store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseRetry, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: "verify", MaskedError: "verification failed"}}}
+	retry := store.RetryNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: "verify", MaskedError: "verification failed"}}
 	applied, err := f.tenant.TransitionNode(ctx, retry)
 	if err != nil || applied.Attempt != 2 || applied.Generation != started.Generation {
 		return fmt.Errorf("application retry: %+v %v", applied, err)
@@ -345,10 +346,10 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 	if after.Status != store.StatusRunning || after.ClaimedBy != before.ClaimedBy || after.CapabilityPrefix != before.CapabilityPrefix || after.Generation != before.Generation || after.LeaseExpiresAt == nil || before.LeaseExpiresAt == nil || !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.Disruptions != 0 || after.ApplicationRetries != 2 || after.Attempt != 3 {
 		return fmt.Errorf("retry changed claim continuity: %+v", after)
 	}
-	result := store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(3), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}
-	delayed = result
-	delayed.SourceAttempt = acceptanceAttempt(2)
-	if _, err := f.tenant.TransitionNode(ctx, delayed); err == nil {
+	result := store.ReportNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(3), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}
+	delayedResult := result
+	delayedResult.SourceAttempt = acceptanceAttempt(2)
+	if _, err := f.tenant.TransitionNode(ctx, delayedResult); err == nil {
 		return errors.New("delayed success finished a later attempt")
 	}
 	for i := range 2 {
@@ -357,14 +358,14 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 			return fmt.Errorf("terminal result %d: %+v %v", i, applied, err)
 		}
 	}
-	result.To, result.Extra.Result.Outcome = store.NodeFailed, store.NodeFailed
+	result.Outcome, result.Result.Outcome = store.NodeFailed, store.NodeFailed
 	if _, err := f.tenant.TransitionNode(ctx, result); err == nil {
 		return errors.New("conflicting result changed a terminal job")
 	}
 	if err := f.reopen(ctx); err != nil {
 		return err
 	}
-	view, err := f.tenant.ReadRunView(ctx, f.ref.RunID)
+	view, err := f.tenant.ReadRunView(ctx, string(f.ref.RunID))
 	if err != nil {
 		return err
 	}
@@ -376,7 +377,7 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 		if i == 2 {
 			want = store.NodeSuccess
 		}
-		if attempt.Identity.Attempt != int64(i+1) || attempt.Identity.Generation != started.Generation || attempt.Holder != before.ClaimedBy || attempt.CapabilityPrefix != before.CapabilityPrefix || attempt.Outcome != want || attempt.FinishedAt == nil {
+		if attempt.Identity.Attempt != int64(i+1) || attempt.Identity.Generation != int64(started.Generation) || attempt.Holder != before.ClaimedBy || attempt.CapabilityPrefix != before.CapabilityPrefix || attempt.Outcome != want || attempt.FinishedAt == nil {
 			return fmt.Errorf("retry attempt %d: %+v", i, attempt)
 		}
 	}
@@ -386,7 +387,7 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 func checkRecoveryCancellation(t *testing.T) error {
 	ctx := t.Context()
 	f := newStoreRecoveryFixture(t, true)
-	actor := store.Actor{Kind: store.ActorReaper, Owner: store.OwnerLeaseRef{Kind: store.OwnerController, Name: f.lease.Name, Holder: f.lease.Holder, Generation: f.lease.Generation}}
+	actor := store.Actor{Kind: store.ActorReaper, Owner: store.OwnerLeaseRef{Kind: store.OwnerController, Name: f.lease.Name, EvalFence: runspec.EvalFence{Holder: f.lease.Holder, Generation: runspec.ClaimGeneration(f.lease.Generation)}}}
 	request := store.RunTransition{RunID: f.ref.RunID, Actor: actor, To: store.RunCancelled, Cause: store.RunCancel, Reason: "user_cancelled"}
 	for range 2 {
 		if _, err := f.tenant.TransitionRun(ctx, request); err != nil {

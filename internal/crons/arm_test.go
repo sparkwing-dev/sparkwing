@@ -610,7 +610,7 @@ func TestTickRecordsAnOverrideThatStoppedEvaluating(t *testing.T) {
 	id := ScheduleID(root, "every-minute", "")
 	// safety: the store takes any zone string, so an override naming a zone
 	// this host cannot load is what a tick has to survive.
-	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronOverride(ctx, id, store.CronOverride{TZ: "Mars/Olympus"}, h.clock.now()); err != nil {
+	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronOverride(ctx, id, store.CronOverride{TZ: "Mars/Olympus"}); err != nil {
 		t.Fatalf("SetCronOverride: %v", err)
 	}
 
@@ -823,7 +823,7 @@ func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
 	// carried through, and Refresh skips a row with a pinned binary, so the
 	// row carries a ref alone -- the shape `crons install --no-prove` leaves.
 	lock := store.CronLock{Ref: "0123456789abcdef0123456789abcdef01234567"}
-	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronScheduleLock(ctx, id, lock, h.clock.now()); err != nil {
+	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronScheduleLock(ctx, id, lock); err != nil {
 		t.Fatalf("SetCronScheduleLock: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
@@ -932,7 +932,7 @@ func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
 		ID: "crn_pushed", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly",
 		Name: store.CronScheduleDefaultName, Cron: "* * * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-	}, h.clock.now()); err != nil {
+	}); err != nil {
 		t.Fatalf("seed a controller row: %v", err)
 	}
 

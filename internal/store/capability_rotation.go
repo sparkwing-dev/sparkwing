@@ -63,13 +63,13 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if err := machineAdministrationTx(ctx, tx, p, c); err != nil {
 			return err
 		}
-		if c.RevokedAt != nil || c.ExpiresAt != nil && !tx.now().Before(*c.ExpiresAt) {
+		if c.RevokedAt != nil || c.ExpiresAt != nil && !tx.now(ctx).Before(*c.ExpiresAt) {
 			return authorityError(apierr.LockHeld, "credential has ended or already has a successor")
 		}
 		if expires == nil {
 			expires = c.ExpiresAt
 		}
-		if expires != nil && !expires.After(tx.now()) {
+		if expires != nil && !expires.After(tx.now(ctx)) {
 			return authorityError(apierr.BadRequest, "replacement expiry has passed")
 		}
 		if !p.DirectAccountSession() && p.Class != capability.CredentialConsole {
@@ -102,7 +102,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if _, err := managementAuthorityTx(ctx, tx, team, a, "POST", true); err != nil {
 			return err
 		}
-		deadline := tx.now().Add(grace)
+		deadline := tx.now(ctx).Add(grace)
 		if c.ExpiresAt != nil && c.ExpiresAt.Before(deadline) {
 			deadline = *c.ExpiresAt
 		}
@@ -174,7 +174,7 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err != nil {
 		return err
 	}
-	if record.Value.ExpiresAt != nil && !tx.now().Before(*record.Value.ExpiresAt) {
+	if record.Value.ExpiresAt != nil && !tx.now(ctx).Before(*record.Value.ExpiresAt) {
 		return authorityError(apierr.LockHeld, "credential expired during rotation")
 	}
 	record.Value.RevokedAt = &deadline

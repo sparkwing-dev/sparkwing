@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
@@ -193,7 +195,7 @@ func scheduleFixture(t *testing.T, jobs ...nodeproto.JobSpec) RunSnapshot {
 		if err != nil {
 			t.Fatal(err)
 		}
-		row := NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: job.ID}, Status: StatusPending, Spec: spec}
+		row := NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: spec}
 		if len(job.Closures.Generate) != 0 {
 			row.Expansion = ExpansionExpected
 		}

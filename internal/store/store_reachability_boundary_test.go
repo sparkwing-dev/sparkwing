@@ -193,7 +193,7 @@ func TestStoreReachabilityNewReferenceWinsMarkedCollection(t *testing.T) {
 	}
 	identity := blob.UploadIdentity{
 		Kind: blob.UploadOwnerUnit, Team: "a", RunID: "target", Principal: "host", CapabilityRef: target.Actor.CapabilityPrefix,
-		Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadTriggerUnit, ID: "target", Generation: target.Actor.Owner.Generation}},
+		Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadTriggerUnit, ID: "target", Generation: int64(target.Actor.Owner.Generation)}},
 	}
 	authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: identity}}
 	intent := blob.UploadIntent{Authority: authority, Identity: identity, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 3}

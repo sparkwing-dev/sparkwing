@@ -6,6 +6,8 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -22,7 +24,7 @@ func NewRunInput(unit controllerwire.ClaimedUnit) (RunInput, error) {
 	input := RunInput{
 		RunID: unit.RunID, RequestHash: string(request.Hash), GrantedRunner: runner,
 		Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-			Kind: store.OwnerTrigger, RunID: unit.RunID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation,
+			Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)},
 		}},
 	}
 	if unit.Unit == capability.UnitEval || unit.Unit == capability.UnitNode {

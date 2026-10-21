@@ -148,7 +148,7 @@ func TestSourceCredential_AppScheduleUsesLiveAutomationConsent(t *testing.T) {
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{
 		ID: "app-nightly", RepoPath: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", LockedRef: headSHA,
-	}, now)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

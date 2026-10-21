@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -22,7 +24,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 				return store.Actor{}, err
 			}
 			binding := principal.Capability.Binding
-			if principal.Authority != cfg.Principal.Authority || input.Owner.Authority != principal.Authority || input.Owner.CapabilityPrefix != principal.Capability.Prefix || principal.Capability.Unit != capability.UnitTrigger || binding.Kind != capability.BindingTrigger || input.Owner.Owner.RunID != binding.RunID || input.Owner.Owner.Holder != binding.Holder || input.Owner.Owner.Generation != binding.Generation || row.Ref.RunID != input.RunID || row.Ref.NodeID == "" {
+			if principal.Authority != cfg.Principal.Authority || input.Owner.Authority != principal.Authority || input.Owner.CapabilityPrefix != principal.Capability.Prefix || principal.Capability.Unit != capability.UnitTrigger || binding.Kind != capability.BindingTrigger || input.Owner.Owner.RunID != runspec.RunID(binding.RunID) || input.Owner.Owner.Holder != binding.Holder || input.Owner.Owner.Generation != runspec.ClaimGeneration(binding.Generation) || row.Ref.RunID != runspec.RunID(input.RunID) || row.Ref.NodeID == "" {
 				return store.Actor{}, errors.New("expansion source is outside the owner award")
 			}
 			return input.Owner, nil

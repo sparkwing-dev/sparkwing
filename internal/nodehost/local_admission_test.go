@@ -30,7 +30,7 @@ func localAdmissionSeal(t *testing.T, options runspec.Options) AcceptedRun {
 }
 
 func localAdmissionRow(id string) store.NodeRow {
-	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: id}}
+	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: runspec.NodeID(id)}}
 }
 
 func localAdmissionOptions() runspec.Options {
@@ -365,7 +365,7 @@ func FuzzLocalAdmissionParentBinding(f *testing.F) {
 			accepted := parent
 			accepted.RunID = runID
 			row := localAdmissionRow(job)
-			row.Ref.RunID = rowRunID
+			row.Ref.RunID = runspec.RunID(rowRunID)
 			row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}}
 			ran := false
 			err := admission.node(ctx, accepted, row, local, func(context.Context) error { ran = true; return nil })

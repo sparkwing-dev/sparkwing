@@ -77,7 +77,7 @@ func TestOwnerHostAcquisitionReturningAfterCancellationCannotContinue(t *testing
 				}
 				var cancelled *lease.CancelError
 				if !resumed && errors.As(cause, &cancelled) {
-					if f.finished.Transition.To != store.RunCancelled || f.finished.Unit != input.Owner.Owner {
+					if f.finished.Transition.Reason != string(apierr.ReasonCancelled) || f.finished.Unit != input.Owner.Owner {
 						t.Fatalf("unaccepted cancellation left its owner unfinished: %+v", f.finished)
 					}
 				} else if f.finished.Transition.RunID != "" {
@@ -110,7 +110,7 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 			if !errors.Is(err, failure) {
 				t.Fatalf("error = %v", err)
 			}
-			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.To != store.RunFailed {
+			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.RunID == "" {
 				t.Fatalf("unfinished preparation failure: %+v", f.finished)
 			}
 			if f.finished.Transition.MaskedError == failure.Error() {
@@ -161,7 +161,7 @@ func TestOwnerHostCancelledPreparationFinishesWithCancellation(t *testing.T) {
 	if !errors.As(err, &cancelled) {
 		t.Fatalf("error = %v", err)
 	}
-	if f.finished.Transition.To != store.RunCancelled || f.finished.Transition.Reason != string(apierr.ReasonCancelled) {
+	if f.finished.Transition.Reason != string(apierr.ReasonCancelled) {
 		t.Fatalf("finish = %+v", f.finished)
 	}
 }
@@ -187,7 +187,7 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
 	h.Layer = func(ctx context.Context, _ LayerSpec, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
-		_, err := f.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, To: store.NodeSkipped})
+		_, err := f.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Outcome: store.NodeSkipped})
 		return OwnerLayerResult{}, errors.Join(failure, err)
 	}
 	_, err := h.Run(t.Context(), in)

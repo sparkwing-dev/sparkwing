@@ -11,6 +11,8 @@ import (
 	"slices"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -138,7 +140,8 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return tx.Commit()
 	}
 	if !exists {
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, tx.now().UnixNano(), tx.now().UnixNano())
+		now := tx.now(ctx)
+		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, now.UnixNano(), now.UnixNano())
 		if err != nil {
 			return err
 		}
@@ -150,14 +153,14 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		seal = tx.now().UnixNano()
+		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
 		finalDigest = digest
 		if commit.IncompleteReason != "" {
 			completeness = "incomplete"
 		}
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.now().UnixNano(), t.team, commit.Subject.RunID, identity.id)
+	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.now(ctx).UnixNano(), t.team, commit.Subject.RunID, identity.id)
 	if err != nil {
 		return err
 	}
@@ -223,14 +226,14 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return authorityError(apierr.Forbidden, "job log grant is required")
 		}
 		a := subject.Attempt
-		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || a.Generation != c.Binding.Generation || a.Generation != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
+		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || runspec.ClaimGeneration(a.Generation) != runspec.ClaimGeneration(c.Binding.Generation) || runspec.ClaimGeneration(a.Generation) != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
 			return holderRefusal()
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: subject.RunID, NodeID: a.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(subject.RunID), NodeID: runspec.NodeID(a.NodeID)})
 		if err != nil {
 			return err
 		}
-		if row.Attempt != a.Attempt || row.Generation != a.Generation {
+		if row.Attempt != runspec.AttemptOrdinal(a.Attempt) || row.Generation != runspec.ClaimGeneration(a.Generation) {
 			return holderRefusal()
 		}
 		var holder, prefix string
@@ -244,12 +247,13 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return holderRefusal()
 		}
 		if finished.Valid {
-			if row.Status != StatusDone || (!sealedReplay && tx.now().UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
+			if row.Status != StatusDone || (!sealedReplay && tx.now(ctx).UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
 				return holderRefusal()
 			}
 			return nil
 		}
-		return checkHolderTx(ctx, tx, team, row, actor, tx.now())
+
+		return checkHolderTx(ctx, tx, team, row, actor)
 	}
 	if subject.Unit == nil {
 		return holderRefusal()
@@ -290,7 +294,8 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 			return err
 		}
 	}
-	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || generation != unit.Generation || generation != actor.Generation || !lease.Valid || lease.Int64 <= tx.now().UnixNano() {
+	now := tx.now(ctx)
+	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
 	return nil
@@ -310,55 +315,53 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 		return result, err
 	}
 	// safety: authority rechecks take shared locks, which PostgreSQL forbids in read-only transactions.
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return result, err
-	}
-	defer rollbackOrLog(tx)
-	principal, err := resolveActorTx(ctx, tx, actor)
-	if err != nil {
-		return result, err
-	}
-	c := principal.Capability
-	if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
-		return result, authorityError(apierr.Forbidden, "log read grant is required")
-	}
-	if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
-		return result, holderRefusal()
-	}
-	if c.Unit == capability.UnitTrigger {
-		owner := actor
-		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: c.Binding.RunID, Holder: actor.Holder, Generation: actor.Generation}
-		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID, tx.now()); err != nil {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (LogSegments, error) {
+		principal, err := resolveActorTx(ctx, tx, actor)
+		if err != nil {
 			return result, err
 		}
-	} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {
-		if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, false); err != nil {
+		c := principal.Capability
+		if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
+			return result, authorityError(apierr.Forbidden, "log read grant is required")
+		}
+		if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
+			return result, holderRefusal()
+		}
+		if c.Unit == capability.UnitTrigger {
+			owner := actor
+			owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: actor.Holder, Generation: actor.Generation}}
+
+			if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID); err != nil {
+				return result, err
+			}
+		} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {
+			if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, false); err != nil {
+				return result, err
+			}
+		}
+		var completeness string
+		err = tx.QueryRowContext(ctx, "SELECT completeness,incomplete_reason FROM log_streams WHERE team = ? AND run_id = ? AND id = ? AND generation = ?", t.team, request.Subject.RunID, identity.id, identity.generation).Scan(&completeness, &result.IncompleteReason)
+		if errors.Is(err, sql.ErrNoRows) {
+			return result, ErrNotFound
+		}
+		if err != nil {
 			return result, err
 		}
-	}
-	var completeness string
-	err = tx.QueryRowContext(ctx, "SELECT completeness,incomplete_reason FROM log_streams WHERE team = ? AND run_id = ? AND id = ? AND generation = ?", t.team, request.Subject.RunID, identity.id, identity.generation).Scan(&completeness, &result.IncompleteReason)
-	if errors.Is(err, sql.ErrNoRows) {
-		return result, ErrNotFound
-	}
-	if err != nil {
-		return result, err
-	}
-	result.Complete = completeness == "complete"
-	rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
-	if err != nil {
-		return result, err
-	}
-	for rows.Next() {
-		var segment Segment
-		if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.StoredBytes, &segment.Digest, &segment.ObjectKey); err != nil {
-			return result, errors.Join(err, rows.Close())
+		result.Complete = completeness == "complete"
+		rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
+		if err != nil {
+			return result, err
 		}
-		result.Segments = append(result.Segments, segment)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return result, err
-	}
-	return result, tx.Commit()
+		for rows.Next() {
+			var segment Segment
+			if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.StoredBytes, &segment.Digest, &segment.ObjectKey); err != nil {
+				return result, errors.Join(err, rows.Close())
+			}
+			result.Segments = append(result.Segments, segment)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return result, err
+		}
+		return result, nil
+	})
 }

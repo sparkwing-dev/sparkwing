@@ -35,6 +35,21 @@ func TestBaselineSchemaIsTheSameOnBothDialects(t *testing.T) {
 	}
 }
 
+func TestSchemaShapeIncludesGeneratedDrainDeadlines(t *testing.T) {
+	s := storetest.OpenSQLite(t)
+	shape := sqliteShape(t, s.DB())
+	for _, table := range []string{"runs", "nodes", "triggers"} {
+		for _, want := range []string{
+			fmt.Sprintf("column %s.drain_deadline_at int notnull=false default=", table),
+			fmt.Sprintf("generated %s.drain_deadline_at stored expression=cancel_requested_at + 300000000000", table),
+		} {
+			if !slices.Contains(shape, want) {
+				t.Errorf("schema inspection omitted %q", want)
+			}
+		}
+	}
+}
+
 // A store this build did not create is refused whole, with the remedy in the
 // message, rather than read with a schema it may not have.
 func TestOpenRefusesAStoreFromAnotherBaseline(t *testing.T) {
@@ -69,9 +84,14 @@ func sqliteShape(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	var out []string
 	for _, table := range column(t, db, `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`) {
-		for _, r := range rows(t, db, `SELECT name, type, "notnull", COALESCE(dflt_value, ''), pk FROM pragma_table_info(?)`, table) {
+		for _, r := range rows(t, db, `SELECT name, type, "notnull", COALESCE(dflt_value, ''), pk FROM pragma_table_xinfo(?)`, table) {
 			out = append(out, fmt.Sprintf("column %s.%s %s notnull=%t default=%s", table, r[0], typeClass(r[1]),
 				r[2] == "1" || r[4] != "0", normalizeDefault(r[3])))
+		}
+		for _, definition := range column(t, db, `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table) {
+			for _, generated := range generatedColumn.FindAllStringSubmatch(definition, -1) {
+				out = append(out, fmt.Sprintf("generated %s.%s %s expression=%s", table, generated[1], strings.ToLower(generated[3]), normalizeDefault(generated[2])))
+			}
 		}
 		pk := rows(t, db, `SELECT name FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk`, table)
 		if len(pk) > 0 {
@@ -102,11 +122,20 @@ func postgresShape(t *testing.T, db *sql.DB) []string {
 	for _, table := range column(t, db, `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = current_schema() AND c.relkind = 'r'`) {
 		for _, r := range rows(t, db, `SELECT a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
-       COALESCE(pg_get_expr(d.adbin, d.adrelid), '')
+       COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attgenerated
   FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
  WHERE a.attrelid = $1::regclass AND a.attnum > 0 AND NOT a.attisdropped`, table) {
+			defaultExpr := r[3]
+			if r[4] != "" {
+				mode := "stored"
+				if r[4] == "v" {
+					mode = "virtual"
+				}
+				out = append(out, fmt.Sprintf("generated %s.%s %s expression=%s", table, r[0], mode, normalizeDefault(r[3])))
+				defaultExpr = ""
+			}
 			out = append(out, fmt.Sprintf("column %s.%s %s notnull=%t default=%s", table, r[0], typeClass(r[1]),
-				r[2] == "true", normalizeDefault(r[3])))
+				r[2] == "true", normalizeDefault(defaultExpr)))
 		}
 		for _, r := range rows(t, db, `SELECT k.contype, k.conname,
        (SELECT string_agg(a.attname, ',' ORDER BY u.ord) FROM unnest(k.conkey) WITH ORDINALITY u(attnum, ord)
@@ -167,8 +196,9 @@ func typeClass(declared string) string {
 }
 
 var (
-	postgresCast  = regexp.MustCompile(`::[a-z ]+`)
-	quotedInteger = regexp.MustCompile(`^'(-?[0-9]+)'$`)
+	postgresCast    = regexp.MustCompile(`::[a-z ]+`)
+	quotedInteger   = regexp.MustCompile(`'(-?[0-9]+)'`)
+	generatedColumn = regexp.MustCompile(`(?i)(\w+)\s+\w+\s+GENERATED\s+ALWAYS\s+AS\s*\(([^()]+)\)\s+(STORED|VIRTUAL)`)
 )
 
 // hack: Postgres stores a default with a cast, parentheses and a quoted negative integer, so those are stripped.

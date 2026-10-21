@@ -317,7 +317,7 @@ func FuzzBurstReservationKeepsCapacityAndClaimFences(f *testing.F) {
 		}
 		reserved := match.Resources{Cores: 4 + float64(amount%17)/4}
 		binding := owner.Capability.Binding
-		actor := Actor{Kind: ActorRunHost, Authority: owner.Authority, CapabilityPrefix: owner.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "run", Holder: binding.Holder, Generation: binding.Generation}}
+		actor := Actor{Kind: ActorRunHost, Authority: owner.Authority, CapabilityPrefix: owner.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}
 		switch attack % 9 {
 		case 1:
 			reserved.Cores = 9 + float64(amount)

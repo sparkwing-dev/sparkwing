@@ -29,7 +29,7 @@ func burstAdmissionFixture(t *testing.T) (*ownerFixture, OwnerHost, RunInput, *f
 		t.Fatal(err)
 	}
 	input.Accepted = &accepted
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
 	f.snapshot.Nodes[0].Execution.Resources.Value.Cores.Value = 4
 	host.Local = func(store.NodeRow) bool { return true }
 	host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
@@ -225,7 +225,7 @@ func FuzzBurstReleaseNeverReservesMachineResources(f *testing.F) {
 		}
 		spec.Resolved.Settings.Options.Resources.Value.Cores.Value = float64(cores)
 		spec.Resolved.Settings.Options.Resources.Value.MemoryBytes.Value = int64(memory)
-		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}}
+		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "job"}}
 		row.Execution.Resources = spec.Resolved.Settings.Options.Resources
 		if grouped {
 			row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "fail"}}

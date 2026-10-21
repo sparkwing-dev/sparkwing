@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -55,7 +57,7 @@ func TestOwnerRunAdmissionOutlivesRunFinish(t *testing.T) {
 	if _, err := host.Run(ctx, input); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.finished.Transition.RunID != input.RunID {
+	if fixture.finished.Transition.RunID != runspec.RunID(input.RunID) {
 		t.Fatal("run did not finish")
 	}
 	if live, granted, released := daemon.counts(); live != 0 || granted != 1 || released != 1 {

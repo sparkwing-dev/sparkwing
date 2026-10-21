@@ -24,7 +24,7 @@ func NewNodeInput(accepted AcceptedRun, row store.NodeRow, selected engine.Resol
 	if granted.Name == "" || granted.Type == "" || granted.Labels == nil {
 		return NodeInput{}, executorError(apierr.SpecDrift, "execution requires the granted runner identity")
 	}
-	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" || row.ClaimedBy == "" || row.CapabilityPrefix == "" || row.Generation < 1 || row.Attempt < 0 {
+	if row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID == "" || row.ClaimedBy == "" || row.CapabilityPrefix == "" || row.Generation < 1 || row.Attempt < 0 {
 		return NodeInput{}, executorError(apierr.LockHeld, "execution requires a persisted job award")
 	}
 	if row.Status != store.StatusPending || row.Outcome != "" {
@@ -33,14 +33,14 @@ func NewNodeInput(accepted AcceptedRun, row store.NodeRow, selected engine.Resol
 	if row.SpecHash == "" {
 		return NodeInput{}, executorError(apierr.SpecDrift, "execution requires the persisted job hash")
 	}
-	if execution, ok := spec.Resolved.Settings.Jobs[row.Ref.NodeID]; ok && !reflect.DeepEqual(execution, row.Execution) {
+	if execution, ok := spec.Resolved.Settings.Jobs[string(row.Ref.NodeID)]; ok && !reflect.DeepEqual(execution, row.Execution) {
 		return NodeInput{}, executorError(apierr.SpecDrift, "job settings differ from the accepted run")
 	}
 	granted.Labels = slices.Clone(granted.Labels)
 	return NodeInput{
-		Accepted: accepted, NodeID: row.Ref.NodeID, Engine: selected, GrantedRunner: granted,
+		Accepted: accepted, NodeID: string(row.Ref.NodeID), Engine: selected, GrantedRunner: granted,
 		Generation: row.Generation, Attempt: row.Attempt, SpecHash: row.SpecHash, Execution: row.Execution,
 		Authority:    ClaimAuthority{Holder: row.ClaimedBy, CapabilityPrefix: row.CapabilityPrefix},
-		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: row.Ref.NodeID},
+		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: string(row.Ref.NodeID)},
 	}, nil
 }

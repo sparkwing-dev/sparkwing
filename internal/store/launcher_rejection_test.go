@@ -16,7 +16,7 @@ func TestLauncherRejectionFailsExactAward(t *testing.T) {
 				if err != nil || len(awards) != 1 {
 					t.Fatal(err)
 				}
-				fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+				fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 				if exchange {
 					if _, err = s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
 						t.Fatal(err)
@@ -60,7 +60,7 @@ func FuzzLauncherRejectRequiresOwnExactAward(f *testing.F) {
 		if err != nil || len(awards) != 1 {
 			t.Fatal(err)
 		}
-		fence := capability.LeaseRef{Kind: capability.UnitNode, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+		fence := capability.LeaseRef{Kind: capability.UnitNode, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 		switch field % 3 {
 		case 0:
 			fence.Generation += int64(change) + 1
@@ -88,7 +88,7 @@ func TestLauncherRejectionPreservesReplacementAward(t *testing.T) {
 			if err != nil || len(awards) != 1 {
 				t.Fatal(err)
 			}
-			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: first.Award.Holder, Generation: first.Award.Generation}
+			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: first.Award.Holder, Generation: int64(first.Award.Generation)}
 			if kind == capability.UnitNode {
 				exchanged, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: first.Award.CapabilityPrefix})
 				if err != nil {

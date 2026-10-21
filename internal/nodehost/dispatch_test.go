@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -19,7 +20,7 @@ import (
 func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 	t.Helper()
 	f.Host.Local = func(store.NodeRow) bool { return false }
-	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: node}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -38,11 +39,11 @@ func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 
 func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClaim, NodeInput) {
 	t.Helper()
-	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.Input.RunID, NodeID: node}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: node})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 		if err := f.report(t.Context(), input, store.NodeSuccess); err != nil {
 			t.Fatal(err)
 		}
-		before, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: id})
+		before, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +91,7 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	releaseRemote(t, f, "flaky")
 	_, input := claimRemote(t, f, "flaky")
-	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "flaky"}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "flaky"}
 	held, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -117,12 +118,12 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	f := newStoreHostFixture(t, remotePlan())
 	releaseRemote(t, f, "build")
 	_, input := claimRemote(t, f, "build")
-	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "build"}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"}
 	if _, err := f.Tenant.TransitionRun(t.Context(), store.RunTransition{RunID: ref.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel}); err != nil {
 		t.Fatal(err)
 	}
 	f.State.notify()
-	applied, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Control, To: store.NodeCancelled, Cause: store.CauseCancel})
+	applied, err := f.State.TransitionNode(t.Context(), store.CancelNode{Ref: ref, Actor: f.Control})
 	if err != nil || !applied.CancelRequested {
 		t.Fatalf("cancel = %+v, error %v", applied, err)
 	}
@@ -308,7 +309,7 @@ func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
 	f.Add("run", "job", "spec", int64(3), int64(4), false)
 	f.Fuzz(func(t *testing.T, run, job, hash string, generation, sequence int64, terminal bool) {
 		before := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, SpecHash: "spec", Generation: 3, StateSeq: 4}
-		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: generation, StateSeq: sequence, Status: store.StatusPending}
+		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, SpecHash: hash, Generation: runspec.ClaimGeneration(generation), StateSeq: sequence, Status: store.StatusPending}
 		if terminal {
 			row.Status, row.Outcome = store.StatusDone, store.NodeSuccess
 		}
@@ -317,7 +318,7 @@ func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
 		}}
 		host := OwnerHost{Store: s, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("not terminal") }}
 		err := host.followRemote(t.Context(), t.Context(), store.Actor{}, before)
-		valid := run == before.Ref.RunID && job == before.Ref.NodeID && hash == before.SpecHash && generation >= before.Generation && sequence >= before.StateSeq && terminal
+		valid := runspec.RunID(run) == before.Ref.RunID && runspec.NodeID(job) == before.Ref.NodeID && hash == before.SpecHash && runspec.ClaimGeneration(generation) >= before.Generation && sequence >= before.StateSeq && terminal
 		if (err == nil) != valid {
 			t.Fatalf("foreign, regressed or unfinished job settled: valid=%v error=%v", valid, err)
 		}

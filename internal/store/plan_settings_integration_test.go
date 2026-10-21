@@ -49,7 +49,7 @@ func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcce
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tenant, PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: in.Request.RequestedArgs, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
+	return tenant, PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: in.Request.RequestedArgs, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
 }
 
 func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
@@ -63,7 +63,7 @@ func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 	if !slices.Equal(accepted.Spec.Resolved.SecretArgs, []string{"message"}) {
 		t.Fatalf("intake classification lost: %+v", accepted.Spec.Resolved.SecretArgs)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestAcceptancePersistsConcurrencyWinnersFromResolutionContract(t *testing.T
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"})
+	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil || !reflect.DeepEqual(row.Execution.Concurrency, want) {
 		t.Fatalf("persisted concurrency winners: %+v, %v", row.Execution.Concurrency, err)
 	}

@@ -29,7 +29,7 @@ func TestOwnerSeals(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
-			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Name: "trigger", Holder: "host", Generation: 3}
+			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 3}}
 			request := runspec.Request{Pipeline: "build", PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42}}}
 			sealed, err := json.Marshal(request)
 			if err != nil {
@@ -111,7 +111,7 @@ func TestOwnerSeals(t *testing.T) {
 				}
 			case "setup_failure", "secret_setup_failure":
 				want = []string{"acquire", "finish"}
-				if err == nil || s.finished.Transition.To != store.RunFailed {
+				if err == nil || s.finished.Transition.RunID == "" {
 					t.Fatalf("finish = %+v error = %v", s.finished, err)
 				}
 			case "rejected_owner":
@@ -133,7 +133,7 @@ func TestOwnerSeals(t *testing.T) {
 			case "cancelled_acquire_success":
 				want = []string{"acquire", "finish"}
 				var cancelled *lease.CancelError
-				if !errors.As(err, &cancelled) || s.finished.Transition.To != store.RunCancelled || s.finished.Unit != owner {
+				if !errors.As(err, &cancelled) || s.finished.Transition.Reason != string(apierr.ReasonCancelled) || s.finished.Unit != owner {
 					t.Fatalf("unaccepted cancellation left its owner unfinished: %+v error=%v", s.finished, err)
 				}
 			}

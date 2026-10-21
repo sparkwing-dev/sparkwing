@@ -436,7 +436,7 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 		if err := teststore.SeedNode(f.server.store, t.Context(), store.Node{RunID: "run", NodeID: private, Status: "pending", Error: private}); err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.SeedNodeFinish(f.server.store, t.Context(), f.tenant.Team(), controllerwire.NodeRef{RunID: "run", NodeID: private}, store.NodeResult{Outcome: store.NodeFailed, MaskedError: private}); err != nil {
+		if err := teststore.SeedNodeFinish(f.server.store, t.Context(), f.tenant.Team(), controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(private)}, store.NodeResult{Outcome: store.NodeFailed, MaskedError: private}); err != nil {
 			t.Fatal(err)
 		}
 		f.finish(store.RunFailed)

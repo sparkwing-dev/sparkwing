@@ -11,7 +11,7 @@ import (
 func reconcileSourceForStore(source controllerwire.ReuseSource) store.MaterializeSource {
 	result := store.MaterializeSource{Kind: store.SourcePolicy(source.Policy), Source: source.Attempt, Record: source.Record}
 	if source.Result != nil {
-		result.Result = &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: source.Result.RunID, NodeID: source.Result.JobID}, StateSeq: source.Result.StateSeq}
+		result.Result = &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: runspec.RunID(source.Result.RunID), NodeID: runspec.NodeID(source.Result.JobID)}, StateSeq: source.Result.StateSeq}
 	}
 	return result
 }
@@ -19,13 +19,13 @@ func reconcileSourceForStore(source controllerwire.ReuseSource) store.Materializ
 func engineReuseSource(source store.MaterializeSource) controllerwire.ReuseSource {
 	result := controllerwire.ReuseSource{Policy: string(source.Kind), Attempt: source.Source, Record: source.Record}
 	if source.Result != nil {
-		result.Result = &controllerwire.MaterializedResultSource{RunID: source.Result.Ref.RunID, JobID: source.Result.Ref.NodeID, StateSeq: source.Result.StateSeq}
+		result.Result = &controllerwire.MaterializedResultSource{RunID: string(source.Result.Ref.RunID), JobID: string(source.Result.Ref.NodeID), StateSeq: source.Result.StateSeq}
 	}
 	return result
 }
 
 func engineReconciledClaim(c capability.Capability, result store.ReconciledNode, run store.RunRow) *controllerwire.ClaimedUnit {
-	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: result.Node.Ref.RunID, JobID: result.Node.Ref.NodeID, Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder, Labels: []string{}}}
+	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: string(result.Node.Ref.RunID), JobID: string(result.Node.Ref.NodeID), Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder, Labels: []string{}}}
 	if c.Billing != nil {
 		claim.Runner.Type = c.Billing.ExecutorClass
 	}

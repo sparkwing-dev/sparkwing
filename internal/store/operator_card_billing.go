@@ -5,23 +5,22 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // DueCardRefunds lists due refunds across the deployment.
-func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error) {
-	var mode capability.PaymentMode
-	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		mode, err = paymentModeTx(ctx, tx)
-		return err
-	}); err != nil {
+func (o *Operator) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err error) {
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
 		return nil, err
 	}
-	rows, err := o.s.query(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, CardRefundDue, now.UnixNano())
+	defer rollbackOrLog(tx)
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, CardRefundDue, tx.now(ctx).UnixNano())
 	if err != nil {
 		return nil, err
 	}

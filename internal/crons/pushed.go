@@ -61,7 +61,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 			row.GitHubInstallationID = push.GitHubInstallationID
 			row.GitHubRepositoryID = push.GitHubRepositoryID
 		}
-		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row, now)
+		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row)
 		if aerr != nil {
 			return report, aerr
 		}
@@ -94,7 +94,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 		} else if sched.GitHubRepositoryID != 0 || sched.RepoPath != push.RepoURL {
 			continue
 		}
-		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
+		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false); err != nil {
 			return report, err
 		}
 		report.Withdrawn++

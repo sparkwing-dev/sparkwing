@@ -25,10 +25,11 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if request.Limit <= 0 {
 		return RetentionResult{}, fmt.Errorf("retention limit must be positive")
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
+
+	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
 		return RetentionResult{}, err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	runDays, err := numericSettingTx(ctx, tx, "operator.run_retention_days", 0)
 	if err != nil {
 		return RetentionResult{}, err
@@ -79,7 +80,8 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err := tx.operator.deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
+
+	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
 		return RetentionResult{}, err
 	}
 	return result, nil

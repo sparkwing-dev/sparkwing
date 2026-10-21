@@ -15,7 +15,7 @@ type operatorSettingsStore interface {
 	ComputeLimits(context.Context) (store.ComputeLimits, error)
 	ComputeUsage(context.Context) (store.ComputeUsage, error)
 	SignUpGate(context.Context) (store.SignUpGate, error)
-	SignUpCounts(context.Context, time.Time) (store.SignUpCounts, error)
+	SignUpCounts(context.Context) (store.SignUpCounts, error)
 	StorageSettings(context.Context) (store.StorageSettings, error)
 	ListStorageQuotas(context.Context) ([]store.StorageQuota, error)
 	TopStorageTeams(context.Context, string, int) ([]store.StorageTeamUsage, error)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -27,7 +28,7 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}}
 	principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +49,7 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 	}
 	for exchange := range 2 {
 		response := request(observation)
-		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != observation.Award.ID || response.Awards[0].Binding.Generation != claim.Award.Generation || response.Awards[0].Delivery != capability.DeliveryBootstrap || response.Awards[0].Execution == nil {
+		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != observation.Award.ID || response.Awards[0].Binding.Generation != int64(claim.Award.Generation) || response.Awards[0].Delivery != capability.DeliveryBootstrap || response.Awards[0].Execution == nil {
 			t.Fatalf("current award not retained: %+v", response)
 		}
 		if exchange == 0 {
@@ -114,7 +115,7 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, Rejected: true}
+	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}, Rejected: true}
 	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observation}})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +162,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 			for _, id := range []string{"run", "sibling"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'job','pending',1,?,?)`, id, []byte(`{"id":"job"}`), []byte(`{}`))
 				engineAcceptedFixturePlan(t, e, "a", id)
-				claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: id, NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+				claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(id), NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -169,7 +170,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				fence := capability.LeaseRef{Kind: capability.UnitNode, ID: principal.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+				fence := capability.LeaseRef{Kind: capability.UnitNode, ID: principal.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 				observed = append(observed, controllerwire.LauncherObservation{Award: fence})
 				preparing = append(preparing, fence)
 				if id == "run" {

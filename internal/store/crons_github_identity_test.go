@@ -26,14 +26,14 @@ func TestGitHubCronWithdrawalUsesExactStoredIdentity(t *testing.T) {
 			GitHubInstallationID: tc.installation, GitHubRepositoryID: tc.repository,
 			Pipeline: "nightly", Name: "default", Cron: "0 3 * * *", TZ: "UTC",
 			Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-		}, time.Now()); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := tn.WithdrawGitHubCronRepository(t.Context(), 7, 701, time.Now()); err != nil || n != 1 {
+	if n, err := tn.WithdrawGitHubCronRepository(t.Context(), 7, 701); err != nil || n != 1 {
 		t.Fatalf("exact withdrawal = %d, %v; want one", n, err)
 	}
-	if n, err := tn.WithdrawOtherGitHubCronInstallations(t.Context(), 8, 701, time.Now()); err != nil || n != 0 {
+	if n, err := tn.WithdrawOtherGitHubCronInstallations(t.Context(), 8, 701); err != nil || n != 0 {
 		t.Fatalf("other-binding withdrawal after exact = %d, %v; want zero", n, err)
 	}
 	rows, err := tn.ListCronSchedules(t.Context())
@@ -63,7 +63,7 @@ func TestGitHubCronWithdrawalNeverReachesAnotherTeam(t *testing.T) {
 			GitHubInstallationID: installation, GitHubRepositoryID: 701,
 			Pipeline: "nightly", Name: "default", Cron: "0 3 * * *", TZ: "UTC",
 			Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-		}, time.Now()); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 		return tn
@@ -71,11 +71,11 @@ func TestGitHubCronWithdrawalNeverReachesAnotherTeam(t *testing.T) {
 	other := arm("other", "crn_other", 7)
 	mine := arm(store.DefaultTeam, "crn_mine", 9)
 	for installation, want := range map[int64]int64{9: 0, 7: 1} {
-		if n, err := mine.WithdrawOtherGitHubCronInstallations(t.Context(), installation, 701, time.Now()); err != nil || n != want {
+		if n, err := mine.WithdrawOtherGitHubCronInstallations(t.Context(), installation, 701); err != nil || n != want {
 			t.Fatalf("withdrawal of installations other than %d = %d, %v; want %d", installation, n, err, want)
 		}
 	}
-	if n, err := mine.WithdrawGitHubCronRepository(t.Context(), 7, 701, time.Now()); err != nil || n != 0 {
+	if n, err := mine.WithdrawGitHubCronRepository(t.Context(), 7, 701); err != nil || n != 0 {
 		t.Fatalf("withdrawal through another team's installation = %d, %v", n, err)
 	}
 	rows, err := other.ListCronSchedules(t.Context())

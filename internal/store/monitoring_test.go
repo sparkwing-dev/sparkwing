@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -32,7 +34,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 			if err := teststore.SeedNode(st, ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, controllerwire.NodeRef{RunID: run.id, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, controllerwire.NodeRef{RunID: runspec.RunID(run.id), NodeID: runspec.NodeID(nodeID)}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 		}

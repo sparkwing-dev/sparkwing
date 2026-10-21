@@ -143,7 +143,7 @@ func (s *Server) observeSignUp(ctx context.Context, provider string, res store.S
 		s.logger.Warn("signup.velocity_unreadable", "error", err.Error())
 		return
 	}
-	counts, err := s.operator.SignUpCounts(ctx, now)
+	counts, err := s.operator.SignUpCounts(ctx)
 	if err != nil {
 		s.logger.Warn("signup.velocity_unreadable", "error", err.Error())
 		return
@@ -201,7 +201,7 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 	if err != nil {
 		return signUpStatusJSON{}, err
 	}
-	counts, err := s.operatorSettings.SignUpCounts(ctx, now)
+	counts, err := s.operatorSettings.SignUpCounts(ctx)
 	if err != nil {
 		return signUpStatusJSON{}, err
 	}

@@ -74,7 +74,7 @@ func FuzzCloudAwardUnitBindingW8(f *testing.F) {
 		job, source = strings.ToValidUTF8(job, "\ufffd"), strings.ToValidUTF8(source, "\ufffd")
 		kinds := []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork}
 		now, cfg, award := cloudFixture(kinds[kind%3])
-		award.Binding.NodeID, award.Binding.SourceNodeID, award.Binding.SourceGeneration = job, source, generation
+		award.Binding.NodeID, award.Binding.SourceNodeID, award.Binding.SourceGeneration = runspec.NodeID(job), runspec.NodeID(source), runspec.ClaimGeneration(generation)
 		valid := false
 		switch award.Binding.Kind {
 		case launcher.CloudPlan:
@@ -237,7 +237,7 @@ func (b *cloudBoundaryFake) Retire(context.Context, launcher.CloudNodeReservatio
 
 func cloudWireAwardW8(award launcher.CloudJobAward) controllerwire.ClaimedUnit {
 	b := award.Binding
-	unit := controllerwire.ClaimedUnit{LeaseExpiresAt: award.LeaseExpiresAt, Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap, UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID, Binding: capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt}, Request: runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}}, OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry, Engine: award.Engine, Execution: &runspec.JobExecutionSettings{}, CloudResources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
+	unit := controllerwire.ClaimedUnit{LeaseExpiresAt: award.LeaseExpiresAt, Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap, UnitID: b.UnitID, RunID: string(b.RunID), JobID: string(b.NodeID), Binding: capability.Binding{Kind: capability.BindingNode, RunID: string(b.RunID), NodeID: string(b.NodeID), Holder: b.Holder, Generation: int64(b.Generation), Attempt: int64(b.Attempt)}, Request: runspec.SealedRequest{RunID: string(b.RunID), Request: runspec.Request{Team: b.Team}}, OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry, Engine: award.Engine, Execution: &runspec.JobExecutionSettings{}, CloudResources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
 	if award.Engine != nil {
 		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: *award.Engine}}}
 	}
@@ -245,9 +245,9 @@ func cloudWireAwardW8(award launcher.CloudJobAward) controllerwire.ClaimedUnit {
 	case launcher.CloudPlan:
 		unit.Unit, unit.Purpose, unit.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun
 	case launcher.CloudEval:
-		unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, b.SourceGeneration
-		unit.Binding.Generation = b.SourceGeneration
-		unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
+		unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, int64(b.SourceGeneration)
+		unit.Binding.Generation = int64(b.SourceGeneration)
+		unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: b.UnitID, Holder: b.Holder, Generation: int64(b.Generation)}
 	}
 	return unit
 }

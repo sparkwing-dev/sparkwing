@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -32,7 +34,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}
-	request := store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly, Reserved: body.Reserved}
+	request := store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: runspec.RunID(authorized.Target.RunID), NodeID: runspec.NodeID(authorized.Target.NodeID)}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly, Reserved: body.Reserved}
 	if body.Source != nil {
 		source := reconcileSourceForStore(*body.Source)
 		request.Source = &source
@@ -49,7 +51,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if result.Claim == nil {
 		return response, nil
 	}
-	claim, err := s.claimedUnit(ctx, store.UnitClaim{Team: store.Team(authorized.Target.Team), Kind: capability.UnitNode, RunID: request.Ref.RunID, NodeID: request.Ref.NodeID, Award: *result.Claim, Bearer: result.Bearer})
+	claim, err := s.claimedUnit(ctx, store.UnitClaim{Team: store.Team(authorized.Target.Team), Kind: capability.UnitNode, RunID: string(request.Ref.RunID), NodeID: string(request.Ref.NodeID), Award: *result.Claim, Bearer: result.Bearer})
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}

@@ -38,7 +38,7 @@ func TestAuthenticationSnapshotReadsAncestryAndCurrentJob(t *testing.T) {
 
 func TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState(t *testing.T) {
 	tenant, _, actor := liveHolderFixture(t)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,sealed_at,created_at,updated_at) VALUES ('a','run','job-stream','job_attempt','job',3,2,'logs','r30',1,1,1)`)
@@ -150,7 +150,7 @@ func TestAuthenticationSnapshotReadsPlanLeaseAndCancellation(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1 WHERE id='run'`)
 	got, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256(claim.Bearer), Audience: capability.Controller}, capability.RequestEvidence{})
-	if err != nil || !got.Binding.RunCancelled || got.Binding.Current.Kind != capability.BindingRun || got.Binding.Current.Holder != "launcher" || got.Binding.Current.Generation != claim.Award.Generation || got.Binding.LeaseExpiresAt != claim.Award.LeaseExpiresAt {
+	if err != nil || !got.Binding.RunCancelled || got.Binding.Current.Kind != capability.BindingRun || got.Binding.Current.Holder != "launcher" || got.Binding.Current.Generation != int64(claim.Award.Generation) || got.Binding.LeaseExpiresAt != claim.Award.LeaseExpiresAt {
 		t.Fatalf("plan liveness: %+v, %v", got.Binding, err)
 	}
 }
@@ -166,7 +166,7 @@ func TestAuthenticationCancellationReasonKeepsJobIntentProperty(t *testing.T) {
 			if i == 0 {
 				reason = ""
 			}
-			_, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
+			_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
 			if err != nil {
 				t.Fatal(err)
 			}

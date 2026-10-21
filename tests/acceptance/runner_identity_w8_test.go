@@ -32,8 +32,8 @@ func TestCloudWorkUsesRunnerExecutionIdentityW8(t *testing.T) {
 	_, cfg, award := cloudFixture(launcher.CloudWork)
 	unit := runnerAuthorityAwardW8(capability.UnitNode)
 	binding := award.Binding
-	unit.UnitID, unit.RunID, unit.JobID = binding.UnitID, binding.RunID, binding.NodeID
-	unit.Binding = capability.Binding{Kind: capability.BindingNode, RunID: binding.RunID, NodeID: binding.NodeID, Holder: binding.Holder, Generation: binding.Generation, Attempt: binding.Attempt}
+	unit.UnitID, unit.RunID, unit.JobID = binding.UnitID, string(binding.RunID), string(binding.NodeID)
+	unit.Binding = capability.Binding{Kind: capability.BindingNode, RunID: string(binding.RunID), NodeID: string(binding.NodeID), Holder: binding.Holder, Generation: int64(binding.Generation), Attempt: int64(binding.Attempt)}
 	unit.CloudResources = &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}
 	unit.Engine = award.Engine
 	unit.Accepted.Spec.Resolved.Engine = *award.Engine

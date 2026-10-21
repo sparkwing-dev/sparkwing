@@ -13,7 +13,7 @@ import (
 func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.T) {
 	s := storetest.OpenSQLite(t)
 	tenant, finish := runCompletionFixture(t, s)
-	row, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+	row, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 	if err := tenant.DeleteAuthorizedRun(t.Context(), a); !errors.As(err, &conflict) || conflict.Code != apierr.Conflict {
 		t.Fatalf("active deletion: %v", err)
 	}
-	if _, err := tenant.TransitionRun(t.Context(), finish.Transition); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: store.RunFinish}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {

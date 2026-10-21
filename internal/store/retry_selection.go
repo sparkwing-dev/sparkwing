@@ -25,11 +25,11 @@ func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, s
 	}
 	defer rows.Close()
 	for rows.Next() {
-		result := MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: source}}
+		result := MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: runspec.RunID(source)}}
 		if err := rows.Scan(&result.Ref.NodeID, &result.StateSeq); err != nil {
 			return err
 		}
-		selection.Results[result.Ref.NodeID] = result
+		selection.Results[string(result.Ref.NodeID)] = result
 	}
 	return rows.Err()
 }

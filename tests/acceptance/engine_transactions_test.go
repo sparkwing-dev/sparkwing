@@ -32,7 +32,7 @@ type engineTransactions struct {
 	admitted          store.AdmissionResult
 	accepted          store.AcceptedPlan
 	expanded          store.AcceptedExpansion
-	nodeChange        store.NodeTransition
+	nodeChange        store.NodeCommand
 	runChange         store.RunTransition
 	finish            store.FinishRunRequest
 	renewPrefix       string
@@ -110,7 +110,7 @@ func (f *engineTransactions) WriteAnnotation(_ context.Context, annotation store
 	return f.err
 }
 
-func (f *engineTransactions) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+func (f *engineTransactions) TransitionNode(_ context.Context, change store.NodeCommand) (store.Applied, error) {
 	f.nodeChange = change
 	f.writes++
 	return f.applied, f.err

@@ -127,7 +127,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		}
 		return a, checkBlobAuthorityHints(input, a.authority)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+	actor := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 	switch {
 	case c.Data.Use == capability.DataPublish:
 		if a.mode != "publish" || c.Binding.Kind != capability.BindingRun {
@@ -148,14 +148,14 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 			a.authority.Attempt = input.Attempt
 		}
 	case c.Unit == capability.UnitNode:
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return a, err
 		}
 		if row.CancelRequestedAt != nil {
 			return a, holderRefusal()
 		}
-		if err := checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
+		if err := checkHolderTx(ctx, tx, team, row, actor); err != nil {
 			return a, err
 		}
 		// safety: source reads precede execution; output writes require an attempt.
@@ -174,7 +174,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 			return a, holderRefusal()
 		}
 		a.source.Kind = blob.UploadJob
-		a.source.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(team), RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: row.Attempt, Generation: row.Generation}}
+		a.source.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(team), RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}}
 		a.authority.Attempt = a.source.Attempt
 	case c.Unit == capability.UnitTrigger || c.Unit == capability.UnitPlan || c.Unit == capability.UnitEval:
 		unit := blob.LogUnit{Kind: blob.LogUnitKind(c.Unit), Generation: c.Binding.Generation}
@@ -191,7 +191,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 				return a, err
 			}
 			upload.Source = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(team), RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: ordinal, Generation: c.Binding.Generation}}
-			actor.Generation = unit.Generation
+			actor.Generation = runspec.ClaimGeneration(unit.Generation)
 		}
 		subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: string(team), RunID: c.Binding.RunID, Unit: &unit}
 		if err := checkOwnerLogWriterTx(ctx, tx, team, subject, c, actor); err != nil {
@@ -231,7 +231,8 @@ func insertBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadIde
 	if err != nil {
 		return blob.Receipt{}, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO blob_receipts(team,id,run_id,node_id,attempt,generation,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,uploader_principal,capability_prefix,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, source.Team, id, source.RunID, node, attempt, generation, source.Kind, unitKind, unitID, unitGeneration, unitSource, digest, source.Principal, source.CapabilityRef, tx.now().UnixNano())
+	now := tx.now(ctx)
+	_, err = tx.ExecContext(ctx, `INSERT INTO blob_receipts(team,id,run_id,node_id,attempt,generation,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,uploader_principal,capability_prefix,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, source.Team, id, source.RunID, node, attempt, generation, source.Kind, unitKind, unitID, unitGeneration, unitSource, digest, source.Principal, source.CapabilityRef, now.UnixNano())
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -284,7 +285,8 @@ func blobIsCache(kind blob.Kind) bool         { return kind == blob.KindMemo || 
 func blobLocalRepo(repo runspec.RepoKey) bool { return strings.HasPrefix(string(repo), "local:") }
 
 func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.Blob, reserved int64) (int64, error) {
-	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, tx.now().UnixNano())
+	now := tx.now(ctx)
+	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, now.UnixNano())
 	if err != nil {
 		return 0, err
 	}

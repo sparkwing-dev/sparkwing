@@ -58,14 +58,14 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
 	}
-	if trusted, err := claimantTrustsRunTx(ctx, tx, team, unit.RunID, chain[len(chain)-1].principal.Capability, e.launcher); err != nil || !trusted {
+	if trusted, err := claimantTrustsRunTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher); err != nil || !trusted {
 		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant trust requires verified default-branch work and launcher mode for reserved pools")
 		return e, err
 	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, checks.lock)
 	switch {
 	case errors.Is(err, errTierOutsideRanking):
-		seal, err := sealedRequestTx(ctx, tx, team, unit.RunID)
+		seal, err := sealedRequestTx(ctx, tx, team, string(unit.RunID))
 		if err != nil {
 			return e, err
 		}
@@ -87,7 +87,7 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 				return e, nil
 			}
 			if errors.As(err, &unpriced) {
-				unpriced.RunID, unpriced.NodeID = unit.RunID, unit.NodeID
+				unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
 			}
 			return e, err
 		}

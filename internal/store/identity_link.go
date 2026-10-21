@@ -77,7 +77,7 @@ func (o *Operator) ConsumeIdentityLink(ctx context.Context, claim capability.Ide
 		if n, err := result.RowsAffected(); err != nil || n != 1 {
 			return errors.Join(identityLinkInvalid(), err)
 		}
-		return nil
+		return identityLinkAuthorityTx(ctx, tx, claim)
 	})
 }
 
@@ -119,20 +119,22 @@ func linkAccountIdentityTx(ctx context.Context, tx *storeTx, claim capability.Id
 	if err != nil {
 		return Identity{}, err
 	}
-	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, tx.now())
+	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, tx.now(ctx))
 	if err != nil {
 		return Identity{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now().UnixNano(), claim.Nonce); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now(ctx).UnixNano(), claim.Nonce); err != nil {
+		return Identity{}, err
+	}
+	if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
 		return Identity{}, err
 	}
 	return id, nil
 }
 
 func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.IdentityLink) error {
-	now := tx.now()
 	if claim.Authority.Kind != capability.AuthoritySession || claim.Authority.ID == "" || claim.AccountID == "" || claim.Nonce == "" ||
-		claim.Provider != ProviderGoogle && claim.Provider != ProviderGitHub || !claim.ExpiresAt.After(now) {
+		claim.Provider != ProviderGoogle && claim.Provider != ProviderGitHub {
 		return identityLinkInvalid()
 	}
 	if err := acquireLockSet(ctx, tx, func() lockSet {
@@ -154,6 +156,10 @@ func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.
 	}
 	c := principal.Capability
 	if !principal.DirectAccountSession() || c.Subject.ID != claim.AccountID {
+		return identityLinkInvalid()
+	}
+	now := tx.now(ctx)
+	if !claim.ExpiresAt.After(now) {
 		return identityLinkInvalid()
 	}
 	if now.Before(c.IssuedAt) || now.Sub(c.IssuedAt) > IdentityChangeSignInWindow {
@@ -282,7 +288,7 @@ func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expire
 }
 
 func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, expires time.Time) (bool, error) {
-	if nonce == "" || !expires.After(tx.now()) {
+	if nonce == "" || !expires.After(tx.now(ctx)) {
 		return false, nil
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
@@ -290,7 +296,14 @@ func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, ex
 		return false, err
 	}
 	n, err := result.RowsAffected()
-	return n == 1, err
+	if err != nil || n != 1 {
+		return false, err
+	}
+	now := tx.now(ctx)
+	if !expires.After(now) {
+		return false, bindingRefusal()
+	}
+	return true, nil
 }
 
 // IdentityLinkStateKey is the key a controller signs link-flow state with.

@@ -38,7 +38,8 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 	var marked int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		marked = 0
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
 		candidates, err := teamKeysTx(ctx, tx, reachableBlobsSQL+`SELECT b.team,b.digest FROM blobs b WHERE NOT EXISTS(SELECT 1 FROM reachable r WHERE r.team=b.team AND r.digest=b.digest) AND NOT EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=b.team AND t.digest=b.digest) ORDER BY b.team,b.digest LIMIT ?`, limit)
@@ -56,7 +57,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 			if reachable {
 				continue
 			}
-			result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, tx.now().UnixNano())
+			result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, tx.now(ctx).UnixNano())
 			if err != nil {
 				return err
 			}
@@ -76,7 +77,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease SingletonLease, limit int) error {
 	var expired []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now().UnixNano(), limit)
+		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now(ctx).UnixNano(), limit)
 		return err
 	})
 	for _, u := range expired {
@@ -84,7 +85,7 @@ func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease Singleto
 			return err
 		}
 		err = o.s.inTx(ctx, func(tx *storeTx) error {
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 				return err
 			}
 			return abandonBlobUploadTx(ctx, tx, Team(u.team), u.key)
@@ -107,10 +108,10 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 	}
 	var settled []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
-		settled, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND staging_deleted_at IS NULL AND (committed_at<>0 OR abandoned_at IS NOT NULL) AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
+		settled, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND staging_deleted_at IS NULL AND (committed_at<>0 OR abandoned_at IS NOT NULL) AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now(ctx).Add(-limits.BlobGCGrace).UnixNano(), limit)
 		return err
 	})
 	if err != nil {
@@ -123,10 +124,10 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 			continue
 		}
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now().UnixNano(), u.team, u.key)
+			_, err := tx.ExecContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now(ctx).UnixNano(), u.team, u.key)
 			return err
 		})
 		if err != nil {
@@ -168,10 +169,10 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	}
 	var candidates []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
-		candidates, err = teamKeysTx(ctx, tx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
+		candidates, err = teamKeysTx(ctx, tx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now(ctx).Add(-limits.BlobGCGrace).UnixNano(), limit)
 		return err
 	})
 	if err != nil {
@@ -206,7 +207,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		if err != nil || tx.now().Before(time.Unix(0, marked).Add(limits.BlobGCGrace)) {
+		if err != nil || tx.now(ctx).Before(time.Unix(0, marked).Add(limits.BlobGCGrace)) {
 			return err
 		}
 		reachable, err := blobReachableTx(ctx, tx, Team(b.Team), b.Digest)
@@ -225,7 +226,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		if collecting.Valid {
 			return nil
 		}
-		collectingAt = tx.now().UnixNano()
+		collectingAt = tx.now(ctx).UnixNano()
 		_, err = tx.ExecContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", collectingAt, b.Team, b.Digest)
 		return err
 	})
@@ -274,13 +275,14 @@ func blobCollectionCurrentTx(ctx context.Context, tx *storeTx, lease SingletonLe
 }
 
 func lockCollectedBlobTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob) error {
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 		return err
 	}
 	if err := advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest)); err != nil {
 		return err
 	}
-	return assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now())
+
+	return assertSingletonLeaseTx(ctx, tx, lease, "maintenance")
 }
 
 // safety: callers hold the digest's blob lock, which orders this check against collection.

@@ -27,34 +27,28 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 	if !validSingletonWork(name) || holder == "" || ttl <= 0 {
 		return SingletonLease{}, fmt.Errorf("invalid singleton lease")
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return SingletonLease{}, err
-	}
-	defer rollbackOrLog(tx)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO leases(name,holder,until,generation) VALUES (?,'',0,0) ON CONFLICT(name) DO NOTHING`, name); err != nil {
-		return SingletonLease{}, err
-	}
-	var prior string
-	var until, generation int64
-	if err := tx.QueryRowContext(ctx, `SELECT holder,until,generation FROM leases WHERE name = ?`+tx.forUpdate(), name).Scan(&prior, &until, &generation); err != nil {
-		return SingletonLease{}, err
-	}
-	now := tx.now()
-	if until > now.UnixNano() && prior != holder {
-		return SingletonLease{}, ErrLockHeld
-	}
-	if until <= now.UnixNano() {
-		generation++
-	}
-	expires := now.Add(ttl)
-	if _, err := tx.ExecContext(ctx, `UPDATE leases SET holder = ?, until = ?, generation = ? WHERE name = ?`, holder, expires.UnixNano(), generation, name); err != nil {
-		return SingletonLease{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return SingletonLease{}, err
-	}
-	return SingletonLease{Name: name, Holder: holder, Generation: generation, ExpiresAt: expires}, nil
+	return inTxResult(ctx, o.s, func(tx *storeTx) (SingletonLease, error) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO leases(name,holder,until,generation) VALUES (?,'',0,0) ON CONFLICT(name) DO NOTHING`, name); err != nil {
+			return SingletonLease{}, err
+		}
+		var prior string
+		var until, generation int64
+		if err := tx.QueryRowContext(ctx, `SELECT holder,until,generation FROM leases WHERE name = ?`+tx.forUpdate(), name).Scan(&prior, &until, &generation); err != nil {
+			return SingletonLease{}, err
+		}
+		now := tx.now(ctx)
+		if until > now.UnixNano() && prior != holder {
+			return SingletonLease{}, ErrLockHeld
+		}
+		if until <= now.UnixNano() {
+			generation++
+		}
+		expires := now.Add(ttl)
+		if _, err := tx.ExecContext(ctx, `UPDATE leases SET holder = ?, until = ?, generation = ? WHERE name = ?`, holder, expires.UnixNano(), generation, name); err != nil {
+			return SingletonLease{}, err
+		}
+		return SingletonLease{Name: name, Holder: holder, Generation: generation, ExpiresAt: expires}, nil
+	})
 }
 
 // RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one.
@@ -62,22 +56,20 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 	if ttl <= 0 || !validSingletonWork(lease.Name) {
 		return SingletonLease{}, fmt.Errorf("invalid singleton renewal")
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return SingletonLease{}, err
-	}
-	defer rollbackOrLog(tx)
-	if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
-		return SingletonLease{}, err
-	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name, tx.now()); err != nil {
-		return SingletonLease{}, err
-	}
-	lease.ExpiresAt = tx.now().Add(ttl)
-	if _, err := tx.ExecContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
-		return SingletonLease{}, err
-	}
-	return lease, tx.Commit()
+	return inTxResult(ctx, o.s, func(tx *storeTx) (SingletonLease, error) {
+		if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
+			return SingletonLease{}, err
+		}
+
+		if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name); err != nil {
+			return SingletonLease{}, err
+		}
+		lease.ExpiresAt = tx.now(ctx).Add(ttl)
+		if _, err := tx.ExecContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
+			return SingletonLease{}, err
+		}
+		return lease, nil
+	})
 }
 
 // ReapedUnit reports recovery in the same run; application retry budgets are never consumed by a lapse.
@@ -154,18 +146,20 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error {
 	if err != nil {
 		return err
 	}
-	result, err := t.s.exec(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, t.s.now().UnixNano())
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return fmt.Errorf("usage counter overflow")
-	}
-	return nil
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		result, err := tx.ExecContext(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, tx.now(ctx).UnixNano())
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("usage counter overflow")
+		}
+		return nil
+	})
 }
 
 // ReserveQuota locks one shared team/quota row; log reads are exempt from download quota.

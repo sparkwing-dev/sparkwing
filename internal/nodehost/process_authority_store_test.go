@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -21,16 +23,16 @@ import (
 func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
-	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: job.ID}
-	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(job.ID)}
+	if _, err := f.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	award, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}
-	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeRunning, Actor: actor, Cause: store.CauseStart, SourceAttempt: &award.Node.Attempt}); err != nil {
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: award.Node.Ref.RunID, NodeID: award.Node.Ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
+	if _, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
 		t.Fatal(err)
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(award.Bearer)}
@@ -44,7 +46,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = registry.Close() })
-	service := &ProcessServices{RunID: ref.RunID, Job: job, Masks: NewMaskRegistry(secrets.NewMasker())}
+	service := &ProcessServices{RunID: string(ref.RunID), Job: job, Masks: NewMaskRegistry(secrets.NewMasker())}
 	spec := capability.DelegateSpec{Parent: parent.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: snapshot.Binding.Current, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt}
 	if parent.Capability.Repositories == nil || len(parent.Capability.Repositories) == 0 {
 		t.Fatal("node award must retain its repository scope")
@@ -102,7 +104,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 		}
 		principal := processAuthorized(issued).Principal
 		principal.Capability.Binding.Attempt += int64(fence % 2)
-		target := capability.Target{RunID: selector(ref.RunID, run), NodeID: selector(ref.NodeID, node), Team: selector(string(store.DefaultTeam), team)}
+		target := capability.Target{RunID: selector(string(ref.RunID), run), NodeID: selector(string(ref.NodeID), node), Team: selector(string(store.DefaultTeam), team)}
 		err := registry.CheckBinding(t.Context(), principal, capability.BindOwnNode, target)
 		return (err == nil) == (run%2 == 0 && node%2 == 0 && team%2 == 0 && fence%2 == 0)
 	}
@@ -112,7 +114,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	if err := revoke(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeSuccess, Actor: actor, Cause: store.CauseReport, SourceAttempt: &issued.Capability.Binding.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	if _, err := f.Tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&issued.Capability.Binding.Attempt), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	request = httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"ended-value"}`))

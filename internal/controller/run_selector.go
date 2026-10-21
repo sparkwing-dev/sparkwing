@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -56,7 +58,7 @@ func (s *EngineController) resolveExpansionTarget(ctx context.Context, principal
 	if err != nil {
 		return target, err
 	}
-	ref := controllerwire.NodeRef{RunID: target.RunID, NodeID: target.NodeID}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)}
 	node, err := tenant.ReadNode(ctx, ref)
 	if err != nil {
 		return target, engineLookupError(err)
@@ -64,7 +66,7 @@ func (s *EngineController) resolveExpansionTarget(ctx context.Context, principal
 	if node.Ref != ref || node.Generation <= 0 {
 		return target, missingEndpointPolicy()
 	}
-	target.UnitSourceNodeID, target.UnitSourceGeneration = node.Ref.NodeID, node.Generation
-	target.SourceGeneration = node.Generation
+	target.UnitSourceNodeID, target.UnitSourceGeneration = string(node.Ref.NodeID), int64(node.Generation)
+	target.SourceGeneration = int64(node.Generation)
 	return target, nil
 }

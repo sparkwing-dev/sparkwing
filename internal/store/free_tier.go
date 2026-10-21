@@ -211,7 +211,7 @@ func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal st
 }
 
 // GrantFreeSlot gives team a free-tier slot whether or not one is free.
-func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error) {
+func (s *Store) GrantFreeSlot(ctx context.Context, team Team) error {
 	team = NormalizeTeam(team)
 	if err := ValidateSlug(string(team)); err != nil {
 		return err
@@ -219,24 +219,21 @@ func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (er
 	if !holdsFreeAllowance(team) {
 		return fmt.Errorf("%w: the operator's team has no free tier", ErrInvalidInput)
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	exists, err := rowPresentTx(ctx, tx, `SELECT 1 FROM teams WHERE name = ?`, string(team))
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("%w: team %s", ErrNotFound, team)
-	}
-	if _, err := tx.ExecContext(ctx, `
+	return s.inTxOnce(ctx, func(tx *storeTx) error {
+		exists, err := rowPresentTx(ctx, tx, `SELECT 1 FROM teams WHERE name = ?`, string(team))
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("%w: team %s", ErrNotFound, team)
+		}
+		if _, err := tx.ExecContext(ctx, `
 INSERT INTO free_slots (team, taken_at) VALUES (?,?)
-ON CONFLICT (team) DO NOTHING`, string(team), now.UnixNano()); err != nil {
-		return err
-	}
-	return tx.Commit()
+ON CONFLICT (team) DO NOTHING`, string(team), tx.now(ctx).UnixNano()); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // SetFreeTeamSlots sets how many teams without credits may hold a slot.

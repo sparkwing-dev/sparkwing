@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -53,13 +55,13 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 	}
 	nodes := make(map[string]store.NodeRow, len(snapshot.Nodes))
 	for _, node := range snapshot.Nodes {
-		if node.Ref.RunID != snapshot.Run.ID || node.Ref.NodeID == "" {
+		if node.Ref.RunID != runspec.RunID(snapshot.Run.ID) || node.Ref.NodeID == "" {
 			return controllerwire.ScheduleSnapshot{}, errors.New("invalid persisted snapshot job")
 		}
-		if _, exists := nodes[node.Ref.NodeID]; exists {
+		if _, exists := nodes[string(node.Ref.NodeID)]; exists {
 			return controllerwire.ScheduleSnapshot{}, errors.New("duplicate persisted snapshot job")
 		}
-		nodes[node.Ref.NodeID] = node
+		nodes[string(node.Ref.NodeID)] = node
 	}
 	out := controllerwire.ScheduleSnapshot{
 		RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: graph.CancelRequested, GuardRefusal: graph.GuardRefusal,
@@ -92,11 +94,11 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 func snapshotExpansions(snapshot store.RunSnapshot) ([]controllerwire.AcceptedExpansion, error) {
 	out := make([]controllerwire.AcceptedExpansion, 0, len(snapshot.Expansions))
 	for _, row := range snapshot.Expansions {
-		if row.Source.RunID != snapshot.Run.ID || row.Source.NodeID == "" || row.SourceGeneration <= 0 || row.BodyHash == "" || !json.Valid(row.Body) {
+		if row.Source.RunID != runspec.RunID(snapshot.Run.ID) || row.Source.NodeID == "" || row.SourceGeneration <= 0 || row.BodyHash == "" || !json.Valid(row.Body) {
 			return nil, errors.New("invalid persisted expansion snapshot")
 		}
 		out = append(out, controllerwire.AcceptedExpansion{
-			SourceJob: row.Source.NodeID, SourceGeneration: row.SourceGeneration,
+			SourceJob: string(row.Source.NodeID), SourceGeneration: row.SourceGeneration,
 			Body: append(json.RawMessage(nil), row.Body...), BodyHash: row.BodyHash,
 		})
 	}
@@ -114,8 +116,8 @@ func executionJob(node store.NodeRow) controllerwire.ExecutionJob {
 
 func snapshotJob(node store.NodeRow) controllerwire.JobDetail {
 	return controllerwire.JobDetail{
-		ID: node.Ref.NodeID, Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: node.StatusDetail,
-		Generation: node.Generation, Attempt: node.Attempt, StateSeq: node.StateSeq, Expansion: string(node.Expansion),
+		ID: string(node.Ref.NodeID), Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: node.StatusDetail,
+		Generation: int64(node.Generation), Attempt: int64(node.Attempt), StateSeq: node.StateSeq, Expansion: string(node.Expansion),
 		StartedAt: node.StartedAt, FinishedAt: node.FinishedAt, CancelRequestedAt: node.CancelRequestedAt,
 	}
 }

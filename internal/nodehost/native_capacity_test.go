@@ -32,7 +32,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	if err == nil || executed || completion.Outcome != "" {
 		t.Fatalf("completion=%+v executed=%v error=%v", completion, executed, err)
 	}
-	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "job"})
+	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"})
 	if err != nil || row.Status != store.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" {
 		t.Fatalf("released without machine admission: row=%+v error=%v", row, err)
 	}

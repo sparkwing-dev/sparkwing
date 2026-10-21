@@ -160,7 +160,7 @@ func TestStandingRequestRefusesInvalidInputAndLostAuthority(t *testing.T) {
 
 func billingStandingOf(t *testing.T, tenant *Tenant) BillingStanding {
 	t.Helper()
-	b, err := tenant.BillingStanding(t.Context(), tenant.s.now())
+	b, err := tenant.BillingStanding(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

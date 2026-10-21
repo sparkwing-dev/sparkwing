@@ -20,7 +20,7 @@ func FuzzEngineMaterializedSourcePreservesIdentity(f *testing.F) {
 		}
 		source := controllerwire.ReuseSource{Policy: "manual_retry", Result: &controllerwire.MaterializedResultSource{RunID: run, JobID: job, StateSeq: seq}}
 		stored := reconcileSourceForStore(source)
-		if stored.Result == nil || stored.Result.Ref.RunID != run || stored.Result.Ref.NodeID != job || stored.Result.StateSeq != seq || stored.Source.Attempt != 0 {
+		if stored.Result == nil || stored.Result.Ref.RunID != runspec.RunID(run) || stored.Result.Ref.NodeID != runspec.NodeID(job) || stored.Result.StateSeq != seq || stored.Source.Attempt != 0 {
 			t.Fatalf("store projection lost materialized identity: %+v", stored)
 		}
 		if got := engineReuseSource(stored); !reflect.DeepEqual(got, source) {

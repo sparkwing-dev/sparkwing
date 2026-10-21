@@ -69,7 +69,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			if job.ID == "" {
 				t.Fatal("fixture job is absent")
 			}
-			input.NodeID, input.RouteBinding.JobID, row.Ref.NodeID = jobID, jobID, jobID
+			input.NodeID, input.RouteBinding.JobID, row.Ref.NodeID = jobID, jobID, runspec.NodeID(jobID)
 			input.Engine.Identity.Pin.Version = hello.SDK.Version
 			input.Entry = &source.Entry{Engine: input.Engine}
 			input.GrantedRunner = runner

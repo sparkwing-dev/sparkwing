@@ -1077,8 +1077,8 @@ status consumers. API binding faults still use `api_ready` and `api_error`.
 
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
 The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
-Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
-`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies a
+`RevokeNode` command with the node reference and current run owner's authority.
 Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
 returns an error without changing state or events. An identical committed
 transition replays.
@@ -3082,3 +3082,20 @@ Within Sparkwing, `NodeRef` and the credential DTOs `CreateTokenRequest`,
 `RotatedToken` live in `internal/controllerwire`.
 `RunSnapshot` remains a private host read model in `internal/store`.
 Routes, JSON field names and runtime behavior are unchanged.
+
+## Bounded cancellation and derived completion
+
+Cancel requests give active work at most five minutes to drain. A holder that
+keeps heartbeating cannot extend that deadline. Cloud funding refusal still has
+its shorter deadline of at most one prepaid slice.
+
+`POST /api/v1/runs/{run}/finish` drops `outcome`. Send only `reason` and an optional
+masked `error`. The controller derives the verdict from accepted plan and job
+results. A run without an accepted plan finishes failed, or cancelled when
+cancellation was requested.
+
+The internal node API replaces `NodeTransition` with named commands. Store
+mutation methods no longer accept caller wall-clock arguments. The store captures
+database time when each transaction begins. Schema baseline 16 adds stored,
+generated cancellation deadlines. Older schema baselines require the declared
+restore workflow.

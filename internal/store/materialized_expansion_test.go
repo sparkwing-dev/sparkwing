@@ -37,7 +37,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	issued, err := tenant.s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 		Parent: request.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
 		Binding: capability.Binding{
-			Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: materialized.Node.Generation,
+			Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: int64(materialized.Node.Generation),
 			Expansion: &capability.LeaseRef{Kind: capability.UnitTrigger, ID: "run", Holder: "host", Generation: 1},
 		},
 	})

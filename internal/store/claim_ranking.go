@@ -127,7 +127,7 @@ func lockRankedUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef)
 	if tx.dialect != DialectPostgres {
 		return nil
 	}
-	return advisoryLockTx(ctx, tx, "ranking:"+string(team)+"/"+unit.RunID+"/"+string(unit.Kind)+"/"+unit.NodeID+"/"+strconv.FormatInt(unit.SourceGeneration, 10))
+	return advisoryLockTx(ctx, tx, "ranking:"+string(team)+"/"+string(unit.RunID)+"/"+string(unit.Kind)+"/"+string(unit.NodeID)+"/"+strconv.FormatInt(unit.SourceGeneration, 10))
 }
 
 // safety: a held claimant's ask is written in the claim transaction, whether that transaction awards another unit
@@ -149,7 +149,7 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, re
 	if err != nil || !ready {
 		return false, err
 	}
-	now, end := tx.now(), since.Add(limits.RankingWindow)
+	now, end := tx.now(ctx), since.Add(limits.RankingWindow)
 	if !now.Before(end) {
 		if !now.Before(end.Add(limits.RankingAward)) {
 			return false, nil

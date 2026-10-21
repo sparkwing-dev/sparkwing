@@ -57,29 +57,19 @@ func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding Capa
 	if key == "" || id == "" || binding.RunID == "" || binding.Generation < 0 {
 		return CapacityAdoption{}, fmt.Errorf("invalid capacity binding")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return CapacityAdoption{}, err
-	}
-	defer rollbackOrLog(tx)
-	fence := capacityFence{binding: binding, actor: actor}
-	if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
-		return CapacityAdoption{}, err
-	}
-	if err := lockCapacityEntryTx(ctx, tx, t.team, key); err != nil {
-		return CapacityAdoption{}, err
-	}
-	if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
-		return CapacityAdoption{}, err
-	}
-	adopted, err := adoptCapacityTx(ctx, tx, t.team, key, id, binding)
-	if err != nil {
-		return CapacityAdoption{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return CapacityAdoption{}, err
-	}
-	return adopted, nil
+	return inTxResult(ctx, t.s, func(tx *storeTx) (CapacityAdoption, error) {
+		fence := capacityFence{binding: binding, actor: actor}
+		if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
+			return CapacityAdoption{}, err
+		}
+		if err := lockCapacityEntryTx(ctx, tx, t.team, key); err != nil {
+			return CapacityAdoption{}, err
+		}
+		if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
+			return CapacityAdoption{}, err
+		}
+		return adoptCapacityTx(ctx, tx, t.team, key, id, binding)
+	})
 }
 
 func lockCapacityEntryTx(ctx context.Context, tx *storeTx, team Team, key string) error {
@@ -92,7 +82,7 @@ func lockCapacityEntryTx(ctx context.Context, tx *storeTx, team Team, key string
 }
 
 func adoptCapacityTx(ctx context.Context, tx *storeTx, team Team, key, id string, binding CapacityBinding) (CapacityAdoption, error) {
-	now := tx.now().UnixNano()
+	now := tx.now(ctx).UnixNano()
 	var holder CapacityHolder
 	var acquired, expires int64
 	err := tx.QueryRowContext(ctx, `SELECT run_id,node_id,generation,cost,claimed_at,lease_expires_at,superseded FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`, team, key, id).Scan(&holder.Binding.RunID, &holder.Binding.NodeID, &holder.Binding.Generation, &holder.Cost, &acquired, &expires, &holder.Superseded)

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -21,11 +23,7 @@ func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorize
 	if a.Access.Credential == capability.CredentialMember {
 		actor.Kind = store.ActorOperator
 	}
-	applied, err := tenant.TransitionNode(ctx, store.NodeTransition{
-		Ref: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
-		To:  store.NodeCancelled, Cause: store.CauseCancel, Actor: actor,
-		Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: body.Reason}},
-	})
+	applied, err := tenant.TransitionNode(ctx, store.CancelNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, Actor: actor, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: body.Reason}})
 	return appliedResponse(applied), engineLookupError(err)
 }
 
@@ -39,7 +37,7 @@ func (s *EngineController) ReadFailure(ctx context.Context, a capability.Authori
 	if err != nil {
 		return nil, err
 	}
-	failure, err := tenant.ReadFailure(ctx, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, a.Target.SourceGeneration, engineActor(a))
+	failure, err := tenant.ReadFailure(ctx, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, a.Target.SourceGeneration, engineActor(a))
 	return failure, engineLookupError(err)
 }
 

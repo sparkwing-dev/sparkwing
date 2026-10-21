@@ -626,6 +626,10 @@ components:
           type: boolean
         generation:
           type: integer
+        outcome:
+          type: string
+        reason:
+          type: string
         replayed:
           type: boolean
         state_seq:
@@ -1686,12 +1690,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.apierr.Error'
             - type: "null"
-        outcome:
-          type: string
         reason:
           type: string
-      required:
-        - outcome
       type: object
       x-sparkwing-go-type: controllerwire.FinishRequest
     internal.controllerwire.FireView:
@@ -6085,18 +6085,24 @@ components:
           type: string
         Kind:
           type: string
+        NodeID:
+          type: string
         Owner:
           $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
         Result:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.RecordedResult'
             - type: "null"
+        RunID:
+          type: string
       required:
         - Result
         - ConsoleProof
         - Authority
         - Kind
         - CapabilityPrefix
+        - RunID
+        - NodeID
         - Holder
         - Generation
         - Owner

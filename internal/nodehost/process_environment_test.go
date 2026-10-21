@@ -29,7 +29,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}
 	// safety: generated declarations are absent from the initial plan; their environment comes from persistence.
 	input.NodeID, input.RouteBinding.JobID = "generated", "generated"
-	st.row.Ref.NodeID = input.NodeID
+	st.row.Ref.NodeID = runspec.NodeID(input.NodeID)
 	job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{
 		"STARTUP": {Value: "interpreter", Startup: true}, "BODY": {Value: "body"},
 	}}
@@ -55,7 +55,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 				}
 				return []string{"BUILT=policy"}, nil
 			}}
-			env, err := policy.job(t.Context(), kind, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+			env, err := policy.job(t.Context(), kind, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 			if err != nil || !called || !reflect.DeepEqual(env, []string{"BUILT=policy"}) {
 				t.Fatalf("environment = %v, error = %v", env, err)
 			}
@@ -113,7 +113,7 @@ func TestSDKEnvironmentRefusesMissingOrChangedPersistedIdentity(t *testing.T) {
 			case "request":
 				input.Accepted.RunID = "other"
 			}
-			env, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+			env, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 			if err == nil || len(env) != 0 || called != (mode == "build") {
 				t.Fatalf("environment = %v, built = %v, error = %v", env, called, err)
 			}

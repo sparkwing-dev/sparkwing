@@ -29,11 +29,15 @@ func FuzzEngineTransitionSourceAttemptProjection(f *testing.F) {
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			t.Fatal(err)
 		}
-		request, err := captureEngineTransition(t.Context(), decoded)
+		command, err := captureEngineTransition(t.Context(), decoded)
+		request, ok := command.(store.StartNode)
+		if !ok {
+			t.Fatalf("unexpected command %T", command)
+		}
 		if err != nil || (request.SourceAttempt != nil) != present {
 			t.Fatalf("attempt presence changed: %+v %v", request, err)
 		}
-		if present && *request.SourceAttempt != ordinal {
+		if present && int64(*request.SourceAttempt) != ordinal {
 			t.Fatal("source ordinal changed before the store boundary")
 		}
 	})
@@ -91,19 +95,40 @@ func TestEngineWireRetryOrdinalCannotConsumeNextAttempt(t *testing.T) {
 
 type transitionCapture struct {
 	RunTransactions
-	change store.NodeTransition
+	change store.NodeCommand
 }
 
-func (c *transitionCapture) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+func (c *transitionCapture) TransitionNode(_ context.Context, change store.NodeCommand) (store.Applied, error) {
 	c.change = change
 	return store.Applied{}, nil
 }
 
-func captureEngineTransition(ctx context.Context, body controllerwire.JobTransitionRequest) (store.NodeTransition, error) {
+func captureEngineTransition(ctx context.Context, body controllerwire.JobTransitionRequest) (store.NodeCommand, error) {
 	capture := &transitionCapture{}
 	server := &EngineController{ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return capture, nil }}
 	_, err := server.TransitionJob(ctx, capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}, body)
 	return capture.change, err
+}
+
+func TestEngineReleaseCommandsPreserveDestination(t *testing.T) {
+	for _, destination := range []string{"ready", "pending"} {
+		command, err := captureEngineTransition(t.Context(), controllerwire.JobTransitionRequest{To: destination, Cause: "release"})
+		if err != nil {
+			t.Fatalf("release to %s: %v", destination, err)
+		}
+		switch command.(type) {
+		case store.ReadyNode:
+			if destination != "ready" {
+				t.Fatal("release to pending became ready")
+			}
+		case store.ReleaseNode:
+			if destination != "pending" {
+				t.Fatal("release to ready became pending")
+			}
+		default:
+			t.Fatalf("unexpected command %T", command)
+		}
+	}
 }
 
 func (f *transitionCapture) Team() store.Team { return "a" }

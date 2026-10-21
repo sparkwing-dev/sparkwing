@@ -6,6 +6,8 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -21,10 +23,10 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	}
 	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
 	owner := input.Owner.Owner
-	if owner.Kind != store.OwnerTrigger || owner.RunID != input.RunID || owner.Holder == "" || owner.Generation <= 0 {
+	if owner.Kind != store.OwnerTrigger || owner.RunID != runspec.RunID(input.RunID) || owner.Holder == "" || owner.Generation <= 0 {
 		return accepted, errors.New("plan unit requires its planning lease")
 	}
-	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitPlan, RunID: input.RunID, Holder: owner.Holder, Generation: owner.Generation}, input.Owner, func() bool { return true })
+	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitPlan, RunID: input.RunID, Holder: owner.Holder, Generation: int64(owner.Generation)}, input.Owner, func() bool { return true })
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return accepted, err
@@ -82,12 +84,12 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	}
 	var row store.NodeRow
 	for _, current := range snapshot.Nodes {
-		if current.Ref == (controllerwire.NodeRef{RunID: input.RunID, NodeID: sourceID}) {
+		if current.Ref == (controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: runspec.NodeID(sourceID)}) {
 			row = current
 			break
 		}
 	}
-	if row.Ref.NodeID == "" || row.Generation != generation || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+	if row.Ref.NodeID == "" || row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 		return errors.New("eval source is outside the awarded expansion")
 	}
 	entry, err := h.acquire(ctx, input, snapshot.Run)

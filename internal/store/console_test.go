@@ -154,7 +154,7 @@ func TestConsoleNativeFinanceAndStableWaitlistBatch(t *testing.T) {
 		t.Fatalf("freeze: %+v %v", freeze, err)
 	}
 	if err := s.inTx(ctx, func(tx *storeTx) error {
-		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", tx.now())
+		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", transactionTime(t, tx))
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestDeletionActorCannotBePresentedByCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	if err := prepareStateActorTx(context.Background(), tx, "a", "run", Actor{Kind: ActorOperator}, tx.now()); err == nil {
+	if err := prepareStateActorTx(context.Background(), tx, "a", "run", Actor{Kind: ActorOperator}); err == nil {
 		t.Fatal("unverified internal actor acquired authority")
 	}
 }
@@ -263,7 +263,9 @@ func TestConsoleGlobalAdmissionAuditDeduplicatesAndDeletes(t *testing.T) {
 	s, c, a := consoleFixture(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('victim','victim@example.test',1,1)`)
 	for range 2 {
-		if err := s.inTx(t.Context(), func(tx *storeTx) error { return recordAdmissionEventTx(tx, "victim", "waitlist", "operator", tx.now()) }); err != nil {
+		if err := s.inTx(t.Context(), func(tx *storeTx) error {
+			return recordAdmissionEventTx(tx, "victim", "waitlist", "operator", transactionTime(t, tx))
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}

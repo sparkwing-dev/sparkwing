@@ -50,7 +50,7 @@ func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, fence cap
 		return holderRefusal()
 	}
 	if b.NodeID == "" {
-		if b.Generation != fence.actor.Owner.Generation {
+		if runspec.ClaimGeneration(b.Generation) != fence.actor.Owner.Generation {
 			return holderRefusal()
 		}
 		return nil
@@ -145,13 +145,13 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 	if err := lockStateRunTx(ctx, tx, team, b.RunID); err != nil {
 		return err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	if b.NodeID != "" {
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: b.RunID, NodeID: b.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 		if err != nil {
 			return err
 		}
-		if row.Generation != b.Generation || row.Status == StatusDone || row.CancelRequestedAt != nil {
+		if row.Generation != runspec.ClaimGeneration(b.Generation) || row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return nil
 		}
 		row.CancelRequestedAt = &now
@@ -167,6 +167,9 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 			return err
 		}
 		if err := writeNodeStateTx(ctx, tx, team, row); err != nil {
+			return err
+		}
+		if err := clampRunLeasesTx(ctx, tx, team, b.RunID, b.NodeID); err != nil {
 			return err
 		}
 		return appendStateEventTx(ctx, tx, team, row.Ref, "job_cancel_requested", row.StateSeq, nil, now)
@@ -189,7 +192,10 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 	if n != 1 {
 		return holderRefusal()
 	}
-	return appendStateEventTx(ctx, tx, team, controllerwire.NodeRef{RunID: b.RunID}, "run_cancel_requested", run.StateSeq+1, nil, now)
+	if err := clampRunLeasesTx(ctx, tx, team, b.RunID, b.NodeID); err != nil {
+		return err
+	}
+	return appendStateEventTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(b.RunID)}, "run_cancel_requested", run.StateSeq+1, nil, now)
 }
 
 func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter ConcurrencyWaiter) (bool, error) {
@@ -207,7 +213,7 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
-	if err := lockCapacityWorkTx(ctx, tx, team, key, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID}); err != nil {
+	if err := lockCapacityWorkTx(ctx, tx, team, key, controllerwire.NodeRef{RunID: runspec.RunID(fence.binding.RunID), NodeID: runspec.NodeID(fence.binding.NodeID)}); err != nil {
 		return err
 	}
 	return checkCapacityFenceTx(ctx, tx, team, fence)
@@ -233,13 +239,13 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, ref.RunID, ref.
 	}
 	previous := ""
 	for _, ref := range work {
-		if ref.RunID == previous {
+		if ref.RunID == runspec.RunID(previous) {
 			continue
 		}
-		if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := lockStateRunTx(ctx, tx, team, string(ref.RunID)); err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		previous = ref.RunID
+		previous = string(ref.RunID)
 	}
 	for _, ref := range work {
 		if ref.NodeID == "" {
@@ -258,5 +264,5 @@ func checkCapacityOwnerTx(ctx context.Context, tx *storeTx, team Team, fence cap
 	if fence.binding.NodeID == "" {
 		check = checkOwnerLeaseTx
 	}
-	return check(ctx, tx, team, fence.actor, fence.binding.RunID, tx.now())
+	return check(ctx, tx, team, fence.actor, fence.binding.RunID)
 }

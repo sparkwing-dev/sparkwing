@@ -146,11 +146,16 @@ func TestConcurrencyKeyIsUniquePerTeam(t *testing.T) {
 	alpha := tenantFor(t, st, "alpha")
 	beta := tenantFor(t, st, "beta")
 	seedConcurrencyRun(t, alpha, "a1")
+	expiry := time.Now().Add(time.Hour)
 	if err := teststore.SeedNode(st, ctx, store.Node{RunID: "a1", NodeID: "n1", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
 	seedConcurrencyRun(t, beta, "b1")
 	if err := teststore.SeedNode(st, ctx, store.Node{RunID: "b1", NodeID: "n1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `UPDATE nodes SET claimed_by='machine',lease_expires_at=? WHERE run_id IN ('a1','b1')`), expiry.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 

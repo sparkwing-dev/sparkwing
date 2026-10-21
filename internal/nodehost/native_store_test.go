@@ -99,7 +99,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
 	f.Host.Layer = nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
-		if award.Node.Ref.NodeID != input.NodeID || len(award.Bearer) == 0 {
+		if award.Node.Ref.NodeID != runspec.NodeID(input.NodeID) || len(award.Bearer) == 0 {
 			return ProcessGrant{}, errors.New("native attempt has no adopted award")
 		}
 		lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(award.Bearer)}
@@ -109,7 +109,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		}
 		principal := parent.Authorities[0].Principal
 		binding := principal.Capability.Binding
-		binding.Attempt = input.Attempt
+		binding.Attempt = int64(input.Attempt)
 		grant, err := processes.Delegate(ctx, lookup, capability.DelegateSpec{
 			Parent: principal.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport},
 			Binding: binding, Repositories: principal.Capability.Repositories, ExpiresAt: principal.Capability.ExpiresAt,
@@ -268,7 +268,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		if err != nil {
 			return JobUpload{}, err
 		}
-		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}}
+		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(input.Attempt), Generation: int64(input.Generation)}}
 		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: request.Team, RunID: input.Accepted.RunID, Principal: blob.Principal(principal.Capability.Subject.ID), CapabilityRef: input.Authority.CapabilityPrefix, Attempt: attempt}
 		run, err := f.Tenant.ReadRun(ctx, input.Accepted.RunID)
 		if err != nil {
@@ -293,11 +293,11 @@ func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, ho
 	if err = errors.Join(err, entry.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
+	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Input.RunID), To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "output"}
-	if _, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "output"}
+	if _, err := f.State.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})

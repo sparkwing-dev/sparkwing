@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -66,7 +67,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if policy == nil {
 			policy = sharedSourceReleaseContracts{}
 		}
-		audit, err = policy.AuthorizeSourceRelease(request, tx.now())
+		audit, err = policy.AuthorizeSourceRelease(request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -102,7 +103,7 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	if c.Team != string(t.team) || c.Audience != capability.Controller || c.Unit == "" || b.RunID == "" || authorized.Target.Team != "" && authorized.Target.Team != c.Team || authorized.Target.RunID != b.RunID || authorized.Target.NodeID != "" && authorized.Target.NodeID != b.NodeID {
 		return capability.SourceReleaseRequest{}, bindingRefusal()
 	}
-	unit := UnitRef{Kind: c.Unit, RunID: b.RunID, NodeID: b.NodeID, SourceGeneration: b.Generation}
+	unit := UnitRef{Kind: c.Unit, RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), SourceGeneration: b.Generation}
 	if b.Expansion != nil {
 		unit.Kind = b.Expansion.Kind
 	}
@@ -143,7 +144,8 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM triggers WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&deadline); err != nil {
 		return err
 	}
-	if deadline.Valid && deadline.Int64 <= tx.now().UnixNano() {
+	now := tx.now(ctx)
+	if deadline.Valid && deadline.Int64 <= now.UnixNano() {
 		return bindingRefusal()
 	}
 	return nil

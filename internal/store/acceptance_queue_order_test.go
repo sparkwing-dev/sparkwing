@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -44,11 +46,11 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a-blocked", "job", "z-preferred"} {
-		if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: plan.RunID, NodeID: id}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	before, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: plan.RunID, NodeID: "a-blocked"})
+	before, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "a-blocked"})
 	if err != nil {
 		t.Fatal(err)
 	}
