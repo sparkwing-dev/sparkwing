@@ -306,7 +306,7 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 	return burstIntakeDeploymentController(t, endpoint, deploymenttest.Team(t))
 }
 
-func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployment.Config) (*store.Store, *controller.Server, string) {
+func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployment.Config, options ...store.Option) (*store.Store, *controller.Server, string) {
 	t.Helper()
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
@@ -322,10 +322,11 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 		}
 	})
 	var server *controller.Server
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+	options = append(options, store.WithPolicies(func(state *store.Store) (store.Policies, error) {
 		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithDataObjects(objects)
 		return server.StorePolicies(), nil
 	}))
+	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"), options...)
 	if err != nil {
 		t.Fatal(err)
 	}

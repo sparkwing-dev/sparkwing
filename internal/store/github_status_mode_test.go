@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -41,6 +42,8 @@ func TestGitHubCommitStatusModeSurvivesReopen(t *testing.T) {
 func TestGitHubCommitStatusModeIsScopedProperty(t *testing.T) {
 	property := func(suffix string, foreign bool) bool {
 		st := storetest.Open(t, store.WithPolicies(sealStorePolicies))
+		now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+		st.SetTestClock(t, func() time.Time { return now })
 		tenant, admitted, err := storePlanSealRequest(t.Context(), st)
 		if err != nil {
 			t.Fatal(err)

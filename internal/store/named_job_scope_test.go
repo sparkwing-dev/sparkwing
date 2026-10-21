@@ -22,6 +22,8 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 	for trial := range 12 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {
 			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
+			now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+			s.SetTestClock(t, func() time.Time { return now })
 			job := fmt.Sprintf("job-%x", random.Uint64())
 			label := fmt.Sprintf("tool-%x", random.Uint64())
 			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
