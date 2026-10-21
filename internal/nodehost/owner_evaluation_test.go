@@ -38,7 +38,7 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, Evaluatio
 	st.row.ClaimedBy, st.row.CapabilityPrefix = "", ""
 	p := &executorProcess{plan: input.Accepted.Plan}
 	in := EvaluationInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: string(hash), Entry: input.Entry, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding}
-	deps := EvaluationDependencies{Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ValidatePlan: exec.ValidatePlan, CanonicalHash: exec.CanonicalHash, ChildContext: exec.ChildContext, Mask: func(s string) string { return strings.ReplaceAll(s, "private", "***") }, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+	deps := EvaluationDependencies{Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ValidatePlan: exec.ValidatePlan, CanonicalHash: exec.CanonicalHash, ChildContext: exec.ChildContext, Masker: testMasker("private"), ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 		if ref != st.row.Ref || generation != st.row.Generation {
 			t.Fatal("read output without source fence")
 		}

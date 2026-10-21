@@ -54,7 +54,7 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 						err = claimed.Execute(t.Context(), input)
 					} else {
 						state, host, input := newOwnerFixture(t, placement == "resumed")
-						host.Masks, host.Mask = masks, masks.masker.Mask
+						host.Masks, host.Masker = masks, masks.masker
 						request := &state.snapshot.Run.Request.Request
 						request.RequestedArgs = map[string]string{"token": value}
 						request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}

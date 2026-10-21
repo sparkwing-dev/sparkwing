@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -79,7 +80,7 @@ type ExecutorDependencies struct {
 	Annotate      func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
 	ReadFailure   func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
 	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Mask          func(string) string
+	Masker        *secrets.Masker
 	Masks         *MaskRegistry
 }
 
@@ -91,7 +92,7 @@ type nodeExecutor struct {
 // NewNodeExecutor builds the common executor for local and dispatched claims.
 // Validation, hashing and deadline defaults are owned by their contract packages.
 func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
-	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
+	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("node executor requires store, process, engine and masking adapters")
 	}
 	if deps.ValidatePlan == nil {
@@ -108,7 +109,7 @@ func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error) {
 	defer func() {
-		err = maskHostError(err, h.deps.Mask)
+		err = maskHostError(err, h.deps.Masker)
 	}()
 	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
 		return err
@@ -306,7 +307,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 		return store.Applied{}, err
 	}
 	if extra.Result != nil {
-		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
+		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Masker.Mask)
 		extra.Result = &result
 	}
 	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
@@ -329,7 +330,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 		return errors.Join(runErr, err)
 	}
 	if ctx.Err() != nil {
-		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Mask(context.Cause(ctx).Error()))}
+		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
 		var admission *AdmissionFailure
 		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == store.NodeSuperseded {
 			result.Outcome, result.Reason = admission.Outcome, admission.Reason
@@ -357,12 +358,12 @@ func (h *nodeExecutor) failure(err error) store.NodeResult {
 func (h *nodeExecutor) failureAt(err error, stage string) store.NodeResult {
 	result := store.NodeResult{Outcome: store.NodeFailed}
 	if err != nil {
-		result.MaskedError = limits.Error(h.deps.Mask(err.Error()))
+		result.MaskedError = limits.Error(h.deps.Masker.Mask(err.Error()))
 	}
 	var failure *apierr.Error
 	code := apierr.SDKError
 	if errors.As(err, &failure) {
-		code = maskedFailureCode(failure.Code, h.deps.Mask)
+		code = maskedFailureCode(failure.Code, h.deps.Masker.Mask)
 		result.Reason = string(code)
 	}
 	result.Failure = &nodeproto.JobFailure{Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}

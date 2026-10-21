@@ -170,7 +170,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(afterErr), afterErr
 		}
 	}
-	if result.Outcome == store.NodeSuccess && len(output) > 0 && h.deps.Mask(string(output)) != string(output) {
+	if result.Outcome == store.NodeSuccess && len(output) > 0 && h.deps.Masker.Mask(string(output)) != string(output) {
 		output = nil
 		if err = h.withholdOutput(ctx, input); err != nil {
 			return h.failure(err), err

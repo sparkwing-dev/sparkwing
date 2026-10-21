@@ -23,7 +23,7 @@ func FuzzHostCanonicalErrorMasking(f *testing.F) {
 			"reason": apierr.ReasonBinding, secret: []any{secret, map[string]any{secret: secret}},
 		}}
 		var rendered *apierr.Error
-		err := maskHostError(failure, masker.Mask)
+		err := maskHostError(failure, masker)
 		if !errors.As(err, &rendered) || !errors.Is(err, failure) || rendered.Details["reason"] != string(apierr.ReasonBinding) {
 			t.Fatalf("lost canonical refusal or cause: %v", err)
 		}
@@ -44,10 +44,16 @@ func FuzzHostCanonicalErrorMasking(f *testing.F) {
 func TestHostCanonicalErrorMasksNumericDetails(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Forbidden, Details: map[string]any{"count": json.Number("123456789"), "flag": true}}
 	var rendered *apierr.Error
-	err := maskHostError(failure, func(value string) string {
-		return strings.NewReplacer("123456789", "***", "true", "***").Replace(value)
-	})
+	err := maskHostError(failure, testMasker("123456789", "true"))
 	if !errors.As(err, &rendered) || rendered.Details["count"] != "***" || rendered.Details["flag"] != "***" {
 		t.Fatal("scalar details bypassed masking")
 	}
+}
+
+func testMasker(values ...string) *secrets.Masker {
+	masker := secrets.NewMasker()
+	for _, value := range values {
+		masker.Register(value)
+	}
+	return masker
 }

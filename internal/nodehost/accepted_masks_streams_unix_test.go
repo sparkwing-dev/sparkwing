@@ -46,7 +46,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 				var failure string
 				if placement == "fresh" {
 					state, host, input := newOwnerFixture(t, false)
-					host.Masks, host.Mask = masks, masks.masker.Mask
+					host.Masks, host.Masker = masks, masks.masker
 					request := &state.snapshot.Run.Request.Request
 					request.RequestedArgs = map[string]string{"token": value}
 					request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
@@ -111,7 +111,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 						}
 					} else {
 						ownerState, host, run := newOwnerFixture(t, true)
-						host.Masks, host.Mask = masks, masks.masker.Mask
+						host.Masks, host.Masker = masks, masks.masker
 						ownerState.snapshot.Run.Spec = spec
 						ownerState.snapshot.Run.PlanHash = string(spec.PlanHash)
 						ownerState.snapshot.Run.Plan, _ = json.Marshal(input.Accepted.Plan)

@@ -56,8 +56,8 @@ func TestOwnerSeals(t *testing.T) {
 				s.refused = secretFailure
 			}
 			host := OwnerHost{
-				Mask:  func(value string) string { return strings.ReplaceAll(value, secret, "***") },
-				Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+				Masker: testMasker(secret),
+				Store:  s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 				Acquire: func(_ context.Context, in RunInput) (*source.Entry, error) {
 					s.trace = append(s.trace, "acquire")
 					if mode == "resume" && in.Accepted == nil {

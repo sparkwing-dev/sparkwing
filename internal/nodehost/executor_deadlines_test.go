@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -181,7 +182,7 @@ func TestNodeExecutorAwaitsHoldNoProgressUntilLastResume(t *testing.T) {
 		input.Execution.NoProgressTimeout.Value = 2 * time.Second
 		executorRetryBudget(t, &input, s, 0)
 		start := time.Now()
-		deps.Mask = func(value string) string { return value }
+		deps.Masker = secrets.NewMasker()
 		deps.Start = func(_ context.Context, _ NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
 				if request.Op != nodeproto.OpRunStep {

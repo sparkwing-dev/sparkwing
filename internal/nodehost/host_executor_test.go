@@ -93,7 +93,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	}
 	input.RouteBinding.Routes.Bearer = "parent-authority"
 	dependencies := ExecutorDependencies{
-		Store: s, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },
+		Store: s, Masker: testMasker("private"),
 		Bind: func(_ context.Context, in NodeInput) (ProcessGrant, error) {
 			binding := in.RouteBinding
 			binding.Routes.Bearer = fmt.Sprintf("process-%d", in.Attempt)
@@ -139,7 +139,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 		t.Fatal(err)
 	}
 	host := &ClaimedNodeHost{
-		Store: s, Executor: executor, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(string) string { return "masked" },
+		Store: s, Executor: executor, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: testMasker("private"),
 		Acquire: func(_ context.Context, in source.Spec, _ source.Options) (*source.Entry, error) {
 			return &source.Entry{Engine: resolved, SHA: in.SHA, RepoKey: in.RepoKey}, nil
 		},

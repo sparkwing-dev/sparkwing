@@ -181,7 +181,7 @@ func (s *ProcessServices) awaitChild(request *http.Request, auth capability.Auth
 		}
 	}
 	if result.Error != nil {
-		masked := maskHostError(result.Error, s.Masks.mask)
+		masked := maskHostError(result.Error, s.Masks.masker)
 		if !errors.As(masked, &result.Error) {
 			return nil, executorError(apierr.Internal, "child error could not be encoded")
 		}

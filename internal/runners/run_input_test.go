@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	award "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -37,7 +38,7 @@ func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := nodehost.ClaimedNodeHost{
-		Store: state, Executor: sourceRefusalExecutor{t}, Mask: func(s string) string { return s },
+		Store: state, Executor: sourceRefusalExecutor{t}, Masker: secrets.NewMasker(),
 		Acquire: func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 			t.Fatal("sourceless award reached acquisition")
 			return nil, nil

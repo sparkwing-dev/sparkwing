@@ -48,6 +48,26 @@ func TestMaskJSONReachesKeysNumbersAndEscapes(t *testing.T) {
 	}
 }
 
+func TestMaskJSONKeepsStructuralKeysBesideMultilineSecrets(t *testing.T) {
+	m := newTestMasker("attribute\"sentinel\nvalue")
+	merged := NewMasker()
+	merged.Merge(m)
+	raw := []byte(`{"nested":[{"value":"attribute\"sentinel\nvalue"}],"prefix-attribute\"sentinel\nvalue":true}`)
+	want := `{"nested":[{"value":"***"}],"prefix-***":true}`
+	for _, masker := range []*Masker{m, merged} {
+		if got := string(masker.MaskJSON(raw)); got != want {
+			t.Fatalf("MaskJSON = %s, want %s", got, want)
+		}
+		if got := masker.Mask("value"); got != "***" {
+			t.Fatalf("multiline text component = %q", got)
+		}
+		masker.Register("value")
+		if got := string(masker.MaskJSON([]byte(`{"value":"public"}`))); got != `{"***":"public"}` {
+			t.Fatalf("explicitly registered key = %s", got)
+		}
+	}
+}
+
 func TestMaskJSONReturnsCanonicalPayload(t *testing.T) {
 	for name, m := range map[string]*Masker{
 		"registered": newTestMasker("private-token"),

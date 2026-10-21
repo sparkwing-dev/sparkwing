@@ -67,7 +67,7 @@ func checkExecutorFailureMask(t *testing.T, value string, secretCode bool) {
 	var trace []string
 	var processes []*scriptedSDK
 	input, storage, host := executionHostFixture(t, "success", &trace, &processes, func(deps *ExecutorDependencies) {
-		deps.Mask = func(text string) string { return strings.ReplaceAll(text, secret, "***") }
+		deps.Masker = testMasker(secret)
 		deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
 			code := apierr.Code("future_sdk_error")
 			if secretCode {
@@ -76,7 +76,7 @@ func checkExecutorFailureMask(t *testing.T, value string, secretCode bool) {
 			return nil, &apierr.Error{Code: code, Message: "failed " + secret + strings.Repeat("界", int(limits.ErrorBytes)) + " tail", Hint: secret, Details: map[string]any{"value": secret}}
 		}
 	})
-	host.Mask = func(text string) string { return strings.ReplaceAll(text, secret, "***") }
+	host.Masker = testMasker(secret)
 	err := host.Execute(t.Context(), input)
 	if err == nil || strings.Contains(err.Error(), secret) {
 		t.Fatal("executor lost or exposed its failure")

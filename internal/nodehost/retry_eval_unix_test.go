@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -169,7 +170,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return input.Engine, nil
 		},
-		Mask:       func(text string) string { return text },
+		Masker:     secrets.NewMasker(),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 		ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 			if ref.RunID != f.Accepted.RunID || ref.NodeID != "targets" || generation != sourceInput.Generation {

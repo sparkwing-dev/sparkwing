@@ -136,14 +136,14 @@ func (h *OwnerEvaluator) MemoKey(ctx context.Context, input EvaluationInput) (st
 func (h *OwnerEvaluator) policyError(ctx context.Context, err error) error {
 	cause := context.Cause(ctx)
 	if err == nil {
-		return maskHostError(cause, h.deps.Mask)
+		return maskHostError(cause, h.deps.Masker)
 	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
 		code = structured.Code
 	}
-	return maskHostError(errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Mask(err.Error()))}), h.deps.Mask)
+	return maskHostError(errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}), h.deps.Masker)
 }
 
 func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row store.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (OwnerLayerResult, error) {

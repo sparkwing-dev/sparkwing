@@ -36,16 +36,16 @@ func (e maskedRunError) As(target any) bool {
 	return true
 }
 
-func maskHostError(err error, mask func(string) string) error {
+func maskHostError(err error, masker *secrets.Masker) error {
 	if err == nil {
 		return nil
 	}
-	masked := maskedRunError{err: err, text: boundedNodeErrText(mask(err.Error()))}
+	masked := maskedRunError{err: err, text: boundedNodeErrText(masker.Mask(err.Error()))}
 	var canonical *apierr.Error
 	if errors.As(err, &canonical) {
-		masked.canonical = &apierr.Error{Code: maskedFailureCode(canonical.Code, mask), Message: masked.text, Details: secrets.MaskDetails(canonical.Details, mask)}
+		masked.canonical = &apierr.Error{Code: maskedFailureCode(canonical.Code, masker.Mask), Message: masked.text, Details: masker.MaskDetails(canonical.Details)}
 		if canonical.Hint != "" {
-			masked.canonical.Hint = boundedNodeErrText(mask(canonical.Hint))
+			masked.canonical.Hint = boundedNodeErrText(masker.Mask(canonical.Hint))
 		}
 	}
 	return masked

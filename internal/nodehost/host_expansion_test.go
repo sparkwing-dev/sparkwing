@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -104,13 +105,13 @@ func TestOwnerExpansion(t *testing.T) {
 					t.Fatal("output read lost source fence")
 				}
 				return json.RawMessage(`{"value":7}`), nil
-			}, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") }})
+			}, Masker: testMasker("private")})
 			if err != nil {
 				t.Fatal(err)
 			}
 			entry := &source.Entry{Engine: resolved}
 			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-			host := OwnerHost{Mask: func(value string) string { return value }, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}

@@ -51,7 +51,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 				}
 				acquired, executed, joined := false, false, false
 				host := ClaimedNodeHost{
-					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Mask: func(string) string { return "masked" },
+					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: testMasker("private"),
 					Acquire: func(_ context.Context, projected source.Spec, _ source.Options) (*source.Entry, error) {
 						acquired = true
 						if s.beats.Load() != 1 || projected.SHA != request.Request.Git.SHA || projected.Engine == nil || *projected.Engine != identity {

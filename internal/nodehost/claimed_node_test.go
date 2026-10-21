@@ -38,7 +38,7 @@ func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
 	secret := "private-claim-read-credential"
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: secret, Details: map[string]any{"credential": secret}}
 	host.Store = refusedClaimSnapshot{ClaimStore: state, failure: failure}
-	host.Mask = func(value string) string { return strings.ReplaceAll(value, secret, "***") }
+	host.Masker = testMasker(secret)
 	state.renew = func(context.Context) (store.LeaseBeat, error) {
 		t.Error("renewed after the acceptance read failed")
 		return store.LeaseBeat{}, nil
@@ -90,7 +90,7 @@ func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDep
 	entry.SHA, entry.RepoKey = spec.Request.Request.Git.SHA, string(spec.Request.Request.Git.Repository.Key)
 	input.Entry = nil
 	host := ClaimedNodeHost{
-		Store: s, Executor: executor, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Mask: deps.Mask,
+		Store: s, Executor: executor, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: deps.Masker,
 		Acquire: func(_ context.Context, in source.Spec, _ source.Options) (*source.Entry, error) {
 			if in.Engine == nil || *in.Engine != spec.Resolved.Engine || in.SHA != spec.Request.Request.Git.SHA || in.RepoKey != entry.RepoKey {
 				t.Fatal("acquisition lost the accepted source or engine")

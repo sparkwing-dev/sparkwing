@@ -6,32 +6,37 @@ type Span = { lo: number; hi: number };
 // Mirrors internal/secrets; the shared vectors pin both implementations.
 export class Masker {
   readonly #values = new Set<string>();
+  readonly #keys = new Set<string>();
   register(value: string): void {
+    this.#register(value, /[,\n]/, this.#values);
+    this.#register(value, /,/, this.#keys);
+  }
+  #register(value: string, separators: RegExp, values: Set<string>): void {
     if (!value) return;
     const parts = [
       value,
       ...value
-        .split(/[,\n]/)
+        .split(separators)
         .map((part) => (value.includes(",") ? part.trim() : part.replace(/\r$/, "")))
         .filter((part) => part.trim()),
     ];
     for (const part of parts) {
-      this.#values.add(part);
+      values.add(part);
       const json = JSON.stringify(part).slice(1, -1);
-      this.#values.add(json);
+      values.add(json);
       const goQuoted = json
         .replace(/\\u00(0[0-9a-f]|1[0-9a-f])/gi, (_, hex: string) =>
           hex.toLowerCase() === "07" ? "\\a" : hex.toLowerCase() === "0b" ? "\\v" : `\\x${hex.toLowerCase()}`,
         )
         .replace(/\x7f/g, "\\x7f");
-      this.#values.add(goQuoted);
-      this.#values.add(
+      values.add(goQuoted);
+      values.add(
         goQuoted.replace(/[^\x00-\x7F]/gu, (c) => {
           const cp = c.codePointAt(0)!;
           return cp > 0xffff ? `\\U${cp.toString(16).padStart(8, "0")}` : `\\u${cp.toString(16).padStart(4, "0")}`;
         }),
       );
-      this.#values.add(json.replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`));
+      values.add(json.replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`));
       const bytes = Buffer.from(part);
       const uri = Array.from(bytes, (byte) => {
         const c = String.fromCharCode(byte);
@@ -51,10 +56,10 @@ export class Masker {
         const inside = encoded.slice(Math.ceil((8 * lead) / 6), Math.floor((8 * (lead + bytes.length)) / 6));
         forms.push(inside, inside.replace(/\+/g, "-").replace(/\//g, "_"));
       }
-      for (const form of forms) if (form.length >= 4) this.#values.add(form);
+      for (const form of forms) if (form.length >= 4) values.add(form);
     }
   }
-  #spans(text: string): Span[] {
+  #spans(text: string, values = this.#values): Span[] {
     const spans: Span[] = [];
     let decoded = "";
     const units: Span[] = [];
@@ -66,7 +71,7 @@ export class Masker {
       for (let j = 0; j < value.length; j++) units.push({ lo: i, hi: i + raw.length });
       i += raw.length;
     }
-    for (const value of this.#values) {
+    for (const value of values) {
       for (const [source, escaped] of [
         [text, false],
         [decoded, true],
@@ -89,8 +94,11 @@ export class Masker {
     return this.#spans(text).length > 0;
   }
   mask(text: string): string {
+    return this.#mask(text, this.#values);
+  }
+  #mask(text: string, values: Set<string>): string {
     for (let pass = 0; pass < 4; pass++) {
-      const spans = this.#spans(text);
+      const spans = this.#spans(text, values);
       if (!spans.length) break;
       let result = "",
         previous = 0;
@@ -100,14 +108,14 @@ export class Masker {
       }
       text = result + text.slice(previous);
     }
-    return this.containsSecret(text) ? "" : text;
+    return this.#spans(text, values).length ? "" : text;
   }
   maskJSON(value: unknown): unknown {
     const visit = (value: unknown): unknown => {
       if (typeof value === "string") return this.mask(value);
       if (Array.isArray(value)) return value.map(visit);
       if (value && typeof value === "object")
-        return Object.fromEntries(Object.entries(value).map(([key, child]) => [this.mask(key), visit(child)]));
+        return Object.fromEntries(Object.entries(value).map(([key, child]) => [this.#mask(key, this.#keys), visit(child)]));
       const text = JSON.stringify(value);
       return text !== undefined && this.mask(text) !== text ? this.mask(text) : value;
     };

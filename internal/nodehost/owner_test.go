@@ -323,8 +323,8 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
-		Mask:  func(value string) string { return value },
-		Store: f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		Masker: secrets.NewMasker(),
+		Store:  f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Delegator: ownerDelegatorFixture{actor: in.Owner},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
@@ -470,7 +470,7 @@ func TestOwnerHostRetainsIntakeSecretClassifications(t *testing.T) {
 	input.SealedRequest, _ = json.Marshal(f.snapshot.Run.Request.Request)
 	masker := secrets.NewMasker()
 	host.Masks = NewMaskRegistry(masker)
-	host.Mask = masker.Mask
+	host.Masker = masker
 	prepare := host.Prepare
 	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 		if masker.Mask("private-value") != "***" {

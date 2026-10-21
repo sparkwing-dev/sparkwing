@@ -19,7 +19,7 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	if err := h.unitReady(input); err != nil {
 		return accepted, err
 	}
-	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
+	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Masker) }()
 	owner := input.Owner.Owner
 	if owner.Kind != store.OwnerTrigger || owner.RunID != input.RunID || owner.Holder == "" || owner.Generation <= 0 {
 		return accepted, errors.New("plan unit requires its planning lease")
@@ -60,7 +60,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if input.Accepted == nil || sourceID == "" || generation < 0 || fence.Kind != capability.UnitEval || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 || h.Expand == nil {
 		return errors.New("eval unit requires accepted source, expansion lease and evaluator")
 	}
-	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
+	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Masker) }()
 	if err := h.Masks.initializeSeal(*input.Accepted); err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 }
 
 func (h *OwnerHost) unitReady(input RunInput) error {
-	if h.Store == nil || h.Mask == nil || h.Renew == nil || h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval || input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost {
+	if h.Store == nil || h.Masker == nil || h.Renew == nil || h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval || input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost {
 		return errors.New("awarded unit requires state, renewal, masking and sealed input")
 	}
 	return nil

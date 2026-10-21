@@ -76,7 +76,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		}
 	}
 	execution.Masks = config.Masks
-	execution.Store, execution.Mask = config.Store, config.Masks.masker.Mask
+	execution.Store, execution.Masker = config.Store, config.Masks.masker
 	execution.Start, execution.EnsureEngine = processes.Start, config.Source.Engines.Ensure
 	execution.Validation, execution.ValidatePlan, execution.CanonicalHash = validation, functions.Validate, functions.Hash
 	executor, err := NewNodeExecutor(execution)
@@ -85,7 +85,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	evaluation := config.Evaluation
 	evaluation.Masks = config.Masks
-	evaluation.Store, evaluation.Mask = config.Store, config.Masks.masker.Mask
+	evaluation.Store, evaluation.Masker = config.Store, config.Masks.masker
 	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
 	evaluation.Validation, evaluation.ValidatePlan, evaluation.CanonicalHash = validation, functions.Validate, functions.Hash
 	evaluator, err := NewOwnerEvaluator(evaluation)
@@ -103,7 +103,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner := config.Owner
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing
-	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
+	owner.Snapshots, owner.Masks, owner.Masker = config.Snapshots, config.Masks, config.Masks.masker
 	owner.Executor, owner.Planner = executor, &planner
 	if config.Capacity == nil {
 		if capacity, ok := config.Store.(CapacityStore); ok {
@@ -152,7 +152,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	claimed := &ClaimedNodeHost{
 		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
-		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.ClaimAdmission,
+		Executor: executor, Masker: config.Masks.masker, Masks: config.Masks, Admission: config.ClaimAdmission,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
 		return nil, nil, nil, err

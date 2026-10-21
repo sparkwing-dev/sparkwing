@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -208,7 +209,7 @@ func TestExecutorOutputCommit(t *testing.T) {
 			var trace []string
 			process := newExecutionSDK(input.Accepted.Plan, input, "output_refused", &trace)
 			executor, err := NewNodeExecutor(ExecutorDependencies{
-				Store: st, Mask: func(text string) string { return text }, PublishOutput: records.PublishOutput,
+				Store: st, Masker: secrets.NewMasker(), PublishOutput: records.PublishOutput,
 				Bind: func(_ context.Context, in NodeInput) (ProcessGrant, error) {
 					binding := in.RouteBinding
 					binding.Routes.Bearer = "delegated-process"

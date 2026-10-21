@@ -166,7 +166,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 		}
 		c, cancel := context.WithCancel(ctx)
 		return c, cancel, nil
-	}, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") }}
+	}, Masker: testMasker("private")}
 	return input, s, deps, &processes
 }
 
@@ -1028,7 +1028,7 @@ func TestNodeExecutorReportsOnlyBoundedMaskedFailureText(t *testing.T) {
 	input, st, deps, _ := executorFixture(t)
 	secret := "private-start-credential"
 	sentinel := errors.New(secret + strings.Repeat("界", int(limits.ErrorBytes)) + "failure-tail")
-	deps.Mask = func(text string) string { return strings.ReplaceAll(text, secret, "***") }
+	deps.Masker = testMasker(secret)
 	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) { return nil, sentinel }
 	host, err := NewNodeExecutor(deps)
 	if err != nil {

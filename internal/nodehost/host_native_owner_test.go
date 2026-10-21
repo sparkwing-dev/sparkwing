@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -80,7 +81,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 				},
 			}
 			host, err := NewOwnerEvaluator(EvaluationDependencies{
-				Store: st, Start: cfg.StartEvaluation, Mask: func(s string) string { return s },
+				Store: st, Start: cfg.StartEvaluation, Masker: secrets.NewMasker(),
 				Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return selected, nil

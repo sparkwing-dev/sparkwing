@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -47,7 +48,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 		t.Run(outcome, func(t *testing.T) {
 			lost := outcome != "success"
 			input, s, host, _ := claimedNodeFixture(t)
-			host.Mask = func(s string) string { return s }
+			host.Masker = secrets.NewMasker()
 			root, sha := hostSourceCheckout(t)
 			s.run.Spec.Request.Request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}
 			s.run.Spec.Request.Request.Git.SHA = sha
@@ -136,7 +137,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 					return revoke()
 				}}, nil
 			}
-			deps.Mask = host.Mask
+			deps.Masker = host.Masker
 			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
 			}

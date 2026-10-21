@@ -82,7 +82,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	if p.Masker == nil {
 		return out, errors.New("checkout planning requires a shared secret registry")
 	}
-	defer func() { err = maskHostError(err, p.Masker.Mask) }()
+	defer func() { err = maskHostError(err, p.Masker) }()
 	if err := context.Cause(ctx); err != nil {
 		return out, err
 	}

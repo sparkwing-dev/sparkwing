@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -57,7 +58,7 @@ type EvaluationDependencies struct {
 	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation    nodeproto.ValidationContext
 	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Mask          func(string) string
+	Masker        *secrets.Masker
 	Masks         *MaskRegistry
 }
 
@@ -70,7 +71,7 @@ type OwnerEvaluator struct {
 
 // NewOwnerEvaluator requires explicit authority, output and process adapters.
 func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
-	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
+	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("owner evaluator requires store, process, engine and masking adapters")
 	}
 	if deps.ValidatePlan == nil {
@@ -89,7 +90,7 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 // in one reconstructed SDK process. Failed evaluation returns only a masked
 // failure; cancellation and stale input leave the barrier to the live owner.
 func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (body json.RawMessage, failure *store.ExpansionFailure, err error) {
-	defer func() { err = maskHostError(err, h.deps.Mask) }()
+	defer func() { err = maskHostError(err, h.deps.Masker) }()
 	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
 		return nil, nil, err
 	}
@@ -127,7 +128,7 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (bod
 		if errors.As(err, &structured) {
 			code = structured.Code
 		}
-		return nil, &store.ExpansionFailure{Code: code, MaskedError: boundedNodeErrText(h.deps.Mask(err.Error()))}, nil
+		return nil, &store.ExpansionFailure{Code: code, MaskedError: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}, nil
 	}
 	return body, nil, nil
 }

@@ -12,9 +12,10 @@ func TestMaskingConformanceVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	var vectors []struct {
-		Name        string
-		Values      []string
-		Input, Want string
+		Name                string
+		Values              []string
+		Input, Want         string
+		JSONInput, JSONWant string
 	}
 	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
@@ -24,6 +25,11 @@ func TestMaskingConformanceVectors(t *testing.T) {
 			m := newTestMasker(v.Values...)
 			if got := m.Mask(v.Input); got != v.Want {
 				t.Fatalf("Mask = %q, want %q", got, v.Want)
+			}
+			if v.JSONInput != "" {
+				if got := string(m.MaskJSON([]byte(v.JSONInput))); got != v.JSONWant {
+					t.Fatalf("MaskJSON = %s, want %s", got, v.JSONWant)
+				}
 			}
 			for split := 0; split <= len(v.Input); split++ {
 				stream := m.Stream()

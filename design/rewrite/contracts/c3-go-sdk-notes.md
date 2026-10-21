@@ -120,7 +120,7 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 `sparkwingtest.New` snapshots option values, including Git and pull-request metadata. Reusing and changing an options value for another fixture cannot change an existing fixture's plans. Injected service callbacks remain test-owned dependencies.
 
-Fake-host records mask attribute keys and nested values, including numeric, boolean and null values whose text contains a registered secret. Longer masks precede their prefixes. `Host.Records` preserves attribute numbers as `json.Number` so masking and snapshots never round large integers.
+Fake-host records mask attribute keys and nested values, including numeric, boolean and null values whose text contains a registered secret. Keys match whole secrets, list elements and their encodings. Nonblank multiline fragments also mask text values, while structural keys such as `value` survive unless explicitly registered as secrets. Longer masks precede their prefixes. `Host.Records` preserves attribute numbers as `json.Number` so masking and snapshots never round large integers.
 
 SDK planning errors redact longer secret inputs before their prefixes, including defaults, so input field order cannot expose a suffix.
 

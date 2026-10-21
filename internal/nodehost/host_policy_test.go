@@ -59,7 +59,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 					return nil, errors.New("approval cannot read its own unexecuted output")
 				},
-				Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },
+				Masker: testMasker("private"),
 			})
 			if err != nil {
 				t.Fatal(err)

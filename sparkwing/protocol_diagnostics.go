@@ -78,7 +78,7 @@ func (d *planningDiagnostics) sanitize(failure error, fallback apierr.Code, pref
 	if masker.ContainsSecret(string(code)) {
 		code = fallback
 	}
-	return &apierr.Error{Code: code, Message: masker.Mask(prefix + source.Message), Hint: masker.Mask(source.Hint), Details: secrets.MaskDetails(source.Details, masker.Mask)}
+	return &apierr.Error{Code: code, Message: masker.Mask(prefix + source.Message), Hint: masker.Mask(source.Hint), Details: masker.MaskDetails(source.Details)}
 }
 
 func planningFailure(value any) error {

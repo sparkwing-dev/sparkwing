@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -23,7 +22,7 @@ func (h *nodeExecutor) diagnostic(ctx context.Context, input NodeInput, level, e
 	}
 	return h.deps.Log(ctx, input, nodeproto.FrameLog{
 		TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Event: event,
-		Step: h.deps.Mask(step), Message: h.deps.Mask(message), Attrs: secrets.MaskJSON(raw, h.deps.Mask),
+		Step: h.deps.Masker.Mask(step), Message: h.deps.Masker.Mask(message), Attrs: h.deps.Masker.MaskJSON(raw),
 	})
 }
 
