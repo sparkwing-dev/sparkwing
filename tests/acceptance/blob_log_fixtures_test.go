@@ -15,8 +15,7 @@ import (
 )
 
 // safety: seeded authority isolates log persistence from claim issuance and byte transport.
-func seedStoreLogBoundary(ctx context.Context, db *sql.DB) (store.SegmentCommit, error) {
-	now := time.Now().UTC()
+func seedStoreLogBoundary(ctx context.Context, db *sql.DB, now time.Time) (store.SegmentCommit, error) {
 	c := capability.Capability{
 		Digest: sha256.Sum256([]byte("log-boundary")), Prefix: "log-boundary", Team: string(store.DefaultTeam),
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "logger"}, Audience: capability.Controller,

@@ -32,9 +32,10 @@ type poolKey struct {
 }
 
 // OpenExisting opens path with store.Open and records it for SQL. Use it
-// to reopen or migrate a database a test already created.
+// to reopen or migrate a database a test already created. SQLite fixtures use
+// advancing Go time; WithClock overrides it for tests that drive time.
 func OpenExisting(path string, opts ...store.Option) (*store.Store, error) {
-	st, err := store.Open(path, opts...)
+	st, err := store.Open(path, append([]store.Option{monotonicClock()}, opts...)...)
 	if err != nil {
 		return nil, err
 	}
