@@ -2589,7 +2589,8 @@ C1's current BindSlotOfBoundNode checker still refuses missing resolved selector
 Tenant consumes SlotKey/SlotHolderID through the concrete transaction interface.
 See C1's scheduled intake and concurrency section for coverage and the remaining
 memo namespace integration. Public node slot transactions refuse box selectors.
-Private owner unit admission derives box keys from persisted award ancestry.
+Private unit admission derives box keys from `ExecutionHost` sealed on the
+authenticated award. Launcher awards wait for activation to seal that identity.
 The HTTP properties use committed-fact and transaction fakes. They prove target
 transport, policy selection, cancellation classes and safe failure. They do not
 close native group/memo declaration, cross-team leader, lease-continuity or

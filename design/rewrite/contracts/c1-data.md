@@ -4067,10 +4067,11 @@ lead harness.
 
 Open integration points: following a private remote branch needs audited
 controller credentials during revision lookup. Pinned App schedules use the
-existing post-admission source release. Box groups use the persisted machine subject in the authenticated award's ancestry,
-or the persisted local peer identity in a local controller's private store.
-Missing host identity is refused. Memo requests need accepted namespace metadata. These gaps remain visible
-for the lead's launch integration work.
+existing post-admission source release. Box groups use only `ExecutionHost` sealed
+on the authenticated award. Launcher awards wait for activation to seal that
+identity. Other awards without it are refused. Memo requests need accepted
+namespace metadata. These gaps remain visible for the lead's launch integration
+work.
 
 
 ## W1b review integration, 2026-10-17
@@ -4198,13 +4199,13 @@ the original seal. Invocation origin never selects environment storage.
 `ComposeNativeAdmission` accepts the placement's capacity store and optional machine
 compute service and required-compute policy. `NativeConfig` and `NativeHostConfig`
 carry that value whole. Owner and claimed hosts share its compute service. Store
-concurrency is independent of machine compute. Owners adopt capacity for ready
-and claimed remote jobs even when compute admission is disabled. Machine
-requests carry CPU and memory without semaphore groups.
+concurrency is independent of machine compute. Each execution admits its sealed
+plan and job groups under its award, even when compute admission is disabled.
+Machine requests carry CPU and memory without semaphore groups.
 
 The direct-store scheduling regression runs two jobs with run-scoped and box-scoped
 capacity-one queue groups, with machine compute enabled and disabled. The store
-derives box identity from persisted award ancestry. It checks
+derives box identity from the award's sealed `ExecutionHost`. It checks
 that each executing job holds the store slot and that terminal completion releases
 it. Machine admission sees resource requests only when enabled.
 
