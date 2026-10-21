@@ -44,8 +44,7 @@ func NameKey(name, goos string) string {
 	return name
 }
 
-// Validate refuses invalid names and engine-owned assignments without exposing values in errors.
-func Validate(env []Assignment) error {
+func validate(env []Assignment) error {
 	for _, assignment := range env {
 		if !validName(assignment.Name) {
 			return errors.New("invalid environment variable name")
@@ -111,7 +110,7 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 		composeRuntime(env, k, rt)
 	}
 	if k == Attempt || k == Eval {
-		if err := Validate(rt.Startup); err != nil {
+		if err := validate(rt.Startup); err != nil {
 			return nil, err
 		}
 		for _, a := range rt.Startup {

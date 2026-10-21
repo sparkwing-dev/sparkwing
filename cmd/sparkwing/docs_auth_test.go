@@ -67,3 +67,15 @@ func TestAuthGuideCLIExamplesUseFinalGrammar(t *testing.T) {
 		t.Fatal("auth guide contains no CLI examples")
 	}
 }
+
+func TestAuthGuideActionsExpiryUsesStoreClock(t *testing.T) {
+	body, err := docs.ReadRaw("auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, clause := range []string{"one hour from the store transaction clock", "one hour after the verified GitHub token expires"} {
+		if !strings.Contains(body, clause) {
+			t.Errorf("auth guide is missing the Actions expiry bound %q", clause)
+		}
+	}
+}

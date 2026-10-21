@@ -15,7 +15,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -54,7 +53,7 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: value, Pipeline: "build", Masked: masked}, time.Now()); err != nil {
+			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: value, Pipeline: "build", Masked: masked}, teststore.Now(s)); err != nil {
 				t.Fatal(err)
 			}
 		}

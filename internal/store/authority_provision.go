@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) (capability.Capability, error) {
@@ -61,6 +62,9 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	if spec.Kind == capability.ProvisionActions {
 		if err := checkActionsEnrollmentTx(ctx, tx, spec); err != nil {
 			return capability.Capability{}, err
+		}
+		if expires := tx.now(ctx).Add(limits.GitHubRunnerCredentialTTL); expires.Before(*c.ExpiresAt) {
+			c.ExpiresAt = &expires
 		}
 	}
 	if spec.Kind == capability.ProvisionMember || spec.Kind == capability.ProvisionTeamAdmin && tx.rotatingRoot != nil {

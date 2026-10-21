@@ -181,6 +181,8 @@ const (
 )
 
 // ProvisionSpec is trusted issuance input whose origin Store.Issue rechecks in its transaction.
+// For Actions, ExpiresAt is the verified token expiry plus the runner lifetime;
+// issuance also bounds it to the runner lifetime from the transaction clock.
 type ProvisionSpec struct {
 	AllowTeamAdmin bool
 	Personal       bool

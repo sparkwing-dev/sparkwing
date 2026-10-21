@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **auth:** GitHub Actions runner credentials use the store clock for their one-hour lifetime, so controller clock skew cannot make an otherwise valid exchange fail.
+
 - **go api:** Add `secretname.ErrMissing` as the shared missing-secret error. `sparkwing.ErrSecretMissing` keeps the same error identity.
 
 - **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 16 adds generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).

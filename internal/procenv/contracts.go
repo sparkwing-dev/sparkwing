@@ -94,7 +94,7 @@ type JobEnv struct{ Startup, Body []Assignment }
 // GODEBUG and GOMAXPROCS always belong to Startup. Startup values must not affect declarations;
 // a differing attempt replan fails as plan_drift, rather than changing the accepted plan.
 func SplitJobEnv(env []Assignment) (JobEnv, error) {
-	if err := Validate(env); err != nil {
+	if err := validate(env); err != nil {
 		return JobEnv{}, err
 	}
 	var result JobEnv

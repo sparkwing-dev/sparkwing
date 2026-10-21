@@ -126,7 +126,7 @@ func TestSessionFlowHTTPRenewsWithNamedProof(t *testing.T) {
 			t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 		}
 		count, expires := f.state(t)
-		if count != 1 || expires/time.Second.Nanoseconds() != result.Expires || result.Expires < time.Now().Add(6*24*time.Hour).Unix() {
+		if count != 1 || expires/time.Second.Nanoseconds() != result.Expires || result.Expires < teststore.Now(f.store).Add(6*24*time.Hour).Unix() {
 			t.Fatalf("stored=%d/%d result=%+v", count, expires, result)
 		}
 	}
@@ -218,7 +218,7 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.raw, f.csrf = raw, csrf
-		now := time.Now().UTC()
+		now := teststore.Now(f.store)
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
 		created, expires := now.Add(-elapsed), now.Add(10*time.Minute)
 		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), expires.UnixNano()); err != nil {
@@ -234,6 +234,11 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 			Expires int64 `json:"expires_at"`
 		}
 		return w.Code == 200 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Expires == stored/time.Second.Nanoseconds() && stored <= created.Add(maximum).UnixNano() && stored >= expires.UnixNano()
+	}
+	for _, age := range []uint8{24, 72} {
+		if !property(age) {
+			t.Fatalf("session renewal boundary: age=%d", age)
+		}
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 96}); err != nil {
 		t.Fatal(err)
@@ -293,15 +298,15 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			query, value := "", int64(0)
 			switch state {
 			case "expired":
-				query, value = "UPDATE sessions SET expires_at=? WHERE hash=?", time.Now().Add(-time.Hour).UnixNano()
+				query, value = "UPDATE sessions SET expires_at=? WHERE hash=?", teststore.Now(f.store).Add(-time.Hour).UnixNano()
 			case "revoked":
-				query, value = "UPDATE sessions SET revoked_at=? WHERE hash=?", time.Now().UnixNano()
+				query, value = "UPDATE sessions SET revoked_at=? WHERE hash=?", teststore.Now(f.store).UnixNano()
 			case "removed member":
 				query = "DELETE FROM memberships"
 			case "maximum lifetime":
-				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(-31*24*time.Hour).UnixNano()
+				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", teststore.Now(f.store).Add(-31*24*time.Hour).UnixNano()
 			case "future creation":
-				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
+				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", teststore.Now(f.store).Add(time.Hour).UnixNano()
 			case "license":
 			case "missing key":
 				f.restartWithCipher(t, nil)

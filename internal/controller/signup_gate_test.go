@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type signUpStatus struct {
@@ -213,6 +214,7 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 	}})
 	operator := f.operatorAuth()
 	for i := range 3 {
+		f.advance(time.Second)
 		out := f.signIn(person(fmt.Sprintf("g-%d", i), fmt.Sprintf("p%d@example.com", i), "P"))
 		if !out.Waitlisted {
 			t.Fatalf("sign-up %d under the deployment waitlist was admitted", i)
@@ -326,6 +328,7 @@ func TestSignUpVelocityWarnsThenClosesTheGate(t *testing.T) {
 		t.Fatal("the closure or the waitlisted sign-up was not counted")
 	}
 
+	f.advance(time.Second)
 	f.setSignUp(map[string]any{"mode": "open", "reason": "reviewed the burst"})
 	if out := f.signIn(person("v-4", "v4@example.com", "V")); out.Waitlisted {
 		t.Fatal("reopening the gate did not restart the hourly window")
@@ -335,7 +338,7 @@ func TestSignUpVelocityWarnsThenClosesTheGate(t *testing.T) {
 func TestYoungGitHubAccountsAreWaitlistedAtSignIn(t *testing.T) {
 	f := newIdentityFixture(t)
 	young := ghPerson(901, "fresh", "fresh@example.com")
-	young.CreatedAt = time.Now().Add(-2 * 24 * time.Hour)
+	young.CreatedAt = teststore.Now(f.store).Add(-2 * 24 * time.Hour)
 	if out := f.signInGitHub(young); !out.Waitlisted || out.ActiveTeam != nil {
 		t.Fatalf("a two-day-old GitHub account = %+v, want waitlisted", out)
 	}
@@ -355,7 +358,7 @@ func TestYoungGitHubAccountsAreWaitlistedAtSignIn(t *testing.T) {
 	f.setSignUp(map[string]any{"github_min_account_days": 1})
 	younger := githubtest.Person{
 		ID: 903, Login: "newer", Emails: []githubtest.Email{{Email: "newer@example.com", Primary: true, Verified: true}},
-		CreatedAt: time.Now().Add(-2 * 24 * time.Hour),
+		CreatedAt: teststore.Now(f.store).Add(-2 * 24 * time.Hour),
 	}
 	if out := f.signInGitHub(younger); out.Waitlisted {
 		t.Fatal("a lowered minimum age still waitlisted a two-day-old account")

@@ -133,14 +133,14 @@ func TestJobEnvironmentPhases(t *testing.T) {
 
 func TestValidateAssignments(t *testing.T) {
 	for _, name := range []string{"", "A=B", "A\x00B", "SPARKWING_RUN_ID", "CI", "SPARKWING_NODE_CLAIM_X", "SPARKWING_NODE_TOKEN", "AWS_SECRET_ACCESS_KEY", "CUSTOM_TOKEN"} {
-		err := Validate([]Assignment{{Name: name, Value: "never-echo-this-value"}})
+		err := validate([]Assignment{{Name: name, Value: "never-echo-this-value"}})
 		if err == nil {
 			t.Errorf("accepted %q", name)
 		} else if strings.Contains(err.Error(), "never-echo-this-value") {
 			t.Fatal("secret in diagnostic")
 		}
 	}
-	if err := Validate([]Assignment{{Name: "SPARKWING_CUSTOM", Value: "fine"}}); err != nil {
+	if err := validate([]Assignment{{Name: "SPARKWING_CUSTOM", Value: "fine"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := SplitJobEnv([]Assignment{{Name: "PATH", Value: "a\x00b"}}); err == nil {
@@ -254,7 +254,7 @@ func TestCABasePathsSurviveCredentialShapeFilter(t *testing.T) {
 	if _, ok := envMap(env)["LC_API_TOKEN"]; ok {
 		t.Fatal("prefix classification bypassed credential filter")
 	}
-	if err := Validate([]Assignment{{Name: "SSL_CERT_FILE", Value: "/ca"}}); err != nil {
+	if err := validate([]Assignment{{Name: "SSL_CERT_FILE", Value: "/ca"}}); err != nil {
 		t.Fatal(err)
 	}
 }
