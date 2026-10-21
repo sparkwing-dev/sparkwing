@@ -213,12 +213,12 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 		if err := f.store.AsOperator().DeleteSession(f.raw); err != nil {
 			t.Fatal(err)
 		}
-		raw, csrf, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+		raw, csrf, session, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
 		f.raw, f.csrf = raw, csrf
-		now := time.Now().UTC()
+		now := session.CreatedAt
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
 		created, expires := now.Add(-elapsed), now.Add(10*time.Minute)
 		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), expires.UnixNano()); err != nil {
@@ -235,8 +235,10 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 		}
 		return w.Code == 200 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Expires == stored/time.Second.Nanoseconds() && stored <= created.Add(maximum).UnixNano() && stored >= expires.UnixNano()
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96}); err != nil {
-		t.Fatal(err)
+	for age := range uint8(96) {
+		if !property(age) {
+			t.Fatalf("session renewal failed at age %s", (time.Duration(age)-24)*time.Hour)
+		}
 	}
 }
 
