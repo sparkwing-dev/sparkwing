@@ -3,6 +3,7 @@ package controller_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -84,6 +85,8 @@ func TestStandingRequestFromBillingToOperatorDecision(t *testing.T) {
 	}
 
 	declinedID := made.ID
+	// Frozen timestamps would make the latest request depend on random IDs.
+	f.advance(time.Second)
 	if code := f.call("POST", controller, owner.auth, ask, &made); code != http.StatusCreated {
 		t.Fatalf("request after decline = %d", code)
 	}
@@ -96,7 +99,7 @@ func TestStandingRequestFromBillingToOperatorDecision(t *testing.T) {
 	}
 	var approved teamStanding
 	if code := f.call("GET", "/api/v1/team/billing", owner.auth, nil, &approved); code != http.StatusOK || approved.Standing.Tier != "High" || approved.Standing.Request == nil || approved.Standing.Request.ID != made.ID || approved.Standing.Request.State != "approved" || !approved.Standing.CanRequest {
-		t.Fatalf("requester view after the grant = %d %+v", code, approved.Standing)
+		t.Fatalf("requester view after the grant = %d %+v request=%+v want_id=%s", code, approved.Standing, approved.Standing.Request, made.ID)
 	}
 	if code := f.call("GET", queue, operator.auth, nil, &listed); code != http.StatusOK || len(listed.Requests) != 0 {
 		t.Errorf("queue after the grant = %d %+v", code, listed)
