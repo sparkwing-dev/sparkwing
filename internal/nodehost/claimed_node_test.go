@@ -251,3 +251,30 @@ func TestClaimedNodeHostLossDuringAcquisitionDiscardsEntry(t *testing.T) {
 		}
 	})
 }
+
+func TestClaimedExecutionRefusesLegacyMaskingSealBeforeSourceOrProcess(t *testing.T) {
+	for _, entry := range []string{"claim", "executor"} {
+		t.Run(entry, func(t *testing.T) {
+			input, state, host, processes := claimedNodeFixture(t)
+			state.run.Spec.Resolved.SecretRegistration.Version = 0
+			input.Accepted.Spec, _ = json.Marshal(state.run.Spec)
+			host.Masks = nil
+			host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
+				t.Fatal("legacy masking seal acquired source")
+				return nil, nil
+			}
+			var err error
+			if entry == "claim" {
+				err = host.Execute(t.Context(), input)
+			} else {
+				err = host.Executor.Execute(t.Context(), input)
+			}
+			if err == nil || !strings.Contains(err.Error(), "start a new run instead of resuming") {
+				t.Fatalf("expected explicit legacy refusal, got %v", err)
+			}
+			if len(*processes) != 0 || len(state.changes) != 0 {
+				t.Fatal("legacy refusal started execution or changed node state")
+			}
+		})
+	}
+}

@@ -1,12 +1,10 @@
 package secrets
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -132,38 +130,6 @@ func TestRegisterOfAKnownValueDoesNoWork(t *testing.T) {
 	allocs := testing.AllocsPerRun(50, func() { m.Register("swt_00000000000000000000000000000001") })
 	if allocs > 0 {
 		t.Fatalf("re-registering a known value allocated %v times per call", allocs)
-	}
-}
-
-func TestCachedRegistersBeforeAnotherReaderSeesTheValue(t *testing.T) {
-	masker := NewMasker()
-	read := make(chan struct{})
-	c := NewCached(SourceFunc(func(name string) (string, bool, error) {
-		close(read)
-		return "secret-value", true, nil
-	}), masker)
-	masker.mu.Lock()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _, _ = c.Resolve(context.Background(), "TOKEN")
-	}()
-	<-read
-	for range 10000 {
-		c.mu.RLock()
-		_, cached := c.cache["TOKEN"]
-		c.mu.RUnlock()
-		if cached {
-			masker.mu.Unlock()
-			<-done
-			t.Fatal("value served from the cache before the masker registered it")
-		}
-		runtime.Gosched()
-	}
-	masker.mu.Unlock()
-	<-done
-	if got := masker.Mask("secret-value"); got != "***" {
-		t.Fatalf("Mask = %q", got)
 	}
 }
 

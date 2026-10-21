@@ -478,10 +478,7 @@ func admissionResultTx(ctx context.Context, tx *storeTx, team Team, id string) (
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, Inputs: runspec.DisplayRequest(run.Request), OwnerUnit: run.Owner, Replayed: true}
-	if run.Spec != nil {
-		result.Inputs = runspec.DisplaySpec(*run.Spec)
-	}
+	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, Inputs: run.Display(), OwnerUnit: run.Owner, Replayed: true}
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		result.OwnerUnit = nil
 	}

@@ -17,10 +17,11 @@ import (
 )
 
 type Masker struct {
-	mu     sync.RWMutex
-	raw    map[string]struct{}
-	values []string
-	known  map[string]struct{}
+	mu       sync.RWMutex
+	raw      map[string]struct{}
+	values   []string
+	known    map[string]struct{}
+	compiled *compiledMatcher
 }
 
 func NewMasker() *Masker { return &Masker{} }
@@ -69,6 +70,7 @@ func (m *Masker) add(value string) {
 	}
 	m.known[value] = struct{}{}
 	m.values = append(m.values, value)
+	m.compiled = nil
 }
 
 // Merge copies raw registrations and patterns without re-encoding derived patterns.
@@ -174,19 +176,7 @@ func (m *Masker) Mask(s string) string {
 	if m == nil || s == "" {
 		return s
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return maskPatterns(s, m.values)
-}
-
-func maskPatterns(s string, values []string) string {
-	for {
-		spans := maskSpans(s, values)
-		if len(spans) == 0 {
-			return s
-		}
-		s = replaceSpans(s, spans, "***")
-	}
+	return m.matcher().mask(s)
 }
 
 func replaceSpans(s string, spans []span, marker string) string {
@@ -203,98 +193,7 @@ func replaceSpans(s string, spans []span, marker string) string {
 
 type span struct{ lo, hi int }
 
-// safety: overlapping values merge into one range, so replacing one cannot
-// leave a fragment of the other in the clear.
-func maskSpans(s string, values []string) []span {
-	if len(values) == 0 {
-		return nil
-	}
-	var found []span
-	for _, v := range values {
-		if strings.Contains(v, "%") {
-			for at := 0; at+len(v) <= len(s); at++ {
-				if percentEqual(s[at:at+len(v)], v) {
-					found = append(found, span{at, at + len(v)})
-				}
-			}
-		} else {
-			for at := 0; ; {
-				i := strings.Index(s[at:], v)
-				if i < 0 {
-					break
-				}
-				found = append(found, span{at + i, at + i + len(v)})
-				at += i + 1
-			}
-		}
-	}
-	if strings.IndexByte(s, '\\') >= 0 {
-		decoded, units := unescapeJSON(s)
-		found = appendDecodedSpans(found, decoded, units, values)
-		if strings.IndexByte(decoded, '\\') >= 0 {
-			second, secondUnits := unescapeJSON(decoded)
-			for i, unit := range secondUnits {
-				secondUnits[i] = span{units[unit.lo].lo, units[unit.hi-1].hi}
-			}
-			found = appendDecodedSpans(found, second, secondUnits, values)
-		}
-	}
-	if len(found) == 0 {
-		return nil
-	}
-	slices.SortFunc(found, func(a, b span) int { return a.lo - b.lo })
-	merged := found[:1]
-	for _, sp := range found[1:] {
-		last := &merged[len(merged)-1]
-		if sp.lo < last.hi {
-			last.hi = max(last.hi, sp.hi)
-			continue
-		}
-		merged = append(merged, sp)
-	}
-	return merged
-}
-
-func appendDecodedSpans(found []span, decoded string, units []span, values []string) []span {
-	for _, value := range values {
-		if strings.Contains(value, "%") {
-			for at := 0; at+len(value) <= len(decoded); at++ {
-				if percentEqual(decoded[at:at+len(value)], value) {
-					found = append(found, span{units[at].lo, units[at+len(value)-1].hi})
-				}
-			}
-			continue
-		}
-		for at := 0; ; {
-			i := strings.Index(decoded[at:], value)
-			if i < 0 {
-				break
-			}
-			found = append(found, span{units[at+i].lo, units[at+i+len(value)-1].hi})
-			at += i + 1
-		}
-	}
-	return found
-}
-
-// percentEqual folds only the hex digits of percent escapes. Ordinary letters
-// remain case-sensitive, including letters adjacent to an escape.
-func percentEqual(text, pattern string) bool {
-	for i := 0; i < len(pattern); i++ {
-		if text[i] == pattern[i] {
-			continue
-		}
-		if i > 0 && pattern[i-1] == '%' || i > 1 && pattern[i-2] == '%' {
-			if text[i]|0x20 == pattern[i]|0x20 && pattern[i]|0x20 >= 'a' && pattern[i]|0x20 <= 'f' {
-				continue
-			}
-		}
-		return false
-	}
-	return true
-}
-
-func unescapeJSON(s string) (string, []span) {
+func unescapeJSON(s string, partial bool) (string, []span, int) {
 	var b strings.Builder
 	units := make([]span, 0, len(s))
 	emit := func(text string, lo, hi int) {
@@ -304,6 +203,9 @@ func unescapeJSON(s string) (string, []span) {
 		}
 	}
 	for i := 0; i < len(s); {
+		if partial && partialJSONEscape(s[i:]) {
+			return b.String(), units, i
+		}
 		if s[i] != '\\' || i+1 >= len(s) {
 			emit(s[i:i+1], i, i+1)
 			i++
@@ -322,7 +224,7 @@ func unescapeJSON(s string) (string, []span) {
 		emit(s[i:i+1], i, i+1)
 		i++
 	}
-	return b.String(), units
+	return b.String(), units, len(s)
 }
 
 var simpleEscapes = map[byte]string{'"': `"`, '\\': `\`, '/': "/", 'b': "\b", 'f': "\f", 'n': "\n", 'r': "\r", 't': "\t"}
@@ -431,9 +333,8 @@ func (m *Masker) ContainsSecret(identifier string) bool {
 	if m == nil {
 		return false
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(maskSpans(identifier, m.values)) > 0
+	found, _ := m.matcher().scan(identifier, false)
+	return len(found) > 0
 }
 
 // Stream masks an ordered byte stream. One goroutine owns each Stream.
@@ -445,8 +346,7 @@ type Stream struct {
 
 func (m *Masker) Stream() *Stream { return &Stream{m: m} }
 
-// Mask accepts raw bytes before line splitting and returns only text that can
-// no longer join a subsequent chunk into a known spelling.
+// Mask emits everything except the shortest suffix that can still form a match.
 func (s *Stream) Mask(chunk string) string {
 	s.pending += chunk
 	if s.m == nil {
@@ -454,26 +354,10 @@ func (s *Stream) Mask(chunk string) string {
 		s.pending = ""
 		return out
 	}
-	s.m.mu.RLock()
-	values := slices.Clone(s.m.values)
-	s.m.mu.RUnlock()
-	if len(values) == 0 {
-		out := s.pending
-		s.pending = ""
-		return out
-	}
-	longest := longestPattern(values)
-	// Two JSON escape views can expand each pattern byte to six bytes twice.
-	// Saturate at the pending size to avoid overflow for exceptionally long values.
-	reserve := len(s.pending)
-	if longest <= reserve/36 {
-		reserve = longest * 36
-	}
-	cut := max(0, len(s.pending)-reserve)
-	if cut == 0 {
-		return ""
-	}
-	for _, sp := range maskSpans(s.pending, values) {
+	matcher := s.m.matcher()
+	spans, cut := matcher.scan(s.pending, true)
+	// A matching range that overlaps an unfinished match stays intact.
+	for _, sp := range spans {
 		if sp.lo < cut && cut < sp.hi {
 			cut = sp.lo
 		}
@@ -481,19 +365,14 @@ func (s *Stream) Mask(chunk string) string {
 	if cut == 0 {
 		return ""
 	}
-	sanitized := maskPatterns(s.pending[:cut], values)
+	text := s.pending[:cut]
 	s.pending = s.pending[cut:]
-	s.rendered = maskPatterns(s.rendered+sanitized, values)
-	emit := max(0, len(s.rendered)-reserve)
-	if emit == 0 {
-		return ""
+	if len(spans) == 0 && s.rendered == "" {
+		return text
 	}
-	// Keep an entire match when the chosen output boundary falls within it.
-	for _, sp := range maskSpans(s.rendered, values) {
-		if sp.lo < emit && emit < sp.hi {
-			emit = sp.lo
-		}
-	}
+	// Re-scan after replacements because marker edges can create another match.
+	s.rendered = matcher.mask(s.rendered + matcher.mask(text))
+	_, emit := matcher.scan(s.rendered, true)
 	out := s.rendered[:emit]
 	s.rendered = s.rendered[emit:]
 	return out
@@ -501,20 +380,10 @@ func (s *Stream) Mask(chunk string) string {
 
 // Flush releases the final masked tail at EOF.
 func (s *Stream) Flush() string {
-	if s.m == nil {
-		out := s.rendered + s.pending
-		s.rendered, s.pending = "", ""
-		return out
+	out := s.rendered + s.pending
+	if s.m != nil {
+		out = s.m.Mask(out)
 	}
-	out := s.m.Mask(s.rendered + s.pending)
 	s.rendered, s.pending = "", ""
 	return out
-}
-
-func longestPattern(values []string) int {
-	longest := 0
-	for _, value := range values {
-		longest = max(longest, len(value))
-	}
-	return longest
 }

@@ -1206,12 +1206,15 @@ contain no masker and perform no automatic Mask RPCs. Explicit `Mask` remains
 synchronous. Without a host, pipeline execution is unmasked.
 
 The accepted run seals `Resolved.SecretRegistration`, including every discovered
-secret default, list argument kinds, raw/effective values and normalized list
+valid discovered secret default, list argument kinds, raw/effective values and normalized list
 items. Go argument parsing and projection use `argvalue.List`. TypeScript uses
 the same comma split, Unicode White_Space trim and empty-item omission contract.
 All registrations precede author execution. Lazily issued values are registered
-before release. Refuse fewer than four characters or `***` in a secret, including
-individual list items. Refusals direct authors to a plain config variable.
+before release. Refuse fewer than four characters or `***` in customer-stored
+secrets, supplied secret args and selected nonempty defaults, including individual
+list items. Refusals direct authors to a plain config variable. Empty defaults
+carry no value. Unselected defaults do not refuse a run. Unsafe derived proxy
+parts are skipped. Issued values do not revalidate accepted job identifiers.
 
 Stdout/stderr bytes enter the stream masker before line splitting. Decode protocol
 frames before sanitizing payloads and constructing trusted envelopes. Attribute
@@ -1224,7 +1227,17 @@ replies carry `arguments` and `declarations_known`. The host gates generator out
 before invoking the callback, registers its declared values on success and only
 then releases output. Failed discovery withholds output and author error details.
 Accepted expansions retain their private registration projection for reconstruction.
-The test host consumes these same host projections and presentation adapters.
+CLI discovery, production and the test host consume one declaration gate.
+CLI discovery stores a safe presentation projection. Directly constructed test
+plans use the same argument projection before callbacks run. The test host
+withholds secret-bearing step/eval outputs. Controller control text and public
+run presentation load accepted expansion registrations inside their owners.
+
+A compiled multi-pattern matcher retains only viable suffixes across writes,
+including escaped spellings and replacement-marker edges. Safe partial lines
+flush after 25 ms of idle output. Incomplete pattern prefixes stay private until
+more input or EOF. Runs sealed without version 1 host masking registrations are
+refused before launch with a request to start a new run. No migration is provided.
 
 SDK command helpers forward each child stdout/stderr stream through `FrameLog`
 `stream`, base64 `stream_data`, and `stream_end` fields. They never split those

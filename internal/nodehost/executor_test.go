@@ -155,7 +155,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	resolved := engine.Resolved{Identity: identity, Executable: "/verified/engine"}
 	execution := runspec.JobExecutionSettings{}
-	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
+	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, SecretRegistration: runspec.SecretRegistration{Version: 1}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
 	raw, _ := json.Marshal(spec)
 	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 4, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}

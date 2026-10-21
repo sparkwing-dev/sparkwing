@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -15,6 +16,7 @@ const planningLogBufferBytes = 8 << 20
 type planningOutput struct {
 	frame       *nodeproto.FrameLog
 	level, text string
+	timestamp   string
 	eof         bool
 }
 
@@ -27,6 +29,8 @@ type planningLogs struct {
 	presenter      *secrets.LogStreams
 	bytes, dropped int
 	err            error
+	timer          *time.Timer
+	closed         bool
 }
 
 func (l *planningLogs) write(ctx context.Context, record nodeproto.FrameLog) error {
@@ -38,7 +42,7 @@ func (l *planningLogs) write(ctx context.Context, record nodeproto.FrameLog) err
 }
 
 func (l *planningLogs) text(ctx context.Context, level, text string, eof bool) error {
-	return l.output(ctx, planningOutput{level: level, text: text, eof: eof}, len(text)+64)
+	return l.output(ctx, planningOutput{level: level, text: text, timestamp: time.Now().UTC().Format(time.RFC3339Nano), eof: eof}, len(text)+64)
 }
 
 func (l *planningLogs) output(ctx context.Context, output planningOutput, size int) error {
@@ -63,6 +67,10 @@ func (l *planningLogs) gate() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.known = false
+	if l.timer != nil {
+		l.timer.Stop()
+		l.timer = nil
+	}
 }
 
 func (l *planningLogs) release(ctx context.Context) error {
@@ -85,6 +93,11 @@ func (l *planningLogs) release(ctx context.Context) error {
 func (l *planningLogs) finish(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.closed = true
+	if l.timer != nil {
+		l.timer.Stop()
+		l.timer = nil
+	}
 	if l.err == nil && !l.known && len(l.buffer)+l.dropped > 0 {
 		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: fmt.Sprintf("sparkwing: output withheld because secret declarations were unavailable (%d lines)", len(l.buffer)+l.dropped)}))
 	}
@@ -112,12 +125,32 @@ func (l *planningLogs) emit(ctx context.Context, output planningOutput) error {
 			return err
 		}
 	} else {
-		frames = l.presenter.Text("raw:"+output.level, nodeproto.FrameLog{Level: output.level}, output.text, output.eof)
+		frames = l.presenter.Text("raw:"+output.level, nodeproto.FrameLog{Level: output.level, TS: output.timestamp}, output.text, output.eof)
 	}
 	for _, frame := range frames {
 		if l.err = l.sink(ctx, frame); l.err != nil {
 			break
 		}
 	}
+	if l.err == nil && !l.closed && l.presenter.Buffered() {
+		if l.timer != nil {
+			l.timer.Stop()
+		}
+		l.timer = time.AfterFunc(25*time.Millisecond, func() { l.idle(ctx) })
+	}
 	return l.err
+}
+
+func (l *planningLogs) idle(ctx context.Context) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.timer = nil
+	if !l.known || l.closed || l.err != nil || l.presenter == nil {
+		return
+	}
+	for _, frame := range l.presenter.Idle() {
+		if l.err = l.sink(ctx, frame); l.err != nil {
+			break
+		}
+	}
 }

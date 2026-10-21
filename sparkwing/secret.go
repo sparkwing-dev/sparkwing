@@ -12,8 +12,7 @@ import (
 var ErrSecretMissing = secrets.ErrSecretMissing
 
 // Secrets are declared during describe and resolved lazily during execution.
-// The host caches successful results per run and registers masked values before
-// releasing them. Secret and Variable reject classification drift.
+// The host registers masked values before releasing them. Secret and Variable reject classification drift.
 type secretResolver interface {
 	resolve(ctx context.Context, name string) (value string, masked bool, err error)
 }

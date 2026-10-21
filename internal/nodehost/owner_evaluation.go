@@ -134,7 +134,7 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (bod
 		if errors.As(err, &structured) {
 			code = structured.Code
 		}
-		return nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: code, MaskedError: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}, nil
+		return nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: code, MaskedError: generatorFailureMessage}, nil
 	}
 	return body, registration, nil, nil
 }

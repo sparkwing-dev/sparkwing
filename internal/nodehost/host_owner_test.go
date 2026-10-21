@@ -37,7 +37,7 @@ func TestOwnerSeals(t *testing.T) {
 			}
 			s := newOwnerSealStore(store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner})
 			if mode == "resume" {
-				s.row.Spec = &runspec.Spec{Request: s.row.Request, Hash: "spec", PlanHash: ownerPlanHash}
+				s.row.Spec = &runspec.Spec{Request: s.row.Request, Hash: "spec", PlanHash: ownerPlanHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 				s.row.Plan, s.row.PlanHash = json.RawMessage(`{"jobs":[]}`), ownerPlanHash
 			}
 			refused := errors.New("acceptance refused")

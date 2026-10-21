@@ -3,12 +3,13 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+const generatorFailureMessage = "generator failed (details withheld: secret declarations unavailable)"
 
 type declarationProcess interface {
 	gateDeclarations()
@@ -26,7 +27,7 @@ func (s *ProtocolSession) releaseDeclarations(ctx context.Context, spec runspec.
 		return executorError(apierr.Internal, "generator output requires host masking")
 	}
 	if result.Error != nil || !result.DeclarationsKnown {
-		return executorError(apierr.SDKError, "generator failed (details withheld: secret declarations unavailable)")
+		return executorError(apierr.SDKError, generatorFailureMessage)
 	}
 	projection, err := generatorRegistration(spec, result.Arguments)
 	if err != nil {
@@ -53,21 +54,5 @@ func finishGeneratorLogs(ctx context.Context, process ExecutorProcess, accepted 
 }
 
 func generatorRegistration(spec runspec.Spec, arguments []nodeproto.ArgumentDescription) (runspec.SecretRegistration, error) {
-	projection := runspec.SecretRegistration{}
-	for _, arg := range arguments {
-		if !arg.Secret && !slices.Contains(spec.Resolved.SecretArgs, arg.Name) && !slices.Contains(spec.Request.Request.SecretArgs.Value, arg.Name) {
-			continue
-		}
-		list := arg.Type == "[]string"
-		if arg.Default != nil {
-			projection.Defaults = append(projection.Defaults, runspec.SecretValue{Raw: *arg.Default, List: list})
-		}
-		if raw, ok := spec.Request.Request.RequestedArgs[arg.Name]; ok {
-			projection.Defaults = append(projection.Defaults, runspec.SecretValue{Raw: raw, List: list})
-		}
-		if raw, ok := spec.Resolved.Args[arg.Name]; ok {
-			projection.Defaults = append(projection.Defaults, runspec.SecretValue{Raw: raw, List: list})
-		}
-	}
-	return runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: projection})
+	return runspec.GeneratedRegistration(spec.Request.Request, spec.Resolved, arguments)
 }

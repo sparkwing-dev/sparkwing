@@ -454,6 +454,7 @@ type SecretValue struct {
 // pipeline and values classified by a generator. ListArgs identifies selected
 // arguments parsed as []string; Values is the sealed, normalized projection.
 type SecretRegistration struct {
+	Version  int           `json:"version"`
 	Defaults []SecretValue `json:"defaults,omitempty"`
 	ListArgs []string      `json:"list_args,omitempty"`
 	Values   []string      `json:"values,omitempty"`

@@ -155,6 +155,9 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		return completion, err
 	}
 	if snapshot.Run.Spec != nil {
+		if err := runspec.CheckMaskingSeal(*snapshot.Run.Spec); err != nil {
+			return completion, err
+		}
 		persisted, err := ownerAccepted(snapshot.Run)
 		if err != nil {
 			return completion, err

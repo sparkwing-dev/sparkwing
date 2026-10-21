@@ -500,6 +500,9 @@ func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	for {
 		n, err := file.Read(buffer)
 		if n > 0 {
+			if s.cfg.Activity.Progress != nil {
+				s.cfg.Activity.Progress()
+			}
 			if s.cfg.output != nil {
 				if writeErr := s.cfg.output.text(s.logCtx, level, string(buffer[:n]), false); writeErr != nil {
 					s.failProtocol(writeErr)

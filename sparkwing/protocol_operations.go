@@ -51,6 +51,14 @@ func sdkVersion() string {
 	return "development"
 }
 
+func (sdkOperations) Arguments(plan any) []nodeproto.ArgumentDescription {
+	var out []nodeproto.ArgumentDescription
+	for _, a := range plan.(*Plan).declaredArguments() {
+		out = append(out, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Default: declaredDefault(a.Default), Enum: a.Enum, Secret: a.Secret, JobID: a.JobID})
+	}
+	return out
+}
+
 func (sdkOperations) Document(plan any) nodeproto.PlanDoc { return planDocument(plan.(*Plan)) }
 
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context {

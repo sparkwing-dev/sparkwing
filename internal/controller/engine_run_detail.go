@@ -74,7 +74,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		if run.Spec.Request.RunID != run.Request.RunID || run.Spec.Request.Request.Team != target.Team || run.Spec.Request.Hash != run.Request.Hash {
 			return controllerwire.RunDetail{}, errors.New("invalid persisted run seals")
 		}
-		detail.Inputs = runspec.DisplaySpec(*run.Spec)
+		detail.Inputs = run.Display()
 		identity := run.Spec.Resolved.Engine
 		detail.Engine = &identity
 	}

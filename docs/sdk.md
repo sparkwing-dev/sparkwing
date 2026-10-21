@@ -362,10 +362,23 @@ Masking is provided by the Go host. Neither SDK masks output or sends automatic
 mask registrations. Pipeline code run without a Sparkwing host is unmasked.
 The host registers accepted secret arguments, defaults and normalized list items
 before execution. Stored secrets and OIDC tokens are registered before release.
-Secret values need at least four characters and must not contain `***`. This
-includes each nonempty list item. Use a plain config variable for smaller values.
+Stored secrets, supplied secret arguments and nonempty secret defaults of the
+selected pipeline need at least four characters and must not contain `***`.
+This includes each nonempty list item. An empty default is no value.
+Use a plain config variable for values that fail this rule. Defaults belonging
+to unselected pipelines do not refuse a run. Derived proxy credential parts
+that fail the rule are skipped.
 Stdout and stderr are masked before line splitting. Describe and generator output
-waits for declarations. Failed discovery withholds that output.
+waits for declarations. Failed discovery withholds that output, including CLI
+help diagnostics and test-host planning output. Generator failures persist a
+fixed error with details withheld. Controller comments and run displays include
+accepted generator classifications.
+
+The stream matcher publishes complete safe lines within the current write.
+It holds only suffixes that could complete a registered spelling. Safe partial
+lines flush after 25 ms of idle output. Prefixes that could complete a secret
+stay private until more input or EOF. A stored secret read is masked even when
+its value occurs in an accepted job identifier.
 
 A pipeline implements `Secrets() any` to declare a typed secrets struct. Fields
 use `sw:"NAME,required"` or `sw:"NAME,optional"`. Required is the default.

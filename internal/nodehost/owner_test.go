@@ -243,6 +243,7 @@ func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance)
 	if f.acceptErr != nil {
 		return store.AcceptedPlan{}, f.acceptErr
 	}
+	input.Seal.Resolved.SecretRegistration.Version = 1
 	spec := runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: input.Seal.Resolved}
 	f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), input.Seal.Plan
 	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: strings.Repeat("a", 64)}, nil
@@ -371,7 +372,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	}}
 	h.Wait, h.WaitNode = follower.Wait, follower.WaitNode
 	if resumed {
-		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: runspec.Resolved{Engine: selected.Identity}}
+		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: runspec.Resolved{Engine: selected.Identity, SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 		f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), json.RawMessage(`{"jobs":[]}`)
 		accepted, err := ownerAccepted(f.snapshot.Run)
 		if err != nil {

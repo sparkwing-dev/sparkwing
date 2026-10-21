@@ -35,7 +35,7 @@ export function argument(spec: ArgSpec, jobID?: string): DescribeArg {
   const arg: DescribeArg = { name: spec.name, type: spec.type, required: spec.required ?? false };
   if (spec.short !== undefined) arg.short = spec.short;
   if (spec.description !== undefined) arg.desc = spec.description;
-  if (spec.default !== undefined) arg.default = spec.default;
+  if (spec.default !== undefined && spec.default !== "") arg.default = spec.default;
   if (spec.enum !== undefined) arg.enum = [...spec.enum];
   if (spec.secret !== undefined) arg.secret = spec.secret;
   if (jobID !== undefined) arg.job_id = jobID;

@@ -19,7 +19,7 @@ import (
 
 func describeCachePath(key string) string {
 	return filepath.Join(bincache.SparkwingHome(),
-		"cache", "describe-v2", key+".json")
+		"cache", "describe-v3", key+".json")
 }
 
 func byRepoDescribePath(sparkwingDir string) string {
@@ -29,7 +29,7 @@ func byRepoDescribePath(sparkwingDir string) string {
 	}
 	sum := sha256.Sum256([]byte(abs))
 	return filepath.Join(bincache.SparkwingHome(),
-		"cache", "describe-v2", "by-repo", hex.EncodeToString(sum[:16])+".json")
+		"cache", "describe-v3", "by-repo", hex.EncodeToString(sum[:16])+".json")
 }
 
 func readDescribeCache(ctx context.Context, sparkwingDir string) ([]nodeproto.PipelineDescription, error) {

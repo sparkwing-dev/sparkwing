@@ -1,7 +1,6 @@
 package procenv
 
 import (
-	"errors"
 	"reflect"
 	"runtime"
 	"slices"
@@ -509,8 +508,11 @@ func TestOwnerToolchainValuesAreMaskedBeforeExecution(t *testing.T) {
 		}
 		masker := secrets.NewMasker()
 		_, err := Build(kind, Base{OwnerMachine: true, Ambient: []string{"GOPROXY=https://u:p@proxy.example"}, Masker: masker}, Runtime{})
-		if !errors.Is(err, secrets.ErrInvalidValue) {
-			t.Fatalf("kind %d: short proxy credentials accepted: %v", kind, err)
+		if err != nil {
+			t.Fatalf("kind %d: derived short proxy credentials refused: %v", kind, err)
+		}
+		if masker.ContainsSecret("u") || masker.ContainsSecret("p") {
+			t.Fatal("registered an unsafe derived credential")
 		}
 	}
 }

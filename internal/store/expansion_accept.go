@@ -56,7 +56,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		return result, err
 	}
 	result.selection = selection
-	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec, selection, snapshot.Expansions...)
+	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec, selection)
 	if err != nil {
 		return result, err
 	}

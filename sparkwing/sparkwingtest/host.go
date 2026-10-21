@@ -95,17 +95,20 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 		h.discardGate(discoveryGate)
 		return nodeproto.PlanDoc{}, fmt.Errorf("pipeline discovery failed")
 	}
-	if err := h.registerArguments(described, name, args); err != nil {
+	declarations, err := runspec.NewDeclarationGate(described, h.masker)
+	if err != nil {
 		h.discardGate(discoveryGate)
 		return nodeproto.PlanDoc{}, err
 	}
-	failedDiscovery := false
-	for _, pipeline := range described.Pipelines {
-		if pipeline.Error != nil {
-			failedDiscovery = true
-			break
-		}
+	selected, err := declarations.Resolve(name, args, nil)
+	if err != nil {
+		h.discardGate(discoveryGate)
+		return nodeproto.PlanDoc{}, err
 	}
+	h.mu.Lock()
+	h.args = selected.Args
+	h.mu.Unlock()
+	failedDiscovery := !declarations.Complete()
 	if failedDiscovery {
 		h.discardGate(discoveryGate)
 	} else {
@@ -116,7 +119,7 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, args, h.runContext(name))
 	if err != nil {
 		h.discardGate(planGate)
-		return doc, h.maskError(err)
+		return nodeproto.PlanDoc{}, declarations.Error(err)
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
@@ -128,7 +131,11 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 		h.discardGate(planGate)
 		return accepted, err
 	}
-	h.releaseGate(planGate)
+	if failedDiscovery {
+		h.discardGate(planGate)
+	} else {
+		h.releaseGate(planGate)
+	}
 	return accepted, nil
 }
 
@@ -148,61 +155,6 @@ func (h *host) releaseGate(g *outputGate) {
 	for _, item := range pending {
 		h.emit(h.ctx, item.frame, item.job)
 	}
-}
-
-func (h *host) registerArguments(described nodeproto.DescribeDoc, name string, args map[string]string) error {
-	var selected *nodeproto.PipelineDescription
-	projection := runspec.SecretRegistration{}
-	for i := range described.Pipelines {
-		pipeline := &described.Pipelines[i]
-		if pipeline.Error != nil {
-			if pipeline.Name == name {
-				return fmt.Errorf("pipeline discovery failed")
-			}
-			continue
-		}
-		for _, argument := range pipeline.Args {
-			if argument.Secret && argument.Default != nil {
-				projection.Defaults = append(projection.Defaults, runspec.SecretValue{Raw: *argument.Default, List: argument.Type == "[]string"})
-			}
-		}
-		if pipeline.Name == name {
-			selected = pipeline
-		}
-	}
-	if selected == nil {
-		return fmt.Errorf("pipeline %q is not registered", name)
-	}
-	resolved := maps.Clone(args)
-	for _, argument := range selected.Args {
-		if _, exists := resolved[argument.Name]; !exists && argument.Default != nil {
-			resolved[argument.Name] = *argument.Default
-		}
-		if argument.Secret && argument.Type == "[]string" {
-			projection.ListArgs = append(projection.ListArgs, argument.Name)
-		}
-	}
-	var names []string
-	for _, argument := range selected.Args {
-		if argument.Secret {
-			if _, exists := resolved[argument.Name]; exists {
-				names = append(names, argument.Name)
-			}
-		}
-	}
-	registration, err := runspec.BuildSecretRegistration(runspec.Request{RequestedArgs: args}, runspec.Resolved{Args: resolved, SecretArgs: names, SecretRegistration: projection})
-	if err != nil {
-		return err
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, value := range registration.Values {
-		if err := h.masker.Register(value); err != nil {
-			return err
-		}
-	}
-	h.args = resolved
-	return nil
 }
 
 func (h *host) maskError(err error) error {
@@ -230,7 +182,7 @@ func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string)
 	if result.Error != nil {
 		return nil, h.masker.Error(result.Error)
 	}
-	return result.Output, nil
+	return h.output(ctx, result.Output), nil
 }
 
 func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string, input json.RawMessage) (json.RawMessage, error) {
@@ -303,47 +255,25 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 	if step != "" && string(result.Value) == "true" {
 		h.settleStep(p, job, step)
 	}
-	return result.Value, nil
+	return h.output(ctx, result.Value), nil
+}
+
+func (h *host) output(ctx context.Context, raw json.RawMessage) json.RawMessage {
+	if h.masker.Mask(string(raw)) != string(raw) {
+		h.emit(ctx, nodeproto.FrameLog{Level: "warn", Event: "output_withheld", Message: "output withheld: contains a secret"}, "")
+		return nil
+	}
+	return raw
 }
 
 func (h *host) registerGenerated(arguments []nodeproto.ArgumentDescription) error {
 	h.mu.Lock()
-	args := maps.Clone(h.args)
-	h.mu.Unlock()
-	if args == nil {
-		args = make(map[string]string)
-	}
-	projection := runspec.SecretRegistration{}
-	var names []string
-	for _, argument := range arguments {
-		if !argument.Secret {
-			continue
-		}
-		if argument.Default != nil {
-			projection.Defaults = append(projection.Defaults, runspec.SecretValue{Raw: *argument.Default, List: argument.Type == "[]string"})
-		}
-		if _, ok := args[argument.Name]; !ok && argument.Default != nil {
-			args[argument.Name] = *argument.Default
-		}
-		if _, ok := args[argument.Name]; ok {
-			names = append(names, argument.Name)
-			if argument.Type == "[]string" {
-				projection.ListArgs = append(projection.ListArgs, argument.Name)
-			}
-		}
-	}
-	registration, err := runspec.BuildSecretRegistration(runspec.Request{RequestedArgs: args}, runspec.Resolved{Args: args, SecretArgs: names, SecretRegistration: projection})
+	defer h.mu.Unlock()
+	selected, err := runspec.RegisterArguments(arguments, h.args, nil, h.masker)
 	if err != nil {
 		return err
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, value := range registration.Values {
-		if err := h.masker.Register(value); err != nil {
-			return err
-		}
-	}
-	h.args = args
+	h.args = selected.Args
 	return nil
 }
 
@@ -455,7 +385,7 @@ func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
 		return "", false, fmt.Errorf("secret %q: %w", name, sparkwing.ErrSecretMissing)
 	}
 	if v.Masked {
-		if err := h.Mask(ctx, v.Value); err != nil {
+		if err := h.registerIssued(ctx, v.Value); err != nil {
 			return "", false, err
 		}
 	}
@@ -523,7 +453,7 @@ func (h *host) OIDC(ctx context.Context, a string) (string, error) {
 		err = fmt.Errorf("host OIDC response needs a token")
 	}
 	if err == nil {
-		err = h.Mask(ctx, token)
+		err = h.registerIssued(ctx, token)
 	}
 	return token, err
 }
@@ -536,12 +466,18 @@ func (h *host) ReleaseCleanup(context.Context, string) error {
 	return &apierr.Error{Code: apierr.Unavailable, Message: "fake host does not execute cleanups"}
 }
 
-func (h *host) Mask(ctx context.Context, value string) error {
+func (h *host) registerIssued(ctx context.Context, value string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if err := h.executionError(ctx); err != nil {
 		return err
 	}
-	if value == "" {
-		return nil
+	return h.masker.Register(value)
+}
+
+func (h *host) Mask(ctx context.Context, value string) error {
+	if err := h.executionError(ctx); err != nil {
+		return err
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -562,6 +498,9 @@ func (h *host) Mask(ctx context.Context, value string) error {
 }
 
 func (h *host) remember(p *sparkwing.Plan) error {
+	if err := h.registerGenerated(sdkserve.DefaultOperations.Arguments(p)); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(sdkserve.DefaultOperations.Document(p))
 	if err != nil {
 		return err

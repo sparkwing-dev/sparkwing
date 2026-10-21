@@ -13,6 +13,32 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+func TestSelectedShortSecretDefaultKeepsConfigVariableGuidance(t *testing.T) {
+	planner, input, fixture, _ := sdkPlanningFixture(t)
+	start := planner.Start
+	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		process, err := start(ctx, in, log)
+		if err != nil {
+			return process, err
+		}
+		proc := process.(*executorProcess)
+		answer := proc.answer
+		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+			if request.Op == nodeproto.OpDescribe {
+				value := "ab"
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: input.Run.Pipeline, Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}}}}, nil
+			}
+			return answer(ctx, request)
+		}
+		return process, nil
+	}
+	_, err := planner.Prepare(t.Context(), input, fixture.input)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || !strings.Contains(failure.Message, "plain config variable") {
+		t.Fatalf("refusal lost guidance: %v", err)
+	}
+}
+
 func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 	const unclassified = "unknown-secret-from-broken-declaration"
 	f.Add("TOKEN", false)

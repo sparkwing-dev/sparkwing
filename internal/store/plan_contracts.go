@@ -58,7 +58,7 @@ type PlanSecretOpener interface {
 	OpenPlanSecret(context.Context, Team, Secret) (string, error)
 }
 
-func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection, prior ...AcceptedExpansionRow) (*secrets.Masker, error) {
+func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec, selection secretSelection) (*secrets.Masker, error) {
 	values := secrets.NewMasker()
 	if spec.Request.Request.Origin != runspec.OriginLocal && len(spec.Request.Request.Env.Names) > 0 {
 		submitted, err := (&Tenant{s: tx.store, team: team}).readSubmittedEnvironmentTx(ctx, tx, spec.Request.RunID)
@@ -87,7 +87,11 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 			return nil, authorityError(apierr.PlanInvalid, err.Error())
 		}
 	}
-	for _, expansion := range prior {
+	expansions, err := readAcceptedExpansionsTx(ctx, tx, team, string(spec.Request.RunID))
+	if err != nil {
+		return nil, err
+	}
+	for _, expansion := range expansions {
 		for _, value := range expansion.Registration.Values {
 			if err := values.Register(value); err != nil {
 				return nil, authorityError(apierr.PlanInvalid, err.Error())

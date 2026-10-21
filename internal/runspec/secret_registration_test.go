@@ -67,3 +67,26 @@ func TestSecretRegistrationRemainsBoundAcrossPersistence(t *testing.T) {
 		t.Fatal("changed projection passed the seal")
 	}
 }
+
+func TestDisplaySpecHidesGeneratorClassifiedArguments(t *testing.T) {
+	spec := fixture(t)
+	spec.Request.Request.RequestedArgs["generated"] = "generated-private-token"
+	spec.Resolved.Args["generated"] = "generated-private-token"
+	spec.Resolved.SecretRegistration.Defaults = []SecretValue{{Raw: "generated-private-token"}}
+	shown := DisplaySpec(spec)
+	if shown.Args["generated"] != RedactedArgValue || shown.RequestedArgs["generated"] != RedactedArgValue {
+		t.Fatalf("generator classification absent from presentation: %+v", shown)
+	}
+	if strings.Contains(strings.Join(shown.Reproducer, " "), "generated-private-token") {
+		t.Fatal("reproducer exposed generator-classified argument")
+	}
+}
+
+func TestLegacySealRefusesResumeBeforeDrift(t *testing.T) {
+	spec := fixture(t)
+	spec.Resolved.SecretRegistration = SecretRegistration{}
+	_, err := CheckSeal(spec, spec)
+	if err == nil || !strings.Contains(err.Error(), "start a new run instead of resuming") {
+		t.Fatalf("expected explicit resume refusal, got %v", err)
+	}
+}

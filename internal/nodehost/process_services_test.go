@@ -226,3 +226,17 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 		t.Fatal("accepted job was missing from process mask registry")
 	}
 }
+
+func TestMaskRegistryIssuedValueMayMatchAcceptedIdentifier(t *testing.T) {
+	m := secrets.NewMasker()
+	registry := NewMaskRegistry(m)
+	if err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build-private-token"}}}, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.registerIssued("private-token"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Mask("private-token") != "***" {
+		t.Fatal("issued value was released without registration")
+	}
+}

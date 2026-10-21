@@ -70,7 +70,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	}
 	request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
 	request.Request.Git.SHA, request.Request.Git.Repository.Key = strings.Repeat("a", 40), "example.com/acme/repo"
-	spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Request: request, Resolved: runspec.Resolved{Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": execution}}}}
+	spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Request: request, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": execution}}}}
 	if mode != "risk_refused" {
 		spec.Resolved.Settings.Options.AllowRisk.Set, spec.Resolved.Settings.Options.AllowRisk.Value = true, []string{"prod"}
 	}

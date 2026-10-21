@@ -64,3 +64,87 @@ func TestExpansionRegistrationRefusesShortItem(t *testing.T) {
 		t.Fatalf("expected short-item refusal, got %v", err)
 	}
 }
+
+func TestControlTextIncludesAcceptedExpansionRegistrations(t *testing.T) {
+	tenant, request := successfulExpansionFixture(t)
+	request.Registration.Defaults = []runspec.SecretValue{{Raw: "generated-private-token"}}
+	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
+		run, err := readRunTx(t.Context(), tx, tenant.team, string(request.Source.RunID))
+		if err != nil {
+			return err
+		}
+		got, err := controlTextTx(t.Context(), tx, tenant.team, run, "reason generated-private-token")
+		if err != nil {
+			return err
+		}
+		if got != "reason ***" {
+			t.Errorf("generated registration omitted from control text: %q", got)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGeneratedArgumentClassificationReachesEveryRunPresentation(t *testing.T) {
+	tenant, request := successfulExpansionFixture(t)
+	run, err := tenant.ReadRun(t.Context(), string(request.Source.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := *run.Spec
+	spec.Request.Request.RequestedArgs = map[string]string{"dynamic": "generated-private-token", "public": "public-value"}
+	spec.Resolved.Args = map[string]string{"dynamic": "generated-private-token", "public": "public-value"}
+	spec.Resolved.SecretArgs = []string{}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE team=? AND id=?`, raw, tenant.team, request.Source.RunID)
+	request.Registration.Defaults = []runspec.SecretValue{{Raw: "generated-private-token"}}
+	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadRun(t.Context(), string(request.Source.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	display := row.Display()
+	if display.RequestedArgs["dynamic"] != "***" || display.Args["dynamic"] != "***" || display.Args["public"] != "public-value" || strings.Contains(strings.Join(display.Reproducer, " "), "generated-private-token") {
+		t.Fatalf("unsafe dynamic display: %+v", display)
+	}
+	unchanged, err := json.Marshal(row.Spec)
+	if err != nil || string(unchanged) != string(raw) {
+		t.Fatalf("presentation changed sealed bytes: %v", err)
+	}
+	direct, err := tenant.GetRun(t.Context(), string(request.Source.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := tenant.ListRuns(t.Context(), RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, shown := range append(listed, direct, latestRunPresentation(row)) {
+		if shown.Args["dynamic"] != "***" || shown.Args["public"] != "public-value" {
+			t.Fatalf("unsafe persisted run presentation: %+v", shown.Args)
+		}
+	}
+	trigger, err := tenant.GetTrigger(t.Context(), string(request.Source.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggers, err := tenant.ListTriggers(t.Context(), TriggerFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, shown := range append(triggers, trigger) {
+		if shown.Args["dynamic"] != "***" || shown.Args["public"] != "public-value" {
+			t.Fatalf("unsafe trigger presentation: %+v", shown.Args)
+		}
+	}
+}

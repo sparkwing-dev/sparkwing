@@ -133,7 +133,18 @@ func SealSpec(input SealInput) (Spec, error) {
 	return spec, err
 }
 
+// CheckMaskingSeal refuses runs sealed before host registration became mandatory.
+func CheckMaskingSeal(s Spec) error {
+	if s.Resolved.SecretRegistration.Version != 1 {
+		return errors.New("run was sealed without host masking registrations; start a new run instead of resuming")
+	}
+	return nil
+}
+
 func verifySpec(s Spec) error {
+	if err := CheckMaskingSeal(s); err != nil {
+		return err
+	}
 	if s.Version != 1 || s.Hash == "" || s.PlanHash == "" {
 		return errors.New("invalid spec seal")
 	}

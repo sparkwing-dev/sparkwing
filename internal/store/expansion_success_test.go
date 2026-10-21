@@ -194,6 +194,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			var spec runspec.Spec
+			spec.Request.RunID = string(request.Source.RunID)
 			spec.Request.Request.Pipeline = "p"
 			spec.Request.Provenance = assertedProvenance(t, "p", "", "")
 			spec.Request.AllowedPools = []string{"prod"}

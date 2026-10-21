@@ -81,7 +81,12 @@ func FuzzExecutorDiagnosticSinks(f *testing.F) {
 	f.Fuzz(func(t *testing.T, input string) {
 		secret := "private-" + strings.ToValidUTF8(input, "�") + "-value"
 		masker := secrets.NewMasker()
-		masker.Register(secret)
+		if err := masker.Register(secret); err != nil {
+			if secrets.Validate(secret) == nil {
+				t.Fatal(err)
+			}
+			return
+		}
 		host := nodeExecutor{deps: ExecutorDependencies{Masker: masker, Log: func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
 			if masker.ContainsSecret(frame.Step) || masker.ContainsSecret(frame.Message) || masker.ContainsSecret(string(frame.Attrs)) {
 				t.Fatal("executor exposed a registered diagnostic value")

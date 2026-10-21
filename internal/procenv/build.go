@@ -241,7 +241,7 @@ func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) e
 	}
 	values = append(values, credentials...)
 	for _, value := range values {
-		if value == "" {
+		if secrets.Validate(value) != nil {
 			continue
 		}
 		if masker == nil {

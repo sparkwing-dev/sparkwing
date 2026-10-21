@@ -191,9 +191,15 @@ func (h *sdkCode) eval(ctx context.Context, session *executorSession, input Node
 		request.Attempt, request.Settled = int(input.Attempt), settled
 	}
 	if err := session.call(ctx, request, &result, kind); err != nil {
+		if kind == "generate" {
+			return nil, executorError(apierr.SDKError, generatorFailureMessage)
+		}
 		return nil, err
 	}
 	if kind == "generate" {
+		if result.Error != nil {
+			return nil, executorError(apierr.SDKError, generatorFailureMessage)
+		}
 		session.arguments = append(session.arguments, result.Arguments...)
 		if err := finishGeneratorLogs(ctx, session.process, input.Accepted, result); err != nil {
 			return nil, err

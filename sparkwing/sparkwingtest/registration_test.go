@@ -3,11 +3,13 @@ package sparkwingtest
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -149,5 +151,110 @@ func TestHostMasksChildChunksAcrossNewlines(t *testing.T) {
 	}
 	if strings.Contains(joined, secret) || !strings.Contains(joined, "***") {
 		t.Fatalf("child stream not masked: %q", joined)
+	}
+}
+
+func TestHostRefusesEmptyExplicitMask(t *testing.T) {
+	h := newHost(Options{}).(*host)
+	defer h.Close()
+	if err := h.Mask(t.Context(), ""); err == nil || !strings.Contains(err.Error(), "plain config variable") {
+		t.Fatalf("empty mask = %v", err)
+	}
+}
+
+func TestDirectPlanRegistersJobSecretDefaults(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "child", &generatedSecretJob{})
+	h := newHost(Options{}).(*host)
+	defer h.Close()
+	if _, err := h.RunStep(t.Context(), plan, "child", "run"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(h.Masks(), "generated-private-value") {
+		t.Fatal("direct plan secret default was not registered")
+	}
+}
+
+type secretOutput struct{ Value string }
+type secretProducer struct {
+	sparkwing.Base
+	sparkwing.Produces[secretOutput]
+}
+
+func (secretProducer) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(work, "run", func(context.Context) (secretOutput, error) { return secretOutput{Value: "output-private-value"}, nil }), nil
+}
+
+func TestHostWithholdsSecretStepAndEvalOutputs(t *testing.T) {
+	for _, operation := range []string{"step", "eval"} {
+		t.Run(operation, func(t *testing.T) {
+			plan := sparkwing.NewPlan()
+			sparkwing.Job(plan, "producer", secretProducer{}).Memo(func(context.Context) (sparkwing.MemoValue, error) {
+				return sparkwing.MemoValue("output-private-value"), nil
+			})
+			h := newHost(Options{Secrets: map[string]Secret{"TOKEN": {Value: "output-private-value", Masked: true}}}).(*host)
+			defer h.Close()
+			var output []byte
+			var err error
+			if operation == "step" {
+				output, err = h.RunStep(t.Context(), plan, "producer", "run")
+			} else {
+				output, err = h.Eval(t.Context(), plan, "producer", sdkserve.DefaultOperations.Document(plan).Jobs[0].Closures.MemoKey, nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(output) != 0 {
+				t.Fatalf("secret output released: %s", output)
+			}
+			records := h.Records()
+			if len(records) != 1 || records[0].Event != "output_withheld" {
+				t.Fatalf("withholding diagnostic = %+v", records)
+			}
+		})
+	}
+}
+
+func TestIssuedTokenDoesNotRefuseAcceptedIdentifier(t *testing.T) {
+	const token = "issued-private-token"
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, token+"-job", secretProducer{})
+	h := newHost(Options{OIDCToken: func(context.Context, string) (string, error) { return token, nil }}).(*host)
+	defer h.Close()
+	if err := h.remember(plan); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.OIDC(h.Context(t.Context()), "audience")
+	if err != nil || got != token {
+		t.Fatalf("issued token = %q, %v", got, err)
+	}
+	if got := h.masker.Mask(token); got != "***" {
+		t.Fatalf("issued token unregistered: %q", got)
+	}
+}
+
+type incompleteDiscoveryPipeline struct{}
+type incompleteDiscoveryKey struct{}
+
+func (incompleteDiscoveryPipeline) Plan(ctx context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	if ctx.Value(incompleteDiscoveryKey{}) == true {
+		sparkwing.Info(ctx, "unknown-private-value")
+		return fmt.Errorf("unknown-private-value")
+	}
+	return nil
+}
+
+func TestIncompleteDiscoveryWithholdsSelectedPlanningOutput(t *testing.T) {
+	const failed = "sparkwingtest-incomplete-discovery"
+	const selected = "sparkwingtest-incomplete-discovery-selected"
+	sparkwing.Register[sparkwing.NoInputs](failed, func() sparkwing.Pipeline[sparkwing.NoInputs] { return incompleteDiscoveryPipeline{} })
+	sparkwing.Register[registrationArgs](selected, func() sparkwing.Pipeline[registrationArgs] { return registrationPipeline{} })
+	h := newHost(Options{}).(*host)
+	defer h.Close()
+	if _, err := h.Plan(context.WithValue(t.Context(), incompleteDiscoveryKey{}, true), selected, nil); err != nil {
+		t.Fatal(err)
+	}
+	if records := h.Records(); len(records) != 0 {
+		t.Fatalf("incomplete discovery released planning output: %+v", records)
 	}
 }

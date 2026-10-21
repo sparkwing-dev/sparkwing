@@ -126,6 +126,25 @@ func TestStreamMasksEveryPercentEscapeCaseAcrossChunks(t *testing.T) {
 	}
 }
 
+func TestPercentEscapesMatchIndependentlyOfNeighboringPercentSigns(t *testing.T) {
+	m := newTestMasker("ab/f-token", "AB/f-token")
+	for _, input := range []string{"%ab%2ff-token!", "%AB%2ff-token!", "%aab%2Ff-token!"} {
+		want := input[:len(input)-len("ab%2ff-token!")] + "***!"
+		if got := m.Mask(input); got != want {
+			t.Fatalf("Mask(%q) = %q, want %q", input, got, want)
+		}
+		for cut := range len(input) + 1 {
+			stream := m.Stream()
+			if got := stream.Mask(input[:cut]) + stream.Mask(input[cut:]) + stream.Flush(); got != want {
+				t.Fatalf("cut %d: %q", cut, got)
+			}
+		}
+	}
+	if got := newTestMasker("ab/f-token").Mask("%AB%2ff-token!"); got != "%AB%2ff-token!" {
+		t.Fatalf("ordinary letters lost case sensitivity: %q", got)
+	}
+}
+
 func BenchmarkStreamMaskLargeRegistry(b *testing.B) {
 	m := NewMasker()
 	for i := range 64 {
@@ -318,5 +337,109 @@ func TestStreamEveryDerivedSpellingAtEachEscapeDepth(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func longestPattern(values []string) int {
+	longest := 0
+	for _, value := range values {
+		longest = max(longest, len(value))
+	}
+	return longest
+}
+
+func liveMasker(b testing.TB) *Masker {
+	b.Helper()
+	m := NewMasker()
+	for _, value := range []string{
+		"0123456789abcdefghijklmnopqrstuvwxyzABCDEFG",
+		"-----BEGIN PRIVATE KEY-----\n" + strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDb5dJ7j\n", 32) + "-----END PRIVATE KEY-----\n",
+	} {
+		if err := m.Register(value); err != nil {
+			b.Fatal(err)
+		}
+	}
+	return m
+}
+
+func TestLiveMaskerPublishesFirstLineWithinOneWrite(t *testing.T) {
+	stream := liveMasker(t).Stream()
+	if got := stream.Mask("first ordinary output line\n"); got != "first ordinary output line\n" {
+		t.Fatalf("first write withheld: %q", got)
+	}
+}
+
+func TestStreamHoldsOnlyViablePrefix(t *testing.T) {
+	stream := newTestMasker("private-token").Stream()
+	if got := stream.Mask("visible pri"); got != "visible " {
+		t.Fatalf("over-retained: %q", got)
+	}
+	if got := stream.Mask("nter\n"); got != "printer\n" {
+		t.Fatalf("failed prefix not released: %q", got)
+	}
+}
+
+func TestIdleLineFlushPreservesUnknownSecretTail(t *testing.T) {
+	lines := newTestMasker("private-token").Stream().Lines()
+	if got := lines.Push("visible pri", false); len(got) != 0 {
+		t.Fatal(got)
+	}
+	if got := lines.Idle(); got != "visible " {
+		t.Fatalf("idle = %q", got)
+	}
+	if got := lines.Push("vate-token\n", false); len(got) != 1 || got[0] != "***" {
+		t.Fatalf("continuation = %q", got)
+	}
+}
+
+func TestIdleLineFlushPreservesIncompleteUTF8(t *testing.T) {
+	lines := NewMasker().Stream().Lines()
+	lines.Push("safe \xe7", false)
+	if got := lines.Idle(); got != "safe " {
+		t.Fatalf("idle = %q", got)
+	}
+	if got := lines.Push("\xa7\x98\n", false); len(got) != 1 || got[0] != "秘" {
+		t.Fatalf("UTF-8 continuation = %q", got)
+	}
+}
+
+func BenchmarkStreamLivePEMFirstLine(b *testing.B) {
+	m := liveMasker(b)
+	m.matcher()
+	const line = "first ordinary output line\n"
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		streamBenchmarkSink = m.Stream().Mask(line)
+		if streamBenchmarkSink != line {
+			b.Fatal("first line withheld")
+		}
+	}
+}
+
+func BenchmarkStreamLivePEMColdFirstLine(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		b.StopTimer()
+		m := liveMasker(b)
+		b.StartTimer()
+		streamBenchmarkSink = m.Stream().Mask("first ordinary output line\n")
+		if streamBenchmarkSink == "" {
+			b.Fatal("first line withheld")
+		}
+	}
+}
+
+func BenchmarkStreamLivePEMLineByLine(b *testing.B) {
+	m := liveMasker(b)
+	m.matcher()
+	stream := m.Stream()
+	line := strings.Repeat("ordinary output ", 7) + "line complete\n"
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		streamBenchmarkSink = stream.Mask(line)
 	}
 }

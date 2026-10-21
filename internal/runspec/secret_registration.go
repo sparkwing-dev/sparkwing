@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -13,6 +14,7 @@ import (
 // names. The projection is checked again on seal read.
 func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistration, error) {
 	projection := resolved.SecretRegistration
+	projection.Version = 1
 	var values []string
 	seen := make(map[string]bool)
 	add := func(raw string, list bool) error {
@@ -37,6 +39,9 @@ func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistra
 		return nil
 	}
 	for _, value := range projection.Defaults {
+		if value.Raw == "" {
+			continue
+		}
 		if err := add(value.Raw, value.List); err != nil {
 			return SecretRegistration{}, fmt.Errorf("secret argument default: %w", err)
 		}
@@ -61,4 +66,24 @@ func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistra
 	}
 	projection.Values = values
 	return projection, nil
+}
+
+// GeneratedRegistration seals literal inputs so expansion replay needs no argument reconstruction.
+func GeneratedRegistration(request Request, resolved Resolved, arguments []nodeproto.ArgumentDescription) (SecretRegistration, error) {
+	projection := SecretRegistration{}
+	for _, argument := range arguments {
+		if !argument.Secret && !slices.Contains(resolved.SecretArgs, argument.Name) && !slices.Contains(request.SecretArgs.Value, argument.Name) {
+			continue
+		}
+		list := argument.Type == "[]string"
+		if argument.Default != nil && *argument.Default != "" {
+			projection.Defaults = append(projection.Defaults, SecretValue{Raw: *argument.Default, List: list})
+		}
+		for _, args := range []map[string]string{request.RequestedArgs, resolved.Args} {
+			if raw, ok := args[argument.Name]; ok {
+				projection.Defaults = append(projection.Defaults, SecretValue{Raw: raw, List: list})
+			}
+		}
+	}
+	return BuildSecretRegistration(Request{}, Resolved{SecretRegistration: projection})
 }

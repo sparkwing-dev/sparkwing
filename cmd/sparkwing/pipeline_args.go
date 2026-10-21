@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -96,12 +97,7 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 		if found && len(arg.Enum) > 0 {
 			values := []string{value}
 			if arg.Type == "[]string" {
-				values = nil
-				for _, item := range strings.Split(value, ",") {
-					if item = strings.TrimSpace(item); item != "" {
-						values = append(values, item)
-					}
-				}
+				values = argvalue.List(value)
 			}
 			for _, item := range values {
 				if slices.Contains(arg.Enum, item) {

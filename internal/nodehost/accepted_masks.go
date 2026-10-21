@@ -44,12 +44,15 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 }
 
 func (r *MaskRegistry) initializeSeal(accepted AcceptedRun) error {
-	if r == nil {
-		return nil
-	}
 	var spec runspec.Spec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
 		return errors.New("mask initialization requires an accepted seal")
+	}
+	if err := runspec.CheckMaskingSeal(spec); err != nil {
+		return err
+	}
+	if r == nil {
+		return nil
 	}
 	projection, err := runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 	if err != nil {

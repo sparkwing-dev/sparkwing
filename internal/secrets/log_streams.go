@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
@@ -37,6 +38,21 @@ func (s *TextStream) Push(chunk string, eof bool) []string {
 		s.held = ""
 	}
 	return lines
+}
+
+// Idle releases an incomplete line only after its bytes have cleared masking.
+// A suffix that might complete a secret remains in the underlying Stream.
+func (s *TextStream) Idle() string {
+	cut := len(s.held)
+	for at := max(0, cut-utf8.UTFMax+1); at < len(s.held); at++ {
+		if utf8.RuneStart(s.held[at]) && !utf8.FullRuneInString(s.held[at:]) {
+			cut = at
+			break
+		}
+	}
+	text := s.held[:cut]
+	s.held = s.held[cut:]
+	return text
 }
 
 // LogStreams decodes child stream payloads before masking and building log envelopes.
@@ -79,6 +95,9 @@ func (s *LogStreams) Text(key string, frame nodeproto.FrameLog, chunk string, eo
 		stream = &logStream{lines: s.masker.lines(), frame: s.masker.Log(frame)}
 		s.streams[key] = stream
 	}
+	if frame.TS != "" {
+		stream.frame.TS = frame.TS
+	}
 	lines := stream.lines.Push(chunk, eof)
 	frames := make([]nodeproto.FrameLog, 0, len(lines))
 	for _, line := range lines {
@@ -96,6 +115,29 @@ func (s *LogStreams) Flush() []nodeproto.FrameLog {
 	var frames []nodeproto.FrameLog
 	for key, stream := range s.streams {
 		frames = append(frames, s.Text(key, stream.frame, "", true)...)
+	}
+	return frames
+}
+
+// Buffered reports safe text waiting for a newline or an idle flush.
+func (s *LogStreams) Buffered() bool {
+	for _, stream := range s.streams {
+		if stream.lines.held != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// Idle flushes safe partial lines without ending a byte stream.
+func (s *LogStreams) Idle() []nodeproto.FrameLog {
+	var frames []nodeproto.FrameLog
+	for _, stream := range s.streams {
+		if text := stream.lines.Idle(); text != "" {
+			frame := stream.frame
+			frame.Message = text
+			frames = append(frames, s.masker.Log(frame))
+		}
 	}
 	return frames
 }

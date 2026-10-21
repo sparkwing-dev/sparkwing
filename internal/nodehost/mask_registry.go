@@ -35,6 +35,16 @@ func (r *MaskRegistry) Register(value string) error {
 	return r.register(candidate)
 }
 
+// registerIssued protects a service value without changing accepted topology.
+func (r *MaskRegistry) registerIssued(value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.masker == nil {
+		return errors.New("mask registration requires a shared masker")
+	}
+	return r.masker.Register(value)
+}
+
 func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

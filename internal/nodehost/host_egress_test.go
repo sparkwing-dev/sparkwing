@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -13,6 +16,62 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
+
+func TestRawStdoutCountsAsProgress(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	var progress int
+	var output []nodeproto.FrameLog
+	logs := &planningLogs{known: true, masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodeproto.FrameLog) error { output = append(output, frame); return nil }}
+	session := &ProtocolSession{logCtx: t.Context(), cfg: ProtocolSessionConfig{output: logs, Activity: ExecutorActivity{Progress: func() { progress++ }}}}
+	session.streams.Add(1)
+	go session.readProtocolText(r, "info")
+	if _, err := w.Write([]byte("raw line\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	session.streams.Wait()
+	if progress == 0 || len(output) != 1 || output[0].Message != "raw line" || output[0].TS == "" {
+		t.Fatalf("progress=%d output=%+v", progress, output)
+	}
+	if err := logs.finish(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIdleOutputFlushesOnlySafePartialLines(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		masker := secrets.NewMasker()
+		if err := masker.Register("private-token"); err != nil {
+			t.Fatal(err)
+		}
+		var frames []nodeproto.FrameLog
+		logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { frames = append(frames, frame); return nil }}
+		if err := logs.text(t.Context(), "info", "safe pri", false); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(30 * time.Millisecond)
+		synctest.Wait()
+		if len(frames) != 1 || frames[0].Message != "safe " {
+			t.Fatalf("idle output = %+v", frames)
+		}
+		if err := logs.text(t.Context(), "info", "vate-token\n", false); err != nil {
+			t.Fatal(err)
+		}
+		if len(frames) != 2 || frames[1].Message != "***" {
+			t.Fatalf("tail escaped = %+v", frames)
+		}
+		if err := logs.finish(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
 
 func TestHostMasksBytesBeforeLineSplitting(t *testing.T) {
 	masker := secrets.NewMasker()

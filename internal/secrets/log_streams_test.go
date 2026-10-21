@@ -53,3 +53,13 @@ func TestChildStreamRefusesMalformedTransportPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestRawStreamLinesKeepReceiveTimestamps(t *testing.T) {
+	logs := NewLogStreams(NewMasker())
+	for _, ts := range []string{"first", "second"} {
+		frames := logs.Text("raw:info", nodeproto.FrameLog{Level: "info", TS: ts}, ts+"\n", false)
+		if len(frames) != 1 || frames[0].TS != ts {
+			t.Fatalf("frames = %+v", frames)
+		}
+	}
+}

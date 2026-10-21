@@ -2,6 +2,7 @@ package sparkwingtest
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,17 +21,18 @@ func TestTestHostMaskingConformance(t *testing.T) {
 			defer host.Close()
 			host.masker.Merge(v.Masker())
 			attrs, _ := json.Marshal(map[string]any{"nested": []string{v.Input}})
+			wantAttrs := map[string]any{"nested": []any{v.Want}}
+			if v.JSONInput != "" {
+				attrs = []byte(v.JSONInput)
+				wantAttrs = nil
+				if err := json.Unmarshal([]byte(v.JSONWant), &wantAttrs); err != nil {
+					t.Fatal(err)
+				}
+			}
 			host.emit(t.Context(), nodeproto.FrameLog{Step: v.Input, Message: v.Input, Attrs: attrs}, "job")
 			record := host.records[0]
-			expected := host.masker.Log(nodeproto.FrameLog{Step: v.Input, Message: v.Input, Attrs: attrs})
-			var expectedAttrs map[string]any
-			if err := json.Unmarshal(expected.Attrs, &expectedAttrs); err != nil {
-				t.Fatal(err)
-			}
-			gotAttrs, _ := json.Marshal(record.Attrs)
-			wantAttrs, _ := json.Marshal(expectedAttrs)
-			if record.Step != expected.Step || record.Msg != expected.Message || string(gotAttrs) != string(wantAttrs) {
-				t.Fatalf("test host differs from production: %+v", record)
+			if record.Step != v.Want || record.Msg != v.Want || !reflect.DeepEqual(record.Attrs, wantAttrs) {
+				t.Fatalf("masked record = %+v, want text %q, attributes %+v", record, v.Want, wantAttrs)
 			}
 		})
 	}
@@ -43,6 +45,12 @@ func FuzzTestHostDiagnosticSinks(f *testing.F) {
 		secret := "private-" + strings.ToValidUTF8(input, "�") + "-value"
 		host := newHost(Options{}).(*host)
 		defer host.Close()
+		if strings.Contains(secret, "***") {
+			if err := host.Mask(t.Context(), secret); err == nil {
+				t.Fatal("marker value accepted")
+			}
+			return
+		}
 		if err := host.Mask(t.Context(), secret); err != nil {
 			t.Fatal(err)
 		}
