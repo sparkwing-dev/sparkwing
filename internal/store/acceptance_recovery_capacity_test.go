@@ -61,7 +61,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if err != nil {
 		return err
 	}
-	for _, group := range []struct{ key, node string }{{"global:node", "job"}, {"global:plan", ""}} {
+	for _, group := range []struct{ key, node string }{{"job:global:node", "job"}, {"plan:global:plan", ""}} {
 		request := store.AcquireSlotRequest{Key: group.key, HolderID: "original", RunID: f.ref.RunID, NodeID: group.node, Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
 		if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
 			return fmt.Errorf("acquire %s: %+v, %v", group.key, got, err)
@@ -87,7 +87,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if err != nil {
 		return err
 	}
-	for _, group := range []struct{ key, node string }{{"global:node", "job"}, {"global:plan", ""}} {
+	for _, group := range []struct{ key, node string }{{"job:global:node", "job"}, {"plan:global:plan", ""}} {
 		generation := f.holder.Generation
 		if group.node == "" {
 			generation = owner.Owner.Generation
@@ -107,16 +107,16 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}); err != nil {
 		return err
 	}
-	if err := checkCapacityWinner(ctx, f.tenant, "global:node", competitor); err != nil {
+	if err := checkCapacityWinner(ctx, f.tenant, "job:global:node", competitor); err != nil {
 		return err
 	}
-	if state, err := f.tenant.GetConcurrencyState(ctx, "global:plan"); err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].HolderID != "original" {
+	if state, err := f.tenant.GetConcurrencyState(ctx, "plan:global:plan"); err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].HolderID != "original" {
 		return fmt.Errorf("job completion released plan capacity: %+v, %v", state, err)
 	}
 	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunTransition{RunID: f.ref.RunID, Actor: owner, To: store.RunSuccess, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
 		return err
 	}
-	return checkCapacityWinner(ctx, f.tenant, "global:plan", competitor)
+	return checkCapacityWinner(ctx, f.tenant, "plan:global:plan", competitor)
 }
 
 func checkCapacityWinner(ctx context.Context, tenant *store.Tenant, key, competitor string) error {
@@ -141,7 +141,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if err != nil {
 		return err
 	}
-	request := store.AcquireSlotRequest{Key: "global:deploy", HolderID: "original", RunID: f.ref.RunID, NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
+	request := store.AcquireSlotRequest{Key: "job:global:deploy", HolderID: "original", RunID: f.ref.RunID, NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
 	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
 		return fmt.Errorf("original capacity: %+v, %v", got, err)
 	}
@@ -149,7 +149,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
 		return fmt.Errorf("competing capacity: %+v, %v", got, err)
 	}
-	if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND key='global:deploy' AND holder_id='original'`, f.tenant.Team()); err != nil {
+	if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND key='job:global:deploy' AND holder_id='original'`, f.tenant.Team()); err != nil {
 		return err
 	}
 	forged := f.lease
@@ -164,7 +164,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if err := f.reopen(ctx); err != nil {
 		return err
 	}
-	adopted, err := f.tenant.AdoptCapacity(ctx, "global:deploy", "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: "job", Generation: f.holder.Generation}, f.owner)
+	adopted, err := f.tenant.AdoptCapacity(ctx, "job:global:deploy", "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: "job", Generation: f.holder.Generation}, f.owner)
 	if err != nil || adopted != "new_arrival" {
 		return fmt.Errorf("expired adoption: %+v, %v", adopted, err)
 	}
@@ -175,7 +175,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if repeated, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease, store.ConcurrencyMaintenanceOptions{}); err != nil || !reflect.DeepEqual(repeated, store.ConcurrencyMaintenanceResult{}) {
 		return fmt.Errorf("repeated capacity pass: %+v, %v", repeated, err)
 	}
-	state, err := f.tenant.GetConcurrencyState(ctx, "global:deploy")
+	state, err := f.tenant.GetConcurrencyState(ctx, "job:global:deploy")
 	if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].RunID != competitor || len(state.Waiters) != 1 || state.Waiters[0].RunID != f.ref.RunID {
 		return fmt.Errorf("capacity after reopening: %+v, %v", state, err)
 	}
@@ -201,7 +201,7 @@ func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocker, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "global:deploy", HolderID: "blocker", RunID: competitor, NodeID: "job", Capacity: 1, Cost: 1, Policy: store.OnLimitQueue})
+	blocker, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "job:global:deploy", HolderID: "blocker", RunID: competitor, NodeID: "job", Capacity: 1, Cost: 1, Policy: store.OnLimitQueue})
 	if err != nil || blocker.Kind != store.AcquireGranted {
 		t.Fatalf("blocker=%+v %v", blocker, err)
 	}

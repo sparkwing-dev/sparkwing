@@ -52,7 +52,7 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 		t.Run(test.policy, func(t *testing.T) {
 			now := time.Now()
 			server, tenant, owner := controllerCapacityFixture(t, teststore.WithClock(func() time.Time { return now }))
-			seedOtherCapacityHolder(t, server, "global:serial")
+			seedOtherCapacityHolder(t, server, "plan:global:serial")
 			group := nodeproto.ConcurrencySpec{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: &test.policy}
 			if test.policy == "queue" {
 				group.QueueTimeoutMS = new(int64(1))
@@ -96,7 +96,7 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 					t.Fatal("queue timeout lost job result event")
 				}
 			}
-			state, err := tenant.GetConcurrencyState(t.Context(), "global:serial")
+			state, err := tenant.GetConcurrencyState(t.Context(), "plan:global:serial")
 			if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != "other" || len(state.Waiters) != 0 {
 				t.Fatalf("refused run changed occupied capacity: %+v %v", state, err)
 			}
@@ -156,11 +156,11 @@ func TestPrivateCapacityEvalUsesOnlyItsAwardedSource(t *testing.T) {
 			t.Fatalf("eval widened source binding to %+v: HTTP %d", wrong, code)
 		}
 	}
-	planState, err := tenant.GetConcurrencyState(t.Context(), "global:serial")
+	planState, err := tenant.GetConcurrencyState(t.Context(), "plan:global:serial")
 	if err != nil || len(planState.Holders) != 1 || planState.Holders[0].NodeID != "" || planState.UsedCost != 1 {
 		t.Fatalf("eval duplicated run capacity: %+v %v", planState, err)
 	}
-	jobState, err := tenant.GetConcurrencyState(t.Context(), "global:job-only")
+	jobState, err := tenant.GetConcurrencyState(t.Context(), "job:global:job-only")
 	if err != nil || len(jobState.Holders) != 0 || len(jobState.Waiters) != 0 {
 		t.Fatalf("eval revived source job capacity: %+v %v", jobState, err)
 	}
@@ -171,7 +171,7 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 		t.Run(map[bool]string{false: "available", true: "occupied"}[occupied], func(t *testing.T) {
 			server, tenant, owner := controllerCapacityFixture(t)
 			if occupied {
-				seedOtherCapacityHolder(t, server, "global:serial")
+				seedOtherCapacityHolder(t, server, "plan:global:serial")
 			}
 			acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{
 				Concurrency: []nodeproto.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
@@ -181,7 +181,7 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 			if err != nil || (row.ReadyAt == nil) != occupied {
 				t.Fatalf("release escaped plan admission: node=%+v occupied=%v error=%v", row, occupied, err)
 			}
-			state, err := tenant.GetConcurrencyState(t.Context(), "global:serial")
+			state, err := tenant.GetConcurrencyState(t.Context(), "plan:global:serial")
 			if err != nil || len(state.Holders) != 1 {
 				t.Fatalf("plan capacity: %+v %v", state, err)
 			}
@@ -202,24 +202,24 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 				if err != nil || row.ReadyAt == nil {
 					t.Fatalf("controller did not resume after capacity release: %+v %v", row, err)
 				}
-				state, err = tenant.GetConcurrencyState(t.Context(), "global:serial")
+				state, err = tenant.GetConcurrencyState(t.Context(), "plan:global:serial")
 			}
 			if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != "run" || state.Holders[0].NodeID != "" || state.UsedCost != 1 || len(state.Waiters) != 0 {
 				t.Fatalf("controller did not hold exactly one run reservation: %+v %v", state, err)
 			}
 			before := state.Holders[0]
 			var previousGeneration int64
-			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT generation FROM concurrency_holders WHERE team='a' AND key='global:serial' AND run_id='run' AND node_id=''`).Scan(&previousGeneration); err != nil {
+			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT generation FROM concurrency_holders WHERE team='a' AND key='plan:global:serial' AND run_id='run' AND node_id=''`).Scan(&previousGeneration); err != nil {
 				t.Fatal(err)
 			}
 			engineSQL(t, server.store, `UPDATE leases SET until=0 WHERE name='controller.owner'`)
 			successor := New(server.store, nil)
 			successor.reconcileOwnedRuns(t.Context())
 			successor.reconcileOwnedRuns(t.Context())
-			state, err = tenant.GetConcurrencyState(t.Context(), "global:serial")
+			state, err = tenant.GetConcurrencyState(t.Context(), "plan:global:serial")
 			run, runErr := tenant.ReadRun(t.Context(), "run")
 			var generation int64
-			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT generation FROM concurrency_holders WHERE team='a' AND key='global:serial' AND run_id='run' AND node_id=''`).Scan(&generation); err != nil {
+			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT generation FROM concurrency_holders WHERE team='a' AND key='plan:global:serial' AND run_id='run' AND node_id=''`).Scan(&generation); err != nil {
 				t.Fatal(err)
 			}
 			if err != nil || runErr != nil || run.Owner == nil || len(state.Holders) != 1 || state.UsedCost != 1 || !state.Holders[0].ClaimedAt.Equal(before.ClaimedAt) || generation != run.Owner.Generation || generation == previousGeneration {

@@ -579,6 +579,8 @@ type JobNode struct {
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
+- `func (n *JobNode) StartsChildren(pipelines ...string) *JobNode` -- StartsChildren appends pipelines in the parent repository that this job may start with RunAndAwait.
+- `func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode` -- StartsChildrenIn declares child pipelines in a canonical repository key such as "gh:123" or "git:host/org/repo".
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
 - `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify checks a postcondition after each successful action attempt.
 
@@ -962,11 +964,12 @@ type Scope string
 const (
     // ScopeRun bounds the budget to the nodes of a single run.
     ScopeRun Scope = "run"
-    // ScopeBox bounds the budget to one machine, even when a controller
-    // dispatches several runs to it.
+    // ScopeBox bounds a job-level budget to one machine, even when a controller
+    // dispatches several runs to it. Pipeline acceptance refuses box-scoped
+    // plan groups because a run can span machines. Use [JobNode.Concurrency].
     ScopeBox Scope = "box"
-    // ScopeGlobal pools the budget across every run that names the
-    // group, coordinated through the shared backend. The zero value.
+    // ScopeGlobal pools the budget across runs naming the group at the same
+    // plan or job level, coordinated through the shared backend. The zero value.
     ScopeGlobal Scope = "global"
 )
 ```

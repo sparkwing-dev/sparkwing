@@ -414,11 +414,11 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		for _, kind := range []ActorKind{ActorRunHost, ActorHolder, ActorOperator, ActorController} {
 			forged := actor
 			forged.Kind = kind
-			if _, err := tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "global:retry", HolderID: "job-slot", RunID: retry.RunID, NodeID: "job", Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, NodeID: "job"}, forged); err == nil {
+			if _, err := tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "job:global:retry", HolderID: "job-slot", RunID: retry.RunID, NodeID: "job", Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, NodeID: "job"}, forged); err == nil {
 				t.Fatalf("planner acquired copied job capacity as %s", kind)
 			}
 		}
-		if _, err := tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "global:retry", HolderID: "run-slot", RunID: retry.RunID, Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, Generation: actor.Owner.Generation}, actor); err != nil {
+		if _, err := tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "plan:global:retry", HolderID: "run-slot", RunID: retry.RunID, Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, Generation: actor.Owner.Generation}, actor); err != nil {
 			t.Fatalf("live planner lost run capacity: %v", err)
 		}
 		before, err := tenant.ReadSnapshot(t.Context(), retry.RunID)

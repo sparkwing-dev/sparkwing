@@ -75,20 +75,20 @@ func TestConcurrencyExpiredCapacityNeverRevivesProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(194, 672))
 	for range 96 {
 		lease := time.Duration(1 + random.Int64N(int64(time.Second)))
-		request := acquireSlotRequest{Key: "global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: lease, Policy: OnLimitQueue}
+		request := acquireSlotRequest{Key: "job:global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: lease, Policy: OnLimitQueue}
 		got, err := tenant.AcquireConcurrencySlot(t.Context(), request)
 		if err != nil || got.Kind != AcquireGranted || !got.LeaseExpiresAt.Equal(now.Add(lease)) {
 			t.Fatalf("acquire: %+v, %v", got, err)
 		}
 		*now = got.LeaseExpiresAt.Add(time.Duration(random.Int64N(2)))
-		if _, _, err := tenant.HeartbeatConcurrencySlot(t.Context(), "global:key", "holder", time.Hour); err == nil {
+		if _, _, err := tenant.HeartbeatConcurrencySlot(t.Context(), "job:global:key", "holder", time.Hour); err == nil {
 			t.Fatal("heartbeat revived expired capacity")
 		}
-		adopted, err := tenant.AdoptCapacity(t.Context(), "global:key", "holder", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
+		adopted, err := tenant.AdoptCapacity(t.Context(), "job:global:key", "holder", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
 		if err != nil || adopted != acquireAgain {
 			t.Fatalf("expired capacity adopted: %+v, %v", adopted, err)
 		}
-		state, err := tenant.GetConcurrencyState(t.Context(), "global:key")
+		state, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
 		if err != nil || state.UsedCost != 0 || len(state.Holders) != 0 {
 			t.Fatalf("expired capacity counted: %+v, %v", state, err)
 		}

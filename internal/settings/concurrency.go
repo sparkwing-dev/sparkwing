@@ -50,9 +50,6 @@ func checkConcurrencyGroups(settings runspec.ExecutionSettings) error {
 		}
 		return nil
 	}
-	if err := check(settings.Concurrency); err != nil {
-		return err
-	}
 	for _, job := range settings.Jobs {
 		if err := check(job.Concurrency); err != nil {
 			return err

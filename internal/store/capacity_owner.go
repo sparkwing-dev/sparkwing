@@ -122,8 +122,8 @@ func checkCapacityMutationTx(ctx context.Context, tx *storeTx, team Team, key, i
 }
 
 func capacityQueueDeadlineTx(ctx context.Context, tx *storeTx, team Team, waiter ConcurrencyWaiter) (time.Time, error) {
-	scope, _, name, ok := runspec.ParseConcurrencyKey(waiter.Key)
-	if !ok {
+	level, scope, _, name, ok := runspec.ParseConcurrencyKey(waiter.Key)
+	if !ok || (waiter.NodeID == "") != (level == "plan") {
 		return time.Time{}, nil
 	}
 	groups, err := capacityGroupsTx(ctx, tx, team, waiter.RunID, waiter.NodeID)

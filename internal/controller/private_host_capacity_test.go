@@ -68,17 +68,17 @@ func TestPrivateCapacityOwnerCannotChangeAcceptedDeclaration(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			server, _, tenant, owner, bearer := localHostAwardFixture(t)
 			acceptCapacityPlan(t, server, tenant, owner, "global", "queue", 1, 1, "build")
-			seedOtherCapacityHolder(t, server, "global:serial")
-			before, err := tenant.GetConcurrencyState(t.Context(), "global:serial")
+			seedOtherCapacityHolder(t, server, "job:global:serial")
+			before, err := tenant.GetConcurrencyState(t.Context(), "job:global:serial")
 			if err != nil {
 				t.Fatal(err)
 			}
 			body := map[string]any{"binding": store.CapacityBinding{RunID: "run", NodeID: "build"}}
-			body[change] = map[string]any{"key": "global:undeclared", "capacity": 100, "cost": 2, "policy": "cancel_others", "lease": int64(time.Hour)}[change]
+			body[change] = map[string]any{"key": "job:global:undeclared", "capacity": 100, "cost": 2, "policy": "cancel_others", "lease": int64(time.Hour)}[change]
 			if code := privateCapacityRequest(t, server, bearer, body); code != http.StatusBadRequest {
 				t.Fatalf("changed declaration accepted: HTTP %d", code)
 			}
-			assertOtherCapacityUnchanged(t, tenant, "global:serial", before)
+			assertOtherCapacityUnchanged(t, tenant, "job:global:serial", before)
 		})
 	}
 }
@@ -125,7 +125,7 @@ func TestPrivateCapacityBindsBoxToPersistedAwardIdentity(t *testing.T) {
 		t.Run(policy, func(t *testing.T) {
 			server, host, tenant, owner, bearer := localHostAwardFixture(t)
 			acceptCapacityPlan(t, server, tenant, owner, "box", policy, 1, 1, "first", "second")
-			otherKey := "box:13:other-machine:serial"
+			otherKey := "job:box:13:other-machine:serial"
 			seedOtherCapacityHolder(t, server, otherKey)
 			before, err := tenant.GetConcurrencyState(t.Context(), otherKey)
 			if err != nil {
@@ -133,7 +133,7 @@ func TestPrivateCapacityBindsBoxToPersistedAwardIdentity(t *testing.T) {
 			}
 			binding := store.CapacityBinding{RunID: "run", NodeID: "first"}
 			// The declaration is valid; only the target machine has changed.
-			for _, key := range []string{otherKey, "box:5:fresh:serial"} {
+			for _, key := range []string{otherKey, "job:box:5:fresh:serial"} {
 				if code := privateCapacityRequest(t, server, bearer, map[string]any{"key": key, "binding": binding}); code != http.StatusBadRequest {
 					t.Fatalf("caller selected a box: HTTP %d", code)
 				}
@@ -142,7 +142,7 @@ func TestPrivateCapacityBindsBoxToPersistedAwardIdentity(t *testing.T) {
 			if err != nil || first.Kind != store.AcquireGranted {
 				t.Fatalf("bound box: %+v %v", first, err)
 			}
-			key := "box:6:runner:serial"
+			key := "job:box:6:runner:serial"
 			initial, err := tenant.GetConcurrencyState(t.Context(), key)
 			if err != nil || len(initial.Holders) != 1 {
 				t.Fatalf("persisted machine key: %+v %v", initial, err)
@@ -191,7 +191,7 @@ func TestPrivateCapacityRefusesMissingPersistedHostIdentity(t *testing.T) {
 	if code != http.StatusForbidden {
 		t.Fatalf("missing host admitted: HTTP %d", code)
 	}
-	if state, err := tenant.GetConcurrencyState(t.Context(), "box:6:runner:serial"); !errors.Is(err, store.ErrNotFound) {
+	if state, err := tenant.GetConcurrencyState(t.Context(), "job:box:6:runner:serial"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing host wrote capacity: %+v %v", state, err)
 	}
 }
@@ -205,7 +205,7 @@ func TestPrivateCapacityUsesSealedDeclarationAndOwnerDeadline(t *testing.T) {
 	if err != nil || result.Kind != store.AcquireGranted || result.LeaseExpiresAt.After(until) {
 		t.Fatalf("owner deadline: %+v %v", result, err)
 	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "global:serial")
+	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:serial")
 	if err != nil || state.Capacity != 3 || state.UsedCost != 2 || len(state.Holders) != 1 || state.Holders[0].HolderID != "run/build" || state.Holders[0].LeaseExpiresAt.After(until) {
 		t.Fatalf("sealed acquisition: %+v %v", state, err)
 	}
@@ -229,7 +229,7 @@ func TestPrivateCapacityAdmitsPendingJobsAndPromotesAfterTerminalRelease(t *test
 	if promoted, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || promoted.Kind != store.AcquireGranted {
 		t.Fatalf("promotion: %+v %v", promoted, err)
 	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "run:3:run:serial")
+	state, err := tenant.GetConcurrencyState(t.Context(), "job:run:3:run:serial")
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].HolderID != "run/second" || len(state.Waiters) != 0 {
 		t.Fatalf("retained semaphore: %+v %v", state, err)
 	}
@@ -271,7 +271,7 @@ func TestPrivateCapacityRejectsForeignTeamAndWrongUnit(t *testing.T) {
 			}
 		})
 	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "global:serial")
+	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:serial")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("refusal mutated capacity: %+v %v", state, err)
 	}
@@ -291,7 +291,7 @@ func TestPrivateCapacityAdmitsEverySealedGroup(t *testing.T) {
 	if err != nil || result.Kind != store.AcquireGranted {
 		t.Fatalf("unit admission: %+v %v", result, err)
 	}
-	for key, cost := range map[string]int{"global:global": 2, "run:3:run:run": 1, "box:6:runner:machine": 1} {
+	for key, cost := range map[string]int{"job:global:global": 2, "job:run:3:run:run": 1, "job:box:6:runner:machine": 1} {
 		state, err := tenant.GetConcurrencyState(t.Context(), key)
 		if err != nil || state.UsedCost != cost || len(state.Holders) != 1 || state.Holders[0].HolderID != "run/build" {
 			t.Fatalf("omitted sealed group %s: %+v %v", key, state, err)
@@ -302,7 +302,7 @@ func TestPrivateCapacityAdmitsEverySealedGroup(t *testing.T) {
 func TestPrivateCapacityRejectsAnotherMachinesBoxWithoutChangingItsHolder(t *testing.T) {
 	server, _, tenant, owner, bearer := localHostAwardFixture(t)
 	acceptCapacityPlan(t, server, tenant, owner, "box", "cancel_others", 1, 1, "build")
-	key := "box:13:other-machine:serial"
+	key := "job:box:13:other-machine:serial"
 	seedOtherCapacityHolder(t, server, key)
 	before, err := tenant.GetConcurrencyState(t.Context(), key)
 	if err != nil {
@@ -345,7 +345,7 @@ func TestPrivateCapacityUsesClaimedJobAward(t *testing.T) {
 			t.Fatalf("claimed admission=%+v %v", result, err)
 		}
 	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "run:3:run:serial")
+	state, err := tenant.GetConcurrencyState(t.Context(), "job:run:3:run:serial")
 	if err != nil || len(state.Holders) != 1 || state.UsedCost != 1 {
 		t.Fatalf("claim reacquired capacity: %+v %v", state, err)
 	}
@@ -354,7 +354,7 @@ func TestPrivateCapacityUsesClaimedJobAward(t *testing.T) {
 			t.Fatalf("claim widened to %+v: HTTP %d", changed, code)
 		}
 	}
-	if after, err := tenant.GetConcurrencyState(t.Context(), "run:3:run:serial"); err != nil || !reflect.DeepEqual(state, after) {
+	if after, err := tenant.GetConcurrencyState(t.Context(), "job:run:3:run:serial"); err != nil || !reflect.DeepEqual(state, after) {
 		t.Fatalf("refusal changed holder: %+v %v", after, err)
 	}
 }

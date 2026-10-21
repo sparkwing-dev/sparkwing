@@ -1209,7 +1209,7 @@ The old request builder names the target in concurrency bodies, run creation, ch
 
 ### Final matrix obligations
 
-Keep the old golden as source evidence in Git. Do not copy its expected statuses into the final suite. The tables above map credential presentations and target variants. [The route appendix](t1-credential-routes.md) enumerates all 229 old routes, their dispositions, scenario IDs, independent permission rules and unresolved rights. This completes the source inventory, not the expected permission matrix. Removed routes go to `surface-api-and-detail-parity`. Surviving cells remain launch-blocked until their expected rights are independently specified.
+Keep the old golden as source evidence in Git. Do not copy its expected statuses into the final suite. The tables above map credential presentations and target variants. [The route appendix](t1-credential-routes.md) enumerates the 221 retained source entries, their dispositions, scenario IDs, independent permission rules and unresolved rights. The eight retired concurrency-route entries are deleted. This completes the source inventory, not the expected permission matrix. Removed routes go to `surface-api-and-detail-parity`. Surviving cells remain launch-blocked until their expected rights are independently specified.
 
 | Old behavior or omission | Final expected behavior |
 |---|---|

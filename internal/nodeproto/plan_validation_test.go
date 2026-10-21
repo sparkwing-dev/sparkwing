@@ -130,7 +130,7 @@ func TestValidatePlanValuesAndCapabilities(t *testing.T) {
 	for _, placement := range []Placement{PlacementLocal, PlacementLocalTriggered, PlacementRunnerHosted, PlacementLauncher, PlacementHere, PlacementGitHubActions} {
 		context := planContext()
 		context.Placement = placement
-		checkPlan(t, `{"jobs":[{"id":"a","approval":{},"closures":{"skip_if":["condition"]}}],"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}`, context, "")
+		checkPlan(t, `{"jobs":[{"id":"a","approval":{},"closures":{"skip_if":["condition"]},"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}]}`, context, "")
 	}
 	context := planContext()
 	context.Placement = "unknown"

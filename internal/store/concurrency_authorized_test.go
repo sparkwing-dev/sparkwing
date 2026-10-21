@@ -43,7 +43,7 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture) capability.Authori
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "global:deploy", SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: row.Generation}
+	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "job:global:deploy", SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: row.Generation}
 	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
@@ -68,13 +68,13 @@ func TestAuthorizedConcurrencyGroupDoesNotDiscloseUndeclaredReadEdgesProperty(t 
 			leaderRun = fmt.Sprintf("foreign/%x", random.Uint64())
 		}
 		cache := fmt.Sprintf("memo/%x", random.Uint64())
-		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES (?,'global:deploy',3,1) ON CONFLICT(team,key) DO NOTHING`), f.tenant.Team()); err != nil {
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES (?,'job:global:deploy',3,1) ON CONFLICT(team,key) DO NOTHING`), f.tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_waiters(team,key,run_id,node_id,holder_id,arrived_at,policy,cache_key_hash,leader_run_id,leader_node_id,generation,lease_expires_at) VALUES (?,'global:deploy',?,'job',?,?,'queue',?,?,'job',0,?)`), f.tenant.Team(), competitor, fmt.Sprintf("wait-%d", i), i+1, cache, leaderRun, time.Now().Add(time.Hour).UnixNano()); err != nil {
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_waiters(team,key,run_id,node_id,holder_id,arrived_at,policy,cache_key_hash,leader_run_id,leader_node_id,generation,lease_expires_at) VALUES (?,'job:global:deploy',?,'job',?,?,'queue',?,?,'job',0,?)`), f.tenant.Team(), competitor, fmt.Sprintf("wait-%d", i), i+1, cache, leaderRun, time.Now().Add(time.Hour).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
-		state, err := f.tenant.ReadAuthorizedGroup(t.Context(), slotAuthorization(t, f), "global:deploy")
+		state, err := f.tenant.ReadAuthorizedGroup(t.Context(), slotAuthorization(t, f), "job:global:deploy")
 		if err != nil || len(state.Waiters) != 1 {
 			t.Fatalf("group view unavailable: %+v, %v", state, err)
 		}
@@ -82,7 +82,7 @@ func TestAuthorizedConcurrencyGroupDoesNotDiscloseUndeclaredReadEdgesProperty(t 
 		if waiter.RunID != competitor || waiter.LeaderRunID != "" || waiter.LeaderNodeID != "" || waiter.CacheKeyHash != "" {
 			t.Fatalf("group disclosed undeclared edge: %+v", waiter)
 		}
-		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `DELETE FROM concurrency_waiters WHERE team=? AND key='global:deploy'`), f.tenant.Team()); err != nil {
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `DELETE FROM concurrency_waiters WHERE team=? AND key='job:global:deploy'`), f.tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,11 +96,16 @@ func TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes(t *testing.T) 
 	}
 	handler := controller.New(f.s, nil).Handler()
 	for _, route := range []struct{ method, suffix string }{
-		{"POST", "/acquire"}, {"POST", "/heartbeat"}, {"POST", "/release"},
-		{"POST", "/cancel-waiter"}, {"GET", "/holder"}, {"GET", "/resolve"},
-		{"POST", "/force-release"}, {"GET", ""},
+		{"POST", "/acquire"},
+		{"POST", "/heartbeat"},
+		{"POST", "/release"},
+		{"POST", "/cancel-waiter"},
+		{"GET", "/holder"},
+		{"GET", "/resolve"},
+		{"POST", "/force-release"},
+		{"GET", ""},
 	} {
-		request := httptest.NewRequest(route.method, "/api/v1/queue/groups/global:deploy"+route.suffix, strings.NewReader(`{}`))
+		request := httptest.NewRequest(route.method, "/api/v1/queue/groups/job:global:deploy"+route.suffix, strings.NewReader(`{}`))
 		request.Header.Set("Authorization", "Bearer "+f.holderBearer)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)

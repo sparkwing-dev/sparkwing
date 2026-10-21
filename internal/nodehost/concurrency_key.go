@@ -20,9 +20,9 @@ func scopedConcurrencyKey(name, scope, runID, boxID string) string {
 	case "box":
 		identity = boxID
 	default:
-		return runspec.ConcurrencyKey("global", "", name)
+		return runspec.ConcurrencyKey("job", "global", "", name)
 	}
-	return runspec.ConcurrencyKey(scope, identity, name)
+	return runspec.ConcurrencyKey("job", scope, identity, name)
 }
 
 const memoKeyPrefix = "memo:"
@@ -32,7 +32,7 @@ func ScopeLabelFromKey(key string) string {
 	if strings.HasPrefix(key, memoKeyPrefix) {
 		return "content-cache"
 	}
-	scope, identity, _, ok := runspec.ParseConcurrencyKey(key)
+	_, scope, identity, _, ok := runspec.ParseConcurrencyKey(key)
 	if !ok {
 		return "unknown"
 	}

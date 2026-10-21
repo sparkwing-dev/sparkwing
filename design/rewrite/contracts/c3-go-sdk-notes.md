@@ -645,7 +645,7 @@ Each row names one exported type or function. Retain means its declared signatur
 
 ## Retained constants
 
-- `ScopeRun`, `ScopeBox`, `ScopeGlobal` declare run, machine, and shared concurrency scope.
+- `ScopeRun`, `ScopeBox`, `ScopeGlobal` declare run, machine, and shared concurrency scope. Box scope is job-only. Pipeline acceptance refuses a box-scoped plan group with an error naming the group and pointing at job-level box scope. Plan and job groups have separate namespaces.
 - `Queue`, `Fail`, `Skip`, `CancelOthers` select capacity policy.
 - `ApprovalFail`, `ApprovalDeny`, `ApprovalApprove` select approval timeout resolution.
 - `FailFast`, `CollectAll` select independent-step failure policy.

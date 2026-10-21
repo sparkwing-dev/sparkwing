@@ -22,11 +22,11 @@ func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 }
 
 func declaredCapacityGroupTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, key string, authority capability.AuthorityRef) (runspec.Concurrency, error) {
-	scope, identity, name, ok := runspec.ParseConcurrencyKey(key)
-	if !ok || scope == "run" && identity != runID || scope == "box" && identity == "" {
+	level, scope, identity, name, ok := runspec.ParseConcurrencyKey(key)
+	if !ok || (nodeID == "") != (level == "plan") || scope == "run" && identity != runID || scope == "box" && identity == "" {
 		return runspec.Concurrency{}, bindingRefusal()
 	}
-	derived, err := capacityKeyTx(ctx, tx, authority, runID, scope, name)
+	derived, err := capacityKeyTx(ctx, tx, authority, runID, nodeID, scope, name)
 	if err != nil {
 		return runspec.Concurrency{}, err
 	}

@@ -348,13 +348,17 @@ Scopes are `sw.ScopeGlobal`, `sw.ScopeRun` and `sw.ScopeBox`. Policies are
 in every Go `ConcurrencyLimit`. Its zero value is an explicit zero and fails
 validation. Omitted scope, membership cost and policy resolve to global scope,
 cost one and queueing. An explicit zero cost also fails validation.
-Reused group definitions must agree on scope, capacity and
-policy. The host computes the scoped key. `QueueTimeout` bounds waiting and
-`CancelTimeout` bounds cancellation of existing holders.
+Reused group definitions at the same level must agree on scope, capacity and
+policy. Plan and job groups have separate namespaces. The same name at both
+levels identifies two budgets. The host computes the scoped key. `QueueTimeout`
+bounds waiting and `CancelTimeout` bounds cancellation of existing holders.
 
-`plan.Concurrency(group, cost...)` holds a budget for the whole run. Job
-memberships consume capacity around the job. Resource admission remains a
-separate host responsibility.
+`plan.Concurrency(group, cost...)` holds a budget for the whole run. Plan groups
+accept global or run scope. Pipeline acceptance refuses a box-scoped plan group
+with an error naming the group and pointing at job-level box scope, because a
+run can execute across several machines. Attach a box-scoped group to jobs to
+limit work on each machine. Job memberships consume capacity around the job.
+Resource admission remains a separate host responsibility.
 
 ## Secrets and masking
 

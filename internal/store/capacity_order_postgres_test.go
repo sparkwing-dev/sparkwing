@@ -37,7 +37,7 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 				if held == "foreign_node" {
 					node = "job"
 				}
-				result, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "global:plan", HolderID: "competitor", RunID: competitor, NodeID: node, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
+				result, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "plan:global:plan", HolderID: "competitor", RunID: competitor, NodeID: node, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
 				if err != nil || result.Kind != store.AcquireGranted {
 					t.Fatalf("competitor: %+v, %v", result, err)
 				}
@@ -49,7 +49,7 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 			defer blocked.Rollback()
 			switch held {
 			case "group":
-				name := fmt.Sprintf("capacity-admission:%d:%s:%s", len(f.tenant.Team()), f.tenant.Team(), "global:plan")
+				name := fmt.Sprintf("capacity-admission:%d:%s:%s", len(f.tenant.Team()), f.tenant.Team(), "plan:global:plan")
 				_, err = blocked.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, name)
 			case "foreign_run":
 				_, err = blocked.ExecContext(ctx, `SELECT id FROM runs WHERE team=$1 AND id=$2 FOR NO KEY UPDATE`, f.tenant.Team(), competitor)

@@ -812,7 +812,11 @@ only with `runner.local_admission`; placement eligibility does not decide this
 requirement. `ComposeNativeAdmission` always supplies controller-backed logical
 concurrency to remote owners through `RemoteHostStore`. Its capacity store uses
 the private owner transport, including before a job has an execution award.
-The capacity store derives box scope only from `Capability.ExecutionHost`, sealed
+Plan and job groups have separate persisted key namespaces. Pipeline acceptance
+refuses box-scoped plan groups because a run can span machines, naming the group
+and pointing at job-level box scope. Controller scheduling admits all plan
+groups before releasing work.
+The capacity store derives job-level box scope only from `Capability.ExecutionHost`, sealed
 on the award independently of its accountable subject. Machine roots and Actions
 push credentials use their machine subject. Account-backed here awards use the
 origin machine authenticated by the intake proof. Local peers use their peer

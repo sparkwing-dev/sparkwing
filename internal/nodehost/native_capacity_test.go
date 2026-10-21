@@ -56,7 +56,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 	}
 	for _, fixture := range []*storeHostFixture{first, second} {
 		owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-			state, err := fixture.Tenant.GetConcurrencyState(ctx, "global:db")
+			state, err := fixture.Tenant.GetConcurrencyState(ctx, "job:global:db")
 			if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != fixture.Accepted.RunID || state.Holders[0].NodeID != "a" {
 				t.Errorf("executed without native store capacity: state=%+v err=%v", state, err)
 			}
@@ -68,7 +68,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 		if err != nil || completion.Outcome != "success" {
 			t.Fatalf("native completion=%+v err=%v", completion, err)
 		}
-		state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+		state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 		if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 			t.Fatalf("native capacity leaked: state=%+v err=%v", state, err)
 		}

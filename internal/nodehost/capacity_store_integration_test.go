@@ -48,12 +48,12 @@ func TestStoreAdmissionSQLiteRetainsUntilTerminalTransition(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 	if err != nil || len(state.Holders) != 1 || state.UsedCost != 1 {
 		t.Fatalf("retained state=%+v err=%v", state, err)
 	}
 	cancelCapacityNode(t, fixture, row)
-	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 	if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 		t.Fatalf("terminal state=%+v err=%v", state, err)
 	}
@@ -233,7 +233,7 @@ func TestStoreAdmissionSQLiteFencesAcquisitionAfterAdoption(t *testing.T) {
 	if err == nil {
 		t.Fatal("stale owner acquired capacity")
 	}
-	state, stateErr := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	state, stateErr := fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 	if !errors.Is(stateErr, store.ErrNotFound) && (stateErr != nil || len(state.Holders) != 0 || len(state.Waiters) != 0) {
 		t.Fatalf("stale owner mutated capacity: %+v, %v", state, stateErr)
 	}
@@ -247,7 +247,7 @@ func TestStoreAdmissionSQLitePromotesOnlyAfterTerminalRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission.Queued = func(ctx context.Context, _ controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
-		state, err := fixture.Tenant.GetConcurrencyState(ctx, "global:db")
+		state, err := fixture.Tenant.GetConcurrencyState(ctx, "job:global:db")
 		if err != nil || len(state.Waiters) != 1 || len(state.Holders) != 1 {
 			t.Errorf("queued state=%+v err=%v", state, err)
 		}
@@ -260,7 +260,7 @@ func TestStoreAdmissionSQLitePromotesOnlyAfterTerminalRelease(t *testing.T) {
 	if err := admission.Node(ctx, fixture.Accepted, second, func(context.Context) error { ran = true; return nil }); err != nil || !ran {
 		t.Fatalf("promoted ran=%v err=%v", ran, err)
 	}
-	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != "b" || len(state.Waiters) != 0 {
 		t.Fatalf("promoted state=%+v err=%v", state, err)
 	}
@@ -285,7 +285,7 @@ func TestStoreAdmissionSQLiteQueueTimeoutAndLimitPolicies(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Outcome != test.want || failure.Reason != test.reason {
 				t.Fatalf("refusal=%v", err)
 			}
-			state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+			state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 			if err != nil || len(state.Waiters) != 0 || len(state.Holders) != 1 {
 				t.Fatalf("refused state=%+v err=%v", state, err)
 			}
@@ -306,12 +306,12 @@ func TestStoreAdmissionSQLiteOwnerLossRetainsWaiterUntilWorkEnds(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 	if err != nil || len(state.Waiters) != 1 {
 		t.Fatalf("lost waiter state=%+v err=%v", state, err)
 	}
 	cancelCapacityNode(t, fixture, second)
-	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "job:global:db")
 	if err != nil || len(state.Waiters) != 0 || len(state.Holders) != 1 {
 		t.Fatalf("cancelled state=%+v err=%v", state, err)
 	}
@@ -341,7 +341,7 @@ func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:deploys")
+	state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "plan:global:deploys")
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != "" {
 		t.Fatalf("plan state=%+v err=%v", state, err)
 	}
@@ -349,7 +349,7 @@ func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) 
 	if _, err := fixture.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: fixture.Actor.Owner, Transition: store.RunTransition{RunID: fixture.Accepted.RunID, To: store.RunFailed, Actor: fixture.Actor, Cause: store.RunFinish}}); err != nil {
 		t.Fatal(err)
 	}
-	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "global:deploys")
+	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "plan:global:deploys")
 	if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 		t.Fatalf("finished plan state=%+v err=%v", state, err)
 	}
@@ -403,7 +403,7 @@ func TestStoreAdmissionSQLitePlanGroupBoundsTwoRuns(t *testing.T) {
 	if _, err := secondAdmission.Run(ctx, second.Accepted, func(context.Context) (RunCompletion, error) { ran = true; return RunCompletion{}, nil }); err != nil || !ran {
 		t.Fatalf("second ran=%v err=%v", ran, err)
 	}
-	state, err := second.Tenant.GetConcurrencyState(t.Context(), "global:deploys")
+	state, err := second.Tenant.GetConcurrencyState(t.Context(), "plan:global:deploys")
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != second.Accepted.RunID || len(state.Waiters) != 0 {
 		t.Fatalf("second plan state=%+v err=%v", state, err)
 	}

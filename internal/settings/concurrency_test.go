@@ -51,8 +51,8 @@ func TestResolvePlanAndExpansionPreserveConcurrency(t *testing.T) {
 		t.Fatal("expansion changed existing capacity")
 	}
 	plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Capacity: new(3)}}
-	if _, err := ResolvePlan(PlanInputs{Declarations: declarations, Plan: plan}); err == nil {
-		t.Fatal("job changed plan capacity")
+	if _, err := ResolvePlan(PlanInputs{Declarations: declarations, Plan: plan}); err != nil {
+		t.Fatalf("independent job and plan capacities refused: %v", err)
 	}
 }
 

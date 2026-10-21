@@ -2,7 +2,7 @@
 
 <!-- design:begin -->
 
-This design appendix enumerates all 229 distinct routes in `internal/controller/testdata/credential_matrix.golden` at `1e16668363ecbd99ba922436ab1a6f9cae63335b`. Those routes generated 8,466 old cells. Every old route has one row below. This is a complete source-route inventory, not a complete final permission specification.
+This design appendix tracks 221 source routes from `internal/controller/testdata/credential_matrix.golden` at `1e16668363ecbd99ba922436ab1a6f9cae63335b`, excluding the retired concurrency endpoints. Each tracked route has one row below. This source-route inventory does not define final permissions.
 
 The frozen architecture determines some removals, resource names and permission boundaries. It does not determine every existing route's role grants. Unresolved rights below are launch blockers for their matrix cells. An unavailable or undecided expected answer cannot be reported as a passing or skipped launch check.
 
@@ -392,19 +392,6 @@ The exact source spelling is retained in the first column, including `/metrics`,
 | `PUT /api/v1/storage/quotas/{principal}/allowance` | unresolved | Deployment operations live under `/api/v1/operator/*`; exact paths and read/write grants are C2 assumptions. | `credentials-matrix-pipeline-and-audience` | OPS; U-DEPLOYMENT |
 | `PUT /api/v1/storage/settings` | unresolved | Deployment operations live under `/api/v1/operator/*`; exact paths and read/write grants are C2 assumptions. | `credentials-matrix-pipeline-and-audience` | OPS; U-DEPLOYMENT |
 
-### Concurrency slots and queue operations
-
-| Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
-|---|---|---|---|---|
-| `GET /api/v1/concurrency/{key}/holder` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-| `GET /api/v1/concurrency/{key}/resolve` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-| `GET /api/v1/concurrency/{key}/state` | removed | Read the group through `/api/v1/queue/groups/{group}`. | `credentials-matrix-node-child-slot` | SLOT |
-| `POST /api/v1/concurrency/{key}/acquire` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-| `POST /api/v1/concurrency/{key}/cancel-waiter` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-| `POST /api/v1/concurrency/{key}/force-release` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-| `POST /api/v1/concurrency/{key}/heartbeat` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-| `POST /api/v1/concurrency/{key}/release` | removed | Single-group operation deleted. Execution uses the shared unit admission owner. | `credentials-matrix-node-child-slot` | SLOT |
-
 ### Billing and credit APIs
 
 | Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
@@ -627,7 +614,7 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 ## Completion record
 
-The inventory has 229 unique source routes: 12 keep, 22 rename, 20 delete, 175 unresolved. Each route has one primary destination scenario and at least one independent rule or unresolved-right reference. This historical inventory records source routes independently of the final declaration baseline above.
+The inventory has 221 unique source routes: 12 keep, 24 rename, 24 delete, 161 unresolved. Each route has one primary destination scenario and at least one independent rule or unresolved-right reference. This historical inventory records source routes independently of the final declaration baseline above.
 
 The complete source dimensions remain in [the port inventory](t1-port-inventory.md). The appendix supplies the missing route dimension. It does not close the unresolved expected answers. Launch acceptance remains incomplete until the lead resolves the named rights and T1 encodes those answers independently of the production route table.
 

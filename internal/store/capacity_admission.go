@@ -68,11 +68,7 @@ func (t *Tenant) admitCapacityTx(ctx context.Context, tx *storeTx, binding Capac
 			return result, err
 		}
 		for _, group := range groups {
-			// safety: a controller releases work before an execution award supplies its host.
-			if group.Scope == "box" && actor.Kind == ActorController && binding.NodeID == "" {
-				continue
-			}
-			key, err := capacityKeyTx(ctx, tx, actor.Authority, binding.RunID, group.Scope, group.Group)
+			key, err := capacityKeyTx(ctx, tx, actor.Authority, binding.RunID, stage.fence.binding.NodeID, group.Scope, group.Group)
 			if errors.Is(err, errLauncherHostPending) {
 				pendingHost = true
 				continue
@@ -199,12 +195,19 @@ func (t *Tenant) admitCapacityStageTx(ctx context.Context, tx *storeTx, stage ca
 }
 
 // capacityKeyTx reads only the execution identity sealed on the authenticated award.
-func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, scope, group string) (string, error) {
+func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, nodeID, scope, group string) (string, error) {
+	level := "job"
+	if nodeID == "" {
+		level = "plan"
+		if scope == "box" {
+			return "", bindingRefusal()
+		}
+	}
 	switch scope {
 	case "global":
-		return runspec.ConcurrencyKey(scope, "", group), nil
+		return runspec.ConcurrencyKey(level, scope, "", group), nil
 	case "run":
-		return runspec.ConcurrencyKey(scope, runID, group), nil
+		return runspec.ConcurrencyKey(level, scope, runID, group), nil
 	case "box":
 		chain, err := authorityChainTx(ctx, tx, authority, false)
 		if err != nil {
@@ -212,7 +215,7 @@ func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.Author
 		}
 		c := chain[0].principal.Capability
 		if c.Unit != "" && c.ExecutionHost != "" {
-			return runspec.ConcurrencyKey(scope, c.ExecutionHost, group), nil
+			return runspec.ConcurrencyKey(level, scope, c.ExecutionHost, group), nil
 		}
 		if c.Unit != "" {
 			for _, node := range chain {

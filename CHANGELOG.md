@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **concurrency (Breaking):** Give plan and job groups separate namespaces, so the same name at both levels identifies independent budgets. Refuse box-scoped plan groups when accepting a pipeline because a run can span machines. Use job-level box scope for per-machine budgets. See [migration](docs/migrations/_unreleased.md#concurrency-admission-and-queue-views).
+
 - **admission:** Acquire plan concurrency before job concurrency and machine compute across execution placements. Controller scheduling honors plan groups, and waiting for logical capacity holds no machine compute.
 
 - **launcher:** Seal box-scoped concurrency to the reserved execution node at authenticated Job activation. Capacity requests and their Pod identities cannot select a box.

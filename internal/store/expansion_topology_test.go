@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-func TestExpansionValidationReceivesAcceptedPlanConcurrency(t *testing.T) {
+func TestExpansionJobConcurrencyIsIndependentOfAcceptedPlanConcurrency(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	group := nodeproto.ConcurrencySpec{Group: "deploy", Capacity: new(3), Cost: new(1), Scope: new("global"), OnLimit: new("queue")}
 	plan := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{group}, Jobs: []nodeproto.JobSpec{{ID: "job", Closures: nodeproto.ClosureSpec{Generate: []string{"group"}}}}}
@@ -19,12 +19,7 @@ func TestExpansionValidationReceivesAcceptedPlanConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET plan_json=? WHERE id='run'`, body)
-	valid := request.Body
 	request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"],"concurrency":[{"group":"deploy","capacity":2}]}]}`)
-	if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil {
-		t.Fatal("generated job replaced the accepted concurrency capacity")
-	}
-	request.Body = valid
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}

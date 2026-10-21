@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -25,16 +26,13 @@ func planGrouped(scope, onLimit string, nodes ...string) nodeproto.PlanDoc {
 	return doc
 }
 
-func TestPlanGroupFixtureDeclaresScopeWithoutHostKey(t *testing.T) {
+func TestPlanGroupFixtureRefusesBoxScope(t *testing.T) {
 	raw, err := json.Marshal(planGrouped("box", "queue", "a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ConcurrencyKey(doc.Concurrency[0], "run-1", testBox); got != "box:5:box-1:deploys" {
-		t.Fatalf("group targets %q, want the occupied box:5:box-1:deploys", got)
+	_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
+	if err == nil || !strings.Contains(err.Error(), "deploys") || !strings.Contains(err.Error(), "job-level") {
+		t.Fatalf("plan box scope refusal: %v", err)
 	}
 }

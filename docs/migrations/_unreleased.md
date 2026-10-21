@@ -2381,6 +2381,18 @@ dispatched-node refusal are removed.
 
 ## Concurrency admission and queue views
 
+Plan and job concurrency groups now have separate namespaces. A group named
+`deploys` on the plan and on a job names two independent budgets. Definitions
+need to agree only within their level. Persisted group keys now include `plan:`
+or `job:`. This moves the store baseline to version 16; recreate stores at an
+earlier baseline before starting this build.
+
+Box scope is available only on job groups. Pipeline acceptance refuses a
+box-scoped plan group with an error naming the group and pointing at job-level
+box scope. A run can span machines, so move that declaration from
+`plan.Concurrency(group)` to the jobs that need a per-machine budget. Use global
+or run scope for a whole-run gate.
+
 Read a group through `GET /api/v1/queue/groups/{group}`. Group waiter positions
 are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds. Member
 priority changes use `PUT /api/v1/queue/groups/{group}/priority`.

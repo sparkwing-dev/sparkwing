@@ -139,7 +139,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 			return err
 		}
 	}
-	if err := v.validateConcurrency(job.Concurrency, path+".concurrency"); err != nil {
+	if err := v.validateConcurrency(job.Concurrency, path+".concurrency", "job"); err != nil {
 		return err
 	}
 	if job.Resources != nil {

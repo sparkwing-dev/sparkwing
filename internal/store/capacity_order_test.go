@@ -16,7 +16,7 @@ func TestClaimedAdmissionWaitsForPlanBeforeTakingJobCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	occupied, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "global:plan", HolderID: "competitor", RunID: competitor, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
+	occupied, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "plan:global:plan", HolderID: "competitor", RunID: competitor, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
 	if err != nil || occupied.Kind != store.AcquireGranted {
 		t.Fatalf("occupy plan capacity: %+v, %v", occupied, err)
 	}
@@ -25,29 +25,29 @@ func TestClaimedAdmissionWaitsForPlanBeforeTakingJobCapacity(t *testing.T) {
 	if err != nil || result.Kind != store.AcquireQueued {
 		t.Fatalf("claimed admission bypassed plan capacity: %+v, %v", result, err)
 	}
-	for _, key := range []string{"global:node", "global:deploy"} {
+	for _, key := range []string{"job:global:node", "job:global:deploy"} {
 		state, err := f.tenant.GetConcurrencyState(ctx, key)
 		if err != nil && !errors.Is(err, store.ErrNotFound) || state != nil && (len(state.Holders) != 0 || len(state.Waiters) != 0) {
 			t.Fatalf("job capacity taken before plan capacity for %s: %+v, %v", key, state, err)
 		}
 	}
-	if _, _, _, err := f.tenant.ReleaseAndNotify(ctx, "global:plan", "competitor", "success", "", "", 0, time.Minute); err != nil {
+	if _, _, _, err := f.tenant.ReleaseAndNotify(ctx, "plan:global:plan", "competitor", "success", "", "", 0, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	result, err = f.tenant.AdmitCapacity(ctx, binding, f.holder)
 	if err != nil || result.Kind != store.AcquireGranted {
 		t.Fatalf("claimed admission after plan promotion: %+v, %v", result, err)
 	}
-	for _, key := range []string{"global:plan", "global:node", "global:deploy"} {
+	for _, key := range []string{"plan:global:plan", "job:global:node", "job:global:deploy"} {
 		state, err := f.tenant.GetConcurrencyState(ctx, key)
 		if err != nil || state == nil || len(state.Holders) != 1 || state.Holders[0].RunID != f.ref.RunID {
 			t.Fatalf("capacity was not admitted for %s: %+v, %v", key, state, err)
 		}
 	}
-	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND key='global:plan' AND run_id=?`), f.tenant.Team(), f.ref.RunID); err != nil {
+	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND key='plan:global:plan' AND run_id=?`), f.tenant.Team(), f.ref.RunID); err != nil {
 		t.Fatal(err)
 	}
-	occupied, err = f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "global:plan", HolderID: "competitor", RunID: competitor, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
+	occupied, err = f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "plan:global:plan", HolderID: "competitor", RunID: competitor, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
 	if err != nil || occupied.Kind != store.AcquireGranted {
 		t.Fatalf("occupy expired plan capacity: %+v, %v", occupied, err)
 	}
@@ -55,7 +55,7 @@ func TestClaimedAdmissionWaitsForPlanBeforeTakingJobCapacity(t *testing.T) {
 	if err != nil || result.Kind != store.AcquireQueued {
 		t.Fatalf("recovery bypassed lost plan capacity: %+v, %v", result, err)
 	}
-	for _, key := range []string{"global:node", "global:deploy"} {
+	for _, key := range []string{"job:global:node", "job:global:deploy"} {
 		state, err := f.tenant.GetConcurrencyState(ctx, key)
 		if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 			t.Fatalf("recovery retained later capacity while waiting for plan: %s: %+v, %v", key, state, err)
@@ -71,7 +71,7 @@ func TestClaimedAdmissionRetainsPlanThroughOwnerRecovery(t *testing.T) {
 	if err != nil || result.Kind != store.AcquireGranted {
 		t.Fatalf("initial admission: %+v, %v", result, err)
 	}
-	before, err := f.tenant.GetConcurrencyState(ctx, "global:plan")
+	before, err := f.tenant.GetConcurrencyState(ctx, "plan:global:plan")
 	if err != nil || len(before.Holders) != 1 {
 		t.Fatalf("initial plan reservation: %+v, %v", before, err)
 	}
@@ -96,7 +96,7 @@ func TestClaimedAdmissionRetainsPlanThroughOwnerRecovery(t *testing.T) {
 	if err != nil || result.Kind != store.AcquireGranted {
 		t.Fatalf("successor admission: %+v, %v", result, err)
 	}
-	after, err := f.tenant.GetConcurrencyState(ctx, "global:plan")
+	after, err := f.tenant.GetConcurrencyState(ctx, "plan:global:plan")
 	if err != nil || len(after.Holders) != 1 || !after.Holders[0].ClaimedAt.Equal(before.Holders[0].ClaimedAt) || after.Holders[0].HolderID != before.Holders[0].HolderID {
 		t.Fatalf("recovery replaced continuous reservation: %+v -> %+v, %v", before, after, err)
 	}

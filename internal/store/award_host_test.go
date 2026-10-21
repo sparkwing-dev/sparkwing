@@ -17,8 +17,8 @@ func assertAwardBox(t *testing.T, s *Store, ref capability.AuthorityRef, run, ho
 		t.Fatalf("persisted award host: %q %v; want %q", p.Capability.ExecutionHost, err, host)
 	}
 	err = s.inTx(t.Context(), func(tx *storeTx) error {
-		key, err := capacityKeyTx(t.Context(), tx, ref, run, "box", "serial")
-		if err != nil || key != runspec.ConcurrencyKey("box", host, "serial") {
+		key, err := capacityKeyTx(t.Context(), tx, ref, run, "job", "box", "serial")
+		if err != nil || key != runspec.ConcurrencyKey("job", "box", host, "serial") {
 			t.Fatalf("award box: %q %v; want host %q", key, err, host)
 		}
 		return nil
@@ -132,7 +132,7 @@ func testLauncherSealedBox(t *testing.T, kind capability.UnitKind) {
 		}
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := capacityKeyTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, "run", "box", "serial")
+		_, err := capacityKeyTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, "run", "job", "box", "serial")
 		if !errors.Is(err, errLauncherHostPending) {
 			t.Fatalf("unplaced launcher box admission must wait: %v", err)
 		}
