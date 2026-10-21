@@ -675,17 +675,15 @@ CREATE TABLE github_app_deliveries (
     received_at BIGINT NOT NULL,
     event TEXT NOT NULL DEFAULT '',
     body BLOB,
-    state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','leased','done')),
-    available_at BIGINT NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','leased','done','failed')),
     lease_until BIGINT NOT NULL DEFAULT 0,
     lease BIGINT NOT NULL DEFAULT 0,
-    attempts BIGINT NOT NULL DEFAULT 0,
     last_error TEXT NOT NULL DEFAULT '',
     CHECK(state != 'done' OR body IS NULL),
     CHECK(state = 'done' OR body IS NOT NULL)
 );
 
-CREATE INDEX idx_github_app_deliveries_ready ON github_app_deliveries(state,available_at,received_at);
+CREATE INDEX idx_github_app_deliveries_ready ON github_app_deliveries(state,received_at);
 CREATE INDEX idx_github_app_deliveries_team ON github_app_deliveries(queue_team,received_at,digest) WHERE state!='done';
 
 CREATE TABLE github_app_delivery_ids (

@@ -59,6 +59,7 @@ type githubAppRun struct {
 	Pipeline string `json:"pipeline"`
 	RunID    string `json:"run_id"`
 	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type githubAppWebhookResp struct {
@@ -675,7 +676,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		githubAppIgnored(w, "the event carries no time this controller can read")
 		return
 	}
-	// safety: completed digests expire after the receipt-based replay window.
+	// safety: completed and failed digests expire after the receipt-based replay window.
 	// Compare event time with receipt so queued work never ages out while pending.
 	if received, ok := r.Context().Value(githubDeliveryReceivedKey{}).(time.Time); ok && received.Sub(intake.at) > store.GitHubAppDeliveryRetention-githubAppClockSkew {
 		s.logger.Warn("github app delivery refused: older than the replay window", "team", string(in.Team),
@@ -693,9 +694,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	if event == "push" && intake.branch != "" && intake.branch == env.Repository.DefaultBranch {
 		cronStatus, cronSkip, cronErr = s.reconcileGitHubAppCrons(r, in, tenant, repo, intake)
 		if cronErr != nil {
-			if cronStatus >= 500 || cronStatus == http.StatusTooManyRequests {
-				apierr.NoteResponseError(w, cronErr)
-			}
+			apierr.NoteResponseError(w, cronErr)
 			s.logger.Warn("github app schedule reconciliation failed", "team", string(in.Team), "repo", repo.Slug(), "err", cronErr)
 		}
 	}
@@ -719,7 +718,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 			if err != nil || (preview.Status != "ready" && preview.Status != "missing") {
 				if err != nil {
 					apierr.NoteResponseError(w, err)
-				} else if preview.Status == "unavailable" {
+				} else {
 					apierr.NoteResponseError(w, errors.New(preview.Error))
 				}
 				s.logger.Warn("github app repository automation unavailable", "team", string(in.Team), "repo", repo.Slug(), "status", preview.Status, "error", preview.Error, "err", err)
@@ -993,10 +992,10 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		}
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
-	queued := 0
+	failed := 0
 	for _, plan := range planned {
 		// safety: a run this delivery already started answers without spending,
-		// so a retry after partial admission pays only for the queued runs.
+		// so manually processing a partial delivery again spends only for missing runs.
 		if existing, err := tenant.FindGitHubAppTrigger(ctx, githubAppDeliveryDigest(body), plan.pipeline); err == nil && existing != nil {
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
@@ -1009,8 +1008,8 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 					writePolicyError(w, err)
 					return
 				}
-				queued++
-				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "queued"})
+				failed++
+				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "failed", Reason: err.Error()})
 				continue
 			}
 			if s.writeComputeLimitRefusal(w, r, err) {
@@ -1021,11 +1020,11 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		}
 		resp.Runs = append(resp.Runs, run)
 	}
-	if !githubAppStartedAny(resp.Runs) && queued == 0 {
+	if !githubAppStartedAny(resp.Runs) && failed == 0 {
 		resp.Status, resp.Reason = "ignored", "repository automation consent is no longer current"
 	}
 	s.logger.Info("github app delivery accepted", "team", string(in.Team), "event", event,
-		"repo", repo.Slug(), "sha", planned[0].intake.sha, "runs", len(resp.Runs), "queued", queued, "delivery", delivery)
+		"repo", repo.Slug(), "sha", planned[0].intake.sha, "runs", len(resp.Runs), "failed", failed, "delivery", delivery)
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
@@ -1060,7 +1059,7 @@ func (s *Server) startGitHubAppRun(
 		return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repo.ID, repo.Owner, repo.Name, sha, name)
 	})
 	if refusal := (*apierr.Error)(nil); errors.As(err, &refusal) && refusal.Code == apierr.InvalidArgs {
-		return githubAppRun{Pipeline: plan.pipeline, Status: "refused"}, nil
+		return githubAppRun{Pipeline: plan.pipeline, Status: "refused", Reason: err.Error()}, nil
 	}
 	if err != nil {
 		return githubAppRun{}, err

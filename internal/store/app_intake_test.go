@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -225,5 +226,69 @@ func TestAppAdmissionOIDCUsesSealedEventAfterReplayExpiry(t *testing.T) {
 	trigger, repository, _, _ := run.Request.Provenance.OIDC()
 	if trigger != "push" || repository != 701 {
 		t.Fatalf("sealed event trigger=%s repository=%d", trigger, repository)
+	}
+}
+
+func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
+	for _, state := range []string{"current", "moved", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			s, tenant, in := appAdmissionFixture(t, true, "fixture")
+			defer s.Close()
+			ctx, now := t.Context(), s.clock()
+			body := []byte(`{"installation":{"id":7}}`)
+			op := s.AsOperator()
+			if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body, now); err != nil {
+				t.Fatal(err)
+			}
+			first, err := op.ClaimGitHubDelivery(ctx, now)
+			if err != nil || first == nil {
+				t.Fatalf("claim: %+v %v", first, err)
+			}
+			if err := op.FinishGitHubDelivery(ctx, *first, "failed before admission", now); err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='queued'`)
+			claim, err := op.ClaimGitHubDelivery(ctx, now)
+			if err != nil || claim == nil {
+				t.Fatalf("manual claim: %+v %v", claim, err)
+			}
+			in.Request.Git.App.Value.DeliveryKey = fmt.Sprintf("%x", sha256.Sum256(body))
+			switch state {
+			case "moved":
+				rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b' WHERE installation_id=7`)
+				rewriteSchemaExec(t, s.db, `UPDATE github_app_automation SET team='b' WHERE installation_id=7`)
+				in.Installation.Team, in.Request.Team = "b", "b"
+				tenant = &Tenant{s: s, team: "b"}
+			case "expired":
+				s.clock = func() time.Time { return now.Add(3 * time.Minute) }
+			}
+			remote := in.Request.Source.Location.RemoteURL
+			schedule := CronSchedule{Team: tenant.team, RepoPath: remote, Pipeline: "ci", Name: "nightly", Cron: "0 0 * * *", TZ: "UTC", Overlap: CronOverlapSkip, Where: CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701}
+			ids, _, err := tenant.ReplaceGitHubAppSchedules(ctx, 7, 701, remote, []CronSchedule{schedule}, []runspec.Request{in.Request})
+			if err != nil || len(ids) != 1 {
+				t.Fatalf("arm current owner's schedule: %v %v", ids, err)
+			}
+			_, _, err = tenant.ReplaceGitHubAppSchedules(claim.Context(ctx), 7, 701, remote, nil, nil)
+			if state == "current" && err != nil || state != "current" && err == nil {
+				t.Fatalf("%s claim schedule withdrawal: %v", state, err)
+			}
+			row, err := tenant.GetCronSchedule(ctx, ids[0])
+			if err != nil || row.Declared != (state != "current") {
+				t.Fatalf("%s schedule changed: %+v %v", state, row, err)
+			}
+
+			result, err := tenant.AdmitGitHubAppRun(claim.Context(ctx), in)
+			if state == "current" {
+				if err != nil || result.RunID == "" {
+					t.Fatalf("current claim refused: %+v %v", result, err)
+				}
+			} else {
+				if err == nil || result.RunID != "" {
+					t.Fatalf("%s claim admitted work: %s %v", state, result.RunID, err)
+				}
+				rewriteSchemaCount(t, s.db, "runs", 0)
+				rewriteSchemaCount(t, s.db, "triggers", 0)
+			}
+		})
 	}
 }

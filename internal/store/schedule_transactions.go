@@ -44,6 +44,9 @@ func ownsSchedule(app *appScheduleScope, repo string, row CronSchedule) bool {
 }
 
 func (t *Tenant) checkGitHubAppScheduleTx(ctx context.Context, tx *storeTx, installationID, repositoryID int64) error {
+	if _, err := githubDeliveryMutationTx(ctx, tx, ""); err != nil {
+		return err
+	}
 	var enabled int64
 	err := tx.QueryRowContext(ctx, `SELECT enabled_at FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installationID, repositoryID).Scan(&enabled)
 	if errors.Is(err, sql.ErrNoRows) {

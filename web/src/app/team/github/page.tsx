@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import TeamShell, { Panel, errorText, quietButtonClass } from "@/components/TeamShell";
+import FailedGitHubDeliveries from "@/components/FailedGitHubDeliveries";
 import Tooltip from "@/components/Tooltip";
 import { ExtraReposPanel } from "@/components/GitHubAppExtraRepos";
 import GitHubOnboarding from "@/components/GitHubOnboarding";
@@ -286,6 +287,7 @@ function ConnectedGitHub({ me }: { me: Me }) {
       {installations.length > 0 ? (
         <ExtraReposPanel repositories={choices} canManage={canManage} />
       ) : null}
+      {canManage && <FailedGitHubDeliveries />}
       {!canManage ? (
         <div className="text-xs text-[var(--muted)]">
           Team owners connect accounts and change subscriptions.

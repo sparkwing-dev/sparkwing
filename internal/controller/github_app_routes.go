@@ -7,12 +7,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // GitHubAppWriter rechecks authority and installation ownership when committing App configuration.
 type GitHubAppWriter interface {
 	Team() store.Team
+	ListFailedGitHubDeliveries(context.Context, capability.Authorized) ([]controllerwire.FailedGitHubDelivery, error)
+	ProcessGitHubDeliveryAgain(context.Context, capability.Authorized, string) error
 	UnbindAuthorizedGitHubInstallation(context.Context, capability.Authorized, int64) error
 	PutAuthorizedGitHubTrigger(context.Context, capability.Authorized, store.GitHubAppTrigger) (store.GitHubAppTrigger, error)
 	DeleteAuthorizedGitHubTrigger(context.Context, capability.Authorized, int64, string) error
@@ -29,6 +32,8 @@ func (s *Server) githubAppWriter(r *http.Request, a capability.Authorized) (GitH
 
 func (s *Server) githubAppEndpoints() []Endpoint {
 	return []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/team/github-app/deliveries/failed", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleFailedGitHubDeliveries},
+		{Method: "POST", Pattern: "/api/v1/team/github-app/deliveries/{delivery}/process-again", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleProcessGitHubDeliveryAgain},
 		{Method: "DELETE", Pattern: "/api/v1/team/github-app/installations/{installation}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleGitHubAppUnbind},
 		{Method: "PUT", Pattern: "/api/v1/team/github-app/triggers", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePutGitHubAppTrigger},
 		{Method: "DELETE", Pattern: "/api/v1/team/github-app/triggers", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteGitHubAppTrigger},

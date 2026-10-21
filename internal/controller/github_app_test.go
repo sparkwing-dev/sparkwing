@@ -566,6 +566,22 @@ func (f *appFixture) deliver(event string, payload any, signature string) (int, 
 	return resp.StatusCode, out
 }
 
+func (f *appFixture) processAgain(who signedIn, payload any) {
+	f.t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	digest := sha256.Sum256(body)
+	var deliveryID string
+	if err := teststore.SQL(f.t, f.store).QueryRow(`SELECT delivery_id FROM github_app_deliveries WHERE digest=? AND state='failed'`, hex.EncodeToString(digest[:])).Scan(&deliveryID); err != nil {
+		f.t.Fatal(err)
+	}
+	if code := f.call("POST", "/api/v1/team/github-app/deliveries/"+url.PathEscape(deliveryID)+"/process-again", who.auth, nil, nil); code != http.StatusNoContent {
+		f.t.Fatalf("process again = %d", code)
+	}
+}
+
 func pushPayload(installation, repoID int64, repo, sha string) map[string]any {
 	return map[string]any{
 		"ref": "refs/heads/main", "before": strings.Repeat("0", 40), "after": sha,
@@ -730,6 +746,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
+	f.processAgain(olga, payload)
 	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
 		t.Fatalf("retry after quota clears = %d %v, want dispatched", code, out)
 	}
@@ -1275,8 +1292,7 @@ func TestGitHubAppUndatedEventIsIgnored(t *testing.T) {
 	}
 }
 
-// A redelivery of a partly shed delivery spends allowance only on the runs it
-// did not start the first time.
+// A manual replay spends allowance only on runs the failed delivery did not start.
 func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
 	f := newAppFixture(t)
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
@@ -1285,11 +1301,12 @@ func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.subscribe(olga, "acme/widgets", "test", nil)
 	push := pushPayload(7, 701, "acme/widgets", headSHA)
-	if _, out := f.deliver("push", push, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "queued"}) {
+	if _, out := f.deliver("push", push, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "failed"}) {
 		t.Fatalf("first delivery = %v, want one run and one shed", out)
 	}
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
 	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
+	f.processAgain(olga, push)
 	if code, out := f.deliver("push", push, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
 		t.Fatalf("redelivery with one run of allowance = %d %v, want the shed run started", code, out)
 	}
@@ -1314,12 +1331,13 @@ func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
 		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
 		"release":    map[string]any{"tag_name": "v1", "published_at": time.Now().UTC().Format(time.RFC3339)},
 	}
-	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "queued"}) {
+	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "failed"}) {
 		t.Fatalf("first release = %v", out)
 	}
 	f.app.SetCommit("acme/widgets", "refs/tags/v1", strings.Repeat("a", 40))
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
 	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
+	f.processAgain(olga, payload)
 	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
 		t.Fatalf("release redelivery = %v", out)
 	}
@@ -1359,7 +1377,7 @@ func TestGitHubAppFloodCapCountsTheTeamsRuns(t *testing.T) {
 		t.Fatalf("redelivery = %d %v, want duplicates that spend nothing", code, out)
 	}
 	code, out := f.deliver("push", pushPayload(7, 702, "acme/plans", headSHA), "")
-	if code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "queued"}) {
+	if code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "failed"}) {
 		t.Fatalf("push to another repository = %d %v, want one run and one shed", code, out)
 	}
 	if code, _ := f.deliver("push", pushPayload(7, 702, "acme/plans", strings.Repeat("2", 40)), ""); code != http.StatusTooManyRequests {

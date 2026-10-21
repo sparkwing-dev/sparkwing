@@ -245,6 +245,28 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = writeRunEffectsTx(ctx, tx, team, id, RunPending, now); err != nil {
 		return AdmissionResult{}, err
 	}
+	if request.VerifiedDeliveryID != "" || snapshot.execution.Retry != nil && snapshot.spec == nil && input.Origin == runspec.OriginApp {
+		run, err := readRunTx(ctx, tx, team, id)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		waiting, err := readUnclaimedUnitTx(ctx, tx, team, run)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		if waiting != nil && waiting.CreditHold != "" {
+			if snapshot.execution.Retry != nil {
+				return AdmissionResult{}, authorityError(apierr.Conflict, waiting.CreditHold)
+			}
+			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: id, To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + waiting.CreditHold}, now); err != nil {
+				return AdmissionResult{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
+				return AdmissionResult{}, err
+			}
+			result.OwnerUnit = nil
+		}
+	}
 	return result, nil
 }
 

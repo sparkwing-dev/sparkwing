@@ -4,8 +4,9 @@
 
 GitHub webhooks now answer 202 with `status: queued` after storing the signed
 delivery. Processing results, including duplicate run details and temporary
-admission refusals, are no longer returned to GitHub. The controller retries
-unfinished work after provider errors, admission limits and restarts. Clients
+admission refusals, are no longer returned to GitHub. Failed deliveries never retry automatically. Team admins can inspect them in
+the team’s GitHub settings and choose Process again. Credit exhaustion creates
+a run that did not start. Use Run now after funding the team. Clients
 that post signed deliveries must treat 202 as acceptance for later processing.
 
 The store baseline moves to version 17 for the inbox, lifecycle effect receipts,

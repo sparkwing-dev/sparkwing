@@ -7,6 +7,8 @@ type credentialRouteExpectation struct {
 
 func credentialRouteExpectations() []credentialRouteExpectation {
 	return []credentialRouteExpectation{
+		{"GET", "/api/v1/team/github-app/deliveries/failed", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
+		{"POST", "/api/v1/team/github-app/deliveries/{delivery}/process-again", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"GET", "/api/v1/runs/{run}/local-host/data-authority", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|runOfTrigger|sensitive", "awarded_or_delegated_claim|data.read|planOwner|sensitive", "awarded_or_delegated_claim|data.read|sourceReport|sensitive"}},
 		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|ownNode|sensitive"}},
 		{"POST", "/api/v1/local/doctor", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},

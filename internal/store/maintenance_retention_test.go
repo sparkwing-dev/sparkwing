@@ -31,7 +31,8 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,seconds,amount_micro,charged_at) VALUES ('a','charge','old_failure','job','cap',1,30,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO storage_run_usage(team,run_id,period,replica_id,bytes,updated_at) VALUES ('a','old_failure','month','replica',123,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at) VALUES ('expired','old',?),('fresh','new',?)`, old, now.UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,body,state,available_at) VALUES ('pending','pending',?,'push',?,'pending',?)`, old, []byte(`{}`), old)
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,body,state) VALUES ('pending','pending',?,'push',?,'pending')`, old, []byte(`{}`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,body,state,last_error) VALUES ('failed','failed',?,'push',?,'failed','failure')`, old, []byte(`{}`))
 	for _, runID := range []string{"pinned", "fresh"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,10,?)`, runID, old)
 		rewriteSchemaExec(t, s.db, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at)

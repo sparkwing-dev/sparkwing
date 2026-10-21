@@ -38,7 +38,7 @@ func TestGitHubDeliveryClaimsRotateTeamsAcrossRestart(t *testing.T) {
 	if _, err := st.AsOperator().UnbindGitHubAppInstallation(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	for turn, want := range []string{"a-00", "b-00", "a-00", "b-01", "a-00"} {
+	for turn, want := range []string{"a-00", "b-00", "a-01", "b-01", "a-02"} {
 		at := now.Add(time.Duration(turn+1) * time.Hour)
 		claim, err := st.AsOperator().ClaimGitHubDelivery(ctx, at)
 		if err != nil || claim == nil || claim.ID != want {
@@ -77,7 +77,7 @@ func TestGitHubDeliveryUnboundInstallationsShareOneTurn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for turn, want := range []string{"3", "0", "3", "1", "3", "2"} {
+	for turn, want := range []string{"3", "0", "1", "2"} {
 		at := now.Add(time.Duration(turn+1) * time.Hour)
 		claim, err := st.AsOperator().ClaimGitHubDelivery(ctx, at)
 		if err != nil || claim == nil || claim.ID != want {

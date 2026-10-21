@@ -122,18 +122,20 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	f.app.SetCommit("acme/widgets", "main", next)
 	f.app.SetFile("acme/widgets", next, ".sparkwing/sparkwing.yaml", []byte("pipelines: [invalid"))
 	f.app.FailContents(1)
-	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), ""); code < 400 {
+	payload := cronPush(7, 701, "acme/widgets", next, "refs/heads/main")
+	if code, _ := f.deliver("push", payload, ""); code < 400 {
 		t.Fatalf("GitHub API failure = %d, want processing failure", code)
 	}
 	var pending int
-	if err := teststore.SQL(t, f.store).QueryRow(`SELECT count(*) FROM github_app_deliveries WHERE state='pending'`).Scan(&pending); err != nil || pending != 1 {
-		t.Fatalf("GitHub API failure retained %d deliveries, want one pending retry: %v", pending, err)
+	if err := teststore.SQL(t, f.store).QueryRow(`SELECT count(*) FROM github_app_deliveries WHERE state='failed'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("GitHub API failure retained %d deliveries, want one failed delivery: %v", pending, err)
 	}
 	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("GitHub API failure changed schedule: %+v", rows)
 	}
 	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
-	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), ""); code < 400 {
+	f.processAgain(olga, payload)
+	if code, _ := f.deliver("push", payload, ""); code < 400 {
 		t.Fatalf("bad config = %d, want failure", code)
 	}
 	rows := appCronRows(t, f, olga.team)

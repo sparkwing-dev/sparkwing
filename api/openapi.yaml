@@ -15105,6 +15105,62 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/team/github-app/deliveries/{delivery}/process-again:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: delivery
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/team/github-app/deliveries/{delivery}/process-again
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/team/github-app/deliveries/{delivery}/process-again
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: never
+      x-sparkwing-wire: undocumented
+  /api/v1/team/github-app/deliveries/failed:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/team/github-app/deliveries/failed
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/team/github-app/deliveries/failed
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: safe
+      x-sparkwing-wire: undocumented
   /api/v1/team/github-app/extra-repos:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

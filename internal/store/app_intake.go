@@ -53,6 +53,10 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 	}); err != nil {
 		return capability.Principal{}, err
 	}
+	if _, err := githubDeliveryMutationTx(ctx, tx, ""); err != nil {
+		return capability.Principal{}, err
+	}
+
 	var created int64
 	err := tx.QueryRowContext(ctx, `SELECT created_at FROM github_app_installations WHERE team=? AND installation_id=? AND suspended=0`, in.Installation.Team, in.Installation.InstallationID).Scan(&created)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && created != in.Installation.CreatedAt.UnixNano() {

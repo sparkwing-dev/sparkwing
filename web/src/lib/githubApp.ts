@@ -344,3 +344,27 @@ export function connectedAccount(search: string): string | null {
   const value = new URLSearchParams(search).get("connected");
   return value ? value : null;
 }
+
+export interface FailedGitHubDelivery {
+  id: string;
+  event: string;
+  received_at: string;
+  last_error: string;
+}
+
+export async function listFailedGitHubDeliveries(): Promise<FailedGitHubDelivery[]> {
+  const res = await send(
+    "GET",
+    "/api/v1/team/github-app/deliveries/failed",
+    "Read failed pushes",
+  );
+  return asList<FailedGitHubDelivery>(await res.json(), "deliveries");
+}
+
+export async function processGitHubDeliveryAgain(id: string): Promise<void> {
+  await send(
+    "POST",
+    `/api/v1/team/github-app/deliveries/${encodeURIComponent(id)}/process-again`,
+    "Process push again",
+  );
+}

@@ -11,7 +11,7 @@ import (
 
 type githubDeliveryReceivedKey struct{}
 
-// Existing event processors write HTTP outcomes; the inbox owns their retry policy.
+// Event processors report failures separately from their HTTP response, including partial admission.
 type githubDeliveryOutcome struct {
 	failure error
 	digest  string
@@ -40,18 +40,21 @@ func (o *githubDeliveryOutcome) Write(body []byte) (int, error) {
 	return o.body.Write(body)
 }
 
-func (o *githubDeliveryOutcome) retryReason() string {
+func (o *githubDeliveryOutcome) failureReason() string {
 	if o.failure != nil {
 		return o.failure.Error()
 	}
-	if o.status == 0 || o.status >= 500 || o.status == http.StatusTooManyRequests || o.header.Get("Retry-After") != "" {
+	if o.status == 0 || o.status >= 400 {
 		return fmt.Sprintf("processing returned %d: %s", o.status, o.body.String())
 	}
 	var response githubAppWebhookResp
 	if err := json.Unmarshal(o.body.Bytes(), &response); err == nil {
 		for _, run := range response.Runs {
-			if run.Status == "queued" {
-				return "waiting for run admission"
+			if run.Status == "failed" || run.Status == "refused" {
+				if run.Reason != "" {
+					return run.Reason
+				}
+				return "one or more runs could not be admitted"
 			}
 		}
 	}
@@ -74,11 +77,9 @@ func (s *Server) processNextGitHubDelivery(ctx context.Context, now time.Time) (
 	r.Header.Set("X-GitHub-Delivery", queued.ID)
 	outcome := &githubDeliveryOutcome{digest: githubAppDeliveryDigest(queued.Body), header: make(http.Header)}
 	s.processGitHubDelivery(outcome, r, *queued)
-	reason := outcome.retryReason()
+	reason := outcome.failureReason()
 	if reason != "" {
-		s.logger.Warn("github app delivery queued for retry", "delivery", queued.ID, "attempt", queued.Attempts, "reason", reason)
-	} else if outcome.status >= 400 {
-		s.logger.Warn("github app delivery refused", "delivery", queued.ID, "status", outcome.status, "result", outcome.body.String())
+		s.logger.Warn("github app delivery failed", "delivery", queued.ID, "reason", reason)
 	}
 	finished := time.Now()
 	if now.After(finished) {
