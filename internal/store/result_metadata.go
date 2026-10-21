@@ -184,47 +184,44 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 	if int64(len(encoded)) > limits.AnnotationBytes {
 		return authorityError(apierr.PayloadTooLarge, "annotation exceeds the byte limit")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
-	if err != nil {
-		return err
-	}
-	var count, total int64
-	err = tx.QueryRowContext(ctx, `SELECT annotation_count,(SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM nodes WHERE team = ? AND run_id = ?) + (SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM node_steps WHERE team = ? AND run_id = ?) FROM runs WHERE team = ? AND id = ?`, t.team, row.Ref.RunID, t.team, row.Ref.RunID, t.team, row.Ref.RunID).Scan(&count, &total)
-	if err != nil {
-		return err
-	}
-	if count >= int64(limits.MaxAnnotations) || total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
-		return authorityError(apierr.LimitExceeded, "run annotation limit exceeded")
-	}
-	var existing []byte
-	query, args := resultTarget(row, t.team, annotation.StepID)
-	table, where, _ := strings.Cut(query, " WHERE ")
-	if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
-		return err
-	}
-	var entries []storedAnnotation
-	if len(existing) > 0 {
-		if err := json.Unmarshal(existing, &entries); err != nil {
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
+		if err != nil {
 			return err
 		}
-	}
-	entries = append(entries, entry)
-	body, err := json.Marshal(entries)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET annotations_json = ? WHERE "+where, append([]any{body}, args...)...); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?", annotation.Message, t.team, row.Ref.RunID); err != nil {
-		return err
-	}
-	return tx.Commit()
+		var count, total int64
+		err = tx.QueryRowContext(ctx, `SELECT annotation_count,(SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM nodes WHERE team = ? AND run_id = ?) + (SELECT COALESCE(SUM(LENGTH(annotations_json)),0) FROM node_steps WHERE team = ? AND run_id = ?) FROM runs WHERE team = ? AND id = ?`, t.team, row.Ref.RunID, t.team, row.Ref.RunID, t.team, row.Ref.RunID).Scan(&count, &total)
+		if err != nil {
+			return err
+		}
+		if count >= int64(limits.MaxAnnotations) || total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
+			return authorityError(apierr.LimitExceeded, "run annotation limit exceeded")
+		}
+		var existing []byte
+		query, args := resultTarget(row, t.team, annotation.StepID)
+		table, where, _ := strings.Cut(query, " WHERE ")
+		if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
+			return err
+		}
+		var entries []storedAnnotation
+		if len(existing) > 0 {
+			if err := json.Unmarshal(existing, &entries); err != nil {
+				return err
+			}
+		}
+		entries = append(entries, entry)
+		body, err := json.Marshal(entries)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET annotations_json = ? WHERE "+where, append([]any{body}, args...)...); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?", annotation.Message, t.team, row.Ref.RunID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // WriteSummary stores bounded masked markdown under the current writer binding.
@@ -232,29 +229,26 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 	if err := boundedResultText(summary.Markdown); err != nil {
 		return err
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	row, err := checkMetadataWriterTx(ctx, tx, t.team, summary.Ref, summary.Actor, summary.StepID)
-	if err != nil {
-		return err
-	}
-	query, args := resultTarget(row, t.team, summary.StepID)
-	table, where, _ := strings.Cut(query, " WHERE ")
-	result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET summary = ? WHERE "+where, append([]any{summary.Markdown}, args...)...)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return ErrNotFound
-	}
-	return tx.Commit()
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		row, err := checkMetadataWriterTx(ctx, tx, t.team, summary.Ref, summary.Actor, summary.StepID)
+		if err != nil {
+			return err
+		}
+		query, args := resultTarget(row, t.team, summary.StepID)
+		table, where, _ := strings.Cut(query, " WHERE ")
+		result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET summary = ? WHERE "+where, append([]any{summary.Markdown}, args...)...)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func resultTarget(row NodeRow, team Team, step string) (string, []any) {

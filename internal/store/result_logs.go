@@ -315,56 +315,53 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 		return result, err
 	}
 	// safety: authority rechecks take shared locks, which PostgreSQL forbids in read-only transactions.
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return result, err
-	}
-	defer rollbackOrLog(tx)
-	principal, err := resolveActorTx(ctx, tx, actor)
-	if err != nil {
-		return result, err
-	}
-	c := principal.Capability
-	if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
-		return result, authorityError(apierr.Forbidden, "log read grant is required")
-	}
-	if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
-		return result, holderRefusal()
-	}
-	if c.Unit == capability.UnitTrigger {
-		owner := actor
-		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: actor.Holder, Generation: actor.Generation}}
+	return inTxResult(ctx, t.s, func(tx *storeTx) (LogSegments, error) {
+		principal, err := resolveActorTx(ctx, tx, actor)
+		if err != nil {
+			return result, err
+		}
+		c := principal.Capability
+		if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
+			return result, authorityError(apierr.Forbidden, "log read grant is required")
+		}
+		if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
+			return result, holderRefusal()
+		}
+		if c.Unit == capability.UnitTrigger {
+			owner := actor
+			owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: actor.Holder, Generation: actor.Generation}}
 
-		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID); err != nil {
+			if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID); err != nil {
+				return result, err
+			}
+		} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {
+			if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, false); err != nil {
+				return result, err
+			}
+		}
+		var completeness string
+		err = tx.QueryRowContext(ctx, "SELECT completeness,incomplete_reason FROM log_streams WHERE team = ? AND run_id = ? AND id = ? AND generation = ?", t.team, request.Subject.RunID, identity.id, identity.generation).Scan(&completeness, &result.IncompleteReason)
+		if errors.Is(err, sql.ErrNoRows) {
+			return result, ErrNotFound
+		}
+		if err != nil {
 			return result, err
 		}
-	} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {
-		if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, false); err != nil {
+		result.Complete = completeness == "complete"
+		rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
+		if err != nil {
 			return result, err
 		}
-	}
-	var completeness string
-	err = tx.QueryRowContext(ctx, "SELECT completeness,incomplete_reason FROM log_streams WHERE team = ? AND run_id = ? AND id = ? AND generation = ?", t.team, request.Subject.RunID, identity.id, identity.generation).Scan(&completeness, &result.IncompleteReason)
-	if errors.Is(err, sql.ErrNoRows) {
-		return result, ErrNotFound
-	}
-	if err != nil {
-		return result, err
-	}
-	result.Complete = completeness == "complete"
-	rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
-	if err != nil {
-		return result, err
-	}
-	for rows.Next() {
-		var segment Segment
-		if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.StoredBytes, &segment.Digest, &segment.ObjectKey); err != nil {
-			return result, errors.Join(err, rows.Close())
+		for rows.Next() {
+			var segment Segment
+			if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.StoredBytes, &segment.Digest, &segment.ObjectKey); err != nil {
+				return result, errors.Join(err, rows.Close())
+			}
+			result.Segments = append(result.Segments, segment)
 		}
-		result.Segments = append(result.Segments, segment)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return result, err
-	}
-	return result, tx.Commit()
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return result, err
+		}
+		return result, nil
+	})
 }

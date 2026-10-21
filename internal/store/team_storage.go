@@ -88,3 +88,18 @@ func (s *Store) inTxOnce(ctx context.Context, fn func(*storeTx) error) (err erro
 	}
 	return tx.Commit()
 }
+
+// A result is usable only after the transaction that authorized it commits.
+func inTxResult[T any](ctx context.Context, s *Store, fn func(*storeTx) (T, error)) (T, error) {
+	var out T
+	err := s.inTxOnce(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = fn(tx)
+		return err
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return out, nil
+}

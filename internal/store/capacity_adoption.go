@@ -57,29 +57,19 @@ func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding Capa
 	if key == "" || id == "" || binding.RunID == "" || binding.Generation < 0 {
 		return CapacityAdoption{}, fmt.Errorf("invalid capacity binding")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return CapacityAdoption{}, err
-	}
-	defer rollbackOrLog(tx)
-	fence := capacityFence{binding: binding, actor: actor}
-	if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
-		return CapacityAdoption{}, err
-	}
-	if err := lockCapacityEntryTx(ctx, tx, t.team, key); err != nil {
-		return CapacityAdoption{}, err
-	}
-	if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
-		return CapacityAdoption{}, err
-	}
-	adopted, err := adoptCapacityTx(ctx, tx, t.team, key, id, binding)
-	if err != nil {
-		return CapacityAdoption{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return CapacityAdoption{}, err
-	}
-	return adopted, nil
+	return inTxResult(ctx, t.s, func(tx *storeTx) (CapacityAdoption, error) {
+		fence := capacityFence{binding: binding, actor: actor}
+		if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
+			return CapacityAdoption{}, err
+		}
+		if err := lockCapacityEntryTx(ctx, tx, t.team, key); err != nil {
+			return CapacityAdoption{}, err
+		}
+		if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
+			return CapacityAdoption{}, err
+		}
+		return adoptCapacityTx(ctx, tx, t.team, key, id, binding)
+	})
 }
 
 func lockCapacityEntryTx(ctx context.Context, tx *storeTx, team Team, key string) error {

@@ -31,49 +31,43 @@ func (o *ConcurrencyMaintenanceOptions) withDefaults() {
 // MaintainConcurrency sweeps capacity atomically under the elected reaper fence.
 func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error) {
 	opts.withDefaults()
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return ConcurrencyMaintenanceResult{}, err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
-		return ConcurrencyMaintenanceResult{}, err
-	}
-	keys, err := tx.operator.lockMaintenanceCapacityTx(ctx, tx)
-	if err != nil {
-		return ConcurrencyMaintenanceResult{}, err
-	}
-	var result ConcurrencyMaintenanceResult
-	for _, key := range keys {
-		waiters, err := reapStaleConcurrencyWaitersTx(ctx, tx, key.team, key.key, opts.WaiterMaxAge)
+	return inTxResult(ctx, o.s, func(tx *storeTx) (ConcurrencyMaintenanceResult, error) {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
+			return ConcurrencyMaintenanceResult{}, err
+		}
+		keys, err := tx.operator.lockMaintenanceCapacityTx(ctx, tx)
 		if err != nil {
 			return ConcurrencyMaintenanceResult{}, err
 		}
-		result.StaleWaiters = append(result.StaleWaiters, waiters...)
-		holders, err := reapStaleConcurrencyHoldersTx(ctx, tx, key.team, key.key)
-		if err != nil {
+		var result ConcurrencyMaintenanceResult
+		for _, key := range keys {
+			waiters, err := reapStaleConcurrencyWaitersTx(ctx, tx, key.team, key.key, opts.WaiterMaxAge)
+			if err != nil {
+				return ConcurrencyMaintenanceResult{}, err
+			}
+			result.StaleWaiters = append(result.StaleWaiters, waiters...)
+			holders, err := reapStaleConcurrencyHoldersTx(ctx, tx, key.team, key.key)
+			if err != nil {
+				return ConcurrencyMaintenanceResult{}, err
+			}
+			result.StaleHolders = append(result.StaleHolders, holders...)
+			now := tx.now(ctx)
+			promoted, err := txPromoteWaiters(ctx, tx, key.team, key.key, now.UnixNano(), now.Add(opts.Lease).UnixNano())
+			if err != nil {
+				return ConcurrencyMaintenanceResult{}, err
+			}
+			result.Promoted += len(promoted)
+		}
+		for _, key := range keys {
+			if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.now(ctx).UnixNano()); err != nil {
+				return ConcurrencyMaintenanceResult{}, err
+			}
+		}
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
 			return ConcurrencyMaintenanceResult{}, err
 		}
-		result.StaleHolders = append(result.StaleHolders, holders...)
-		now := tx.now(ctx)
-		promoted, err := txPromoteWaiters(ctx, tx, key.team, key.key, now.UnixNano(), now.Add(opts.Lease).UnixNano())
-		if err != nil {
-			return ConcurrencyMaintenanceResult{}, err
-		}
-		result.Promoted += len(promoted)
-	}
-	for _, key := range keys {
-		if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.now(ctx).UnixNano()); err != nil {
-			return ConcurrencyMaintenanceResult{}, err
-		}
-	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
-		return ConcurrencyMaintenanceResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ConcurrencyMaintenanceResult{}, err
-	}
-	return result, nil
+		return result, nil
+	})
 }
 
 func (op *Operator) lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) ([]concurrencyKey, error) {

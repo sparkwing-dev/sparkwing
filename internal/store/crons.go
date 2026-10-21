@@ -616,35 +616,29 @@ func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) 
 // DeleteCronSchedulesForRepo disarms every schedule of one repository
 // checkout in t's team and returns how many rows went, so a caller can
 // report an uninstall that found nothing.
-func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM cron_fires
+func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (int, error) {
+		if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM cron_fires
           WHERE team = ?
             AND schedule_id IN (SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ?)`,
-		string(t.team), string(t.team), repoPath); err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
-	if err != nil {
-		return 0, err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return int(affected), nil
+			string(t.team), string(t.team), repoPath); err != nil {
+			return 0, err
+		}
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		return int(affected), nil
+	})
 }
 
 // ResolveCronDue advances the schedule past one due instant: the cursor
@@ -1002,11 +996,9 @@ func nanosToTime(ns sql.NullInt64) *time.Time {
 	return &at
 }
 
-// rollbackUnlessDone rolls a transaction back on the way out; a transaction
-// already committed reports ErrTxDone, which is the expected case and dropped,
-// while any other rollback failure becomes the function's error.
+// rollbackUnlessDone preserves a rollback failure when nothing else failed.
 func rollbackUnlessDone(tx *storeTx, err *error) {
-	if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) && *err == nil {
+	if rerr := tx.Rollback(); rerr != nil && *err == nil {
 		*err = rerr
 	}
 }

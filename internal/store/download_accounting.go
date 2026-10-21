@@ -46,20 +46,13 @@ func (e *DownloadCapError) Error() string {
 func (e *DownloadCapError) Unwrap() error { return ErrDownloadCap }
 
 // ChargeDownload admits under the shared quota lock and records additive replica usage atomically.
-func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error) {
+func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (DownloadCharged, error) {
 	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return DownloadCharged{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := t.chargeDownloadTx(ctx, tx, c)
-	if err != nil {
-		return DownloadCharged{}, err
-	}
-	return out, tx.Commit()
+	return inTxResult(ctx, t.s, func(tx *storeTx) (DownloadCharged, error) {
+		return t.chargeDownloadTx(ctx, tx, c)
+	})
 }
 
 func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCharge) (DownloadCharged, error) {

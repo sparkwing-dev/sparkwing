@@ -10,32 +10,22 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 	if err := ValidateEventKind(kind); err != nil {
 		return 0, err
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackOrLog(tx)
-	if err := lockStateRunTx(ctx, tx, t.team, runID); err != nil {
-		return 0, err
-	}
-	size := eventBytes(kind, payload)
-	if err := refuseEventOverLimitsTx(ctx, tx, t.team, runID, size); err != nil {
-		return 0, err
-	}
-	if err := admitEventStorageTx(ctx, tx, t.team, size); err != nil {
-		return 0, err
-	}
-	if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
-		return 0, err
-	}
-	seq, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return seq, nil
+	return inTxResult(ctx, t.s, func(tx *storeTx) (int64, error) {
+		if err := lockStateRunTx(ctx, tx, t.team, runID); err != nil {
+			return 0, err
+		}
+		size := eventBytes(kind, payload)
+		if err := refuseEventOverLimitsTx(ctx, tx, t.team, runID, size); err != nil {
+			return 0, err
+		}
+		if err := admitEventStorageTx(ctx, tx, t.team, size); err != nil {
+			return 0, err
+		}
+		if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
+			return 0, err
+		}
+		return appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
+	})
 }
 
 func admitEventStorageTx(ctx context.Context, tx *storeTx, team Team, size int64) error {

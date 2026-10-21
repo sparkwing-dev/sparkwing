@@ -33,61 +33,58 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 	if !validUploadTicket(request.ID) || !validBlobDigest(request.Intent.Digest) || request.Intent.Size < 0 {
 		return UploadReservation{}, authorityError(apierr.BadRequest, "invalid upload reservation")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	defer rollbackOrLog(tx)
-	a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Intent.Authority, capability.DataWrite)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	if !reflect.DeepEqual(a.source, request.Intent.Identity) {
-		return UploadReservation{}, authorityError(apierr.Forbidden, "upload identity differs from live authority")
-	}
-	if err := advisoryLockTx(ctx, tx, "upload:"+request.ID); err != nil {
-		return UploadReservation{}, err
-	}
-	if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(request.Intent.Digest)); err != nil {
-		return UploadReservation{}, err
-	}
-	if err := clearBlobTombstoneTx(ctx, tx, t.team, request.Intent.Digest); err != nil {
-		return UploadReservation{}, err
-	}
-	prior, err := readBlobUploadTx(ctx, tx, t.team, request.ID)
-	if err == nil {
-		if prior.Identity != a.source || prior.Blob.Digest != request.Intent.Digest || prior.Blob.Size != request.Intent.Size || !prior.ExpiresAt.Equal(request.ExpiresAt) || prior.RefFacts.Scope != a.authority.Ref.Scope {
-			return UploadReservation{}, authorityError(apierr.Conflict, "upload ticket is immutable")
-		}
-		if err := checkBlobUploadTx(ctx, tx, t.team, a, &prior, true); err != nil {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (UploadReservation, error) {
+		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Intent.Authority, capability.DataWrite)
+		if err != nil {
 			return UploadReservation{}, err
 		}
-		return prior, tx.Commit()
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return UploadReservation{}, err
-	}
-	if !request.ExpiresAt.After(tx.now(ctx)) {
-		return UploadReservation{}, authorityError(apierr.BadRequest, "upload expiry must be in the future")
-	}
-	reserved, objects, err := blobUploadReservationSizeTx(ctx, tx, t.team, a, request.Intent)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	if err := reserveBlobUploadQuotaTx(ctx, tx, t.team, request.ID, a.source.RunID, reserved, objects, request.ExpiresAt); err != nil {
-		return UploadReservation{}, err
-	}
-	u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}
-	setBlobUploadKeys(&u)
-	node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err := blobUploadColumns(u.Identity)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO uploads(id,team,run_id,store,size,provenance,expires_at,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,node_id,attempt,generation,uploader_principal,capability_prefix,repo_key,ref_scope) VALUES (?,?,?,'blob',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, t.team, u.Identity.RunID, u.Blob.Size, u.Provenance, u.ExpiresAt.UnixNano(), u.Identity.Kind, unitKind, unitID, unitGeneration, unitSource, u.Blob.Digest, node, attempt, generation, u.Identity.Principal, u.Identity.CapabilityRef, a.authority.Repo, u.RefFacts.Scope.CapabilityScope())
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	return u, tx.Commit()
+		if !reflect.DeepEqual(a.source, request.Intent.Identity) {
+			return UploadReservation{}, authorityError(apierr.Forbidden, "upload identity differs from live authority")
+		}
+		if err := advisoryLockTx(ctx, tx, "upload:"+request.ID); err != nil {
+			return UploadReservation{}, err
+		}
+		if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(request.Intent.Digest)); err != nil {
+			return UploadReservation{}, err
+		}
+		if err := clearBlobTombstoneTx(ctx, tx, t.team, request.Intent.Digest); err != nil {
+			return UploadReservation{}, err
+		}
+		prior, err := readBlobUploadTx(ctx, tx, t.team, request.ID)
+		if err == nil {
+			if prior.Identity != a.source || prior.Blob.Digest != request.Intent.Digest || prior.Blob.Size != request.Intent.Size || !prior.ExpiresAt.Equal(request.ExpiresAt) || prior.RefFacts.Scope != a.authority.Ref.Scope {
+				return UploadReservation{}, authorityError(apierr.Conflict, "upload ticket is immutable")
+			}
+			if err := checkBlobUploadTx(ctx, tx, t.team, a, &prior, true); err != nil {
+				return UploadReservation{}, err
+			}
+			return prior, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return UploadReservation{}, err
+		}
+		if !request.ExpiresAt.After(tx.now(ctx)) {
+			return UploadReservation{}, authorityError(apierr.BadRequest, "upload expiry must be in the future")
+		}
+		reserved, objects, err := blobUploadReservationSizeTx(ctx, tx, t.team, a, request.Intent)
+		if err != nil {
+			return UploadReservation{}, err
+		}
+		if err := reserveBlobUploadQuotaTx(ctx, tx, t.team, request.ID, a.source.RunID, reserved, objects, request.ExpiresAt); err != nil {
+			return UploadReservation{}, err
+		}
+		u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}
+		setBlobUploadKeys(&u)
+		node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err := blobUploadColumns(u.Identity)
+		if err != nil {
+			return UploadReservation{}, err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO uploads(id,team,run_id,store,size,provenance,expires_at,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,node_id,attempt,generation,uploader_principal,capability_prefix,repo_key,ref_scope) VALUES (?,?,?,'blob',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, t.team, u.Identity.RunID, u.Blob.Size, u.Provenance, u.ExpiresAt.UnixNano(), u.Identity.Kind, unitKind, unitID, unitGeneration, unitSource, u.Blob.Digest, node, attempt, generation, u.Identity.Principal, u.Identity.CapabilityRef, a.authority.Repo, u.RefFacts.Scope.CapabilityScope())
+		if err != nil {
+			return UploadReservation{}, err
+		}
+		return u, nil
+	})
 }
 
 func blobUploadReservationSizeTx(ctx context.Context, tx *storeTx, team Team, a blobActor, intent blob.UploadIntent) (bytes, objects int64, err error) {
@@ -117,23 +114,20 @@ func blobUploadReservationSizeTx(ctx context.Context, tx *storeTx, team Team, a 
 
 // LookupBlobUpload rechecks the authenticated uploader before returning its ticket.
 func (t *Tenant) LookupBlobUpload(ctx context.Context, authority blob.Authority, id string) (UploadReservation, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	defer rollbackOrLog(tx)
-	a, err := resolveBlobAuthorityTx(ctx, tx, t.team, authority, capability.DataWrite)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	u, err := readBlobUploadTx(ctx, tx, t.team, id)
-	if err != nil {
-		return UploadReservation{}, err
-	}
-	if err := checkBlobUploadTx(ctx, tx, t.team, a, &u, true); err != nil {
-		return UploadReservation{}, err
-	}
-	return u, tx.Commit()
+	return inTxResult(ctx, t.s, func(tx *storeTx) (UploadReservation, error) {
+		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, authority, capability.DataWrite)
+		if err != nil {
+			return UploadReservation{}, err
+		}
+		u, err := readBlobUploadTx(ctx, tx, t.team, id)
+		if err != nil {
+			return UploadReservation{}, err
+		}
+		if err := checkBlobUploadTx(ctx, tx, t.team, a, &u, true); err != nil {
+			return UploadReservation{}, err
+		}
+		return u, nil
+	})
 }
 
 // CommitBlobUpload atomically settles verified bytes, quota and the exact uploader receipt.
@@ -141,73 +135,67 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 	if !validUploadTicket(request.TicketID) || request.ReplicaID == "" || request.Verified.Team != string(t.team) || !validBlobDigest(request.Verified.Digest) || request.Verified.Size < 0 {
 		return blob.Receipt{}, authorityError(apierr.BadRequest, "verified upload and replica are required")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	defer rollbackOrLog(tx)
-	a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Authority, capability.DataWrite)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if err := advisoryLockTx(ctx, tx, "upload:"+request.TicketID); err != nil {
-		return blob.Receipt{}, err
-	}
-	u, err := readBlobUploadTx(ctx, tx, t.team, request.TicketID)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if err := checkBlobUploadTx(ctx, tx, t.team, a, &u, true); err != nil {
-		return blob.Receipt{}, err
-	}
-	if u.Blob.Digest != request.Verified.Digest || u.Blob.Size != request.Verified.Size {
-		return blob.Receipt{}, blob.ErrIntegrity
-	}
-	intent := blob.UploadIntent{Authority: request.Authority, Identity: u.Identity, Digest: u.Blob.Digest, Size: u.Blob.Size}
-	receipt, err := commitVerifiedBlobTx(ctx, tx, t.team, a, intent, blobAccounting{ReservationID: blobUploadQuotaID(u.ID), ReplicaID: request.ReplicaID})
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if u.CommittedAt == nil {
-		result, err := tx.ExecContext(ctx, "UPDATE uploads SET committed_at=? WHERE team=? AND id=? AND committed_at=0", tx.now(ctx).UnixNano(), t.team, u.ID)
+	return inTxResult(ctx, t.s, func(tx *storeTx) (blob.Receipt, error) {
+		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Authority, capability.DataWrite)
 		if err != nil {
 			return blob.Receipt{}, err
 		}
-		if err := requireOneRow(result, "upload commit"); err != nil {
+		if err := advisoryLockTx(ctx, tx, "upload:"+request.TicketID); err != nil {
 			return blob.Receipt{}, err
 		}
-	}
-	return receipt, tx.Commit()
+		u, err := readBlobUploadTx(ctx, tx, t.team, request.TicketID)
+		if err != nil {
+			return blob.Receipt{}, err
+		}
+		if err := checkBlobUploadTx(ctx, tx, t.team, a, &u, true); err != nil {
+			return blob.Receipt{}, err
+		}
+		if u.Blob.Digest != request.Verified.Digest || u.Blob.Size != request.Verified.Size {
+			return blob.Receipt{}, blob.ErrIntegrity
+		}
+		intent := blob.UploadIntent{Authority: request.Authority, Identity: u.Identity, Digest: u.Blob.Digest, Size: u.Blob.Size}
+		receipt, err := commitVerifiedBlobTx(ctx, tx, t.team, a, intent, blobAccounting{ReservationID: blobUploadQuotaID(u.ID), ReplicaID: request.ReplicaID})
+		if err != nil {
+			return blob.Receipt{}, err
+		}
+		if u.CommittedAt == nil {
+			result, err := tx.ExecContext(ctx, "UPDATE uploads SET committed_at=? WHERE team=? AND id=? AND committed_at=0", tx.now(ctx).UnixNano(), t.team, u.ID)
+			if err != nil {
+				return blob.Receipt{}, err
+			}
+			if err := requireOneRow(result, "upload commit"); err != nil {
+				return blob.Receipt{}, err
+			}
+		}
+		return receipt, nil
+	})
 }
 
 // AbortBlobUpload releases an uncommitted ticket and quota under current uploader authority.
 func (t *Tenant) AbortBlobUpload(ctx context.Context, authority blob.Authority, id string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	a, err := resolveBlobAuthorityTx(ctx, tx, t.team, authority, capability.DataWrite)
-	if err != nil {
-		return err
-	}
-	if err := advisoryLockTx(ctx, tx, "upload:"+id); err != nil {
-		return err
-	}
-	u, err := readBlobUploadTx(ctx, tx, t.team, id)
-	if err != nil {
-		return err
-	}
-	if err := checkBlobUploadTx(ctx, tx, t.team, a, &u, false); err != nil {
-		return err
-	}
-	if u.CommittedAt != nil {
-		return tx.Commit()
-	}
-	if err := abandonBlobUploadTx(ctx, tx, t.team, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, authority, capability.DataWrite)
+		if err != nil {
+			return err
+		}
+		if err := advisoryLockTx(ctx, tx, "upload:"+id); err != nil {
+			return err
+		}
+		u, err := readBlobUploadTx(ctx, tx, t.team, id)
+		if err != nil {
+			return err
+		}
+		if err := checkBlobUploadTx(ctx, tx, t.team, a, &u, false); err != nil {
+			return err
+		}
+		if u.CommittedAt != nil {
+			return nil
+		}
+		if err := abandonBlobUploadTx(ctx, tx, t.team, id); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func setBlobUploadKeys(u *UploadReservation) {

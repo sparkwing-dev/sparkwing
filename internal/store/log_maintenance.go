@@ -39,46 +39,39 @@ func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonL
 	if limit <= 0 {
 		return 0, ErrInvalidInput
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackOrLog(tx)
-
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-		return 0, err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.now(ctx)), limit)...)
-	if err != nil {
-		return 0, err
-	}
-	var candidates []abandonedLogStream
-	for rows.Next() {
-		var candidate abandonedLogStream
-		if err := rows.Scan(&candidate.team, &candidate.run, &candidate.id); err != nil {
-			return 0, errors.Join(err, rows.Close())
+	return inTxResult(ctx, o.s, func(tx *storeTx) (int64, error) {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
+			return 0, err
 		}
-		candidates = append(candidates, candidate)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return 0, err
-	}
-	var sealed int64
-	for _, candidate := range candidates {
-		n, err := sealAbandonedLogStreamTx(ctx, tx, lease, candidate)
+		rows, err := tx.QueryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.now(ctx)), limit)...)
 		if err != nil {
 			return 0, err
 		}
-		sealed += n
-	}
+		var candidates []abandonedLogStream
+		for rows.Next() {
+			var candidate abandonedLogStream
+			if err := rows.Scan(&candidate.team, &candidate.run, &candidate.id); err != nil {
+				return 0, errors.Join(err, rows.Close())
+			}
+			candidates = append(candidates, candidate)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return 0, err
+		}
+		var sealed int64
+		for _, candidate := range candidates {
+			n, err := sealAbandonedLogStreamTx(ctx, tx, lease, candidate)
+			if err != nil {
+				return 0, err
+			}
+			sealed += n
+		}
 
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return sealed, nil
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
+			return 0, err
+		}
+		return sealed, nil
+	})
 }
 
 func sealAbandonedLogStreamTx(ctx context.Context, tx *storeTx, lease SingletonLease, stream abandonedLogStream) (int64, error) {

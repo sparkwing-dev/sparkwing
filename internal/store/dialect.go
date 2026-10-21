@@ -161,12 +161,12 @@ func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeT
 		// SQLite establishes its snapshot on the first table read.
 		var version int
 		if err := t.QueryRowContext(ctx, `SELECT COUNT(*) FROM sparkwing_schema_version`).Scan(&version); err != nil {
-			return nil, errors.Join(err, raw.Rollback())
+			return nil, errors.Join(err, t.Rollback())
 		}
 	}
 	now, err := t.readClock(ctx)
 	if err != nil {
-		return nil, errors.Join(err, raw.Rollback())
+		return nil, errors.Join(err, t.Rollback())
 	}
 	t.clock = t.readClock
 	if read {
@@ -251,7 +251,7 @@ func (s *Store) beginStoreTx(ctx context.Context, read bool) (*storeTx, error) {
 		err := tx.QueryRowContext(ctx, controllerEpochLockSQL).Scan(&epoch)
 		if err != nil || epoch != s.controllerEpoch {
 			fenced := err == nil || errors.Is(err, sql.ErrNoRows)
-			err = errors.Join(err, tx.Rollback())
+			err = errors.Join(err, rollbackTx(tx))
 			if fenced {
 				err = errors.Join(fmt.Errorf("controller epoch lost (promoted=%d, current=%d): %w", s.controllerEpoch, epoch, errControllerFenced), err)
 				s.controllerFailStop(err)
@@ -274,7 +274,16 @@ func (t *storeTx) Commit() error {
 	}
 	return nil
 }
-func (t *storeTx) Rollback() error { return t.tx.Rollback() }
+func (t *storeTx) Rollback() error { return rollbackTx(t.tx) }
+
+// Cancellation may have already rolled back the transaction in database/sql.
+func rollbackTx(tx *sql.Tx) error {
+	err := tx.Rollback()
+	if errors.Is(err, sql.ErrTxDone) {
+		return nil
+	}
+	return err
+}
 
 func (t *storeTx) checkSQL(q string) error {
 	if t.err != nil {

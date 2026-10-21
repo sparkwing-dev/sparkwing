@@ -71,36 +71,26 @@ func eventBytes(kind string, payload []byte) int64 {
 
 // EventLimits returns the caps in force, the defaults where the operator
 // set none.
-func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return EventLimits{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	limits, err := eventLimitsTx(ctx, tx)
-	if err != nil {
-		return EventLimits{}, err
-	}
-	return limits, tx.Commit()
+func (s *Store) EventLimits(ctx context.Context) (EventLimits, error) {
+	return inTxResult(ctx, s, func(tx *storeTx) (EventLimits, error) {
+		return eventLimitsTx(ctx, tx)
+	})
 }
 
 // SetEventLimits replaces every cap; zero or less lifts one.
-func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytes, formatCreditSetting(limits.MaxBytesPerEvent)); err != nil {
-		return err
-	}
-	if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, formatCreditSetting(limits.MaxBytesPerRun)); err != nil {
-		return err
-	}
-	if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, formatCreditSetting(limits.MaxEventsPerRun)); err != nil {
-		return err
-	}
-	return tx.Commit()
+func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) error {
+	return s.inTxOnce(ctx, func(tx *storeTx) error {
+		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytes, formatCreditSetting(limits.MaxBytesPerEvent)); err != nil {
+			return err
+		}
+		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, formatCreditSetting(limits.MaxBytesPerRun)); err != nil {
+			return err
+		}
+		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, formatCreditSetting(limits.MaxEventsPerRun)); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func eventLimitsTx(ctx context.Context, tx *storeTx) (EventLimits, error) {

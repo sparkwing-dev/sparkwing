@@ -71,25 +71,21 @@ ORDER BY t.name`)
 	return teams, rows.Err()
 }
 
-func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease, team Team, rate, free int64) (_ *CreditCharge, err error) {
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackUnlessDone(tx, &err)
+func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease, team Team, rate, free int64) (*CreditCharge, error) {
+	return inTxResult(ctx, o.s, func(tx *storeTx) (*CreditCharge, error) {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
+			return nil, err
+		}
+		charge, err := chargeRetainedTeamTx(ctx, tx, team, rate, free)
+		if err != nil {
+			return nil, err
+		}
 
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-		return nil, err
-	}
-	charge, err := chargeRetainedTeamTx(ctx, tx, team, rate, free)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-		return nil, err
-	}
-	return charge, tx.Commit()
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
+			return nil, err
+		}
+		return charge, nil
+	})
 }
 
 func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, free int64) (*CreditCharge, error) {

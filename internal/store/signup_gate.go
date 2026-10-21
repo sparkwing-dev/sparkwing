@@ -203,22 +203,19 @@ func writeSignUpGateTx(ctx context.Context, tx *storeTx, g SignUpGate) error {
 }
 
 func (s *Store) updateSignUpGate(ctx context.Context, change func(*storeTx, *SignUpGate) error) (SignUpGate, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return SignUpGate{}, err
-	}
-	defer rollbackOrLog(tx)
-	g, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect+tx.forUpdate()))
-	if err != nil {
-		return SignUpGate{}, err
-	}
-	if err := change(tx, &g); err != nil {
-		return SignUpGate{}, err
-	}
-	if err := writeSignUpGateTx(ctx, tx, g); err != nil {
-		return SignUpGate{}, err
-	}
-	return g, tx.Commit()
+	return inTxResult(ctx, s, func(tx *storeTx) (SignUpGate, error) {
+		g, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect+tx.forUpdate()))
+		if err != nil {
+			return SignUpGate{}, err
+		}
+		if err := change(tx, &g); err != nil {
+			return SignUpGate{}, err
+		}
+		if err := writeSignUpGateTx(ctx, tx, g); err != nil {
+			return SignUpGate{}, err
+		}
+		return g, nil
+	})
 }
 
 // SetSignUpMode records the operator's mode. Opening the gate also restarts

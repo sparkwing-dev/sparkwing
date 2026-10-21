@@ -282,17 +282,9 @@ func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node s
 
 // ReadableBlobs answers existence only within the transaction's authorized read set.
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error) {
-	result := blob.Presence{}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return result, err
-	}
-	defer rollbackOrLog(tx)
-	result, err = readableBlobsTx(ctx, tx, t.team, request)
-	if err != nil {
-		return result, err
-	}
-	return result, tx.Commit()
+	return inTxResult(ctx, t.s, func(tx *storeTx) (blob.Presence, error) {
+		return readableBlobsTx(ctx, tx, t.team, request)
+	})
 }
 
 func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.HasManyRequest) (blob.Presence, error) {

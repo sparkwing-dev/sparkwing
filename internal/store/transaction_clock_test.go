@@ -52,6 +52,69 @@ func TestTransactionClockSnapshot(t *testing.T) {
 	}
 }
 
+func TestTransactionClockCancellationAfterAutomaticRollback(t *testing.T) {
+	for _, read := range []bool{false, true} {
+		t.Run(fmt.Sprint(read), func(t *testing.T) {
+			db := sql.OpenDB(&clockFailureConnector{})
+			defer db.Close()
+			s := &Store{db: db, dialect: DialectSQLite}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			raw, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Complete database/sql's cancellation rollback before clock initialization.
+			if err := raw.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			cancel()
+			_, err = s.snapshotTx(ctx, raw, read)
+			if !errors.Is(err, context.Canceled) || errors.Is(err, sql.ErrTxDone) {
+				t.Fatalf("cancelled clock initialization = %v", err)
+			}
+		})
+	}
+}
+
+func TestTransactionResultRequiresCommit(t *testing.T) {
+	for _, failure := range []string{"", "body", "clock", "commit"} {
+		t.Run(failure, func(t *testing.T) {
+			refused := errors.New("transaction refused")
+			connector := &clockFailureConnector{}
+			if failure == "commit" {
+				connector.commitErr = refused
+			}
+			db := sql.OpenDB(connector)
+			defer db.Close()
+			s := &Store{db: db, dialect: DialectSQLite}
+			out, err := inTxResult(t.Context(), s, func(tx *storeTx) (string, error) {
+				if failure == "clock" {
+					connector.err = refused
+					tx.now(t.Context())
+					connector.err = nil
+				}
+				if failure == "body" {
+					return "uncommitted", refused
+				}
+				return "committed", nil
+			})
+			if failure == "" {
+				if out != "committed" || err != nil || connector.commits != 1 {
+					t.Fatalf("committed result = %q, error = %v, commits = %d", out, err, connector.commits)
+				}
+			} else if out != "" || !errors.Is(err, refused) {
+				t.Fatalf("refused result = %q, error = %v", out, err)
+			}
+			if failure == "body" || failure == "clock" {
+				if connector.commits != 0 || connector.rollbacks != 1 {
+					t.Fatalf("refused transaction = %+v", connector)
+				}
+			}
+		})
+	}
+}
+
 func TestTransactionFenceClockFailure(t *testing.T) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
 		t.Run(dialect.String(), func(t *testing.T) {
@@ -165,6 +228,7 @@ func TestTransactionClockFailureRollsBackWrites(t *testing.T) {
 
 type clockFailureConnector struct {
 	err       error
+	commitErr error
 	rollbacks int
 	queries   int
 	writes    int
@@ -218,5 +282,5 @@ func (r *clockValueRows) Next(values []driver.Value) error {
 
 type clockFailureTx struct{ c *clockFailureConnector }
 
-func (tx clockFailureTx) Commit() error   { tx.c.commits++; return nil }
+func (tx clockFailureTx) Commit() error   { tx.c.commits++; return tx.c.commitErr }
 func (tx clockFailureTx) Rollback() error { tx.c.rollbacks++; return nil }

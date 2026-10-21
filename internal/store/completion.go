@@ -74,63 +74,59 @@ func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effe
 	if limit <= 0 {
 		return nil, fmt.Errorf("effect limit must be positive")
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "completion"); err != nil {
-		return nil, err
-	}
-	observedAt := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
+	return inTxResult(ctx, o.s, func(tx *storeTx) ([]DesiredRunEffect, error) {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "completion"); err != nil {
+			return nil, err
+		}
+		observedAt := tx.now(ctx)
+		rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error,
 (SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
 WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, observedAt.UnixNano(), effect, effect, limit)
-	if err != nil {
-		return nil, err
-	}
-	var due []DesiredRunEffect
-	for rows.Next() {
-		var effect DesiredRunEffect
-		var next int64
-		var pipeline, sha, branch, runError string
-		var event []byte
-		if err := rows.Scan(&effect.Team, &effect.RunID, &effect.Effect, &effect.State, &effect.DesiredRev, &effect.DeliveredRev, &effect.Attempts, &next, &pipeline, &sha, &branch, &runError, &event); err != nil {
-			return nil, errors.Join(err, rows.Close())
+		if err != nil {
+			return nil, err
 		}
-		var terminal struct {
-			Reason string `json:"reason"`
-		}
-		if len(event) > 0 {
-			if err := json.Unmarshal(event, &terminal); err != nil {
+		var due []DesiredRunEffect
+		for rows.Next() {
+			var effect DesiredRunEffect
+			var next int64
+			var pipeline, sha, branch, runError string
+			var event []byte
+			if err := rows.Scan(&effect.Team, &effect.RunID, &effect.Effect, &effect.State, &effect.DesiredRev, &effect.DeliveredRev, &effect.Attempts, &next, &pipeline, &sha, &branch, &runError, &event); err != nil {
 				return nil, errors.Join(err, rows.Close())
 			}
+			var terminal struct {
+				Reason string `json:"reason"`
+			}
+			if len(event) > 0 {
+				if err := json.Unmarshal(event, &terminal); err != nil {
+					return nil, errors.Join(err, rows.Close())
+				}
+			}
+			effect.Reason = terminal.Reason
+			effect.NextAt = time.Unix(0, next)
+			effect.ObservedAt = observedAt
+			effect.Phase = effectPhase(effect.State)
+			effect.Payload, err = json.Marshal(struct {
+				Version  int      `json:"version"`
+				RunID    string   `json:"run_id"`
+				Pipeline string   `json:"pipeline"`
+				State    RunState `json:"state"`
+				SHA      string   `json:"git_sha"`
+				Branch   string   `json:"git_branch"`
+				Error    string   `json:"error"`
+				Reason   string   `json:"reason,omitempty"`
+			}{1, effect.RunID, pipeline, effect.State, sha, branch, runError, effect.Reason})
+			if err != nil {
+				return nil, errors.Join(err, rows.Close())
+			}
+			due = append(due, effect)
 		}
-		effect.Reason = terminal.Reason
-		effect.NextAt = time.Unix(0, next)
-		effect.ObservedAt = observedAt
-		effect.Phase = effectPhase(effect.State)
-		effect.Payload, err = json.Marshal(struct {
-			Version  int      `json:"version"`
-			RunID    string   `json:"run_id"`
-			Pipeline string   `json:"pipeline"`
-			State    RunState `json:"state"`
-			SHA      string   `json:"git_sha"`
-			Branch   string   `json:"git_branch"`
-			Error    string   `json:"error"`
-			Reason   string   `json:"reason,omitempty"`
-		}{1, effect.RunID, pipeline, effect.State, sha, branch, runError, effect.Reason})
-		if err != nil {
-			return nil, errors.Join(err, rows.Close())
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return nil, err
 		}
-		due = append(due, effect)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	return due, tx.Commit()
+		return due, nil
+	})
 }
 
 // AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev.
@@ -158,47 +154,43 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 	if delivery.RunID == "" || delivery.Revision < 1 {
 		return fmt.Errorf("invalid effect delivery")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-
-	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion"); err != nil {
-		return err
-	}
-	var desired, delivered int64
-	err = tx.QueryRowContext(ctx, `SELECT desired_rev,delivered_rev FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), t.team, delivery.RunID, delivery.Effect).Scan(&desired, &delivered)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if delivery.Revision > desired {
-		return fmt.Errorf("effect revision %d exceeds desired revision %d", delivery.Revision, desired)
-	}
-	if delivery.Revision <= delivered {
-		return tx.Commit()
-	}
-	if retryAt != nil {
-		_, err = tx.ExecContext(ctx, `UPDATE run_effects SET attempts = attempts + 1, next_at = CASE WHEN desired_rev = ? THEN ? ELSE next_at END WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, retryAt.UnixNano(), t.team, delivery.RunID, delivery.Effect)
-	} else {
-		if apply != nil {
-			if err := apply(tx); err != nil {
-				return err
-			}
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion"); err != nil {
+			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.now(ctx).UnixNano(), t.team, delivery.RunID, delivery.Effect)
-	}
-	if err != nil {
-		return err
-	}
+		var desired, delivered int64
+		err := tx.QueryRowContext(ctx, `SELECT desired_rev,delivered_rev FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), t.team, delivery.RunID, delivery.Effect).Scan(&desired, &delivered)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if delivery.Revision > desired {
+			return fmt.Errorf("effect revision %d exceeds desired revision %d", delivery.Revision, desired)
+		}
+		if delivery.Revision <= delivered {
+			return nil
+		}
+		if retryAt != nil {
+			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET attempts = attempts + 1, next_at = CASE WHEN desired_rev = ? THEN ? ELSE next_at END WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, retryAt.UnixNano(), t.team, delivery.RunID, delivery.Effect)
+		} else {
+			if apply != nil {
+				if err := apply(tx); err != nil {
+					return err
+				}
+			}
+			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.now(ctx).UnixNano(), t.team, delivery.RunID, delivery.Effect)
+		}
+		if err != nil {
+			return err
+		}
 
-	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion"); err != nil {
-		return err
-	}
-	return tx.Commit()
+		if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion"); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func effectPhase(state RunState) EffectPhase {

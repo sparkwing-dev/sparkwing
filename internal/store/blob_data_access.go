@@ -15,15 +15,12 @@ func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Auth
 	if authorized.Principal.Capability.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := tx.CheckDataAccess(ctx, authorized, target); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if err := tx.CheckDataAccess(ctx, authorized, target); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
