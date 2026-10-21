@@ -144,7 +144,11 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM triggers WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&deadline); err != nil {
 		return err
 	}
-	if deadline.Valid && deadline.Int64 <= tx.time.UnixNano() {
+	now, err := tx.now(ctx)
+	if err != nil {
+		return err
+	}
+	if deadline.Valid && deadline.Int64 <= now.UnixNano() {
 		return bindingRefusal()
 	}
 	return nil

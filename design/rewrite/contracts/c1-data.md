@@ -4194,10 +4194,13 @@ the original seal. Invocation origin never selects environment storage.
 
 ## Fenced completion and transaction clocks
 
-Successful transaction construction captures database time once. Failure to
-read that clock aborts construction before any transaction body runs. Lifecycle,
-identity, billing and schedule mutations read this snapshot instead of a caller
-clock. Schedule due times and provider event timestamps remain domain facts.
+Successful transaction construction captures database time. Failure to read that
+clock aborts construction before any transaction body runs. Read transactions
+keep that instant and one database snapshot. Mutation authority and lease checks
+read fresh database time after lock waits or policy work, through the same
+error-returning clock owner. Lifecycle, identity, billing and schedule mutations
+use store time instead of a caller clock. Schedule due times and provider event
+timestamps remain domain facts.
 Browser flow expiry and recent sign-in checks use the same snapshot as the
 session authority read.
 

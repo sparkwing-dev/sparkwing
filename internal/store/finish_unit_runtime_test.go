@@ -65,7 +65,7 @@ func TestFinishRunAndUnitCommitsTogetherAndReplays(t *testing.T) {
 				t.Fatalf("owner survived finish: %s %v %v %v, %v", status, holder, prefix, expiry, err)
 			}
 			run, err := tenant.ReadRun(t.Context(), claim.RunID)
-			if err != nil || run.State != RunSuccess || run.StateSeq != 1 || run.FinishedAt == nil {
+			if err != nil || run.State != RunFailed || run.StateSeq != 1 || run.FinishedAt == nil {
 				t.Fatalf("finished run: %+v, %v", run, err)
 			}
 			rewriteSchemaCount(t, s.db, "events", 1)

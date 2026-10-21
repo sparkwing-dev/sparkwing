@@ -162,18 +162,42 @@ func (s *Store) now() time.Time {
 // Read-only decisions may never commit, so clock failure must refuse construction.
 func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeTx, error) {
 	t := &storeTx{operator: &Operator{s: s}, tx: raw, dialect: s.dialect, store: s, snapshotRead: read}
-	if s.pinnedClock != nil {
-		t.time = s.pinnedClock().UTC()
-	} else if s.dialect == DialectSQLite && s.clock != nil {
-		t.time = s.now()
-	} else {
-		var ns int64
-		if err := t.QueryRowContext(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+	if read && s.dialect == DialectSQLite {
+		// SQLite establishes its snapshot on the first table read.
+		var version int
+		if err := t.QueryRowContext(ctx, `SELECT COUNT(*) FROM sparkwing_schema_version`).Scan(&version); err != nil {
 			return nil, errors.Join(err, raw.Rollback())
 		}
-		t.time = time.Unix(0, ns).UTC()
+	}
+	var err error
+	t.time, err = t.readClock(ctx)
+	if err != nil {
+		return nil, errors.Join(err, raw.Rollback())
 	}
 	return t, nil
+}
+
+// now preserves read snapshots and rechecks write fences after lock or policy work.
+func (t *storeTx) now(ctx context.Context) (time.Time, error) {
+	if t.snapshotRead {
+		return t.time, nil
+	}
+	return t.readClock(ctx)
+}
+
+func (t *storeTx) readClock(ctx context.Context) (time.Time, error) {
+	s := t.store
+	if s.pinnedClock != nil {
+		return s.pinnedClock().UTC(), nil
+	}
+	if s.dialect == DialectSQLite && s.clock != nil {
+		return s.now(), nil
+	}
+	var ns int64
+	if err := t.QueryRowContext(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, ns).UTC(), nil
 }
 
 func databaseTimeSQL(d Dialect) string {
@@ -198,11 +222,7 @@ func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
 // refuses the level, so it keeps the default.
 func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if s.dialect != DialectPostgres {
-		tx, err := s.beginTx(ctx)
-		if err == nil {
-			tx.snapshotRead = true
-		}
-		return tx, err
+		return s.beginStoreTx(ctx, true)
 	}
 	tx, err := s.sqlRunner().BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
@@ -217,6 +237,10 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 var errControllerFenced = errors.New("controller superseded by promotion")
 
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
+	return s.beginStoreTx(ctx, false)
+}
+
+func (s *Store) beginStoreTx(ctx context.Context, read bool) (*storeTx, error) {
 	tx, err := s.sqlRunner().BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -234,7 +258,7 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 			return nil, err
 		}
 	}
-	return s.snapshotTx(ctx, tx, false)
+	return s.snapshotTx(ctx, tx, read)
 }
 
 func (t *storeTx) Commit() error {

@@ -168,9 +168,8 @@ func TestAccountUnlinkKeepsSelectedSessionAndRequiresRecentSignIn(t *testing.T) 
 	}
 }
 
-func accountMutationInvitation(t *testing.T, s *Store, now time.Time) Invitation {
+func accountMutationInvitation(t *testing.T, s *Store) Invitation {
 	t.Helper()
-	s.SetTestClock(t, func() time.Time { return now })
 	owner, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "owner", Email: "owner@example.test", EmailVerified: true}, SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
@@ -193,8 +192,8 @@ func accountMutationInvitation(t *testing.T, s *Store, now time.Time) Invitation
 }
 
 func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
-	s, a, raw, now := accountMutationFixture(t)
-	invitation := accountMutationInvitation(t, s, *now)
+	s, a, raw, _ := accountMutationFixture(t)
+	invitation := accountMutationInvitation(t, s)
 	before := accountMutationRows(t, s)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_invitation_session BEFORE UPDATE OF team ON sessions BEGIN SELECT RAISE(ABORT,'session refused'); END`)
 	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
@@ -228,8 +227,8 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 }
 
 func TestAccountInvitationHasOneWinnerAcrossSessions(t *testing.T) {
-	s, a, _, now := accountMutationFixture(t)
-	invitation := accountMutationInvitation(t, s, *now)
+	s, a, _, _ := accountMutationFixture(t)
+	invitation := accountMutationInvitation(t, s)
 	raw, _, _, err := s.AsOperator().CreateAccountSession(t.Context(), Account{ID: a.Principal.Capability.Subject.ID}, Team(a.Principal.Capability.Team), time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +265,7 @@ func TestAccountInvitationExpiresOnStoreClock(t *testing.T) {
 	for _, elapsed := range []time.Duration{0, time.Second} {
 		t.Run(elapsed.String(), func(t *testing.T) {
 			s, a, _, now := accountMutationFixture(t)
-			invitation := accountMutationInvitation(t, s, *now)
+			invitation := accountMutationInvitation(t, s)
 			*now = invitation.ExpiresAt.Add(elapsed)
 			rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, now.Add(time.Hour).UnixNano(), a.Principal.Authority.ID)
 			before := accountMutationRows(t, s)
@@ -327,10 +326,10 @@ func TestAccountMutationsKeepNanosecondTimestamps(t *testing.T) {
 func TestSessionCannotSelectRemovedTeamAfterFreshSessionRejoins(t *testing.T) {
 	for _, previouslySelected := range []bool{false, true} {
 		t.Run(fmt.Sprint("previously-selected=", previouslySelected), func(t *testing.T) {
-			s, member, raw, now := accountMutationFixture(t)
+			s, member, raw, _ := accountMutationFixture(t)
 			accountID := member.Principal.Capability.Subject.ID
 			personal := Team(member.Principal.Capability.Team)
-			invitation := accountMutationInvitation(t, s, *now)
+			invitation := accountMutationInvitation(t, s)
 			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), member, invitation.ID); err != nil {
 				t.Fatal(err)
 			}

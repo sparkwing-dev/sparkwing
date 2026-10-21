@@ -250,6 +250,10 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&controllerGeneration, &until); err != nil {
 			return err
 		}
+		now, err = tx.now(ctx)
+		if err != nil {
+			return err
+		}
 		if until <= now.UnixNano() {
 			return holderRefusal()
 		}
@@ -292,6 +296,10 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	default:
 		return holderRefusal()
 	}
+	if err != nil {
+		return err
+	}
+	now, err = tx.now(ctx)
 	if err != nil {
 		return err
 	}

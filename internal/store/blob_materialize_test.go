@@ -47,7 +47,7 @@ func blobMaterializationFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest
 func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef controllerwire.NodeRef) (*Store, *Tenant, ReconcileRequest) {
 	t.Helper()
 	maintenanceRun(t, s, "target", 2, RunRunning)
-	rewriteSchemaExec(t, s.db, "UPDATE runs SET pipeline='ci',repo_key='gh:1',request_json=? WHERE id='target'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET pipeline='ci',repo_key='gh:1',request_json=?,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=1 WHERE id='target'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`), []byte(`{}`), []byte(`{"jobs":[{"id":"job","memo":{}}]}`))
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET lineage_json=? WHERE id='target'", []byte(`{"retry_of":"run","retry":{"mode":"failed","results":{"job":{"Ref":{"run_id":"run","job_id":"job"},"StateSeq":1}}}}`))
 	rewriteSchemaExec(t, s.db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json) VALUES ('a','target','job','pending',?,'same',?)", []byte(`{"id":"job","memo":{}}`), []byte(`{}`))
 	owner := authorityRoot("target-owner", "a")

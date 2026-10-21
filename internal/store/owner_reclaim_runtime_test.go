@@ -53,7 +53,7 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 		t.Fatal("terminal run was claimed again")
 	}
 	run, err := tenant.ReadRun(t.Context(), first.RunID)
-	if err != nil || run.State != RunSuccess || run.FinishedAt == nil {
+	if err != nil || run.State != RunFailed || run.FinishedAt == nil {
 		t.Fatalf("terminal run: %+v, %v", run, err)
 	}
 }

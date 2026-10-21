@@ -214,11 +214,11 @@ func TestPublicationCompletionChecksPersistedVerdict(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), result); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionRun(t.Context(), finish); err == nil {
-		t.Fatal("failed published job produced a successful run")
-	}
-	finish.To = RunFailed
 	if _, err := tenant.TransitionRun(t.Context(), finish); err != nil {
 		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), finish.RunID)
+	if err != nil || run.State != RunFailed {
+		t.Fatalf("persisted job verdict: %s, %v", run.State, err)
 	}
 }

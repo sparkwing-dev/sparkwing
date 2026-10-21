@@ -71,7 +71,11 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if status == "done" && expected == capability.UnitPlan && accepted == generation && request.Actor.Result == nil {
 		return nil
 	}
-	if status != "claimed" || holder != owner.Holder || prefix != c.Prefix || !lease.Valid || lease.Int64 <= tx.time.UnixNano() {
+	now, err := tx.now(ctx)
+	if err != nil {
+		return err
+	}
+	if status != "claimed" || holder != owner.Holder || prefix != c.Prefix || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
 	return nil

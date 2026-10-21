@@ -234,7 +234,11 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 			deadline = time.Unix(0, ownerUntil).UTC()
 		}
 	}
-	if !deadline.After(tx.time) {
+	current, err := tx.now(ctx)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	if !deadline.After(current) {
 		return UnitClaim{}, holderRefusal()
 	}
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {

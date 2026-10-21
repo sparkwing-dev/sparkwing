@@ -29,6 +29,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 		return err
 	}
 	now := time.Unix(1700000000, 83).UTC()
+	s.SetTestClock(t, func() time.Time { return now })
 	repo := filepath.Join(root, "repo")
 	for i, team := range []store.Team{store.DefaultTeam, "other"} {
 		tenant, err := s.ForTeam(ctx, team)

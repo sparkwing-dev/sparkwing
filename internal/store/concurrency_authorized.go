@@ -82,7 +82,11 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 	if err != nil {
 		return capability.Authorized{}, time.Time{}, err
 	}
-	snapshot := capability.AuthenticationSnapshot{Now: tx.time}
+	now, err := tx.now(ctx)
+	if err != nil {
+		return capability.Authorized{}, time.Time{}, err
+	}
+	snapshot := capability.AuthenticationSnapshot{Now: now}
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"io"
 	"testing"
 	"time"
 )
@@ -24,6 +25,9 @@ func TestTransactionClockSnapshot(t *testing.T) {
 	if !tx.time.Equal(want) || calls != 1 {
 		t.Fatalf("snapshot = %v, clock calls = %d; want %v, 1", tx.time, calls, want)
 	}
+	if current, err := tx.now(t.Context()); err != nil || !current.Equal(now) || !tx.time.Equal(want) {
+		t.Fatalf("write fence clock = %v, snapshot = %v, error = %v", current, tx.time, err)
+	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -32,8 +36,33 @@ func TestTransactionClockSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(next)
-	if !next.time.Equal(now) || calls != 2 {
-		t.Fatalf("next snapshot = %v, clock calls = %d; want %v, 2", next.time, calls, now)
+	if !next.time.Equal(now) || calls != 3 {
+		t.Fatalf("next snapshot = %v, clock calls = %d; want %v, 3", next.time, calls, now)
+	}
+	want = now
+	now = now.Add(time.Hour)
+	if current, err := next.now(t.Context()); err != nil || !current.Equal(want) || calls != 3 {
+		t.Fatalf("read snapshot clock = %v, calls = %d, error = %v", current, calls, err)
+	}
+}
+
+func TestTransactionFenceClockFailure(t *testing.T) {
+	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
+		t.Run(dialect.String(), func(t *testing.T) {
+			connector := &clockFailureConnector{}
+			db := sql.OpenDB(connector)
+			defer db.Close()
+			s := &Store{db: db, dialect: dialect}
+			tx, err := s.beginTx(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rollbackOrLog(tx)
+			connector.err = errors.New("database clock lost during policy work")
+			if _, err := tx.now(t.Context()); !errors.Is(err, connector.err) {
+				t.Fatalf("fence clock failure = %v", err)
+			}
+		})
 	}
 }
 
@@ -91,7 +120,22 @@ func (c clockFailureConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx,
 }
 
 func (c clockFailureConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	if c.c.err == nil {
+		return &clockValueRows{}, nil
+	}
 	return nil, c.c.err
+}
+
+type clockValueRows struct{ read bool }
+
+func (*clockValueRows) Columns() []string { return []string{"now"} }
+func (*clockValueRows) Close() error      { return nil }
+func (r *clockValueRows) Next(values []driver.Value) error {
+	if r.read {
+		return io.EOF
+	}
+	r.read, values[0] = true, int64(1)
+	return nil
 }
 
 type clockFailureTx struct{ c *clockFailureConnector }

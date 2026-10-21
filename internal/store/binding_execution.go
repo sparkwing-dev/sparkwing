@@ -108,7 +108,11 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 	if err != nil {
 		return err
 	}
-	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(tx.time) {
+	now, err := tx.now(ctx)
+	if err != nil {
+		return err
+	}
+	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now) {
 		return bindingRefusal()
 	}
 	for _, row := range snapshot.Nodes {
@@ -144,14 +148,18 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	if err != nil {
 		return err
 	}
+	now, err := tx.now(ctx)
+	if err != nil {
+		return err
+	}
 	if b.Expansion != nil {
 		lease := state.Expansion
-		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(tx.time) || lease.Lease.Kind == capability.UnitEval && (lease.ControllerLeaseExpiresAt == nil || !lease.ControllerLeaseExpiresAt.After(tx.time)) {
+		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(now) || lease.Lease.Kind == capability.UnitEval && (lease.ControllerLeaseExpiresAt == nil || !lease.ControllerLeaseExpiresAt.After(now)) {
 			return bindingRefusal()
 		}
 		return nil
 	}
-	if state.RunCancelled || state.FinishedAt != nil || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(tx.time) {
+	if state.RunCancelled || state.FinishedAt != nil || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now) {
 		return bindingRefusal()
 	}
 	if b.Kind == capability.BindingNode {

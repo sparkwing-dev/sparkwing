@@ -40,7 +40,10 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 	if err := tx.QueryRowContext(ctx, `SELECT holder,until,generation FROM leases WHERE name = ?`+tx.forUpdate(), name).Scan(&prior, &until, &generation); err != nil {
 		return SingletonLease{}, err
 	}
-	now := tx.time
+	now, err := tx.now(ctx)
+	if err != nil {
+		return SingletonLease{}, err
+	}
 	if until > now.UnixNano() && prior != holder {
 		return SingletonLease{}, ErrLockHeld
 	}

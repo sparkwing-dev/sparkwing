@@ -292,7 +292,11 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 			return err
 		}
 	}
-	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= tx.time.UnixNano() {
+	now, err := tx.now(ctx)
+	if err != nil {
+		return err
+	}
+	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
 	return nil

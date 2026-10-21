@@ -452,7 +452,10 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 		}
 		ref = *parent
 	}
-	now := tx.time
+	now, err := tx.now(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for _, node := range chain {
 		c := node.principal.Capability
 		if !capability.CredentialAlive(c, now) {
