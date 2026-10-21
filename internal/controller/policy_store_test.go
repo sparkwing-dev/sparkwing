@@ -246,7 +246,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := &consoleWritesFake{}
-	s.WithConsoleWriter(writer)
+	s.consoleWrites = writer
 	property := func(input []byte, phase uint8) bool {
 		s.WithOperatorAccounts([]string{"operator"})
 		writer.calls = 0

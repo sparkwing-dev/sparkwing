@@ -125,7 +125,7 @@ type Server struct {
 	paymentVerifier   capability.PaymentAuthenticator
 	paymentLedger     PaymentSettler
 	operators         atomic.Pointer[map[string]bool]
-	consoleWrites     ConsoleWriter
+	consoleWrites     consoleWriteTransactions
 
 	dashboard                 *Dashboard
 	localHTTPOnce             sync.Once

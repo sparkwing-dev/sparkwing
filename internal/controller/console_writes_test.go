@@ -102,7 +102,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 	})
 	s.githubApp = &githubAppState{}
 	f := &consoleWritesFake{}
-	s.WithConsoleWriter(f)
+	s.consoleWrites = f
 	cases := []struct {
 		method, path, body string
 		status             int
