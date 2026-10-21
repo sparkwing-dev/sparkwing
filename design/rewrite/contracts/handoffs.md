@@ -967,3 +967,8 @@ separate operations; no database transaction stays open across a provider call.
 
 - When a run's hold on a run-level group lapses (controller or host lost contact past the lease) and another run takes the group, the first run is not cancelled. Jobs already released keep running to completion; no further job is released until the run reacquires the group, and it queues for it like any other waiter. The run shows that it is waiting to reacquire the named group.
 - Rationale: once the lease has lapsed the overlap has already happened, so cancelling cannot undo it, and killing a half-finished deploy is usually worse than finishing it. Waiting also keeps the run's remaining work instead of forcing a rerun.
+
+## 2026-10-21 Korey decision 39: audit rows carry no personal data; retention by age
+
+- Audit rows are append-only and name people only by account id and invitations only by invitation id, never by email or other personal data. Personal data lives on the account record; deleting the account leaves its audit entries naming a deleted account with no route back to the person. This replaces the old business_events scrub on account deletion. Matches GitHub's audit log, which keeps entries for deleted users under a placeholder.
+- The append-only guard itself permits deleting rows older than the retention horizon (decision 15: 400 days, operator-set); a retention job prunes them. Rows inside the horizon cannot be updated or deleted by any code path.
