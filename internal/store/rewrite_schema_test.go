@@ -14,7 +14,11 @@ func rewriteSchemaDB(t *testing.T) *sql.DB {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	rewriteSchemaExec(t, db, "PRAGMA foreign_keys = ON")
-	rewriteSchemaExec(t, db, schemaNeutral)
+	schema, err := TranslateSchema(schemaNeutral, DialectSQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, db, schema)
 	return db
 }
 
@@ -108,8 +112,8 @@ VALUES ('a',?,?,'p','success',?,'request',1,'gh:1','host','execute',?,'account',
 	rewriteSchemaExec(t, db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','old','n','pending',?,?)", []byte(`{"version":1}`), []byte(`{}`))
 	rewriteSchemaRefuses(t, db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('b','old','n','pending',?,?)", []byte(`{"version":1}`), []byte(`{}`))
 	for _, attempt := range []int{1, 2} {
-		rewriteSchemaExec(t, db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at)
-VALUES ('a','old','n',?,1,'holder','cap','runner','runner','remote',1)`, attempt)
+		rewriteSchemaExec(t, db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome)
+VALUES ('a','old','n',?,1,'holder','cap','runner','runner','remote',1,2,'success')`, attempt)
 	}
 	rewriteSchemaRefuses(t, db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at)
 VALUES ('a','old','n',1,2,'holder','cap','runner','runner','remote',1)`)
@@ -174,6 +178,7 @@ func TestRewriteSchemaReceiptsSeparateJobAndNonJobUploaders(t *testing.T) {
 repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
 VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','publish',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
 	rewriteSchemaExec(t, db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','r','n','pending',?,?)", []byte(`{"version":1}`), []byte(`{}`))
+	rewriteSchemaExec(t, db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','r','n',1,1,'holder','cap','runner','runner','remote',1)`)
 	rewriteSchemaExec(t, db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a','digest',1,1)")
 	rewriteSchemaExec(t, db, `INSERT INTO blob_receipts(team,id,run_id,uploader_kind,unit_kind,unit_id,unit_generation,digest,uploader_principal,capability_prefix,created_at)
 VALUES ('a','owner','r','owner_unit','plan','plan-unit',1,'digest','machine','cap',1)`)

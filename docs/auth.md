@@ -722,8 +722,10 @@ pointed at a restored copy.
 
 A grant with a `--key` it has seen reports the first grant instead of granting
 again. One grant is capped at 10,000 cents ($100); set
-`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1` in the controller pod to allow more. Each action writes the console's business event with
-`sparkwing-controller admin` as the actor and the reason.
+`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1` in the controller pod to allow more. Each
+action writes the console's business event with `sparkwing-controller admin` as
+the fixed system actor. Audit rows exclude free-form reasons and store grant
+keys as digests.
 
 ## Retained storage
 

@@ -125,7 +125,7 @@ func TestPaymentSettlementAuditsTransitionsAndResumesFundedTeam(t *testing.T) {
 	}
 	for kind, want := range map[string]int{BusinessEventCheckoutExpired: 1, BusinessEventCheckoutFailed: 0, BusinessEventCheckoutPaid: 1} {
 		var count int
-		if err := s.db.QueryRow("SELECT COUNT(*) FROM business_events WHERE team='a' AND kind=?", kind).Scan(&count); err != nil || count != want {
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE team='a' AND kind=?", kind).Scan(&count); err != nil || count != want {
 			t.Fatalf("%s events=%d, want %d: %v", kind, count, want, err)
 		}
 	}
@@ -133,7 +133,7 @@ func TestPaymentSettlementAuditsTransitionsAndResumesFundedTeam(t *testing.T) {
 
 func TestPaymentSettlementAuditFailureRollsBackFinancialResult(t *testing.T) {
 	s, event := paymentFixture(t, capability.PaymentTest)
-	rewriteSchemaExec(t, s.db, "CREATE TRIGGER refuse_payment_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END")
+	rewriteSchemaExec(t, s.db, "CREATE TRIGGER refuse_payment_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END")
 	if _, err := s.settlePaymentFacts(t.Context(), event); err == nil {
 		t.Fatal("financial write ignored audit failure")
 	}

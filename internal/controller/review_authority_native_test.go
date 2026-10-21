@@ -41,7 +41,8 @@ func TestReviewSetupEndsBootstrapAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,capability_prefix,team) VALUES ('bootstrap-session','bootstrap:admin','',1,?,?,'a')`, time.Now().Add(time.Hour).UnixNano(), child.Capability.Prefix)
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('bootstrap:admin','bootstrap@example.test',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,capability_prefix,team,account_id) VALUES ('bootstrap-session','bootstrap:admin','',1,?,?,'a','bootstrap:admin')`, time.Now().Add(time.Hour).UnixNano(), child.Capability.Prefix)
 	h := New(e.Store, nil).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/operator/tokens", `{"name":"administrator","grants":["operator.tokens","operator.limits"]}`, 201)
 	var issued credentialResponse

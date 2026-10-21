@@ -19,6 +19,13 @@ func rankingFixture(t *testing.T, funded bool) *store.RankingFixture {
 	return storetest.Open(t).TestOnlyRankingFixture(t, funded)
 }
 
+func finishRankingTrigger(t *testing.T, f *store.RankingFixture) {
+	t.Helper()
+	if _, err := f.Store.DB().ExecContext(t.Context(), storetest.Rebind(f.Store, `UPDATE triggers SET status='done',finished_at=?`), f.ReadyAt.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func livePolls(t *testing.T, f *store.RankingFixture, prefixes ...string) {
 	t.Helper()
 	f.At(-time.Second)
@@ -126,9 +133,7 @@ func TestRankingCreditHoldOnlyWhenCloudCouldTakeTheUnit(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := rankingFixture(t, false)
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='done'`); err != nil {
-				t.Fatal(err)
-			}
+			finishRankingTrigger(t, f)
 			test.setup(t, f)
 			f.Poll(t, f.Launcher)
 			tenant, err := f.Store.ForTeam(t.Context(), "a")
@@ -317,9 +322,7 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := rankingFixture(t, true)
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='done'`); err != nil {
-				t.Fatal(err)
-			}
+			finishRankingTrigger(t, f)
 			test.setup(t, f)
 			f.At(time.Minute)
 			tenant, err := f.Store.ForTeam(t.Context(), "a")
@@ -403,9 +406,7 @@ func TestRankingNoticeUsesTheClaimLivenessHorizon(t *testing.T) {
 	for _, horizon := range []time.Duration{5 * time.Second, 2 * time.Minute} {
 		t.Run(horizon.String(), func(t *testing.T) {
 			f := rankingFixture(t, true)
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='done'`); err != nil {
-				t.Fatal(err)
-			}
+			finishRankingTrigger(t, f)
 			f.Poll(t, f.Self)
 			f.At(30 * time.Second)
 			tenant, err := f.Store.ForTeam(t.Context(), "a")

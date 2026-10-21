@@ -41,13 +41,13 @@ func TestLocalSecretsIntakePlanAndLiveClaim(t *testing.T) {
 	if err != nil || row == nil || row.Value != "requester-private-value" || !row.Masked || !row.Ephemeral {
 		t.Fatalf("local release: %#v %v", row, err)
 	}
-	events, err := tenant.ReadStateEvents(t.Context(), a.Binding.RunID, 0, 100)
+	events, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, event := range events {
-		if event.Kind == "secret_released" {
+		if event.Kind == "secret.released" {
 			found = true
 		}
 	}
@@ -147,7 +147,7 @@ func FuzzLocalSecretsNeverPersistOrEscapeTheirRun(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		events, err := tenant.ReadStateEvents(t.Context(), a.Binding.RunID, 0, 100)
+		events, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
 		if err != nil {
 			t.Fatal(err)
 		}

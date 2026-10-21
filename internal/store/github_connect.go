@@ -23,7 +23,7 @@ func (t *Tenant) githubConnectTx(ctx context.Context, a capability.Authorized, u
 		}); err != nil {
 			return err
 		}
-		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, p capability.Principal) error {
+		return t.teamMutationInTx(ctx, tx, a, "githubConnectTx", string(t.team), func(tx *storeTx, p capability.Principal) error {
 			if !a.Principal.DirectAccountSession() || !p.DirectAccountSession() || p.Capability.Subject != a.Principal.Capability.Subject || p.Capability.Team != a.Principal.Capability.Team || !p.Capability.IssuedAt.Equal(a.Principal.Capability.IssuedAt) {
 				return bindingRefusal()
 			}
@@ -103,7 +103,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			for _, team := range []Team{previousTeam, t.team} {
-				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
+				if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: team, Actor: auditPrincipalActor(p)}, auditInstallation{ReceiptID: transfer, InstallationID: row.InstallationID, PreviousTeam: previousTeam, NewTeam: t.team}); err != nil {
 					return err
 				}
 			}

@@ -540,12 +540,16 @@ func (h *Harness) hammerCLI() {
 	if h.sparkBin == "" {
 		return
 	}
-	verbs := [][]string{{"runs", "list", "--limit", "5"}, {"info"}, {"queue"}}
+	// Synthetic admission runs have no controller API or runs-store rows.
+	verbs := [][]string{{"daemon", "events", "--limit", "5"}, {"info"}}
 	verb := verbs[h.rng.Intn(len(verbs))]
 	cmd := exec.Command(h.sparkBin, verb...)
 	cmd.Env = append(os.Environ(), "SPARKWING_HOME="+h.home)
-	_ = cmd.Run()
-	h.jr.Append(Event{Kind: "cli", Detail: strings.Join(verb, " ")})
+	event := Event{Kind: "cli", Detail: strings.Join(verb, " ")}
+	if err := cmd.Run(); err != nil {
+		event.Fields = map[string]any{"error": err.Error()}
+	}
+	h.jr.Append(event)
 }
 
 func (h *Harness) checkLedger() {

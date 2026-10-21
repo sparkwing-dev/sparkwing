@@ -91,21 +91,39 @@ func TestAddNodeUsageConcurrentWritersRespectBoundary(t *testing.T) {
 	}
 }
 
-func TestAddNodeUsageRejectsNegativeStoredTotals(t *testing.T) {
-	for _, column := range []string{"cpu_nanos", "process_wall_nanos"} {
+func TestNodeUsageSchemaRejectsNegativeTotals(t *testing.T) {
+	for _, column := range []string{"cpu_nanos", "process_wall_nanos", "max_rss_bytes"} {
 		t.Run(column, func(t *testing.T) {
 			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
-			a := metricAuthorization(t, f, "usage")
-			ctx := t.Context()
-			if _, err := f.s.DB().ExecContext(ctx, "UPDATE nodes SET "+column+" = -1"); err != nil {
-				t.Fatal(err)
-			}
 			before := metricUsage(t, f)
-			if err := f.tenant.WriteUsage(ctx, a, store.NodeUsage{CPUTime: 1, Wall: 1, MaxRSSBytes: 8192}); err == nil {
-				t.Error("accepted negative stored total")
+			if _, err := f.s.DB().ExecContext(t.Context(), "UPDATE nodes SET "+column+" = -1"); err == nil {
+				t.Error("stored negative node usage")
 			}
 			after := metricUsage(t, f)
-			if after.CPUTime != before.CPUTime || after.Wall != before.Wall || after.MaxRSSBytes != before.MaxRSSBytes {
+			if after != before {
+				t.Fatal("rejected update changed stored usage")
+			}
+		})
+	}
+}
+
+func TestAddNodeUsageRejectsNegativeObservations(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		usage store.NodeUsage
+	}{
+		{"CPU", store.NodeUsage{CPUTime: -1}},
+		{"wall", store.NodeUsage{Wall: -1}},
+		{"RSS", store.NodeUsage{MaxRSSBytes: -1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+			a := metricAuthorization(t, f, "usage")
+			before := metricUsage(t, f)
+			if err := f.tenant.WriteUsage(t.Context(), a, test.usage); err == nil || !strings.Contains(err.Error(), "nonnegative") {
+				t.Fatalf("negative observation: %v", err)
+			}
+			if after := metricUsage(t, f); after != before {
 				t.Fatal("rejected observation changed stored usage")
 			}
 		})

@@ -27,7 +27,7 @@ func (f consoleFixtureAuthority) Authenticate(ctx context.Context, presentation 
 	p.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: session.AccountID}
 	set := f.server.operators.Load()
 	if set != nil && (*set)[session.AccountID] {
-		p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
+		p.Class = capability.CredentialConsole
 		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	}
 	var live []capability.LiveAccess

@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
-	"time"
 )
 
 const (
+	storageAuditRetentionKey  = "operator.audit_retention_days"
 	storageRunRetentionKey    = "operator.run_retention_days"
 	storageMetricRetentionKey = "operator.node_metric_retention_days"
 	metaKeyDatabaseAlarmBytes = "storage_alarm_database_bytes"
@@ -34,6 +33,7 @@ func storageSettingsTx(ctx context.Context, tx *storeTx) (StorageSettings, error
 		key   string
 		value *int64
 	}{
+		{storageAuditRetentionKey, &out.AuditRetentionDays},
 		{storageRunRetentionKey, &out.RunRetentionDays},
 		{storageMetricRetentionKey, &out.NodeMetricRetentionDays},
 		{metaKeyDatabaseAlarmBytes, &out.DatabaseAlarmBytes},
@@ -47,6 +47,9 @@ func storageSettingsTx(ctx context.Context, tx *storeTx) (StorageSettings, error
 			return StorageSettings{}, err
 		}
 		*field.value = value
+	}
+	if out.AuditRetentionDays == 0 {
+		out.AuditRetentionDays = defaultAuditRetentionDays
 	}
 	var err error
 	out.DefaultTier, err = storageDefaultTierTx(ctx, tx)
@@ -75,10 +78,10 @@ func storageDefaultTierTx(ctx context.Context, tx *storeTx) (string, error) {
 }
 
 func validateStorageSettings(in StorageSettings) error {
-	if in.RunRetentionDays < 0 || in.NodeMetricRetentionDays < 0 || in.DatabaseAlarmBytes < 0 {
+	if in.AuditRetentionDays < 0 || in.RunRetentionDays < 0 || in.NodeMetricRetentionDays < 0 || in.DatabaseAlarmBytes < 0 {
 		return errors.New("storage: settings must not be negative")
 	}
-	if in.RunRetentionDays > math.MaxInt64/int64(24*time.Hour) || in.NodeMetricRetentionDays > math.MaxInt64/int64(24*time.Hour) {
+	if in.AuditRetentionDays > maxRetentionDays || in.RunRetentionDays > maxRetentionDays || in.NodeMetricRetentionDays > maxRetentionDays {
 		return errors.New("storage: retention duration overflows")
 	}
 	if in.DefaultTier != "" {
@@ -98,11 +101,15 @@ func setStorageSettingsTx(ctx context.Context, tx *storeTx, in StorageSettings) 
 	if err := validateStorageSettings(in); err != nil {
 		return err
 	}
+	if in.AuditRetentionDays == 0 {
+		in.AuditRetentionDays = defaultAuditRetentionDays
+	}
 	tier, err := json.Marshal(in.DefaultTier)
 	if err != nil {
 		return err
 	}
 	for _, field := range []struct{ key, value string }{
+		{storageAuditRetentionKey, strconv.FormatInt(in.AuditRetentionDays, 10)},
 		{storageRunRetentionKey, strconv.FormatInt(in.RunRetentionDays, 10)},
 		{storageMetricRetentionKey, strconv.FormatInt(in.NodeMetricRetentionDays, 10)},
 		{metaKeyDatabaseAlarmBytes, strconv.FormatInt(in.DatabaseAlarmBytes, 10)},

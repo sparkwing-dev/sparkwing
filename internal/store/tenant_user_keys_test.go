@@ -155,7 +155,7 @@ func TestConcurrencyKeyIsUniquePerTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `UPDATE nodes SET claimed_by='machine',lease_expires_at=? WHERE run_id IN ('a1','b1')`), expiry.UnixNano()); err != nil {
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `UPDATE nodes SET claimed_by='machine',capability_prefix='claim',generation=1,lease_expires_at=? WHERE run_id IN ('a1','b1')`), expiry.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 

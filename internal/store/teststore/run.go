@@ -126,8 +126,8 @@ func SeedNode(s *store.Store, ctx context.Context, n store.Node) error {
 	if err != nil {
 		return err
 	}
-	query := `INSERT INTO nodes(team,run_id,node_id,status,outcome,deps_json,started_at,finished_at,spec_json,spec_hash,execution_json,attempt,requested_cores,requested_memory_bytes,requested_slots,seq)
-SELECT team,id,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM nodes WHERE run_id=?) FROM runs WHERE id=?`
+	query := `INSERT INTO nodes(team,run_id,node_id,status,outcome,deps_json,started_at,finished_at,spec_json,spec_hash,execution_json,attempt,requested_cores,requested_memory_bytes,requested_slots,claimed_by,capability_prefix,lease_expires_at,generation,seq)
+SELECT team,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM nodes WHERE run_id=?) FROM runs WHERE id=?`
 	if s.Dialect() == store.DialectPostgres {
 		for i := 1; strings.Contains(query, "?"); i++ {
 			query = strings.Replace(query, "?", fmt.Sprintf("$%d", i), 1)
@@ -141,7 +141,17 @@ SELECT team,id,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM nod
 	if n.FinishedAt != nil {
 		finished = n.FinishedAt.UnixNano()
 	}
-	write, err := Exec(ctx, s, query, n.NodeID, n.Status, n.Outcome, deps, started, finished, spec, n.SpecHash, []byte(`{}`), n.AttemptsConsumed, n.RequestedCores, n.RequestedMemoryBytes, max(n.RequestedSlots, 1), n.RunID, n.RunID)
+	var holder, lease any
+	prefix, generation, attempt := "", int64(0), n.AttemptsConsumed
+	if n.Status == "running" {
+		now := time.Now()
+		if started == nil {
+			started = now.UnixNano()
+		}
+		holder, prefix, lease, generation = "fixture", "fixture", now.Add(time.Hour).UnixNano(), 1
+		attempt = max(attempt, 1)
+	}
+	write, err := Exec(ctx, s, query, n.NodeID, n.Status, n.Outcome, deps, started, finished, spec, n.SpecHash, []byte(`{}`), attempt, n.RequestedCores, n.RequestedMemoryBytes, max(n.RequestedSlots, 1), holder, prefix, lease, generation, n.RunID, n.RunID)
 	if err != nil {
 		return err
 	}

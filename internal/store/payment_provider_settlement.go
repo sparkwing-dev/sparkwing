@@ -53,7 +53,7 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 				return err
 			}
 		}
-		result, err = tx.operator.applyPaymentStateTx(ctx, tx, event, "payment_provider")
+		result, err = tx.operator.applyPaymentStateTx(ctx, tx, event, auditActor{system: auditPaymentProvider})
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 	return a.Kind != capability.PaymentDisputeClosed || b.Kind != capability.PaymentDisputeClosed || a.Status == b.Status
 }
 
-func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, actor string) (PaymentSettlement, error) {
+func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, actor auditActor) (PaymentSettlement, error) {
 	// The refill worker locks ledger before checkout; callbacks preserve that order after the payment lock.
 	var team Team
 	err := tx.QueryRowContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))`, e.Mode, e.PaymentID, e.CheckoutID).Scan(&team)
@@ -405,7 +405,7 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 		return team, nil
 	}
 	card.AddedAt = time.Unix(created, 0)
-	if err := saveCardTx(ctx, tx, team, card, "payment_provider", tx.now(ctx)); err != nil && !errors.Is(err, ErrStaleCardSetup) {
+	if err := saveCardTx(ctx, tx, team, card, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, ErrStaleCardSetup) {
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)

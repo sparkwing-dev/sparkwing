@@ -74,7 +74,7 @@ func TestEveryTenantTableCarriesTheTeamColumn(t *testing.T) {
 		}
 	}
 	for _, table := range operatorTables {
-		if sqliteColumns(t, s, table)["team"] && !slices.Contains([]string{"business_events", "capabilities", "sessions", "payment_events"}, table) {
+		if sqliteColumns(t, s, table)["team"] && !slices.Contains([]string{"audit_events", "capabilities", "sessions", "payment_events"}, table) {
 			t.Errorf("operator-owned table %s carries a team column", table)
 		}
 	}

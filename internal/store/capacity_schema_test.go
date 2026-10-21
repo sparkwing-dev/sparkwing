@@ -20,7 +20,7 @@ func TestRecordProfileObservation_IgnoresLegacySamples(t *testing.T) {
 INSERT INTO pipeline_profiles
     (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, samples_json)
 VALUES (?, ?, '', 19100, 19100, 3.0, 0, 2, ?, ?)`,
-		DefaultTeam, "demo", time.Now().UnixNano(), legacy); err != nil {
+		DefaultTeam, "demo", time.Now().UnixNano(), []byte(legacy)); err != nil {
 		t.Fatal(err)
 	}
 

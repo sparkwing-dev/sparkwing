@@ -108,6 +108,7 @@ func TestStoreDataStandingRejectsCorruptAndOverflowedInventory(t *testing.T) {
 			s, tenant, request := uploadFixture(t)
 			switch kind {
 			case "negative_events":
+				rewriteSchemaExec(t, s.db, "PRAGMA ignore_check_constraints=ON")
 				rewriteSchemaExec(t, s.db, "UPDATE runs SET event_bytes=-1 WHERE team='a'")
 			case "negative_blob":
 				rewriteSchemaExec(t, s.db, "PRAGMA ignore_check_constraints=ON")

@@ -90,8 +90,8 @@ func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, pay
 			continue
 		}
 		reference := paymentConsequenceReference(mode, r.kind, r.id)
-		actor := "payment_provider"
-		if r.kind == "refund" && r.id == attribution.refund && attribution.actor != "" {
+		actor := auditActor{system: auditPaymentProvider}
+		if r.kind == "refund" && r.id == attribution.refund && attribution.actor.subject.ID != "" {
 			actor = attribution.actor
 		}
 		reversed, err := reversePaymentTx(ctx, tx, paymentIntent, reference, actor, r.amount)
@@ -167,11 +167,11 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 	for _, item := range states {
 		switch item.kind {
 		case "dispute":
-			if _, err := holdCreditFreezeTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), payment, "disputed", "", tx.now(ctx)); err != nil {
+			if _, err := holdCreditFreezeTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), payment, "disputed", "", tx.now(ctx), auditActor{system: auditPaymentProvider}); err != nil {
 				return err
 			}
 			if item.status == "canceled" {
-				if _, err := releaseCreditFreezesTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), false, false, "", "", tx.now(ctx)); err != nil {
+				if _, err := releaseCreditFreezesTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), false, false, "", "", tx.now(ctx), auditActor{system: auditPaymentProvider}); err != nil {
 					return err
 				}
 			}
@@ -229,5 +229,5 @@ func paymentConsequenceReference(mode capability.PaymentMode, kind, id string) s
 
 type paymentAttribution struct {
 	refund string
-	actor  string
+	actor  auditActor
 }

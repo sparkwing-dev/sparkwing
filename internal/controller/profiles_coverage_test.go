@@ -13,7 +13,7 @@ import (
 )
 
 func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
-	for _, mode := range []string{"missing", "unreadable", "memoized", "zero"} {
+	for _, mode := range []string{"missing", "malformed", "memoized", "zero"} {
 		t.Run(mode, func(t *testing.T) {
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -47,12 +47,9 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if mode == "unreadable" {
-				if _, err := teststore.SQL(t, st).Exec(`UPDATE node_metrics SET memory_bytes='invalid' WHERE run_id='r' AND node_id='c'`); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "r", "c"); err == nil {
-					t.Fatal("corrupt metric read succeeded")
+			if mode == "malformed" {
+				if _, err := teststore.SQL(t, st).Exec(`UPDATE node_metrics SET memory_bytes='invalid' WHERE run_id='r' AND node_id='c'`); err == nil {
+					t.Fatal("malformed metric was accepted")
 				}
 			}
 			if mode == "memoized" {
@@ -68,14 +65,6 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == "unreadable" {
-				if _, err := runProfileObservations(t.Context(), tenant, &run); err == nil {
-					t.Fatal("corrupt metrics did not fail the fold")
-				}
-				if _, err := teststore.SQL(t, st).Exec(`UPDATE node_metrics SET memory_bytes=100 WHERE run_id='r' AND node_id='c'`); err != nil {
-					t.Fatal(err)
-				}
-			}
 			foldProfilesForTest(t, tenant, &run)
 			for _, id := range []string{"a"} {
 				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", id)
@@ -86,7 +75,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatalf("valid node %s profile=%+v", id, p)
 				}
 			}
-			if mode == "zero" {
+			if mode == "zero" || mode == "malformed" {
 				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "c")
 				if err != nil {
 					t.Fatal(err)

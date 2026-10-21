@@ -83,12 +83,26 @@ func TestProfileCompletionFromRealTerminalTransition(t *testing.T) {
 	}
 }
 
-func TestProfileCompletionRetriesCorruptMetricsWithoutPartialFold(t *testing.T) {
+func TestProfileCompletionRejectsMalformedMetrics(t *testing.T) {
+	server, tenant := completedProfileRun(t)
+	if _, err := teststore.SQL(t, server.store).Exec(`UPDATE node_metrics SET memory_bytes='corrupt' WHERE team='a' AND run_id='run' AND node_id='build'`); err == nil {
+		t.Fatal("malformed metric was accepted")
+	}
+	if err := server.ReconcileRunEffects(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p, err := tenant.GetPipelineProfile(t.Context(), "ci", "build")
+	if err != nil || p == nil || p.SampleCount != 1 || p.PeakMemoryBytes != 2048 {
+		t.Fatalf("delivery after rejected metric=%+v: %v", p, err)
+	}
+}
+
+func TestProfileCompletionRetriesCorruptNodeWithoutPartialFold(t *testing.T) {
 	clock := &testClock{}
 	server, tenant := completedProfileRun(t, clock.option())
 	now := time.Now()
 	clock.pin(func() time.Time { return now })
-	engineSQL(t, server.store, `UPDATE node_metrics SET memory_bytes='corrupt' WHERE team='a' AND run_id='run' AND node_id='build'`)
+	engineSQL(t, server.store, `UPDATE nodes SET deps_json=? WHERE team='a' AND run_id='run' AND node_id='build'`, []byte(`{`))
 	if err := server.ReconcileRunEffects(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -96,10 +110,12 @@ func TestProfileCompletionRetriesCorruptMetricsWithoutPartialFold(t *testing.T) 
 	if err := teststore.SQL(t, server.store).QueryRow(`SELECT attempts,delivered_rev,next_at FROM run_effects WHERE team='a' AND run_id='run' AND effect='profile_fold'`).Scan(&attempts, &delivered, &next); err != nil || attempts != 1 || delivered != 0 || next <= now.UnixNano() {
 		t.Fatalf("failed delivery=%d/%d next=%d: %v", attempts, delivered, next, err)
 	}
-	if p, err := tenant.GetPipelineProfile(t.Context(), "ci", "build"); err != nil || p != nil {
-		t.Fatalf("failed read folded partial data: %+v: %v", p, err)
+	for _, node := range []string{"", "build"} {
+		if p, err := tenant.GetPipelineProfile(t.Context(), "ci", node); err != nil || p != nil {
+			t.Fatalf("failed read folded partial data for %q: %+v: %v", node, p, err)
+		}
 	}
-	engineSQL(t, server.store, `UPDATE node_metrics SET memory_bytes=2048 WHERE team='a' AND run_id='run' AND node_id='build'`)
+	engineSQL(t, server.store, `UPDATE nodes SET deps_json=? WHERE team='a' AND run_id='run' AND node_id='build'`, []byte(`[]`))
 	now = now.Add(time.Minute)
 	for range 2 {
 		if err := server.ReconcileRunEffects(t.Context()); err != nil {

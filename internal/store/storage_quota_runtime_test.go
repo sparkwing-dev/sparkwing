@@ -102,6 +102,7 @@ func TestStoreDataQuotaReportRejectsOverflowAndCorruption(t *testing.T) {
 	if _, err := tenant.StorageUsageFor(t.Context(), "", "period"); err == nil {
 		t.Fatal("overflowing usage accepted")
 	}
+	rewriteSchemaExec(t, s.db, "PRAGMA ignore_check_constraints=ON")
 	rewriteSchemaExec(t, s.db, "UPDATE storage_month_usage SET bytes=-1 WHERE team='a' AND replica_id='r2'")
 	if _, err := tenant.StorageUsageFor(t.Context(), "", "period"); err == nil {
 		t.Fatal("negative counter concealed in sum")

@@ -38,13 +38,14 @@ and a run without --key grants under a fresh key. It refuses more than 10000
 cents ($100) per grant unless SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1 is set in the
 pod. Each action commits the
 business event the console writes (team.frozen, team.unfrozen or
-credit.granted) with the reason and with "sparkwing-controller admin" as the
+credit.granted) with "sparkwing-controller admin" as the
 actor, prints an audit line to stderr, and prints the team's holds, or the
-grant and the team's balance, as JSON.`
+grant and the team's balance, as JSON. Audit rows exclude free-form reasons
+and store grant keys as digests.`
 
 // safety: every business event this command writes names it as the actor, so a
 // break-glass action never reads as a signed-in operator's.
-const breakGlassActor = "sparkwing-controller admin"
+const breakGlassActor = store.AuditActorBreakGlass
 
 const (
 	adminGrantCapCents   = 10_000
@@ -75,7 +76,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("admin "+verb, flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprintln(stderr, adminUsage) }
 	team := fs.String("team", "", "the team's slug (required)")
-	reason := fs.String("reason", "", "why, recorded on the business event (required, up to 500 characters)")
+	reason := fs.String("reason", "", "why (required, up to 500 characters; excluded from audit rows)")
 	hold := fs.String("hold", "", "unfreeze only: the one hold to release, as the team's holds name it")
 	cents := fs.Int64("cents", 0, "grant only: the free credits to grant, in cents (required)")
 	key := fs.String("key", "", "grant only: makes a rerun report the first grant instead of granting again")

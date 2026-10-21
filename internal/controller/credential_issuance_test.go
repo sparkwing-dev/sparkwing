@@ -29,6 +29,7 @@ func credentialSessionServer(t *testing.T, opts ...store.Option) (*serverFixture
 
 func credentialSessionServerWith(t *testing.T, configure func(*Server), opts ...store.Option) (*serverFixture, string) {
 	t.Helper()
+	now := time.Now().UTC()
 	fixture := &serverFixture{}
 	option := fixture.option(deployment.Config{}, func(s *Server) {
 		s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -36,14 +37,14 @@ func credentialSessionServerWith(t *testing.T, configure func(*Server), opts ...
 			configure(s)
 		}
 	})
-	e, _ := engineRuntimeStore(t, append([]store.Option{option}, opts...)...)
+	e, _ := engineRuntimeStore(t, append([]store.Option{option, teststore.WithClock(func() time.Time { return now })}, opts...)...)
 	fixture.engine = e
 	s := e.Store
 	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	raw := "private-account-session"
 	digest := sha256.Sum256([]byte(raw))
-	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',?,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano())
+	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',?,?,'a','member')`, hex.EncodeToString(digest[:]), now.UnixNano(), now.Add(time.Hour).UnixNano())
 	engineSQL(t, s, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, hex.EncodeToString(digest[:]))
 	server := fixture.Server
 	a := server.authorization

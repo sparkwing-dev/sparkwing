@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -152,6 +153,7 @@ func TestCredentialRotationEmptyAndMissingTransforms(t *testing.T) {
 
 func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
 	tenant, a, _ := sourceReleaseFixture(t)
+	authorityMember(t, tenant.s, "owner", RoleReader)
 	tenant.s.sourcePolicy = nil
 	_, first, err := tenant.ReleaseSourceCredential(t.Context(), a)
 	if err != nil {
@@ -164,16 +166,54 @@ func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := tenant.SourceReleaseAudits(t.Context(), 1)
-	if err != nil || len(rows) != 1 || !reflect.DeepEqual(rows[0], second) {
+	if err != nil || len(rows) != 1 {
 		t.Fatalf("newest audit: %+v, %v", rows, err)
 	}
+	assertSourceReleaseAuditProjection(t, rows[0], second)
 	rows, err = tenant.SourceReleaseAudits(t.Context(), 0)
-	if err != nil || len(rows) != 2 || !reflect.DeepEqual(rows[1], first) {
+	if err != nil || len(rows) != 2 {
 		t.Fatalf("committed audits: %+v,%v", rows, err)
 	}
+	assertSourceReleaseAuditProjection(t, rows[1], first)
 	rows, err = (&Tenant{s: tenant.s, team: "b"}).SourceReleaseAudits(t.Context(), 200)
 	if err != nil || rows == nil || len(rows) != 0 {
 		t.Fatalf("foreign audits: %+v,%v", rows, err)
+	}
+}
+
+func TestSourceReleaseAuditsRenderDeletedAccount(t *testing.T) {
+	tenant, authorized, _ := sourceReleaseFixture(t)
+	authorityMember(t, tenant.s, "owner", RoleReader)
+	if _, _, err := tenant.ReleaseSourceCredential(t.Context(), authorized); err != nil {
+		t.Fatal(err)
+	}
+	before, err := tenant.SourceReleaseAudits(t.Context(), 10)
+	if err != nil || len(before) != 1 || before[0].OwnerAccountID != "owner" {
+		t.Fatalf("live account projection: %+v, %v", before, err)
+	}
+	if _, err := tenant.s.DeleteAccount(t.Context(), "owner"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := tenant.SourceReleaseAudits(t.Context(), 10)
+	if err != nil || len(after) != 1 || after[0].OwnerAccountID != "deleted account" {
+		t.Fatalf("deleted account projection: %+v, %v", after, err)
+	}
+	if after[0].ID != before[0].ID || after[0].RunID != before[0].RunID {
+		t.Fatal("account erasure changed the release identity")
+	}
+}
+
+func assertSourceReleaseAuditProjection(t *testing.T, got, source capability.SourceReleaseAudit) {
+	t.Helper()
+	if got.ID == "" {
+		t.Fatal("stored release has no event ID")
+	}
+	source.ID, source.Host = got.ID, ""
+	for _, field := range []*string{&source.CredentialID, &source.RepositoryKey, &source.NodeID, &source.MachineID, &source.CapabilityPrefix} {
+		*field = fmt.Sprintf("%x", sha256.Sum256([]byte(*field)))
+	}
+	if !reflect.DeepEqual(got, source) {
+		t.Fatalf("audit projection: got=%+v want=%+v", got, source)
 	}
 }
 

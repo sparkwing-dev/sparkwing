@@ -58,7 +58,7 @@ func TestRepositoryAwardRechecksAncestry(t *testing.T) {
 	root.Grants = []capability.Grant{capability.TriggersClaim}
 	root.Repositories = []string{"gh:other"}
 	authorityPersist(t, s, root)
-	rewriteSchemaExec(t, s.db, `UPDATE triggers SET claimed_by='restricted',generation=1,lease_expires_at=?`, s.now().Add(time.Hour).UnixNano())
+	seedTriggerClaim(t, s, "run", "restricted", "restricted", 1, s.now().Add(time.Hour))
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect}})
 		return err
