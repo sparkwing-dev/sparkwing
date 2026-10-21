@@ -238,3 +238,64 @@ $ go run ./internal/sleepcheck -base HEAD <worktree>
 sleepcheck: clean
 $ bash bin/sync-docs.sh --check
 pkg/docs/mirror and changelog match source docs.
+
+WS15 continuation after lead verification (2026-10-21, HEAD 36f09a7a6)
+Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-WS15
+Integration: bw-3095-rewrite a23a6a777 is an ancestor of HEAD. No merge pending. Clean start.
+
+$ go test ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./cmd/sparkwing-controller ./charts -run '^(TestEpoch|TestRestore|TestRestored|TestPaymentPull|TestPurgedPaid|TestSchemaError|TestControllerEpoch)' -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.145s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.084s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	0.220s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.983s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	0.393s
+ok  	github.com/sparkwing-dev/sparkwing/charts	2.804s
+exit: 0
+
+$ go test -tags rewrite_integration ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./cmd/sparkwing-controller ./charts -run '^(TestEpoch|TestRestore|TestRestored|TestPaymentPull|TestPurgedPaid|TestSchemaError|TestControllerEpoch)' -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.126s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.074s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	0.389s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.829s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	0.382s
+ok  	github.com/sparkwing-dev/sparkwing/charts	2.832s
+exit: 0
+
+$ go test ./internal/credentials ./internal/fssecure ./internal/capability -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.151s
+ok  	github.com/sparkwing-dev/sparkwing/internal/fssecure	0.671s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.209s
+exit: 0
+
+$ go test ./internal/doccheck -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/doccheck	2.498s
+exit: 0
+
+$ GOLANGCI_LINT_CACHE=<worktree>/.cache/golangci-lint go run ./internal/guardcheck <worktree>
+guardcheck: every guard matches its allow-list
+exit: 0
+
+$ go test ./internal/controller -run '^(TestRetryRecordsAdmissionIdentitySeparatelyFromSource|TestSecretsEnvelopeBindingProperty|FuzzMetadataNumericSelectorsRetainJobAuthority)$' -count=10
+--- FAIL: TestSecretsEnvelopeBindingProperty (6.79s)
+    --- FAIL: TestSecretsEnvelopeBindingProperty/pipeline (0.12s)
+        secrets_encryption_test.go:198: authority has ended
+--- FAIL: TestSecretsEnvelopeBindingProperty (6.56s)
+    --- FAIL: TestSecretsEnvelopeBindingProperty/name (0.24s)
+        secrets_encryption_test.go:198: authority expired while ancestry was locked
+FAIL internal/controller 109.679s; exit 1
+The retry and metadata selector cases passed all ten runs. No cause established.
+
+Temporary probe at readAuthorityTx and authorityChainTx logged only failed lifetime checks, without bearer values.
+$ go test ./internal/controller -run '^TestSecretsEnvelopeBindingProperty/(pipeline|name)$' -count=40
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	149.216s
+exit: 0. No failure diagnostics emitted. Probe removed, and the production file matches HEAD.
+
+Documentation mirror check and git diff --check passed. No production changes or guard allow-list changes.
+Full repository suites, PostgreSQL and socket checks were not rerun here. The lead owns them.
+No git mutation commands or product binaries against real HOME. No cluster or cloud access.
+
+$ go test -tags rewrite_integration ./internal/store ./tests/acceptance -run '^(TestPaymentPurgeClosure|TestPurgedPaid)' -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	0.125s
+ok  	github.com/sparkwing-dev/sparkwing/tests/acceptance	0.095s [no tests to run]
+exit: 0. Acceptance has no matching cases. Controller paid-purge regression passed in both focused runs above.
+Temporary directory /tmp/sw-astra-WS15 removed after all checks.

@@ -64,6 +64,28 @@ suites, PostgreSQL and socket-dependent checks remain with the harness lead.
 No commits were made. Xwing candidate inspection remains blocked by its
 read-only session lock. The task used the selected worktree directly.
 
+## Continuation after lead verification
+
+The worktree started clean at `36f09a7a6`, which already contains all seven
+unblocked ws15a corrections. Integration `a23a6a777` is an ancestor of HEAD.
+No merge or further production change was needed. This continuation adds zero
+production lines and no mechanism. The earlier cumulative growth remains
+894 Go lines, 9 SQL lines and 29 Helm/values lines.
+
+Normal and tagged focused restore, payment-pull, epoch, directional-schema and
+Helm epoch render checks pass. Complete credentials, fssecure and capability
+suites, doccheck, documentation mirror drift and guardcheck also pass.
+The lead's full SQLite and PostgreSQL store suites passed. Its full run still
+reports controller authority failures and a nodehost lease-authority failure.
+
+A ten-run repeat reproduced two secrets-envelope authority failures. The retry
+and metadata-selector tests passed all ten runs. A narrower 40-run secrets
+probe with temporary lifetime diagnostics passed, so the cause is still
+undiagnosed. Diagnostics were removed. No claims, admission, masking or
+fixture changes were made. Exact commands and results are in
+`WS15-test-output.txt`. Full suites, PostgreSQL and socket checks remain with
+the lead. No commits were made. Scratch was removed after verification.
+
 ## Decisions needing the lead
 
 B63 is covered. B61 remains partial: authoritative recovery of post-backup usage
