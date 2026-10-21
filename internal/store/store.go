@@ -944,7 +944,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 
 // Step status constants. Steps are inserted as StepRunning on
 // step_start and transitioned to passed/failed/cancelled on step_end. Skipped
-// steps insert directly as StepSkipped with started_at == finished_at.
+// steps insert directly as StepSkipped with both lifecycle timestamps set.
 const (
 	StepRunning   = "running"
 	StepPassed    = "passed"

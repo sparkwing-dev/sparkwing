@@ -49,7 +49,7 @@ func consoleBoundary() *credentialBoundary {
 		Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "console-session"},
 		Capability: capability.Capability{
 			Digest: sha256.Sum256([]byte(b.raw)), Audience: capability.Controller,
-			Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator-account"},
+			Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator-account"},
 			Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorConsole},
 		},
 	}
@@ -98,6 +98,7 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 					r.Header.Del("Cookie")
 					want = apierr.Unauthenticated
 				case "deployment bearer", "delegated bearer":
+					p.Capability.Subject.Kind = capability.SubjectOperator
 					p.Class, p.Authority.Kind, p.Authority.ID = capability.CredentialBearer, capability.AuthorityCapability, "deployment"
 					p.Capability.Prefix = p.Authority.ID
 					p.Capability.Grants = append(p.Capability.Grants, capability.OperatorTokens, capability.OperatorLimits)
@@ -290,7 +291,7 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 					continue
 				}
 				records++
-				if record["principal_id"] != "operator-account" || record["principal_kind"] != "operator" {
+				if record["principal_id"] != "operator-account" || record["principal_kind"] != "account" {
 					t.Fatalf("audit lost authenticated identity: %+v", record)
 				}
 			}

@@ -27,7 +27,7 @@ func assertConsoleRefundReceiptSurvivesAuditRetention(t *testing.T, target *stor
 	operator := signIn(t, s, "operator", "operator@example.test")
 	team := tenant(t, s, operator.Account.ActiveTeam)
 	actor := membershipActor(t, s, operator.Account.ID, team.Team())
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: actor.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: operator.Account.ID}}}, Target: capability.Target{Team: string(team.Team())}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: actor.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: operator.Account.ID}}}, Target: capability.Target{Team: string(team.Team())}}
 	allowed := func(id string) bool { return id == operator.Account.ID }
 	console := s.AsConsole(allowed)
 	if _, err := team.TestOnlySettlePaidCredit(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "payment"}); err != nil {

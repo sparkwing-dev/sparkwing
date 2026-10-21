@@ -200,6 +200,14 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	s, raw, csrf := reviewAccount(t, "reader")
 	s.WithOperatorAccounts([]string{"member"})
+	route, ok := capability.LookupRoute("POST", "/api/v1/operator/teams")
+	if !ok {
+		t.Fatal("operator team route missing")
+	}
+	authenticated, err := s.storeRouteAuthorization().Authenticator.Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
+	if err != nil || authenticated.Principal.Class != capability.CredentialConsole || authenticated.Principal.Capability.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) {
+		t.Fatalf("console authorization changed verified identity: %+v %v", authenticated.Principal, err)
+	}
 	reviewSessionRequest(t, s, raw, "", "POST", "/api/v1/operator/teams", `{"slug":"csrf-team"}`, 403)
 	w := reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/teams", `{"slug":"console-team"}`, 201)
 	var created struct{ Team string }
@@ -210,12 +218,37 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
-	if err != nil || len(events) != 1 || !strings.HasPrefix(events[0].Actor, "operator:") {
-		t.Fatalf("console audit: %+v %v", events, err)
+	reviewSessionRequest(t, s, raw, csrf, "PUT", "/api/v1/operator/object-store/quotas/console-team", `{"max_bytes_per_run":22}`, 200)
+	w = reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/tokens", `{"name":"service","grants":["operator.tokens"]}`, 201)
+	var issued credentialResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil {
+		t.Fatal(err)
 	}
+	reviewSessionRequest(t, s, raw, csrf, "DELETE", "/api/v1/operator/tokens/"+issued.Prefix, "", 204)
+	var actor string
+	var isAccount int
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT actor,actor_is_account FROM audit_events WHERE kind='team.mutated' AND subject_id=?`, string(capability.AuthorityCapability)+":"+issued.Prefix).Scan(&actor, &isAccount); err != nil || actor != "member" || isAccount != 1 {
+		t.Fatalf("console revocation actor: %q account=%d %v", actor, isAccount, err)
+	}
+	checkActors := func(want string) {
+		t.Helper()
+		events, err := tenant.BusinessEvents(t.Context(), "", 10, "")
+		if err != nil || len(events) != 2 {
+			t.Fatalf("console audit: %+v %v", events, err)
+		}
+		for _, ev := range events {
+			if ev.Actor != want {
+				t.Fatalf("console action %s/%v actor=%q, want %q", ev.Kind, ev.Attrs["operation"], ev.Actor, want)
+			}
+		}
+	}
+	checkActors("member")
 	s.WithOperatorAccounts(nil)
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/teams", `{"slug":"refused-team"}`, 403)
+	if _, err := s.store.DeleteAccount(t.Context(), "member", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	checkActors("deleted account")
 }
 
 type teamCreationRace struct {

@@ -24,7 +24,7 @@ func consoleAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorize
 	if err != nil {
 		return err
 	}
-	if !p.DirectAccountSession() || a.Principal.Capability.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: p.Capability.Subject.ID}) || !tx.store.consolePolicy(p, tx.now()) {
+	if !p.DirectAccountSession() || a.Principal.Capability.Subject != p.Capability.Subject || !tx.store.consolePolicy(p, tx.now()) {
 		return bindingRefusal()
 	}
 	for _, access := range route.Access {

@@ -20,7 +20,7 @@ func consoleFixture(t *testing.T) (*Store, *Console, capability.Authorized) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "operator", RoleReader)
 	c := s.AsConsole(func(id string) bool { return id == "operator" })
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "b"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "b"}}
 	return s, c, a
 }
 
@@ -244,7 +244,7 @@ func TestConsoleTeamDeletionUsesNativeCancellation(t *testing.T) {
 	s := tenant.s
 	owner := authorityMember(t, s, "operator", RoleReader, "b")
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a'`, now.Add(time.Minute).UnixNano())
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
 	c := s.AsConsole(func(id string) bool { return id == "operator" })
 	if _, err := c.ConsoleDeleteTeam(t.Context(), a); err != nil {
 		t.Fatal(err)

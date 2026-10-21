@@ -28,7 +28,9 @@ STRICT, WITHOUT ROWID so replacement cannot bypass their guarded primary key.
 Every run deletion appends a `run.deleted` tombstone with a fresh identity,
 including when a later run reuses the ID.
 
-Human actors and account subjects use account IDs. Non-account claimants are
+Human actors and account subjects use account IDs. Console authorization uses
+the credential class and preserves the verified account subject through the
+committing transaction. Non-account claimants are
 identified by capability and holder digests, with no caller-selected actor name.
 Source credential history retains its owner account ID separately from the actor.
 System actors use fixed enums permitted by each payload kind. Invitation

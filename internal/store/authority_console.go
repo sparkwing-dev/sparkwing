@@ -16,7 +16,6 @@ func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capabilit
 		return capability.Principal{}, authorityError(apierr.Forbidden, "direct operator session required")
 	}
 	p.Class = capability.CredentialConsole
-	p.Capability.Subject.Kind = capability.SubjectOperator
 	p.Capability.Team = ""
 	p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	return p, nil

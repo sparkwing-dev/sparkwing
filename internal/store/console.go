@@ -28,7 +28,7 @@ func (s *Store) AsConsole(allowed func(string) bool) *Console {
 
 func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorized, write func(*storeTx, auditActor) (T, error), discovery ...func(*storeTx, lockSet) lockSet) (T, error) {
 	var zero T
-	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectOperator {
+	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectAccount {
 		return zero, authorityError(apierr.Forbidden, "direct operator session required")
 	}
 	var result T

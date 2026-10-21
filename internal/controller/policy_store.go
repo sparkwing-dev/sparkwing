@@ -46,7 +46,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonMissingGrant, "operator console requires the operator's own signed-in account")
 		}
 		p := &snapshot.Authorities[0].Principal
-		p.Class, p.Capability.Subject.Kind, p.Capability.Team = capability.CredentialConsole, capability.SubjectOperator, ""
+		p.Class, p.Capability.Team = capability.CredentialConsole, ""
 		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	}
 	return snapshot, nil

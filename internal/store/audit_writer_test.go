@@ -129,3 +129,50 @@ func TestAuditWriterDistinguishesPrincipalProvenance(t *testing.T) {
 		t.Fatalf("principal provenance lost: identities=%d err=%v", identities, err)
 	}
 }
+
+func TestAuditWriterRejectsSystemActorsForOtherKinds(t *testing.T) {
+	s := authorityStore(t)
+	for _, tc := range []struct {
+		name    string
+		payload auditPayload
+		allowed []auditSystem
+	}{
+		{"team", auditTeamCreation{AccountID: "account"}, nil},
+		{"mutation", auditMutation{Operation: "WriteStorageSettings"}, nil},
+		{"release", auditSecretRelease{}, nil},
+		{"refund", auditRefund{}, nil},
+		{"run_deletion", auditRunDeletion{}, nil},
+		{"source_release", auditSourceRelease{}, nil},
+		{"installation", auditInstallation{}, nil},
+		{"team_settings", auditTeamSettings{}, nil},
+		{"refill_settings", auditRefillSettings{}, nil},
+		{"trust", auditTrust{}, []auditSystem{auditBreakGlass}},
+		{"standing_requested", auditStandingRequest{State: "open"}, nil},
+		{"standing_decided", auditStandingRequest{State: "approved"}, []auditSystem{auditBreakGlass}},
+		{"admission", auditAdmission{AccountID: "account", Via: "signup"}, []auditSystem{auditController, auditBreakGlass}},
+		{"first_success", auditFirstSuccess{RunID: "run"}, []auditSystem{auditController}},
+		{"checkout_opened", auditCheckout{Outcome: BusinessEventCheckoutOpened}, []auditSystem{auditController}},
+		{"checkout_failed", auditCheckout{Outcome: BusinessEventCheckoutFailed}, []auditSystem{auditPaymentProvider}},
+		{"paid", auditGrant{Kind: CreditGrantPaid}, []auditSystem{auditPaymentProvider}},
+		{"free", auditGrant{Kind: CreditGrantFree}, []auditSystem{auditBreakGlass}},
+		{"reversal", auditGrant{Kind: CreditGrantReversal}, []auditSystem{auditPaymentProvider}},
+		{"hold", auditHold{}, []auditSystem{auditController, auditPaymentProvider, auditBreakGlass}},
+		{"card", auditCard{Operation: BusinessEventCardBlocked}, []auditSystem{auditPaymentProvider}},
+		{"refill", auditRefill{}, []auditSystem{auditController}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, system := range []auditSystem{auditController, auditPaymentProvider, auditBreakGlass} {
+				allowed := false
+				for _, candidate := range tc.allowed {
+					allowed = allowed || candidate == system
+				}
+				err := s.inTx(t.Context(), func(tx *storeTx) error {
+					return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: system}}, tc.payload)
+				})
+				if (err == nil) != allowed {
+					t.Errorf("system=%s allowed=%v err=%v", system, allowed, err)
+				}
+			}
+		})
+	}
+}

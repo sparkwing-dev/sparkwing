@@ -280,7 +280,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 		if phase%5 == 0 {
 			a := writer.seen
 			digest := sha256.Sum256([]byte(raw))
-			return a.Principal.Class == capability.CredentialConsole && a.Principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}) && a.Principal.Authority == (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) && a.Target.Team == "a"
+			return a.Principal.Class == capability.CredentialConsole && a.Principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}) && a.Principal.Authority == (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) && a.Target.Team == "a"
 		}
 		return true
 	}

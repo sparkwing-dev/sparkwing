@@ -14,8 +14,9 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','person@example.test',1,1)`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditAccountActor("account")}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -30,19 +31,19 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,run_id,actor) SELECT id,ts,team,kind,subject_id,run_id,'forged' FROM audit_events`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditPaymentProvider}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,actor) VALUES ('replacement',1,'a','checkout.opened','fact','forged')`)
 	var actor string
-	if err := s.db.QueryRow(`SELECT actor FROM audit_events WHERE kind='checkout.opened' AND id<>'replacement'`).Scan(&actor); err != nil || actor != "payment_provider" {
+	if err := s.db.QueryRow(`SELECT actor FROM audit_events WHERE kind='checkout.opened' AND id<>'replacement'`).Scan(&actor); err != nil || actor != string(auditController) {
 		t.Fatalf("replacement altered audit: %q %v", actor, err)
 	}
 	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='checkout.opened'", 2)
 	tenant := &Tenant{s: s, team: "a"}
 	rows, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
-	if err != nil || len(rows) != 1 || rows[0].RunID != "already-deleted-run" || rows[0].Actor != string(auditController) {
+	if err != nil || len(rows) != 1 || rows[0].RunID != "already-deleted-run" || rows[0].Actor != "account" {
 		t.Fatalf("retained audit=%+v: %v", rows, err)
 	}
 }
@@ -71,6 +72,7 @@ func TestEveryRunDeletionLeavesTombstone(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = s.Close() })
 			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+			rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','person@example.test',1,1)`)
 			rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','success',?,'request',1,'gh:1','host','execute',?,'account',1,2,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
 			if mode == "raw" {
 				rewriteSchemaExec(t, s.db, `DELETE FROM runs WHERE team='a'`)
@@ -121,13 +123,13 @@ func TestAuditOwnerRejectsEmails(t *testing.T) {
 			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Team: "person@example.test", Actor: auditActor{system: auditController}}, auditTeamCreation{AccountID: "account"})
+			return tx.operator.recordAudit(tx, auditContext{Team: "person@example.test", Actor: auditAccountActor("account")}, auditTeamCreation{AccountID: "account"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditRunDeletion{RunID: "person@example.test"})
+			return tx.operator.recordAudit(tx, auditContext{Actor: auditAccountActor("account")}, auditRunDeletion{RunID: "person@example.test"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
+			return tx.operator.recordAudit(tx, auditContext{Actor: auditAccountActor("account")}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
 		},
 		func(tx *storeTx) error {
 			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "account", Via: "person@example.test"})

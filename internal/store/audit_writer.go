@@ -275,13 +275,16 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	}
 	ev := BusinessEvent{At: c.At, Team: c.Team, Actor: actor}
 	valid, repeat := true, false
+	actorAllowed := c.Actor.system == ""
 	switch p := payload.(type) {
 	case auditAdmission:
+		actorAllowed = actorAllowed || auditOneOf(c.Actor.system, string(auditController), string(auditBreakGlass))
 		ev.Kind, ev.SubjectID, ev.Account = BusinessEventAccountAdmitted, p.AccountID, p.AccountID
 		valid = auditOneOf(p.Via, "signup", "waitlist", "invitation")
 	case auditTeamCreation:
 		ev.Kind, ev.SubjectID, ev.Account = BusinessEventTeamCreated, string(c.Team), p.AccountID
 	case auditFirstSuccess:
+		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.RunID = BusinessEventFirstRunSucceeded, p.RunID
 	case auditRunDeletion:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "run.deletion_authorized", p.RunID, p.RunID, true
@@ -293,6 +296,7 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 			ev.SubjectID = digestAudit(p.SubjectID).String()
 		}
 	case auditCheckout:
+		actorAllowed = p.Outcome == BusinessEventCheckoutOpened && c.Actor.system == auditController || p.Outcome != BusinessEventCheckoutOpened && c.Actor.system == auditPaymentProvider
 		ev.Kind, ev.SubjectID = string(p.Outcome), p.CheckoutID
 		valid = auditOneOf(p.Outcome, BusinessEventCheckoutOpened, BusinessEventCheckoutFailed, BusinessEventCheckoutExpired, BusinessEventRefillFailed) && auditOneOf(p.PaymentMode, "", "test", "live")
 	case auditGrant:
@@ -300,26 +304,33 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		ev.SubjectID = p.GrantID
 		switch p.Kind {
 		case CreditGrantPaid:
+			actorAllowed = c.Actor.system == auditPaymentProvider
 			ev.Kind = BusinessEventCheckoutPaid
 		case CreditGrantReversal:
+			actorAllowed = actorAllowed || c.Actor.system == auditPaymentProvider
 			ev.Kind = BusinessEventCreditReversed
 		case CreditGrantFree:
+			actorAllowed = actorAllowed || c.Actor.system == auditBreakGlass
 			ev.Kind = BusinessEventCreditGranted
 		default:
 			valid = false
 		}
 	case auditHold:
+		actorAllowed = actorAllowed || auditOneOf(c.Actor.system, string(auditController), string(auditPaymentProvider), string(auditBreakGlass))
 		ev.Kind, ev.SubjectID = BusinessEventTeamFrozen, p.HoldID.String()
 		if p.Released {
 			ev.Kind = BusinessEventTeamUnfrozen
 		}
 	case auditCard:
+		actorAllowed = c.Actor.system == auditPaymentProvider
 		ev.Kind, ev.SubjectID = string(p.Operation), p.Reference.String()
 		valid = auditOneOf(p.Operation, BusinessEventCardAdded, BusinessEventCardRefused, BusinessEventCardBlocked, BusinessEventCardRefundDue)
 	case auditTrust:
+		actorAllowed = actorAllowed || c.Actor.system == auditBreakGlass
 		ev.Kind, ev.SubjectID = BusinessEventBillingTrustChanged, p.ReceiptID
 		valid = auditOneOf(p.Before, "", "granted", "revoked") && auditOneOf(p.After, "", "granted", "revoked") && validAuditStanding(p.StandingBefore) && validAuditStanding(p.StandingAfter)
 	case auditStandingRequest:
+		actorAllowed = actorAllowed || p.State != "open" && c.Actor.system == auditBreakGlass
 		ev.Kind, ev.SubjectID = BusinessEventStandingRequested, p.RequestID
 		if p.State != "open" {
 			ev.Kind = BusinessEventStandingRequestDecided
@@ -338,6 +349,7 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	case auditRefillSettings:
 		ev.Kind, ev.SubjectID = BusinessEventRefillSettings, p.ReceiptID
 	case auditRefill:
+		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.SubjectID = BusinessEventRefillOpened, p.RefillID
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
@@ -348,8 +360,8 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	default:
 		valid = false
 	}
-	if !valid {
-		return fmt.Errorf("%w: unknown audit enum", ErrInvalidInput)
+	if !valid || !actorAllowed {
+		return fmt.Errorf("%w: invalid audit payload or actor for kind", ErrInvalidInput)
 	}
 	if ev.At.IsZero() {
 		ev.At = tx.now()

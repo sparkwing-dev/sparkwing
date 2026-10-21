@@ -3303,8 +3303,10 @@ Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefu
 and the request key, returning CreditReversal. It runs through consoleWrite,
 resolves the persisted paid grant before any reversal and checks its team
 against the path. Its reference matches verified refund settlement. A receipt
-in audit_events retains the normalized request digest and result. The
-existing ledger lock serializes reads, replay, reversal and receipt commit.
+in console_refund_receipts retains the normalized request digest and original
+result independently of audit retention. The audit row projects identifiers,
+digests and financial facts. The existing ledger lock serializes reads, replay,
+reversal and receipt commit.
 
 <!-- design:end -->
 
