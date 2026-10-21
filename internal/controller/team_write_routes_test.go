@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -26,6 +27,16 @@ type teamWriteFake struct {
 	value string
 	calls int
 	err   error
+}
+
+var _ GitHubAppWriter = (*teamWriteFake)(nil)
+
+func (f *teamWriteFake) ListFailedGitHubDeliveries(_ context.Context, a capability.Authorized) ([]controllerwire.FailedGitHubDelivery, error) {
+	return nil, f.record(a, "list failed deliveries")
+}
+
+func (f *teamWriteFake) ProcessGitHubDeliveryAgain(_ context.Context, a capability.Authorized, id string) error {
+	return f.record(a, id)
 }
 
 func (f *teamWriteFake) Team() store.Team { return f.team }

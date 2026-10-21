@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"testing/quick"
@@ -98,6 +99,41 @@ func TestAppAdmissionRequiresCurrentOriginProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppAdmissionRevokedInstallationInClaim(t *testing.T) {
+	for _, automatic := range []bool{false, true} {
+		for _, revoke := range []string{"suspend", "unbind"} {
+			t.Run(fmt.Sprintf("automatic=%t/%s", automatic, revoke), func(t *testing.T) {
+				s, tenant, in := appAdmissionFixture(t, automatic, "fixture")
+				defer s.Close()
+				ctx, now, op := t.Context(), s.clock(), s.AsOperator()
+				body := []byte(`{"installation":{"id":7}}`)
+				if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body, now); err != nil {
+					t.Fatal(err)
+				}
+				claim, err := op.ClaimGitHubDelivery(ctx, now)
+				if err != nil || claim == nil {
+					t.Fatalf("claim: %+v %v", claim, err)
+				}
+				in.Request.Git.App.Value.DeliveryKey = fmt.Sprintf("%x", sha256.Sum256(body))
+				if revoke == "unbind" {
+					_, err = op.UnbindGitHubAppInstallation(ctx, 7)
+				} else {
+					err = op.SetGitHubAppInstallationSuspended(ctx, 7, true, now)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := tenant.AdmitGitHubAppRun(claim.Context(ctx), in)
+				if !errors.Is(err, ErrGitHubAppAutomationRevoked) || result.RunID != "" {
+					t.Fatalf("revoked admission: run=%q error=%v", result.RunID, err)
+				}
+				rewriteSchemaCount(t, s.db, "runs", 0)
+				rewriteSchemaCount(t, s.db, "triggers", 0)
+			})
+		}
 	}
 }
 
