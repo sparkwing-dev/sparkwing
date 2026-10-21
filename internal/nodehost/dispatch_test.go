@@ -169,10 +169,8 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 					d := newFakeDaemon()
 					d.hostGate = make(chan struct{})
 					var machine *LocalAdmission
-					machineLeases := 0
 					if compute {
 						machine = &LocalAdmission{Daemon: d}
-						machineLeases = 1
 					}
 					configureNativeAdmission(&f.Host, machine, &storeAdmission{Store: f.Tenant, Owner: f.Actor}, false)
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -221,7 +219,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 					if err := <-done; err != nil {
 						t.Fatal(err)
 					}
-					if live, granted, released := d.counts(); live != 0 || granted != released || granted != machineLeases {
+					if live, granted, released := d.counts(); live != 0 || granted != 0 || released != 0 {
 						t.Fatalf("leases=%d/%d/%d", live, granted, released)
 					}
 					state, err := f.Tenant.GetConcurrencyState(ctx, scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder))
@@ -296,8 +294,28 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if live, _, _ := d.counts(); live != 1 {
-		t.Fatal("cancellation released the owner lease before the remote holder drained")
+	key := scopedConcurrencyKey("db", "global", f.Input.RunID, "")
+	state, err := f.Tenant.GetConcurrencyState(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := false
+	for _, holder := range state.Holders {
+		if holder.RunID == f.Input.RunID && holder.NodeID == "build" && holder.Superseded {
+			held = true
+		}
+	}
+	if !held {
+		t.Fatalf("cancellation released the remote logical holder before it drained: %+v", state)
+	}
+	run, err := f.Tenant.ReadRun(ctx, f.Input.RunID)
+	if err != nil || run.FinishedAt != nil {
+		t.Fatalf("owner finished before the remote holder drained: %+v %v", run, err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("owner returned before the remote holder drained: %v", err)
+	default:
 	}
 	if err := f.report(ctx, input, store.NodeCancelled); err != nil {
 		t.Fatal(err)
@@ -305,7 +323,16 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if live, granted, released := d.counts(); live != 0 || granted != released {
+	state, err = f.Tenant.GetConcurrencyState(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, holder := range state.Holders {
+		if holder.RunID == f.Input.RunID {
+			t.Fatalf("remote logical holder survived draining: %+v", state)
+		}
+	}
+	if live, granted, released := d.counts(); live != 0 || granted != 0 || released != 0 {
 		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 }

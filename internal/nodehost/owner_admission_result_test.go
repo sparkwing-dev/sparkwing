@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -27,45 +27,39 @@ func (f admissionAcquireFunc) Acquire(ctx context.Context, request wingwire.Admi
 }
 
 func TestOwnerPreservesIndependentLocalAcquisitionFailures(t *testing.T) {
-	for _, scope := range []string{"plan", "job"} {
-		for _, policy := range []string{"skip", "queue"} {
-			t.Run(scope+"/"+policy, func(t *testing.T) {
-				synctest.Test(t, func(t *testing.T) {
-					plan := capacityPlan(policy, 1, "refused")
-					plan.Jobs[0].Concurrency[0].Scope = new("box")
-					if scope == "plan" {
-						plan = planGrouped("box", policy, "refused")
-						plan.Concurrency[0].QueueTimeoutMS = new(int64(1))
-					}
-					fixture := newStoreHostFixture(t, plan)
-					independent := errors.New("admission transport cleanup failed")
-					parent := newFakeDaemon()
-					admission := &LocalAdmission{Daemon: admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
-						if scope == "job" && !request.SubLease {
-							return parent.Acquire(ctx, request, queued)
-						}
-						if policy == "queue" {
-							queued(wingwire.Queued{RunID: string(request.RunID), Key: "host"})
-							return nil, independent
-						}
-						return nil, errors.Join(&wingdclient.AdmissionError{Policy: wingwire.PolicySkip, Key: "db"}, independent)
-					})}
-					fixture.Host.Around, fixture.Host.Admit = admission.Run, admission.Node
-					completion, err := fixture.Host.Run(t.Context(), fixture.Input)
-					if !errors.Is(err, independent) || completion.Outcome != "" {
-						t.Errorf("independent failure consumed: completion=%+v error=%v", completion, err)
-					}
-					row := capacityRow(t, fixture, "refused")
-					if row.Status != store.StatusPending || row.Outcome != "" || row.ReadyAt != nil {
-						t.Errorf("independent failure recorded policy result: status=%s outcome=%s ready=%v", row.Status, row.Outcome, row.ReadyAt)
-					}
-					run, err := fixture.Tenant.ReadRun(t.Context(), fixture.Input.RunID)
-					if err != nil || run.FinishedAt != nil {
-						t.Errorf("independent failure finished run: state=%s finished=%v error=%v", run.State, run.FinishedAt, err)
-					}
-				})
+	for _, policy := range []string{"skip", "queue"} {
+		t.Run(policy, func(t *testing.T) {
+			fixture := newStoreHostFixture(t, capacityPlan(policy, 1, "refused"))
+			independent := errors.New("admission transport cleanup failed")
+			admission := &LocalAdmission{Daemon: admissionAcquireFunc(func(_ context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
+				if policy == "queue" {
+					queued(wingwire.Queued{RunID: string(request.RunID), Key: "host"})
+					return nil, independent
+				}
+				return nil, errors.Join(&wingdclient.AdmissionError{Policy: wingwire.PolicySkip, Key: "db"}, independent)
+			})}
+			configureNativeAdmission(&fixture.Host, admission, &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
+			executed := false
+			fixture.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error {
+				executed = true
+				return nil
 			})
-		}
+			completion, err := fixture.Host.Run(t.Context(), fixture.Input)
+			if err != nil {
+				t.Fatalf("setup failure did not finish: completion=%+v error=%v", completion, err)
+			}
+			persisted, err := fixture.Tenant.GetNode(t.Context(), fixture.Input.RunID, "refused")
+			if err != nil || !strings.Contains(persisted.Error, independent.Error()) {
+				t.Fatalf("independent failure was not recorded: node=%+v error=%v", persisted, err)
+			}
+			row := capacityRow(t, fixture, "refused")
+			if executed || row.Attempt != 0 {
+				t.Errorf("acquisition failure started execution: executed=%v attempt=%d", executed, row.Attempt)
+			}
+			if row.Outcome != store.NodeFailed || completion.Outcome != "failed" {
+				t.Errorf("independent failure became a policy result: row=%+v completion=%+v", row, completion)
+			}
+		})
 	}
 }
 

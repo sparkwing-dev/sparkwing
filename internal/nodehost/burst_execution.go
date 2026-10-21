@@ -58,6 +58,18 @@ func (h *OwnerHost) executeBurst(ctx context.Context, run RunInput, accepted Acc
 		if errors.Is(err, errBurstProgress) && waitFailure(err, errBurstProgress) == nil {
 			continue
 		}
+		var refused *store.ErrIllegalTransition
+		if errors.As(err, &refused) && refused.Reason == store.ReasonHolderRights {
+			// safety: a claim may commit before the state follower observes it.
+			current, readErr := h.Store.ReadSnapshot(ctx, accepted.RunID)
+			if readErr != nil {
+				return errors.Join(err, readErr)
+			}
+			latest, ok := ownerNode(current, row.Ref.NodeID)
+			if ok && (latest.Generation != row.Generation || latest.StateSeq > row.StateSeq) {
+				continue
+			}
+		}
 		if err != nil || !dispatched || !hasLocalConcurrency(row.Execution.Concurrency) {
 			return err
 		}
@@ -88,18 +100,11 @@ func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, r
 			<-changed
 		}
 	}()
-	a := h.claimAdmission
-	spec, err := admissionSpec(accepted)
-	if err != nil {
-		return err
+	actor := store.Actor{}
+	if h.executionAdmission.capacity != nil {
+		actor = h.executionAdmission.capacity.Owner
 	}
-	options := spec.Resolved.Settings.Options
-	request := wingwire.AdmissionRequest{
-		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID),
-		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
-		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
-	}
-	return a.hold(ctx, row.Ref, request, func(ctx context.Context, held Lease) error {
+	return h.executionAdmission.withNode(ctx, accepted, row, actor, func(ctx context.Context, resources wingwire.HostResources) error {
 		stop()
 		err := <-changed
 		joined = true
@@ -109,6 +114,6 @@ func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, r
 		if cause := context.Cause(ctx); cause != nil {
 			return cause
 		}
-		return body(ctx, held.Resources())
+		return body(ctx, resources)
 	})
 }

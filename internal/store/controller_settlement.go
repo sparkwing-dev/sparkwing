@@ -4,8 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
@@ -60,6 +61,26 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 		if snapshot.Run.FinishedAt != nil {
 			return nil
 		}
+		admitted := true
+		if snapshot.Run.CancelRequestedAt == nil && snapshot.Run.Spec != nil {
+			tenant := &Tenant{s: tx.store, team: team}
+			capacity, err := tenant.admitCapacityTx(ctx, tx, CapacityBinding{RunID: runID, Generation: actor.Owner.Generation}, *actor)
+			if err != nil {
+				return err
+			}
+			if capacity.Kind == AcquireSkipped || capacity.Kind == AcquireFailed {
+				kind, outcome := PolicyAdmissionFail, RunFailed
+				if capacity.Kind == AcquireSkipped {
+					kind, outcome = PolicyAdmissionSkip, RunSuccess
+				}
+				if capacity.FailureReason == FailureQueueTimeout {
+					kind = PolicyQueueTimeout
+				}
+				_, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: runID, To: outcome, Actor: *actor, Cause: RunPolicyRefused, Reason: capacity.FailureReason, OwnerPolicy: &OwnerPolicyResult{Kind: kind, Generation: actor.Owner.Generation}}, tx.now())
+				return err
+			}
+			admitted = capacity.Kind == AcquireGranted
+		}
 		graph, err := snapshot.Scheduling()
 		if err != nil {
 			return err
@@ -67,6 +88,9 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 		decision := Decide(graph)
 		changed := false
 		for _, node := range decision.Nodes {
+			if !admitted && (node.Kind == DecisionReady || node.Kind == DecisionExpand || node.Kind == DecisionApproval) {
+				continue
+			}
 			change := NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: node.NodeID}, Actor: *actor}
 			switch node.Kind {
 			case DecisionExpand:

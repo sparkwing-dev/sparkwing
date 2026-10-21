@@ -1146,6 +1146,8 @@ burst jobs, enter the same concurrency acquisition operation under their job
 award. It admits every accepted group before execution and reuses live holders.
 The store releases holders on terminal transitions. `LocalAdmission` requests
 only CPU and memory. `runner.local_admission` controls those compute requests.
+The shared admission owner acquires plan groups before job groups and compute;
+scheduling holds no compute while logical admission waits.
 Logical concurrency stays enabled for every placement. A burst owner acquires
 compute before requesting a self-claim.
 While that admission waits,

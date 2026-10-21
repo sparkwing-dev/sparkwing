@@ -1,13 +1,10 @@
 package nodehost
 
 import (
-	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestSDKPlanningUnknownPipelineNeverPlans(t *testing.T) {
@@ -29,36 +26,5 @@ func TestSDKPlanningUnknownPipelineNeverPlans(t *testing.T) {
 		if request.Op == "plan" {
 			t.Fatal("unknown pipeline reached planning")
 		}
-	}
-}
-
-type leaseAtNativeFinish struct {
-	*ownerFixture
-	daemon  *fakeDaemon
-	testing *testing.T
-}
-
-func (s leaseAtNativeFinish) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
-	if live, _, _ := s.daemon.counts(); live != 1 {
-		s.testing.Errorf("live admission leases at finish=%d, want 1", live)
-	}
-	return s.ownerFixture.FinishRunAndUnit(ctx, request)
-}
-
-func TestOwnerRunAdmissionOutlivesRunFinish(t *testing.T) {
-	fixture, host, input := newOwnerFixture(t, true)
-	daemon := newFakeDaemon()
-	host.Store = leaseAtNativeFinish{ownerFixture: fixture, daemon: daemon, testing: t}
-	configureNativeAdmission(&host, &LocalAdmission{Daemon: daemon}, nil, false)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	if _, err := host.Run(ctx, input); err != nil {
-		t.Fatal(err)
-	}
-	if fixture.finished.Transition.RunID != input.RunID {
-		t.Fatal("run did not finish")
-	}
-	if live, granted, released := daemon.counts(); live != 0 || granted != 1 || released != 1 {
-		t.Fatalf("admission leases live/granted/released=%d/%d/%d", live, granted, released)
 	}
 }

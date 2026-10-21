@@ -224,7 +224,7 @@ func TestBurstWaitsForPlacementBeforeConcurrency(t *testing.T) {
 			t.Fatalf("burst did not wait for placement: %v", err)
 		default:
 		}
-		if live, _, _ := daemon.counts(); live != 1 || executed || len(probe.bindings) != 0 {
+		if live, _, _ := daemon.counts(); live != 0 || executed || len(probe.bindings) != 0 {
 			t.Fatalf("waiting burst acquired job capacity: live=%d executed=%v", live, executed)
 		}
 		f.mu.Lock()
@@ -234,7 +234,7 @@ func TestBurstWaitsForPlacementBeforeConcurrency(t *testing.T) {
 		if err := <-done; err != nil || !executed {
 			t.Fatalf("returned capacity did not resume the waiting owner: executed=%v error=%v", executed, err)
 		}
-		if live, granted, released := daemon.counts(); live != 0 || granted != 2 || released != 2 || len(probe.bindings) != 1 {
+		if live, granted, released := daemon.counts(); live != 0 || granted != 1 || released != 1 || len(probe.bindings) != 1 {
 			t.Fatalf("placement wait leaked admission: %d/%d/%d", live, granted, released)
 		}
 	})

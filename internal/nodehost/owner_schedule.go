@@ -435,7 +435,7 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 	if err != nil {
 		return err
 	}
-	if spec.Request.Request.Burst != nil && h.claimAdmission != nil {
+	if spec.Request.Request.Burst != nil && h.executionAdmission.compute != nil {
 		return h.executeBurst(ctx, run, accepted, entry, request)
 	}
 	result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)

@@ -501,8 +501,10 @@ Each claimed job holds its machine lease through source preparation, execution
 and cleanup. A full machine offers zero headroom, so later preferences can win.
 Busy local work does not prevent jobs from becoming ready for overflow.
 Jobs without resource settings use the same one-core admission charge locally
-and when matching a runner. The requesting machine reserves compute before claiming a job, because local
-work can arrive after a capacity observation. A waiting job stays available to
+and when matching a runner. The shared admission owner acquires plan groups, job groups and compute in
+that order. Scheduling holds no compute while it waits for logical capacity.
+The requesting machine reserves compute before claiming a burst job, because
+local work can arrive after a capacity observation. A waiting job stays available to
 other ranked claimants. If another machine advances it, the requester cancels
 its compute wait. Ctrl-C also cancels the wait.
 Concurrency slots count once even when a registered runner shares this machine

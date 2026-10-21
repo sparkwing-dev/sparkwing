@@ -2,22 +2,32 @@
 
 ## Burst release and machine admission
 
-For a sealed burst request, readiness acquires neither job concurrency nor
-compute resources. Run resource settings still
-flow into each job's sealed settings. A self-claim acquires a job-specific machine lease before the shared store's
-fenced reconciliation. Waiting for machine capacity leaves the job unclaimed.
-A joined state follower cancels that wait when another claimant advances the
-job. Reconciliation still decides who executes after admission succeeds.
-No attempt starts before both admission and the award. Cleanup joins before release.
+`NativeAdmission` is the admission owner for owner execution, independent claims,
+burst self-claims, here, local peers, Actions, launcher jobs and evaluations.
+It acquires accepted plan groups, then accepted job groups, then machine CPU
+and memory. `Tenant.AdmitCapacity` owns both logical stages in one transaction;
+the controller scheduler calls that same operation before releasing ready jobs.
+Controller box groups wait for an execution award to supply a sealed host.
 
-Every claimed job acquires all accepted concurrency groups under its own award
-before source preparation or execution. This also covers burst jobs and owner
-self-claims. The shared store transaction reuses live holders. Terminal
-transitions release them. CPU and memory admission is optional for runners.
-For independently awarded jobs, pre-execution machine-admission failure reports
-through the fenced setup result path, with attempt zero retained. A self-hosting
-owner's preclaim admission transport failure returns an error without claiming
-or finishing the job.
+Scheduling holds no machine compute. Run resource settings flow into each job's
+sealed settings. A burst self-claim acquires logical capacity before its
+job-specific compute lease and fenced reconciliation. Reentrant execution
+reuses that lease. Waiting for compute leaves the job unclaimed, and another
+claimant's state change cancels and joins the wait. Independently awarded jobs
+admit logical capacity before source preparation and compute.
+
+Store admission reuses live holders and waiter arrival order after ownership
+handoff. Recovery revalidates the plan stage before the job stage; when plan
+capacity must wait, later job reservations are removed. An expired reservation
+cannot be revived. No compute is held while logical admission waits. Compute
+releases after joined cleanup; job terminal transitions release job capacity,
+and run completion releases plan capacity after workers drain.
+
+Owner closure evaluation uses the same admission order. An independent expansion
+evaluation admits plan capacity under its exact expansion lease, then compute;
+its terminal source job's groups remain released. An admission failure before
+execution reports the fenced setup result without starting an attempt. Runner
+compute is optional; logical admission is always on.
 
 An unclaimed burst job waits for placement without acquiring job concurrency. The owner follows the existing state subscription and retries the
 fenced reconciliation after persisted state or its execution eligibility
@@ -343,11 +353,11 @@ are part of this contract.
 | `nodehost.DebugBoundary`, `DebugBoundaryWaiter`, `OwnerHost.Debug` | Wait at sealed owner pause boundaries under the current owner and job generation. Released boundaries remain released on replay. Persistence and timeout release require an authority-bearing adapter. |
 | `nodehost.OwnerDelegator`, `OwnerHost.Delegator` | Resolve live owner ceilings and delegate expansion submission to the exact source generation under that owner lease. |
 | `nodehost.NewNativeHost`, `NativeHostConfig` | Assemble owner and claimed execution with one native executor and register their delegated process services. |
-| `nodehost.LocalAdmission`, `LocalAdmission.Run`, `LocalAdmission.Node` | Hold local run resources and run/box semaphores through joined scheduling, and job admission through execution and cleanup, using sealed settings. Nonlocal concurrency requires its store adapter. |
+| `nodehost.LocalAdmission` | Supply the optional machine compute client. The shared admission owner holds CPU and memory for each execution or evaluation through joined cleanup. |
 | `nodehost.CapacityStore`, `NativeAdmission`, `ComposeNativeAdmission` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The private store adapter binds the current run owner on each invocation. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
 | `nodehost.NativeHostConfig.Admission`, `NativeConfig.Admission` | Carry one composed admission value. Required requester compute is independent of placement eligibility. Runners may omit compute while retaining the supplied capacity store. |
 | `nodehost.AdmissionFailure` | Preserve admission outcome and reason through cancellation and fenced executor reports. |
-| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Admit scheduling and job release before readiness. Store-owned groups retain capacity through persisted completion, independently of local compute resources. Supersession requests holder cancellation before replacement. |
+| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Admit plan capacity around scheduling and validate readiness without holding compute. Store-owned groups retain capacity through persisted completion. Supersession requests holder cancellation before replacement. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
@@ -806,10 +816,10 @@ The capacity store derives box scope only from `Capability.ExecutionHost`, seale
 on the award independently of its accountable subject. Machine roots and Actions
 push credentials use their machine subject. Account-backed here awards use the
 origin machine authenticated by the intake proof. Local peers use their peer
-identity. Launcher awards seal the reserved node UID during authenticated launcher
-sync, before pod activation. The identity survives child awards, delegation and
+identity. Launcher awards seal the reserved node identity only during authenticated
+activation of that node. Capacity-demand observations never seal an execution host. The identity survives child awards, delegation and
 bootstrap exchange. A later observation cannot replace it. An award without an
-execution host is refused for box scope. Compute admission settings do not select
+execution host is refused for box scope; an unactivated launcher award waits. Compute admission settings do not select
 a concurrency namespace.
 The private client sends only the unit binding; the store admits all its groups.
 Selection uses the scheduler's dependency closure, including present

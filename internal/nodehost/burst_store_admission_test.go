@@ -46,7 +46,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed = true
 				requests := daemon.requests()
-				if len(requests) != 2 || !requests[0].SemaphoresOnly || requests[1].SemaphoresOnly || requests[1].Resources.Cores != 4 {
+				if len(requests) != 1 || requests[0].SemaphoresOnly || requests[0].Resources.Cores != 4 {
 					t.Errorf("shared owner lost per-job capacity: %+v", requests)
 				}
 				return fixture.report(ctx, input, store.NodeSuccess)
@@ -133,9 +133,17 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if err != nil {
 		t.Fatal(err)
 	}
+	key := scopedConcurrencyKey("db", "run", fixture.Input.RunID, "")
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
-	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: daemon}, &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
+	admitter := admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
+		capacity, err := fixture.Tenant.GetConcurrencyState(context.WithoutCancel(ctx), key)
+		if err != nil || len(capacity.Holders) != 1 || capacity.Holders[0].NodeID != "job" {
+			t.Errorf("machine admission preceded logical capacity: %+v %v", capacity, err)
+		}
+		return daemon.Acquire(ctx, request, queued)
+	})
+	configureNativeAdmission(&fixture.Host, &LocalAdmission{Daemon: admitter}, &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}, false)
 	fixture.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error { t.Error("saturated host executed work"); return nil })
 	ready := make(chan string, 1)
 	wait := fixture.Host.Wait
@@ -179,12 +187,8 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if err != nil || rowBefore.ClaimedBy != "" || rowBefore.Attempt != 0 {
 		t.Fatalf("waiting for machine capacity consumed the overflow claim: %+v %v", rowBefore, err)
 	}
-	key := scopedConcurrencyKey("db", "run", fixture.Input.RunID, "")
-	capacity, err := fixture.Tenant.GetConcurrencyState(ctx, key)
-	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("unclaimed burst acquired concurrency: %+v %v", capacity, err)
-	}
-	if live, _, _ := daemon.counts(); live != 1 {
+
+	if live, _, _ := daemon.counts(); live != 0 {
 		t.Fatalf("ready burst retained extra machine admission: live=%d", live)
 	}
 	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
@@ -212,12 +216,12 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 		}
 		return fixture.report(ctx, input, store.NodeSuccess)
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("remote claimed execution: %v", err)
 	}
 	err = <-done
 	joined = true
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("owner completion after remote execution: %v", err)
 	}
 
 	if live, granted, released := daemon.counts(); live != 0 || granted != released {

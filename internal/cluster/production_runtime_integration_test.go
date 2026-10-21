@@ -542,10 +542,10 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 						if err != nil {
 							return nil, err
 						}
-						if !slices.ContainsFunc(state.Holders, func(holder wingwire.Holder) bool {
-							return holder.DisplayRunID == unit.RunID && holder.Resources.Cores > 0
+						if slices.ContainsFunc(state.Holders, func(holder wingwire.Holder) bool {
+							return (holder.DisplayRunID == unit.RunID || strings.HasPrefix(holder.DisplayRunID, unit.RunID+"/")) && holder.Resources.Cores > 0
 						}) {
-							return nil, fmt.Errorf("job scheduled without its machine compute lease: %+v", state.Holders)
+							return nil, fmt.Errorf("scheduling held compute before job admission: %+v", state.Holders)
 						}
 					}
 					once.Do(func() { close(scheduled) })

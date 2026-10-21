@@ -16,7 +16,7 @@ func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, bi
 		return AcquireSlotResponse{}, err
 	}
 	defer rollbackOrLog(tx)
-	fence := capacityFence{binding, actor}
+	fence := capacityFence{binding: binding, actor: actor}
 	if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, []string{req.Key}, fence); err != nil {
 		return AcquireSlotResponse{}, err
 	}
@@ -29,7 +29,7 @@ func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, bi
 
 // ResolveCapacityWaiter adjudicates promotion and sealed queue expiry under the captured owner fence.
 func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error) {
-	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding, actor})
+	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding: binding, actor: actor})
 }
 
 // AdoptCapacity checks continuity under the entry lock; expired holders and waiters are removed before a fresh request.

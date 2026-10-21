@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -15,6 +16,7 @@ import (
 type capacityFence struct {
 	binding CapacityBinding
 	actor   Actor
+	source  *CapacityBinding
 }
 
 func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, key string, fence capacityFence) error {
@@ -46,7 +48,11 @@ func checkCapacityUnitTx(ctx context.Context, tx *storeTx, team Team, fence capa
 		return holderRefusal()
 	}
 	if b.NodeID == "" {
-		if b.Generation != fence.actor.Owner.Generation {
+		generation, err := capacityGenerationTx(ctx, tx, team, b.RunID, "")
+		if err != nil {
+			return err
+		}
+		if b.Generation != generation {
 			return holderRefusal()
 		}
 	} else {
@@ -54,11 +60,35 @@ func checkCapacityUnitTx(ctx context.Context, tx *storeTx, team Team, fence capa
 		if err := tx.QueryRowContext(ctx, `SELECT status,generation,cancel_requested_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), team, b.RunID, b.NodeID).Scan(&status, &generation, &cancelled); err != nil {
 			return err
 		}
-		if status == string(StatusDone) || cancelled.Valid || generation != b.Generation {
+		evaluation, err := capacityEvaluationTx(ctx, tx, team, b, fence.actor)
+		if err != nil {
+			return err
+		}
+		if status == string(StatusDone) && !evaluation || cancelled.Valid || generation != b.Generation {
 			return holderRefusal()
 		}
 	}
 	return nil
+}
+
+func capacityEvaluationTx(ctx context.Context, tx *storeTx, team Team, binding CapacityBinding, actor Actor) (bool, error) {
+	if actor.Authority.Kind != "" {
+		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+		if err != nil {
+			return false, err
+		}
+		if principal.Capability.Unit == capability.UnitEval {
+			return true, nil
+		}
+	}
+	if binding.NodeID != "" && actor.Kind == ActorRunHost {
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID})
+		if err != nil {
+			return false, err
+		}
+		return row.Status == StatusDone && row.Expansion == ExpansionExpected, nil
+	}
+	return false, nil
 }
 
 func checkCapacityMutationTx(ctx context.Context, tx *storeTx, team Team, key, id string, fence *capacityFence) error {
@@ -177,7 +207,17 @@ func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter
 
 func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, keys []string, fence capacityFence) error {
 	for _, key := range keys {
-		if err := advisoryLockTx(ctx, tx, fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)); err != nil {
+		name := fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)
+		// safety: settlement already owns its run row, so it must never wait behind admission that needs that row.
+		if fence.actor.Kind == ActorController && tx.dialect == DialectPostgres {
+			var locked bool
+			if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))`, name).Scan(&locked); err != nil {
+				return err
+			}
+			if !locked {
+				return errCapacityAdmissionBusy
+			}
+		} else if err := advisoryLockTx(ctx, tx, name); err != nil {
 			return err
 		}
 	}
@@ -192,18 +232,13 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
-	if err := lockCapacityWorkTx(ctx, tx, team, keys, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID}); err != nil {
+	if err := lockCapacityWorkTx(ctx, tx, team, keys, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID}, fence.actor.Kind == ActorController); err != nil {
 		return err
 	}
-	for _, key := range keys {
-		if err := checkCapacityFenceTx(ctx, tx, team, key, fence); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkCapacityUnitTx(ctx, tx, team, fence)
 }
 
-func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, keys []string, ref controllerwire.NodeRef) error {
+func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, keys []string, ref controllerwire.NodeRef, nonblocking bool) error {
 	predicate := "NULL"
 	var args []any
 	if len(keys) > 0 {
@@ -238,7 +273,22 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, args...)
 		if ref.RunID == previous {
 			continue
 		}
-		if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil && !errors.Is(err, ErrNotFound) {
+		if nonblocking && tx.dialect == DialectPostgres {
+			var found string
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate()+` SKIP LOCKED`, team, ref.RunID).Scan(&found); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					var exists bool
+					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE team=? AND id=?)`, team, ref.RunID).Scan(&exists); err != nil {
+						return err
+					}
+					if exists {
+						return errCapacityAdmissionBusy
+					}
+					continue
+				}
+				return err
+			}
+		} else if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
 		previous = ref.RunID
@@ -248,27 +298,59 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, args...)
 			continue
 		}
 		var found string
-		if err := tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), team, ref.RunID, ref.NodeID).Scan(&found); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
+		lock := tx.forUpdate()
+		if nonblocking && tx.dialect == DialectPostgres {
+			lock += " SKIP LOCKED"
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`+lock, team, ref.RunID, ref.NodeID).Scan(&found); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				if nonblocking && tx.dialect == DialectPostgres {
+					var exists bool
+					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM nodes WHERE team=? AND run_id=? AND node_id=?)`, team, ref.RunID, ref.NodeID).Scan(&exists); err != nil {
+						return err
+					}
+					if exists {
+						return errCapacityAdmissionBusy
+					}
+				}
+			} else {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 func checkCapacityOwnerTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {
+	binding := fence.binding
+	if fence.source != nil {
+		binding = *fence.source
+	}
+	if fence.actor.Authority.Kind != "" {
+		principal, err := tx.ResolveAuthority(ctx, fence.actor.Authority)
+		if err != nil {
+			return err
+		}
+		if principal.Capability.Unit == capability.UnitEval {
+			if binding.NodeID == "" {
+				return holderRefusal()
+			}
+			return expansionAuthorityTx(ctx, tx, team, ExpansionSubmission{Source: controllerwire.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID}, SourceGeneration: binding.Generation, Actor: fence.actor}, tx.now())
+		}
+	}
 	if fence.actor.Kind == ActorHolder {
-		if fence.binding.NodeID == "" || fence.binding.Generation != fence.actor.Generation {
+		if binding.NodeID == "" || binding.Generation != fence.actor.Generation {
 			return holderRefusal()
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: fence.binding.RunID, NodeID: fence.binding.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID})
 		if err != nil {
 			return err
 		}
 		return checkHolderTx(ctx, tx, team, row, fence.actor, tx.now())
 	}
 	check := checkOwnerTx
-	if fence.binding.NodeID == "" {
+	if binding.NodeID == "" {
 		check = checkOwnerLeaseTx
 	}
-	return check(ctx, tx, team, fence.actor, fence.binding.RunID, tx.now())
+	return check(ctx, tx, team, fence.actor, binding.RunID, tx.now())
 }

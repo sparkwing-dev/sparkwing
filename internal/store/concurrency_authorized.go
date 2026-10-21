@@ -153,7 +153,7 @@ func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.A
 				return zero, err
 			}
 		}
-		if err := lockCapacityWorkTx(ctx, tx, t.team, []string{key}, controllerwire.NodeRef{RunID: a.Binding.RunID, NodeID: a.Binding.NodeID}); err != nil {
+		if err := lockCapacityWorkTx(ctx, tx, t.team, []string{key}, controllerwire.NodeRef{RunID: a.Binding.RunID, NodeID: a.Binding.NodeID}, false); err != nil {
 			return zero, err
 		}
 		if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {

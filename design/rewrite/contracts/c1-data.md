@@ -4216,8 +4216,14 @@ the job's terminal transition. Remote work reserves no local compute resources.
 Unit capacity admission takes only `CapacityBinding` and the authenticated actor.
 Its transaction reads every accepted group, derives its complete key and lease
 bound, and locks admission keys, authority, owner, sorted work and group rows in
-that order. It retains live holders, resolves existing waiters and acquires the
-remaining groups in key order. A queued group retains earlier holds until its
+that order. It admits plan capacity before job capacity, retaining live holders
+and resolving waiters within each stage in key order. A node or eval award may
+admit the parent plan only as a prerequisite of its exact authenticated binding.
+Terminal expansion sources admit plan capacity without reviving job holders.
+Controller settlement uses this same transaction before readiness; contended
+PostgreSQL locks defer settlement to its next pass. Box-scoped plan capacity
+waits for a sealed execution host. Recovery drops retained job capacity when
+plan reacquisition must wait. A queued group retains earlier holds until its
 work ends or their leases expire. Repeated admission preserves queue arrival
 and holder continuity. Owner and claim renewal keep capacity live; terminal
 transitions release it. A caller cannot select another machine's namespace,

@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
@@ -54,6 +55,12 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 
 // Evaluate submits a source expansion under its independent eval lease.
 func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID string, generation int64, fence capability.LeaseRef) (err error) {
+	bound := *h
+	h = &bound
+	if h.bindAdmission != nil {
+		h.bindAdmission(h, input.Owner)
+	}
+	parent = context.WithValue(parent, admissionContext{}, h.executionAdmission)
 	if err := h.unitReady(input); err != nil {
 		return err
 	}
@@ -90,21 +97,23 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if row.Ref.NodeID == "" || row.Generation != generation || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 		return errors.New("eval source is outside the awarded expansion")
 	}
-	entry, err := h.acquire(ctx, input, snapshot.Run)
-	if entry != nil {
-		defer func() { err = errors.Join(err, entry.Close()) }()
-	}
-	if cause := context.Cause(ctx); cause != nil {
-		return errors.Join(err, cause)
-	}
-	if err != nil || entry == nil {
-		return h.commitExpansion(ctx, row, input.Owner, nil, &store.ExpansionFailure{Code: apierr.PlanFailed, MaskedError: "evaluation source acquisition failed"})
-	}
-	body, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
-	if err != nil {
-		return err
-	}
-	return h.commitExpansion(ctx, row, input.Owner, body, failure)
+	return h.executionAdmission.withNode(ctx, accepted, row, input.Owner, func(ctx context.Context, _ wingwire.HostResources) (err error) {
+		entry, err := h.acquire(ctx, input, snapshot.Run)
+		if entry != nil {
+			defer func() { err = errors.Join(err, entry.Close()) }()
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return errors.Join(err, cause)
+		}
+		if err != nil || entry == nil {
+			return h.commitExpansion(ctx, row, input.Owner, nil, &store.ExpansionFailure{Code: apierr.PlanFailed, MaskedError: "evaluation source acquisition failed"})
+		}
+		body, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+		if err != nil {
+			return err
+		}
+		return h.commitExpansion(ctx, row, input.Owner, body, failure)
+	})
 }
 
 func (h *OwnerHost) unitReady(input RunInput) error {

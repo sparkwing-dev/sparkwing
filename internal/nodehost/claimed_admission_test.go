@@ -70,9 +70,9 @@ func FuzzClaimedNodeMachineLeasesKeepSeparateJobs(f *testing.F) {
 		admission := LocalAdmission{Daemon: daemon}
 		row := localAdmissionRow(first)
 		row.Ref.RunID = accepted.RunID
-		err := admission.ClaimedNode(t.Context(), accepted, row, func(ctx context.Context) error {
+		err := admission.node(t.Context(), accepted, row, func(ctx context.Context) error {
 			row.Ref.NodeID = second
-			return admission.ClaimedNode(ctx, accepted, row, func(context.Context) error {
+			return admission.node(ctx, accepted, row, func(context.Context) error {
 				requests := daemon.requests()
 				if live, _, _ := daemon.counts(); live != 2 || len(requests) != 2 || requests[0].RunID == requests[1].RunID || requests[0].SubLease || requests[1].SubLease {
 					t.Fatalf("separate claimed jobs shared machine ownership: %+v live=%d", requests, live)

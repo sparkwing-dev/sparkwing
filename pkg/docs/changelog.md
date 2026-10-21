@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **admission:** Acquire plan concurrency before job concurrency and machine compute across execution placements. Controller scheduling honors plan groups, and waiting for logical capacity holds no machine compute.
+
 - **launcher:** Seal box-scoped concurrency to the reserved execution node at authenticated Job activation. Capacity requests and their Pod identities cannot select a box.
 
 - **controller (Breaking):** Remove `--trigger-dedupe-window` and chart `controller.triggerDedupeWindow`. Identical API submissions create separate runs unless the caller supplies an idempotency key. Explicit keys and GitHub delivery IDs keep their persistent replay behavior.

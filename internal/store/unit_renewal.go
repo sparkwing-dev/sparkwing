@@ -149,5 +149,8 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 		return err
 	}
 	beat.ExpiresAt = expiry
+	if err := renewCapacityTx(ctx, tx, team, unit.RunID, unit.NodeID, tx.now(), expiry); err != nil {
+		return err
+	}
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }

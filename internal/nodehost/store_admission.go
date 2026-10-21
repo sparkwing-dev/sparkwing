@@ -54,13 +54,14 @@ func (a *storeAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 
 // Node admits the awarded job; terminal transitions release its capacity atomically.
 func (a *storeAdmission) Node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
-	if _, err := admissionSpec(accepted); err != nil {
+	spec, err := admissionSpec(accepted)
+	if err != nil {
 		return err
 	}
 	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" || row.Generation < 0 {
 		return errors.New("store admission requires the accepted job identity")
 	}
-	if err := a.acquire(ctx, accepted.RunID, row.Ref.NodeID, row.Generation, row.Execution.Concurrency); err != nil {
+	if err := a.acquire(ctx, accepted.RunID, row.Ref.NodeID, row.Generation, append(append([]runspec.Concurrency{}, spec.Resolved.Settings.Concurrency...), row.Execution.Concurrency...)); err != nil {
 		return err
 	}
 	return body(ctx)
@@ -70,7 +71,7 @@ func (a *storeAdmission) acquire(ctx context.Context, runID, jobID string, gener
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	if a.Store == nil || (a.Owner.Kind != store.ActorHolder && (a.Owner.Kind != store.ActorRunHost || a.Owner.Owner.RunID != runID || a.Owner.Owner.Holder == "" || a.Owner.Owner.Generation < 1)) {
+	if a.Store == nil || (a.Owner.Kind != store.ActorHolder && (a.Owner.Kind != store.ActorRunHost || a.Owner.Authority.Kind == "" && (a.Owner.Owner.RunID != runID || a.Owner.Owner.Holder == "" || a.Owner.Owner.Generation < 1))) {
 		return errors.New("store admission requires a live run owner or job award")
 	}
 	if len(groups) == 0 {

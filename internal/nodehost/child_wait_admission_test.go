@@ -93,8 +93,8 @@ func TestJobWaitingOnChildKeepsItsReservation(t *testing.T) {
 			process, err := start(ctx, in, activity)
 			process.(*executorProcess).onRun = func(context.Context) {
 				defer activity.Await()()
-				hogErr = admission.ClaimedNode(ctx, accepted, sizedJob("hog", 0, gib+gib/2), func(context.Context) error { return nil })
-				childErr = admission.ClaimedNode(ctx, accepted, sizedJob("child", 1, gib/2), func(context.Context) error {
+				hogErr = admission.node(ctx, accepted, sizedJob("hog", 0, gib+gib/2), func(context.Context) error { return nil })
+				childErr = admission.node(ctx, accepted, sizedJob("child", 1, gib/2), func(context.Context) error {
 					childRan = true
 					return nil
 				})
