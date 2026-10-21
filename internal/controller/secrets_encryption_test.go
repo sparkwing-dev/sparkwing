@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -76,6 +77,23 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	}
 	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?pipeline=ci", "", nil); code != http.StatusForbidden || strings.Contains(body, "supersecret") {
 		t.Fatalf("masked member read: HTTP %d %s", code, body)
+	}
+}
+
+func TestSecrets_InvalidMaskedValuesRequirePlainConfig(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	for _, value := range []string{"", "abc", "prefix***suffix"} {
+		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value})
+		if code != http.StatusBadRequest || !strings.Contains(body, "plain config variable") {
+			t.Fatalf("masked value %q: HTTP %d %s", value, code, body)
+		}
+		if _, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", ""); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("refused secret persisted: %v", err)
+		}
+		code, body, _ = secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "VARIABLE", "value": value, "masked": false})
+		if code != http.StatusNoContent {
+			t.Fatalf("plain config %q: HTTP %d %s", value, code, body)
+		}
 	}
 }
 
