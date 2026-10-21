@@ -962,3 +962,18 @@ separate operations; no database transaction stays open across a provider call.
 - Run-level (plan) groups and job-level groups live in separate namespaces. The same key declared at both levels names two different groups, so a run holding plan group X can never block on another run's job group X. This removes the plan/job wait cycle that one shared namespace allowed.
 - Run-level groups cannot be box-scoped. A run has no single execution host, so a machine scope at run level has no meaning; declaring one is refused when the pipeline is accepted, with an error that names the group and points at job-level box scope. Box scope stays available for job-level groups.
 - The raw API for acquiring a group directly (`/api/v1/queue/groups/{group}` acquire, heartbeat, release, cancel and resolve) is deleted pre-launch. Every acquisition goes through the single admission owner.
+
+## 2026-10-20 Korey decision 38: a run that loses its run-level group waits to reacquire it
+
+- When a run's hold on a run-level group lapses (controller or host lost contact past the lease) and another run takes the group, the first run is not cancelled. Jobs already released keep running to completion; no further job is released until the run reacquires the group, and it queues for it like any other waiter. The run shows that it is waiting to reacquire the named group.
+- Rationale: once the lease has lapsed the overlap has already happened, so cancelling cannot undo it, and killing a half-finished deploy is usually worse than finishing it. Waiting also keeps the run's remaining work instead of forcing a rerun.
+
+## 2026-10-21 Korey decision 39: audit rows carry no personal data; retention by age
+
+- Audit rows are append-only and name people only by account id and invitations only by invitation id, never by email or other personal data. Personal data lives on the account record; deleting the account leaves its audit entries naming a deleted account with no route back to the person. This replaces the old business_events scrub on account deletion. Matches GitHub's audit log, which keeps entries for deleted users under a placeholder.
+- The append-only guard itself permits deleting rows older than the retention horizon (decision 15: 400 days, operator-set); a retention job prunes them. Rows inside the horizon cannot be updated or deleted by any code path.
+
+## 2026-10-21 Korey decision 40: audit append-only is a guard against application code, not credential theft
+
+- PostgreSQL keeps one database role that owns the tables and runs the app. The append-only trigger stops application code from changing audit history; it does not stop a holder of the app's database credentials, who could disable it (and could already read every secret). Docs say "append-only against application code", not "tamper-proof". The no-op REVOKE is removed rather than kept as an implied control.
+- Separate owner and runtime roles (migrations as owner, controller as a restricted role) are post-launch hardening.
