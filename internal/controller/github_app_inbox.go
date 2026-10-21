@@ -65,7 +65,7 @@ func (s *Server) processNextGitHubDelivery(ctx context.Context, now time.Time) (
 	}
 	processing, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	processing = context.WithValue(processing, githubDeliveryReceivedKey{}, queued.ReceivedAt)
+	processing = context.WithValue(queued.Context(processing), githubDeliveryReceivedKey{}, queued.ReceivedAt)
 	r, err := http.NewRequestWithContext(processing, http.MethodPost, "/webhooks/github-app", nil)
 	if err != nil {
 		return nil, err

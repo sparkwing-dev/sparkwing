@@ -165,6 +165,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "github_app_automation", Owner: SchemaTenant},
 	{Name: "github_app_deliveries", Owner: SchemaOperator},
 	{Name: "github_app_delivery_ids", Owner: SchemaOperator},
+	{Name: "github_app_delivery_effects", Owner: SchemaOperator},
 	{Name: "github_app_extra_repos", Owner: SchemaTenant},
 	{Name: "github_app_installations", Owner: SchemaTenant},
 	{Name: "github_app_triggers", Owner: SchemaTenant},

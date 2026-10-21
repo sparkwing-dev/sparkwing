@@ -195,6 +195,11 @@ func (g *GitHub) SetCommit(repo, ref, sha string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.commits[strings.ToLower(repo)+"/"+ref] = sha
+	qualified := strings.TrimPrefix(ref, "refs/")
+	if !strings.HasPrefix(ref, "refs/") {
+		qualified = "heads/" + ref
+	}
+	g.commits[strings.ToLower(repo)+"/"+qualified] = sha
 }
 
 // SetFile makes path available at sha, or removes it when content is nil.

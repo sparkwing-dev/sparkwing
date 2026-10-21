@@ -669,6 +669,7 @@ CREATE TABLE github_app_triggers (
 
 CREATE TABLE github_app_deliveries (
     admitted_team TEXT NOT NULL DEFAULT '',
+    queue_team TEXT NOT NULL DEFAULT '',
     digest TEXT NOT NULL PRIMARY KEY,
     delivery_id TEXT NOT NULL UNIQUE,
     received_at BIGINT NOT NULL,
@@ -685,10 +686,17 @@ CREATE TABLE github_app_deliveries (
 );
 
 CREATE INDEX idx_github_app_deliveries_ready ON github_app_deliveries(state,available_at,received_at);
+CREATE INDEX idx_github_app_deliveries_team ON github_app_deliveries(queue_team,received_at,digest) WHERE state!='done';
 
 CREATE TABLE github_app_delivery_ids (
     delivery_id TEXT NOT NULL PRIMARY KEY,
     digest TEXT NOT NULL REFERENCES github_app_deliveries(digest) ON DELETE CASCADE
+);
+
+CREATE TABLE github_app_delivery_effects (
+    digest TEXT NOT NULL REFERENCES github_app_deliveries(digest) ON DELETE CASCADE,
+    effect TEXT NOT NULL,
+    PRIMARY KEY (digest, effect)
 );
 
 CREATE TABLE team_deletions (

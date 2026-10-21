@@ -23,7 +23,17 @@ import (
 func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, code runspec.Source, override string, options Options) (runspec.Git, runspec.Source, *projectconfig.Config, error) {
 	lookup := func(ref string) (string, error) {
 		if options.ResolveRef != nil {
-			return options.ResolveRef(ctx, ref)
+			return resolveReference(ref, false, func(refs []string) (map[string]string, error) {
+				commits := make(map[string]string)
+				for _, candidate := range refs {
+					sha, err := options.ResolveRef(ctx, candidate)
+					if err != nil {
+						return nil, err
+					}
+					commits[candidate] = sha
+				}
+				return commits, nil
+			})
 		}
 		return ResolveRef(ctx, spec, ref, options)
 	}

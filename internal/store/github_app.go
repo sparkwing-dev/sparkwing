@@ -182,7 +182,7 @@ func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation i
 // installation.
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error) {
 	var team Team
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
+	err := o.s.githubDeliveryEffect(ctx, fmt.Sprintf("unbind:%d", installation), func(tx *storeTx) error {
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
 		}); err != nil {
@@ -209,7 +209,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 	if suspended {
 		flag = 1
 	}
-	return o.s.inTx(ctx, func(tx *storeTx) error {
+	return o.s.githubDeliveryEffect(ctx, fmt.Sprintf("suspend:%d", installation), func(tx *storeTx) error {
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
 		}); err != nil {
@@ -423,7 +423,7 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	if !ok {
 		return ErrInvalidInput
 	}
-	_, err := t.s.exec(ctx, `UPDATE github_app_triggers SET repository = ?, installation_id = ? WHERE team = ? AND repository_id = ?`,
+	_, err := t.s.githubDeliveryExec(ctx, fmt.Sprintf("rename-triggers:%s:%d:%d", t.team, installation, repositoryID), `UPDATE github_app_triggers SET repository = ?, installation_id = ? WHERE team = ? AND repository_id = ?`,
 		repo.Slug(), installation, string(t.team), repositoryID)
 	return err
 }

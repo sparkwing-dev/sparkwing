@@ -17,7 +17,7 @@ import (
 type scheduleFixturePolicy struct{ IntakePolicy }
 
 func (p scheduleFixturePolicy) ResolveScheduleSource(_ context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: row.RepoPath})
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: row.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: row.GitHubRepositoryID > 0, Value: row.GitHubRepositoryID}})
 	request.Version = 1
 	request.Git = runspec.Git{Repository: repository, Ref: row.GitBranch, SHA: row.LockedRef}
 	request.Source.Ref = request.Git.SHA
@@ -381,13 +381,48 @@ func TestScheduleRunNowPreservesCadenceWhilePaused(t *testing.T) {
 type scheduleFollowPolicy struct {
 	scheduleFixturePolicy
 	revision *string
+	failure  *error
 }
 
 func (p scheduleFollowPolicy) ResolveScheduleSource(ctx context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
+	if p.failure != nil && *p.failure != nil {
+		return request, *p.failure
+	}
 	request, err := p.scheduleFixturePolicy.ResolveScheduleSource(ctx, row, request)
 	request.Git.SHA = *p.revision
 	request.Source.Ref = request.Git.SHA
 	return request, err
+}
+
+func TestAppScheduleReplayKeepsFirstSealWithoutSourceProvider(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		t.Run(fmt.Sprint(unavailable), func(t *testing.T) {
+			tenant, row, due := scheduleIntakeFixture(t, 1)
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET locked_ref=''`)
+			row.LockedRef = ""
+			revision := "0123456789abcdef0123456789abcdef01234567"
+			var failure error
+			tenant.s.intakePolicy = scheduleFollowPolicy{scheduleFixturePolicy: scheduleFixturePolicy{tenant.s.intakePolicy}, revision: &revision, failure: &failure}
+			first, err := tenant.AdmitScheduledRun(t.Context(), row, due)
+			if err != nil {
+				t.Fatal(err)
+			}
+			revision = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			if unavailable {
+				failure = fmt.Errorf("source provider unavailable")
+			}
+			replay, err := tenant.AdmitScheduledRun(t.Context(), row, due)
+			if err != nil || !replay.Replayed || !reflect.DeepEqual(first.Request, replay.Request) {
+				t.Fatalf("committed App schedule depended on source provider: run=%s replayed=%t err=%v", replay.RunID, replay.Replayed, err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_installations SET suspended=1`)
+			if replay, err := tenant.AdmitScheduledRun(t.Context(), row, due); err == nil || replay.RunID != "" {
+				t.Fatalf("revoked App authority replayed: run=%s err=%v", replay.RunID, err)
+			}
+			rewriteSchemaCount(t, tenant.s.db, "runs", 1)
+			rewriteSchemaCount(t, tenant.s.db, "triggers", 1)
+		})
+	}
 }
 
 func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {

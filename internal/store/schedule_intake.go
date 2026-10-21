@@ -109,67 +109,47 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return AdmissionResult{}, err
 		}
 		input.Source.Location = runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}
-		if schedule.LockedRef != "" {
-			git, code, err := source.ResolveRevisions(ctx, input.Git, input.Source, "", nil)
-			if err != nil {
-				return AdmissionResult{}, err
-			}
-			input.Git, input.Source = git, code
-		}
 	}
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
-	if in.consent != "" {
-		var replay AdmissionResult
-		err := t.s.inTx(ctx, func(tx *storeTx) error {
-			if err := in.lock(ctx, tx); err != nil {
-				return err
-			}
-			tx.scheduleAdmission = &in
-			if !schedule.Declared || caller == nil && schedule.Paused {
-				return bindingRefusal()
-			}
-			p, err := in.resolve(ctx, tx)
-			if err != nil {
-				return err
-			}
-			scope, err := intakeScope(p, schedule.Pipeline)
-			if err != nil {
-				return err
-			}
-			var id string
-			err = tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND idempotency_scope=? AND idempotency_key=?`, t.team, scope, key).Scan(&id)
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			stored, err := admissionResultTx(ctx, tx, t.team, id)
-			if err != nil {
-				return err
-			}
-			if schedule.LockedRef == "" {
-				input.Git.SHA = stored.Request.Request.Git.SHA
-			}
-			input.Source.Ref = stored.Request.Request.Source.Ref
-			digest, err := tx.store.planServices().CanonicalHash(struct {
-				Request  runspec.Request
-				Delivery string
-			}{Request: input})
-			if err != nil {
-				return err
-			}
-			replay, _, err = replayAdmissionTx(ctx, tx, t.team, scope, key, string(digest))
-			return err
-		})
-		if err != nil || replay.Replayed {
-			return replay, err
-		}
-	}
-	// safety: only the controller's fire-time lookup through the App names the default
-	// branch; an armed request cannot carry one in.
+	// safety: only fire-time lookup may name the default branch; an armed request cannot carry one in.
 	input.Git.DefaultBranch = runspec.Optional[string]{}
+	// Replays identify persisted intent because source facts can change after admission.
+	intent := input
+	var replay AdmissionResult
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := in.lock(ctx, tx); err != nil {
+			return err
+		}
+		tx.scheduleAdmission = &in
+		if !schedule.Declared || caller == nil && schedule.Paused {
+			return bindingRefusal()
+		}
+		p, err := in.resolve(ctx, tx)
+		if err != nil {
+			return err
+		}
+		scope, err := intakeScope(p, schedule.Pipeline)
+		if err != nil {
+			return err
+		}
+		digest, err := intakeDigest(tx, IntakeRequest{Request: intent}, admittedSnapshot{})
+		if err != nil {
+			return err
+		}
+		replay, _, err = replayAdmissionTx(ctx, tx, t.team, scope, key, string(digest))
+		return err
+	})
+	if err != nil || replay.Replayed {
+		return replay, err
+	}
+	if in.consent == "" && schedule.LockedRef != "" {
+		git, code, err := source.ResolveRevisions(ctx, input.Git, input.Source, "", nil)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		input.Git, input.Source = git, code
+	}
 	if policy, ok := t.s.intakePolicy.(ScheduleSourcePolicy); ok && (in.consent != "" || schedule.LockedRef == "") {
 		var err error
 		input, err = policy.ResolveScheduleSource(ctx, schedule, input)
@@ -179,7 +159,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	}
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
-	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input}
+	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input, Intent: &intent}
 	var result AdmissionResult
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		if err := in.lock(ctx, tx); err != nil {

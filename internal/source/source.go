@@ -69,7 +69,8 @@ type Options struct {
 	// BundleTransport supplies signed-object transfers; the source client always refuses redirects.
 	// Nil uses the standard HTTP transport.
 	BundleTransport http.RoundTripper
-	// ResolveRef resolves a revision through host authority; nil uses Git with Access.
+	// ResolveRef reads an exact qualified ref through host authority. An absent ref
+	// returns an empty commit and nil error; nil uses Git with Access.
 	ResolveRef func(context.Context, string) (string, error)
 	// ReadFile reads one committed file through host authority; nil fetches it with Access.
 	ReadFile  func(ctx context.Context, sha, name string) ([]byte, bool, error)

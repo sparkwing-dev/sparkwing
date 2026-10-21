@@ -675,8 +675,8 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		githubAppIgnored(w, "the event carries no time this controller can read")
 		return
 	}
-	// safety: a digest is forgotten one retention after receipt, so an event older than that is a replay
-	// nothing remembers; GitHub redelivers for days, not months, so no real delivery is refused.
+	// safety: completed digests expire after the receipt-based replay window.
+	// Compare event time with receipt so queued work never ages out while pending.
 	if received, ok := r.Context().Value(githubDeliveryReceivedKey{}).(time.Time); ok && received.Sub(intake.at) > store.GitHubAppDeliveryRetention-githubAppClockSkew {
 		s.logger.Warn("github app delivery refused: older than the replay window", "team", string(in.Team),
 			"event", event, "repo", repo.Slug(), "event_at", intake.at.UTC(), "delivery", delivery)

@@ -496,9 +496,15 @@ func (c *Client) RepositoryByID(ctx context.Context, token string, id int64) (Re
 	return repo, err
 }
 
-// ResolveCommit reads the commit selected by a branch or tag with a token
-// restricted to that repository.
+// ErrRefNotFound means the repository has no requested ref.
+var ErrRefNotFound = errors.New("githubapp: source ref is unavailable")
+
+// ResolveCommit reads the commit selected by a qualified ref or full commit ID
+// with a token restricted to that repository.
 func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, repo, ref string) (string, error) {
+	if ref != "HEAD" && !runspec.IsCommitID(ref) && !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") {
+		return "", errors.New("githubapp: source ref must be qualified")
+	}
 	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
 	if err != nil {
 		return "", err
@@ -506,7 +512,10 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	var commit struct {
 		SHA string `json:"sha"`
 	}
-	err = c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(ref), "Bearer "+tok.Token, &commit)
+	err = c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(strings.TrimPrefix(ref, "refs/")), "Bearer "+tok.Token, &commit)
+	if errors.Is(err, errNotFound) {
+		return "", ErrRefNotFound
+	}
 	if err != nil {
 		return "", err
 	}
@@ -547,7 +556,7 @@ func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owne
 	var head struct {
 		SHA string `json:"sha"`
 	}
-	if err := c.getJSON(ctx, root+"/commits/"+url.PathEscape(meta.DefaultBranch), auth, &head); err != nil {
+	if err := c.getJSON(ctx, root+"/commits/"+url.PathEscape("heads/"+meta.DefaultBranch), auth, &head); err != nil {
 		return RepositoryFileSnapshot{}, err
 	}
 	if !runspec.IsCommitID(head.SHA) {

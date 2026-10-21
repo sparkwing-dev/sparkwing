@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestGitHubDeliveryReplayAndEventBinding(t *testing.T) {
@@ -119,5 +121,99 @@ func TestGitHubDeliveryRetriesRemainClaimable(t *testing.T) {
 		if err := op.FinishGitHubDelivery(ctx, *claim, "temporary failure", at); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	ctx := t.Context()
+	team := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := team.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	op := st.AsOperator()
+	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`), now); err != nil {
+		t.Fatal(err)
+	}
+	old, err := op.ClaimGitHubDelivery(ctx, now)
+	if err != nil || old == nil {
+		t.Fatalf("claim: %+v, %v", old, err)
+	}
+	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true, now); err != nil {
+		t.Fatal(err)
+	}
+	// Crash after the effect commits, before delivery completion.
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st = target.Open(t)
+	op = st.AsOperator()
+	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7}}`), now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	newer, err := op.ClaimGitHubDelivery(ctx, now.Add(time.Second))
+	if err != nil || newer == nil || newer.ID != "unsuspend" {
+		t.Fatalf("newer: %+v, %v", newer, err)
+	}
+	if err := op.SetGitHubAppInstallationSuspended(newer.Context(ctx), 7, false, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.FinishGitHubDelivery(ctx, *newer, "", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := op.ClaimGitHubDelivery(ctx, now.Add(3*time.Minute))
+	if err != nil || replay == nil || replay.ID != "suspend" {
+		t.Fatalf("replay: %+v, %v", replay, err)
+	}
+	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true, now.Add(3*time.Minute)); err == nil {
+		t.Fatal("stale worker applied lifecycle mutation")
+	}
+	if err := op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := op.GitHubAppInstallationTeam(ctx, 7)
+	if err != nil || got.Suspended {
+		t.Fatalf("applied suspend overwrote newer unsuspend after restart: %+v, %v", got, err)
+	}
+}
+
+func TestGitHubDeliveryFailedLifecycleDoesNotKeepReceipt(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	team := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := team.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	op := st.AsOperator()
+	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`), now); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := op.ClaimGitHubDelivery(ctx, now)
+	if err != nil || claim == nil {
+		t.Fatalf("claim: %+v, %v", claim, err)
+	}
+	db := teststore.SQL(t, st)
+	if _, err := db.Exec(`ALTER TABLE cron_schedules RENAME TO unavailable_cron_schedules`); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.SetGitHubAppInstallationSuspended(claim.Context(ctx), 7, true, now); err == nil {
+		t.Fatal("suspension committed without schedule withdrawal")
+	}
+	got, err := op.GitHubAppInstallationTeam(ctx, 7)
+	if err != nil || got.Suspended {
+		t.Fatalf("failed suspension leaked: %+v, %v", got, err)
+	}
+	if _, err := db.Exec(`ALTER TABLE unavailable_cron_schedules RENAME TO cron_schedules`); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.SetGitHubAppInstallationSuspended(claim.Context(ctx), 7, true, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err = op.GitHubAppInstallationTeam(ctx, 7)
+	if err != nil || !got.Suspended {
+		t.Fatalf("failed effect kept receipt and prevented retry: %+v, %v", got, err)
 	}
 }

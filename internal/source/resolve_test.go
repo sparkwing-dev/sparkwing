@@ -77,3 +77,30 @@ func TestResolveRemoteRefWithoutLocalTrackingBranch(t *testing.T) {
 		t.Fatalf("remote-only branch resolved to %q: %v", got, err)
 	}
 }
+
+func TestResolveRefRefusesAmbiguousNamesAndCommitPrefixes(t *testing.T) {
+	repo, first := sourcetest.Repository(t)
+	sourcetest.Git(t, repo, "tag", "main", first)
+	sourcetest.Git(t, repo, "commit", "--allow-empty", "-m", "next")
+	second := sourcetest.Git(t, repo, "rev-parse", "HEAD")
+	sourcetest.Git(t, repo, "branch", "main", second)
+	remote := "https://8.8.8.8/team/repo"
+	sourcetest.Remote(t, map[string]string{remote: repo})
+	for _, local := range []bool{true, false} {
+		spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote}
+		if local {
+			spec.RemoteURL, spec.LocalCheckout = "", repo
+		}
+		options := source.Options{Access: &access{}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+		for _, ref := range []string{"main", first[:12], "refs/heads/main~1", "main^", "HEAD@{0}"} {
+			if sha, err := source.ResolveRef(t.Context(), spec, ref, options); err == nil {
+				t.Errorf("local=%v ref=%s resolved to %s", local, ref, sha)
+			}
+		}
+		for ref, want := range map[string]string{"refs/heads/main": second, "refs/tags/main": first} {
+			if sha, err := source.ResolveRef(t.Context(), spec, ref, options); err != nil || sha != want {
+				t.Errorf("local=%v ref=%s resolved to %s: %v", local, ref, sha, err)
+			}
+		}
+	}
+}

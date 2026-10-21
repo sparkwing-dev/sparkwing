@@ -60,6 +60,18 @@ func TestLauncherClaimProbesBoundedWorkPerTeamAndRotates(t *testing.T) {
 	if err != nil || third.Team != "a" || third.NodeID != "a00" {
 		t.Fatalf("bounded probe did not wrap to ready work: claim=%+v err=%v", third, err)
 	}
+	for _, claim := range []UnitClaim{second, third} {
+		if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL WHERE team='a' AND node_id=?`, claim.NodeID)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND node_id='a01'`, execution)
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'a','run','z00','pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`)
+	fourth, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil || fourth.NodeID != "a01" {
+		t.Fatalf("new arrivals bypassed wrapped contender: node=%s err=%v", fourth.NodeID, err)
+	}
 }
 
 func TestLauncherFinalRefusalKeepsRoundRobinProgress(t *testing.T) {
@@ -99,5 +111,56 @@ func TestLauncherUnpricedBacklogDoesNotDelayAnotherTeam(t *testing.T) {
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claim.Team != "b" {
 		t.Fatalf("unpriced backlog starved another team: claim=%+v err=%v", claim, err)
+	}
+}
+
+func TestLauncherClaimsDrainEligiblePageBeforeNewArrivals(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	demand.JobNamespace = "cloud"
+	demand.ExcludedTeamLabels = []string{admission.TeamNodeValue("cloud", "b")}
+	for i := range 2 * launcherProbePerTeam {
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, fmt.Sprintf("a%02d", i))
+	}
+	for i := range 2 * launcherProbePerTeam {
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+		if err != nil || claim.NodeID != fmt.Sprintf("a%02d", i) {
+			t.Fatalf("eligible contender %d bypassed: kind=%s run=%s node=%s err=%v", i, claim.Kind, claim.RunID, claim.NodeID, err)
+		}
+		if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL WHERE team='a' AND node_id=?`, claim.NodeID)
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, fmt.Sprintf("z%02d", i))
+	}
+}
+
+func TestLauncherMixedKindsKeepUnawardedEligibleContenders(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	demand.JobNamespace = "cloud"
+	demand.ExcludedTeamLabels = []string{admission.TeamNodeValue("cloud", "b")}
+	demand.Kinds = []capability.UnitKind{capability.UnitNode, capability.UnitPlan}
+	for i := range 2 * launcherProbePerTeam {
+		id := fmt.Sprintf("a%02d", i)
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, id)
+		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,?,'ci','running',request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, id, i+2)
+		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,?,'plan',available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE team='a' AND id='run'`, id)
+	}
+	first, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil || first.Kind != capability.UnitNode || first.NodeID != "a00" {
+		t.Fatalf("initial mixed-kind award: claim=%+v err=%v", first, err)
+	}
+	if err := s.ReleaseUnit(t.Context(), first, first.Award.CapabilityPrefix); err != nil {
+		t.Fatal(err)
+	}
+	demand.Kinds = []capability.UnitKind{capability.UnitPlan}
+	for i := range 2 * launcherProbePerTeam {
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+		if err != nil || claim.RunID != fmt.Sprintf("a%02d", i) {
+			t.Fatalf("unawarded plan %d bypassed: kind=%s run=%s node=%s err=%v", i, claim.Kind, claim.RunID, claim.NodeID, err)
+		}
+		if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=? WHERE team='a' AND id=?`, s.now().Add(time.Hour).UnixNano(), claim.RunID)
 	}
 }

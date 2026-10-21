@@ -45,7 +45,7 @@ func TestGitHubInboxPersistsBeforeGitHubAndRetriesWithoutRedelivery(t *testing.T
 				} else {
 					body = `{"id":701,"default_branch":"main"}`
 				}
-			case "GET /repos/acme/widgets/commits/main":
+			case "GET /repos/acme/widgets/commits/heads/main":
 				body = `{"sha":"0123456789abcdef0123456789abcdef01234567"}`
 			case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
 				if projectConfig != "" {
@@ -165,5 +165,44 @@ func TestGitHubInboxPersistsBeforeGitHubAndRetriesWithoutRedelivery(t *testing.T
 	rows, err = tenant.ListRuns(t.Context(), store.RunFilter{Limit: 100})
 	if err != nil || len(rows) != 6 {
 		t.Fatalf("runs after partial budget retry=%d, %v; outcome=%s", len(rows), err, outcome.body.String())
+	}
+}
+
+func TestGitHubInboxLifecycleCrashBeforeCompletionKeepsNewerState(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) {
+		s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook"})
+	})
+	s, ctx, now := e.Server, t.Context(), time.Now()
+	engineSQL(t, e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',42,'acme','Organization',1,1)`)
+	op := e.Store.AsOperator()
+	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7,"app_id":1}}`), now); err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `CREATE TRIGGER fail_delivery_completion BEFORE UPDATE ON github_app_deliveries WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'crash before completion'); END`)
+	if outcome, err := s.processNextGitHubDelivery(ctx, now); err == nil || outcome == nil || outcome.retryReason() != "" {
+		t.Fatalf("completion failure: %+v, %v", outcome, err)
+	}
+	got, err := op.GitHubAppInstallationTeam(ctx, 7)
+	if err != nil || !got.Suspended {
+		t.Fatalf("mutation did not commit before completion failure: %+v, %v", got, err)
+	}
+	engineSQL(t, e.Store, `DROP TRIGGER fail_delivery_completion`)
+	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7,"app_id":1}}`), now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, err := s.processNextGitHubDelivery(ctx, now.Add(time.Second)); err != nil || outcome == nil || outcome.retryReason() != "" {
+		t.Fatalf("newer delivery: %+v, %v", outcome, err)
+	}
+	restarted := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook"})
+	if outcome, err := restarted.processNextGitHubDelivery(ctx, now.Add(3*time.Minute)); err != nil || outcome == nil || outcome.retryReason() != "" {
+		t.Fatalf("reclaimed delivery: %+v, %v", outcome, err)
+	}
+	got, err = op.GitHubAppInstallationTeam(ctx, 7)
+	if err != nil || got.Suspended {
+		t.Fatalf("replayed applied suspend overwrote newer unsuspend: %+v, %v", got, err)
 	}
 }

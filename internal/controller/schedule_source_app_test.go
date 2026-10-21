@@ -25,18 +25,29 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name  string
-		pin   string
-		trust runspec.TrustClass
+		name          string
+		pin           string
+		trust         runspec.TrustClass
+		refusal       bool
+		missingBranch bool
+		matchingTag   bool
 	}{
 		{name: "execution commit", trust: runspec.TrustSchedule},
 		{name: "branch pin", pin: "origin/code", trust: runspec.TrustAsserted},
 		{name: "commit pin", pin: pinned, trust: runspec.TrustSchedule},
+		{name: "ambiguous branch and tag pin", pin: "main", refusal: true},
+		{name: "short commit prefix pin", pin: pinned[:12], refusal: true},
+		{name: "qualified revision expression pin", pin: "refs/heads/main~1", refusal: true},
+		{name: "explicit branch pin", pin: "refs/heads/main", trust: runspec.TrustSchedule},
+		{name: "explicit tag pin", pin: "refs/tags/main", trust: runspec.TrustAsserted},
+		{name: "matching branch and tag pin", pin: "main", matchingTag: true, trust: runspec.TrustSchedule},
+		{name: "tag cannot replace missing execution branch", missingBranch: true, refusal: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lookups := map[string]int{}
 			cfg := githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 				body := ""
+				status := http.StatusOK
 				switch r.Method + " " + r.URL.Path {
 				case "GET /repos/acme/widgets/installation":
 					body = `{"id":7,"app_id":1}`
@@ -46,10 +57,18 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 					body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":42,"login":"acme","type":"Organization"}}]}`
 				case "GET /repositories/701":
 					body = `{"id":701,"default_branch":"main"}`
-				case "GET /repos/acme/widgets/commits/main":
+				case "GET /repos/acme/widgets/commits/heads/main", "GET /repos/acme/widgets/commits/refs/heads/main":
 					lookups["main"]++
 					body = `{"sha":"` + execution + `"}`
-				case "GET /repos/acme/widgets/commits/code":
+					if tc.missingBranch {
+						status = http.StatusNotFound
+					}
+				case "GET /repos/acme/widgets/commits/refs/heads/main~1", "GET /repos/acme/widgets/commits/heads/main~1", "GET /repos/acme/widgets/commits/refs/tags/main", "GET /repos/acme/widgets/commits/main", "GET /repos/acme/widgets/commits/tags/main", "GET /repos/acme/widgets/commits/" + pinned[:12]:
+					body = `{"sha":"` + pinned + `"}`
+					if tc.matchingTag {
+						body = `{"sha":"` + execution + `"}`
+					}
+				case "GET /repos/acme/widgets/commits/code", "GET /repos/acme/widgets/commits/heads/code":
 					lookups["code"]++
 					body = `{"sha":"` + pinned + `"}`
 				case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
@@ -60,10 +79,12 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 					if tc.pin != "" {
 						body += "    source: " + tc.pin + "\n"
 					}
+				case "GET /repos/acme/widgets/commits/heads/" + pinned[:12], "GET /repos/acme/widgets/commits/tags/" + pinned[:12]:
+					status = http.StatusNotFound
 				default:
 					t.Fatalf("unexpected GitHub call: %s %s", r.Method, r.URL)
 				}
-				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 			})}}
 			e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithGitHubApp(cfg) })
 			engineSQL(t, e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',42,'acme','Organization',1,1)`)
@@ -78,15 +99,21 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 				t.Fatal(err)
 			}
 			admitted, err := tenant.AdmitScheduledRun(t.Context(), row, time.Now())
+			if tc.refusal {
+				if err == nil {
+					t.Fatal("ambiguous or abbreviated source pin admitted")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			request := admitted.Request.Request
 			wantSource := execution
-			if tc.pin != "" {
+			if tc.pin != "" && tc.pin != "refs/heads/main" && !tc.matchingTag {
 				wantSource = pinned
 			}
-			if request.Git.SHA != execution || request.Source.Ref != wantSource || admitted.Request.Provenance.Trust() != tc.trust || lookups["main"] != 1 {
+			if request.Git.SHA != execution || request.Source.Ref != wantSource || admitted.Request.Provenance.Trust() != tc.trust || lookups["main"] == 0 {
 				t.Fatalf("fire execution=%s source=%s trust=%s lookups=%v, want execution=%s source=%s trust=%s", request.Git.SHA, request.Source.Ref, admitted.Request.Provenance.Trust(), lookups, execution, wantSource, tc.trust)
 			}
 			engineSQL(t, e.Store, `DELETE FROM github_app_automation`)

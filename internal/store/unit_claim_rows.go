@@ -307,6 +307,8 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			candidates = append(candidates, found...)
 		}
 		var best *queuedClaim
+		contenders := map[capability.UnitKind]bool{}
+		rejected := map[capability.UnitKind]queuedClaim{}
 		for i := range candidates {
 			candidate := &candidates[i]
 			standing, err := unitEligibilityTx(ctx, tx, team, candidate.unit, demand, eligibilityChecks{fit: true, billing: true, claim: true})
@@ -319,11 +321,25 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 				return UnitRef{}, err
 			}
 			if !standing.ok() {
+				if !contenders[candidate.unit.Kind] {
+					rejected[candidate.unit.Kind] = *candidate
+				}
 				continue
 			}
+			contenders[candidate.unit.Kind] = true
 			candidate.score = standing.score
 			if best == nil || candidate.score > best.score || candidate.score == best.score && candidate.created < best.created {
 				best = candidate
+			}
+		}
+		// Eligible rows stay ahead of scan progress until an award removes them.
+		for kind, last := range rejected {
+			value, err := json.Marshal(launcherProbePosition{Created: last.created, RunID: last.unit.RunID, NodeID: last.unit.NodeID, Generation: last.unit.SourceGeneration})
+			if err != nil {
+				return UnitRef{}, err
+			}
+			if err := setCreditSettingTx(ctx, tx, "launcher_probe/"+string(team)+"/"+string(kind), string(value)); err != nil {
+				return UnitRef{}, err
 			}
 		}
 		if best != nil {
@@ -406,14 +422,7 @@ func launcherKindCandidatesTx(ctx context.Context, tx *storeTx, c capability.Cap
 		if err != nil {
 			return nil, err
 		}
-	}
-	if len(found) > 0 {
-		last := found[len(found)-1]
-		value, err := json.Marshal(launcherProbePosition{Created: last.created, RunID: last.unit.RunID, NodeID: last.unit.NodeID, Generation: last.unit.SourceGeneration})
-		if err != nil {
-			return nil, err
-		}
-		if err := setCreditSettingTx(ctx, tx, key, string(value)); err != nil {
+		if err := setCreditSettingTx(ctx, tx, key, `{}`); err != nil {
 			return nil, err
 		}
 	}

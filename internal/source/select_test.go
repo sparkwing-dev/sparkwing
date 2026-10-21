@@ -128,10 +128,12 @@ func TestSelectUsesHostAuthorityForExecutionAndConfiguredSourceRevisions(t *test
 				ResolveRef: func(_ context.Context, ref string) (string, error) {
 					lookedUp = append(lookedUp, ref)
 					switch ref {
-					case "main":
+					case "refs/heads/main":
 						return execution, nil
-					case "origin/code":
+					case "refs/heads/code":
 						return pinned, nil
+					case "refs/tags/main":
+						return "", nil
 					default:
 						t.Fatalf("unexpected revision lookup %q", ref)
 						return "", nil
@@ -152,12 +154,12 @@ func TestSelectUsesHostAuthorityForExecutionAndConfiguredSourceRevisions(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantSHA, wantLookups := execution, []string{"main"}
+			wantSHA, wantLookups := execution, []string{"refs/heads/main", "refs/tags/main"}
 			if pin != "" {
 				wantSHA = pinned
 			}
 			if pin == "origin/code" {
-				wantLookups = append(wantLookups, pin)
+				wantLookups = append(wantLookups, "refs/heads/code")
 			}
 			if git.SHA != execution || code.Ref != wantSHA || code.RequestedRef != pin || !slices.Equal(lookedUp, wantLookups) {
 				t.Fatalf("selection git=%s source=%+v lookups=%v, want source=%s lookups=%v", git.SHA, code, lookedUp, wantSHA, wantLookups)

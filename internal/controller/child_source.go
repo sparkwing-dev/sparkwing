@@ -75,10 +75,11 @@ func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, reques
 				return "", err
 			}
 			repo, _ := store.ParseGitHubRepo(repository.FullName)
-			for _, prefix := range []string{"origin/", "refs/remotes/origin/"} {
-				ref = strings.TrimPrefix(ref, prefix)
+			sha, err := s.githubApp.client.ResolveCommit(ctx, installation.InstallationID, repo.Owner, repo.Name, ref)
+			if errors.Is(err, githubapp.ErrRefNotFound) {
+				return "", nil
 			}
-			return s.githubApp.client.ResolveCommit(ctx, installation.InstallationID, repo.Owner, repo.Name, ref)
+			return sha, err
 		}
 	}
 	git, code, _, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
