@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
@@ -14,8 +15,8 @@ func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	got := Config{Budget: b}.resolvedBudget()
-	if got.Source != BudgetSourceUnknown {
-		t.Errorf("source = %q, want %q", got.Source, BudgetSourceUnknown)
+	if got.Source != wingwire.BudgetSourceUnknown {
+		t.Errorf("source = %q, want %q", got.Source, wingwire.BudgetSourceUnknown)
 	}
 
 	got = Config{}.resolvedBudget()

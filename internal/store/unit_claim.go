@@ -153,9 +153,6 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	named := demand
 	named.Kinds = nil
 	named.Target = &unit
-	if err = lockRankedUnitTx(ctx, tx, team, unit); err != nil {
-		return UnitClaim{}, err
-	}
 	if _, err := queuedUnitTx(ctx, tx, p.Capability, named, []capability.UnitKind{unit.Kind}); err != nil {
 		return UnitClaim{}, err
 	}

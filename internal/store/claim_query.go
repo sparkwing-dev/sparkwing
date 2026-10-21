@@ -166,12 +166,6 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	return f, nil
 }
 
-// safety: the queue lock serializes fairness accounting with awards on PostgreSQL; SQLite already serializes writers.
-func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
-	var ordinal int64
-	return tx.QueryRowContext(ctx, `SELECT ordinal FROM claim_awards WHERE singleton=1`+tx.forUpdate()).Scan(&ordinal)
-}
-
 func recordClaimAwardTx(ctx context.Context, tx *storeTx, team Team) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE claim_awards SET ordinal=ordinal+1 WHERE singleton=1`); err != nil {
 		return err

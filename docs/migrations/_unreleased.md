@@ -33,7 +33,8 @@ in claim matching.
 All claimants now share eligibility and fair-share ordering. An eligible team's
 last successful award determines its next turn, followed by job arrival and
 identity. Queue preference scores are removed. Explicit preference holds and
-placement ranking remain. Registration and temporary occupancy do not decide whether a push
+placement ranking remain. Concurrent claims share queue arbitration before
+billing. Registration and temporary occupancy do not decide whether a push
 needs credits. A placement policy permitting unmetered execution can wait for
 its runner. Cloud-only work still needs funds at intake.
 

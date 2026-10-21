@@ -265,7 +265,7 @@ func (b *takeoverBudget) spend(version string) bool {
 	return true
 }
 
-var ErrTakeoverExhausted = errors.New("wingd/client: repeated daemon takeover did not resolve the version skew")
+var errTakeoverExhausted = errors.New("wingd/client: repeated daemon takeover did not resolve the version skew")
 
 var errDaemonDraining = errors.New("wingd/client: daemon is draining")
 
@@ -280,7 +280,7 @@ func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) 
 	}
 	return fmt.Errorf("%w: after %d attempts the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
 		"Run `sparkwing daemon restart` to replace it, or set SPARKWING_HOME to run against a daemon of your own",
-		ErrTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
+		errTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
 }
 
 func spawnFailed(home, sock string, serr, dialErr error) error {

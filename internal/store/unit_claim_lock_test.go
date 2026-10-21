@@ -49,3 +49,45 @@ func TestClaimUnitLocksOwnerBeforeRun(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimQueueLedgerLockOrder(t *testing.T) {
+	for _, inverse := range []bool{false, true} {
+		t.Run(map[bool]string{false: "queue then ledger", true: "ledger then queue"}[inverse], func(t *testing.T) {
+			s, recorder := newRecordingStore(t)
+			recorder.reset()
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				if !inverse {
+					if err := lockClaimQueueTx(t.Context(), tx); err != nil {
+						return err
+					}
+				}
+				if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+					return err
+				}
+				// Ignoring a refused acquisition must still roll back the transaction.
+				_ = lockClaimQueueTx(t.Context(), tx)
+				return nil
+			})
+			if inverse {
+				if err == nil || !strings.Contains(err.Error(), "claim lock order") {
+					t.Fatalf("inverse lock order committed: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			locks := 0
+			for _, query := range recorder.snapshot() {
+				if strings.HasPrefix(query, "SELECT ordinal FROM claim_awards") {
+					locks++
+				}
+			}
+			want := 1
+			if inverse {
+				want = 0
+			}
+			if locks != want {
+				t.Fatalf("queue acquisitions = %d, want %d", locks, want)
+			}
+		})
+	}
+}

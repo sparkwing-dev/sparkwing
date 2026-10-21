@@ -55,8 +55,6 @@ func (a machineAdmitter) Acquire(ctx context.Context, request wingwire.Admission
 
 type machineLease struct{ lease *wingdclient.Lease }
 
-func (l machineLease) Resources() wingwire.HostResources { return l.lease.Resources }
-
 func (l machineLease) Token() string  { return l.lease.Token }
 func (l machineLease) Release() error { return l.lease.Release() }
 func (l machineLease) Watch(evicted func(wingwire.Evicted), stopped func(wingwire.Cancel)) error {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -120,23 +119,10 @@ func unitReadyTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (tim
 	return time.Unix(0, at.Int64).UTC(), at.Valid, err
 }
 
-// safety: every claim decision for a unit, an ask or an award, holds the unit's ranking lock from before it reads
-// readiness until its transaction ends, so asks and awards serialize. It is always taken before the unit's rows,
-// and scans take it in one global unit order, so claims cannot deadlock.
-func lockRankedUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	if tx.dialect != DialectPostgres {
-		return nil
-	}
-	return advisoryLockTx(ctx, tx, "ranking:"+string(team)+"/"+string(unit.RunID)+"/"+string(unit.Kind)+"/"+string(unit.NodeID)+"/"+strconv.FormatInt(unit.SourceGeneration, 10))
-}
-
 // safety: a held claimant's ask is written in the claim transaction, whether that transaction awards another unit
 // or nothing, so later polls cannot erase it. For RankingAward after the window, only the window's winner, the
 // best-ranked asker recorded inside it, may take the unit; a newcomer of any rank waits for the deadline.
 func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, claimant string, liveness time.Duration) (bool, error) {
-	if err := lockRankedUnitTx(ctx, tx, team, unit); err != nil {
-		return false, err
-	}
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant}, false)
 	if err != nil {
 		return false, err

@@ -11,10 +11,9 @@ import (
 type BudgetSource = wingwire.BudgetSource
 
 const (
-	BudgetSourceUnset   = wingwire.BudgetSourceUnset
-	BudgetSourceFlag    = wingwire.BudgetSourceFlag
-	BudgetSourceConfig  = wingwire.BudgetSourceConfig
-	BudgetSourceUnknown = wingwire.BudgetSourceUnknown
+	BudgetSourceUnset  = wingwire.BudgetSourceUnset
+	BudgetSourceFlag   = wingwire.BudgetSourceFlag
+	BudgetSourceConfig = wingwire.BudgetSourceConfig
 )
 
 type ResolvedBudget struct {
@@ -59,7 +58,7 @@ func (c Config) resolvedBudget() ResolvedBudget {
 	}
 	src, origin := c.BudgetSource, c.BudgetOrigin
 	if src == "" || src == BudgetSourceUnset {
-		src, origin = BudgetSourceUnknown, ""
+		src, origin = wingwire.BudgetSourceUnknown, ""
 	}
 	return ResolvedBudget{Budget: c.Budget, Source: src, Origin: origin}
 }

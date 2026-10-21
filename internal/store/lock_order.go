@@ -50,6 +50,24 @@ func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
 }
 
+// Claims take the controller lease, queue arbitration, authority and unit rows,
+// then the ledger. Arbitration serializes asks and awards without unit ranking locks.
+func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
+	if tx.claimQueueLocked {
+		return nil
+	}
+	if tx.ledgerLocked {
+		tx.err = errors.New("claim lock order: queue arbitration must precede the ledger")
+		return tx.err
+	}
+	var ordinal int64
+	if err := tx.QueryRowContext(ctx, `SELECT ordinal FROM claim_awards WHERE singleton=1`+tx.forUpdate()).Scan(&ordinal); err != nil {
+		return err
+	}
+	tx.claimQueueLocked = true
+	return nil
+}
+
 // lockAuthorityThenRunTx takes a writer's authority chain, then its run.
 // Renewal holds authority while it waits for the run, so taking the run first
 // deadlocks against it (B15).

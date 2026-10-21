@@ -828,9 +828,11 @@ SQL eligibility predicate. It includes readiness, current grants and bindings,
 repository access, trust, all selector terms, exclusions, placement and funding.
 There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
-ordinal. Award takes the unit's ranking lock before rechecking SQL eligibility,
-then reserves the unit and funding atomically. A committed ask observed after
-that lock can still hold the award for its preferred claimant.
+ordinal. Queue arbitration serializes asks and awards. Claims take the controller
+lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
+arbitration after a ledger lock poisons the transaction before acquiring the queue
+lock. Award rechecks SQL eligibility and reserves the unit and funding atomically.
+A committed ask can still hold the award for its preferred claimant.
 Runner matching has no CPU or memory fit. Cloud size labels map to credit classes
 in one catalog. Existing AND-between-terms and OR-within-terms semantics remain.
 

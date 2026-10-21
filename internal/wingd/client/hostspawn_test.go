@@ -103,7 +103,7 @@ func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
 	if !errors.Is(err, ErrDaemonHostFailed) {
 		t.Fatalf("error %v does not match ErrDaemonHostFailed", err)
 	}
-	if errors.Is(err, ErrTakeoverExhausted) {
+	if errors.Is(err, errTakeoverExhausted) {
 		t.Fatal("a broken successor was reported as a version skew after burning the takeover budget")
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
@@ -207,7 +207,7 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 	if !errors.Is(err, ErrDaemonTooOld) {
 		t.Fatalf("error %v does not match ErrDaemonTooOld", err)
 	}
-	if errors.Is(err, ErrTakeoverExhausted) {
+	if errors.Is(err, errTakeoverExhausted) {
 		t.Fatal("a client that never takes over reported an exhausted takeover budget")
 	}
 	msg := err.Error()
@@ -313,7 +313,7 @@ func TestEnsureDaemon_HostingClientStillTakesOver(t *testing.T) {
 		Backoff:     5 * time.Millisecond,
 	})
 
-	if !errors.Is(err, ErrTakeoverExhausted) {
+	if !errors.Is(err, errTakeoverExhausted) {
 		t.Fatalf("hosting client ended with %v, want the exhausted-takeover report", err)
 	}
 	if got := spawns.Load(); got != int64(maxTakeoverAttempts) {

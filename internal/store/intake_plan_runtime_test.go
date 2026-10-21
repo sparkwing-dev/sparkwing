@@ -545,6 +545,32 @@ func TestAdmissionHereAwardRetainsRequestingAuthority(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "capabilities", 2)
 }
 
+func TestLocalForegroundClaimCannotLoseToBackgroundQueue(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	request.Request.Origin = runspec.OriginLocal
+	request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+	admitted, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil || admitted.HereCapabilityPrefix == "" {
+		t.Fatalf("local admission: %v", err)
+	}
+	background := authorityRoot("local-queue", "a")
+	background.Subject.Kind = capability.SubjectLocal
+	background.Grants = []capability.Grant{capability.TriggersClaim}
+	authorityPersist(t, tenant.s, background)
+	op := tenant.s.AsOperator()
+	if claim, err := op.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: background.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("background queue took foreground work: %+v %v", claim, err)
+	}
+	target := &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}
+	if _, err := op.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: background.Prefix, Target: target}); err == nil {
+		t.Fatal("named background claim bypassed the foreground reservation")
+	}
+	claim, err := op.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: admitted.HereCapabilityPrefix, Target: target})
+	if err != nil || claim.RunID != admitted.RunID || claim.Award.Generation != 1 {
+		t.Fatalf("foreground handoff lost its first award: %+v %v", claim, err)
+	}
+}
+
 func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 	for _, mode := range []string{"valid", "member", "foreign_run", "wrong_scope", "revoked"} {
 		t.Run(mode, func(t *testing.T) {

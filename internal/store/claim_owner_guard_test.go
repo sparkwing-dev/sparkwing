@@ -29,7 +29,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"launcherSweep", "launcher_sweep/", "launcher_claim_team", "queuedLauncherUnitTx", "SAVEPOINT launcher_award"} {
+		for _, forbidden := range []string{"launcherSweep", "launcher_sweep/", "launcher_claim_team", "queuedLauncherUnitTx", "SAVEPOINT launcher_award", "lockRankedUnitTx", `"ranking:"`} {
 			if strings.Contains(string(raw), forbidden) {
 				t.Fatalf("%s restores %s", path, forbidden)
 			}

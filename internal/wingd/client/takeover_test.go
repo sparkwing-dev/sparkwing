@@ -99,8 +99,8 @@ func TestTakeoverReplacesSameVersionDaemonWithoutNonBlockingAdmission(t *testing
 				DialTimeout: 200 * time.Millisecond,
 				Backoff:     5 * time.Millisecond,
 			})
-			if !errors.Is(err, ErrTakeoverExhausted) {
-				t.Fatalf("same-version old daemon result = %v, want ErrTakeoverExhausted", err)
+			if !errors.Is(err, errTakeoverExhausted) {
+				t.Fatalf("same-version old daemon result = %v, want errTakeoverExhausted", err)
 			}
 			if got := spawns.Load(); got != int64(maxTakeoverAttempts) {
 				t.Fatalf("successor spawns = %d, want %d", got, maxTakeoverAttempts)
@@ -241,7 +241,7 @@ func TestAlternatingPredecessorsStillExhaustTheBudget(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrTakeoverExhausted) {
+		if !errors.Is(err, errTakeoverExhausted) {
 			t.Fatalf("alternating predecessors ended with %v, want the version conflict reported", err)
 		}
 		if got := spawns.Load(); got != int64(maxTotalTakeovers) {

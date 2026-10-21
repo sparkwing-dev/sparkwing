@@ -149,6 +149,7 @@ func lockLedgerTx(ctx context.Context, tx *storeTx, team Team) (*ledgerTx, error
 			return nil, err
 		}
 	}
+	tx.ledgerLocked = true
 	return &ledgerTx{storeTx: tx, team: team}, nil
 }
 
