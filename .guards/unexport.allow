@@ -47,7 +47,7 @@ internal/limits	1
 internal/localsecrets	8
 internal/logpretty	6
 internal/logutil	2
-internal/nodehost	52
+internal/nodehost	51
 internal/nodeproto	43
 internal/objectguard	50
 internal/oidcissuer	8
@@ -80,7 +80,7 @@ internal/sparks	5
 internal/sparkwingruntime	5
 internal/storage/logseg	24
 internal/storage/s3	1
-internal/store	264
+internal/store	263
 internal/store/internal/storetest	1
 internal/store/teststore	5
 internal/tokenpark	3

@@ -307,7 +307,7 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path, level
 				return err
 			}
 		}
-		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 || spec.CancelTimeoutMS != nil && *spec.CancelTimeoutMS < 0 {
+		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 {
 			return planInvalid(at, "timeout is negative")
 		}
 		if v.context.Expansion {

@@ -84,11 +84,6 @@
               "name": "queue_timeout_ms",
               "kind": "int64",
               "omitempty": true
-            },
-            {
-              "name": "cancel_timeout_ms",
-              "kind": "int64",
-              "omitempty": true
             }
           ]
         },

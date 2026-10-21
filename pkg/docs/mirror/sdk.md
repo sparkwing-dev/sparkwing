@@ -351,7 +351,7 @@ cost one and queueing. An explicit zero cost also fails validation.
 Reused group definitions at the same level must agree on scope, capacity and
 policy. Plan and job groups have separate namespaces. The same name at both
 levels identifies two budgets. The host computes the scoped key. `QueueTimeout`
-bounds waiting and `CancelTimeout` bounds cancellation of existing holders.
+bounds waiting.
 
 `plan.Concurrency(group, cost...)` holds a budget for the whole run. Plan groups
 accept global or run scope. Pipeline acceptance refuses a box-scoped plan group

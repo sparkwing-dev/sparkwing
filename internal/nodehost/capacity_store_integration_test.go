@@ -197,16 +197,14 @@ func TestStoreAdmissionSQLiteCancelOthersReachesPlanUnitRenewal(t *testing.T) {
 	second := newStoreHostFixtureOn(t, first.Store, planGrouped("global", "cancel_others", "a"), runspec.Options{})
 	for _, fixture := range []*storeHostFixture{first, second} {
 		admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
-		if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) {
-			if fixture == second {
-				beat, err := first.Store.AsOperator().RenewUnit(t.Context(), first.Actor.CapabilityPrefix, false)
-				if err != nil || !beat.CancelRequested {
-					t.Fatalf("superseded plan renewed without cancellation: %+v, %v", beat, err)
-				}
-			}
-			return RunCompletion{}, nil
-		}); err != nil {
+		if err := admission.plan(t.Context(), fixture.Accepted); err != nil {
 			t.Fatal(err)
+		}
+		if fixture == second {
+			beat, err := first.Store.AsOperator().RenewUnit(t.Context(), first.Actor.CapabilityPrefix, false)
+			if err != nil || !beat.CancelRequested {
+				t.Fatalf("superseded plan renewed without cancellation: %+v, %v", beat, err)
+			}
 		}
 	}
 }
@@ -334,10 +332,8 @@ func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) 
 	doc := planGrouped("global", "queue", "a")
 	fixture := newStoreHostFixture(t, doc)
 	admission := storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
-	interrupted := errors.New("owner interrupted")
 	for range 2 {
-		_, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, interrupted })
-		if !errors.Is(err, interrupted) {
+		if err := admission.plan(t.Context(), fixture.Accepted); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -362,10 +358,7 @@ func TestStoreAdmissionRequiresCoordinationStore(t *testing.T) {
 	if err := admission.Node(t.Context(), accepted, row, func(context.Context) error { t.Error("job ran without store"); return nil }); err == nil {
 		t.Fatal("missing store admitted work")
 	}
-	if _, err := admission.Run(t.Context(), accepted, func(context.Context) (RunCompletion, error) {
-		t.Error("run started without store")
-		return RunCompletion{}, nil
-	}); err == nil {
+	if err := admission.plan(t.Context(), accepted); err == nil {
 		t.Fatal("missing store admitted run")
 	}
 }
@@ -388,7 +381,7 @@ func TestStoreAdmissionSQLitePlanGroupBoundsTwoRuns(t *testing.T) {
 	first := newStoreHostFixture(t, planGrouped("global", "queue", "a"))
 	second := newStoreHostFixtureOn(t, first.Store, planGrouped("global", "queue", "a"), runspec.Options{})
 	firstAdmission := storeAdmission{Store: first.Tenant, Owner: first.Actor}
-	if _, err := firstAdmission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
+	if err := firstAdmission.plan(t.Context(), first.Accepted); err != nil {
 		t.Fatal(err)
 	}
 	secondAdmission := storeAdmission{Store: second.Tenant, Owner: second.Actor}
@@ -399,9 +392,8 @@ func TestStoreAdmissionSQLitePlanGroupBoundsTwoRuns(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	ran := false
-	if _, err := secondAdmission.Run(ctx, second.Accepted, func(context.Context) (RunCompletion, error) { ran = true; return RunCompletion{}, nil }); err != nil || !ran {
-		t.Fatalf("second ran=%v err=%v", ran, err)
+	if err := secondAdmission.plan(ctx, second.Accepted); err != nil {
+		t.Fatal(err)
 	}
 	state, err := second.Tenant.GetConcurrencyState(t.Context(), "plan:global:deploys")
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != second.Accepted.RunID || len(state.Waiters) != 0 {

@@ -2540,8 +2540,7 @@ The single-group acquire, heartbeat, release, waiter cancellation, holder
 observation, resolve and force-release endpoints are deleted. Their request and
 response types and authority-bearing mutation methods are deleted with them.
 
-Group reads use `controllerwire.QueueGroup`, with one-based waiter positions
-and numeric `cancel_timeout_ns`. Members need `runs.read`. Claims need
+Group reads use `controllerwire.QueueGroup`, with one-based waiter positions. Members need `runs.read`. Claims need
 `node.report` or `runs.state` and a binding to the accepted group and current
 work generation. The decoder supplies the selected group. The resolver supplies
 the authenticated run, job and generation. There are no caller-selected holder

@@ -25,15 +25,19 @@ pointing at job-level box scope, because a run has no single execution host.
 Controller scheduling reserves no machine compute. A launcher award waits for its authenticated activation before
 any job-level box-scoped key can be derived.
 
-An owner admits plan groups around scheduling, without a run-wide compute
-reservation. Each job passes through the same admission operation under its
+An owner enters reconciliation immediately, without a run-wide compute
+reservation. Plan admission gates only new ready, approval and expansion releases.
+Recovery always settles completed work and follows released jobs while plan
+capacity is unavailable. Each job passes through the same admission operation under its
 award before source preparation or execution. Burst self-claims use that same
 operation before reserving compute for reconciliation. Reentrant execution
-reuses its live reservation. Owner closure evaluation uses the same order;
-independent expansion evaluations admit plan capacity under their expansion
-lease, then compute. Their source job is already terminal, so its released job
-groups are not revived. Planning before acceptance has no accepted groups to
-acquire; its existing unit lease remains its authority.
+reuses its live reservation. Owner closure evaluation retains its committed
+admission behavior while predicate placement awaits Korey's ruling. The known
+opposite-host box-group cycle and skip-to-SDKError conversion are tracked by the
+skipped ws12j #1 simulation seed. Independent expansion evaluations admit plan
+capacity under their expansion lease, then compute. Their source job is already
+terminal, so its released job groups are not revived. Planning before acceptance
+has no accepted groups to acquire. Its existing unit lease remains its authority.
 
 Waiting never holds a later resource while acquiring an earlier one. A job
 waiting for plan capacity holds neither job capacity nor compute. A job waiting
@@ -42,17 +46,31 @@ logical capacity is granted. Scheduling and state followers hold no compute,
 so a remote claimant holding logical capacity can obtain machine resources.
 Within each logical stage the existing sorted-key acquisition is reused.
 
-Continuous holders and waiters survive ownership handoff. Admission adopts
-only live persisted bindings and preserves waiter arrival order. Recovery first
-revalidates plan capacity, then job capacity; an elapsed lease never revives a
-reservation. Later job reservations are discarded if recovery must wait on the
-earlier plan stage. Unit renewal keeps both stages live while execution waits.
+Continuous holders and waiters survive ownership handoff. Queue selection,
+promotion and adoption use one continuity rule: a live unit lease and a live
+capacity lease preserve a waiter's arrival order across owner generations. An
+elapsed lease never revives a reservation. Recovery reconciles immediately.
+It revalidates plan capacity before releasing new work, then job capacity under
+the actual execution award. Later job reservations are discarded before waiting
+for an earlier stage. Unit renewal keeps both stages live while execution waits.
 
 Compute releases after process cleanup has joined. Job terminal transitions
 release job holders and waiters atomically. Run completion releases plan
 holders and waiters after child executions drain. Process loss leaves logical
 capacity attached to durable work, bounded by its unit lease, for adoption or
 expiry. No placement owns a second semaphore implementation.
+
+`TestAdmissionDeterministicSimulation` steps six runs on two authenticated hosts
+through both logical levels, run and box scopes, capacities 1-2, ownership handoff,
+crash recovery and lease lapse. Every step checks capacity, key binding and FIFO.
+A fair drain checks progress and settlement. CI runs 12 fixed seeds. Set
+`SPARKWING_ADMISSION_SIM_SEEDS` to run a larger fixed set.
+`TestNativeAdmissionSeededRecovery` varies completion and release order with
+compute enabled and disabled, checking settlement and new ready, approval and
+expansion gates. Mutations restoring the recovery-entry and waiter-continuity
+defects fail their respective simulations. The real-store predicate seed
+`TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J` stays skipped pending
+the placement ruling. Set `SPARKWING_REPRO_WS12J_PREDICATE=1` to reproduce it.
 
 Regressions exercise controller-owned plan contention, owner and independent
 claim contention with a finite compute budget, compute enabled and disabled,

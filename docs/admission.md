@@ -4,6 +4,14 @@ Sparkwing's admission daemon decides when work may consume CPU and memory on one
 machine. It does not assess job risk. Risk declarations and approvals remain
 deterministic pipeline contracts and are unaffected by admission mode.
 
+Logical capacity follows one order: plan groups, job groups, then machine
+CPU and memory.
+
+Recovery reconciles released work immediately. If plan capacity has lapsed,
+running jobs finish and their results settle while the run waits to reacquire.
+Only new ready, approval and expansion releases wait for that capacity. A live
+waiter keeps its arrival order through owner handoff.
+
 For a run that waited, was refused, or lost its daemon, see [Diagnosing admission](diagnosing-admission.md).
 
 The local controller starts on demand. It stays up for runs, queued triggers,

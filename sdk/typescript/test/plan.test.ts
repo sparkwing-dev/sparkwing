@@ -23,13 +23,13 @@ test("flat declarations keep zero and false settings and leave authority to the 
     .env("CI", "1")
     .env("NODE_OPTIONS", "--stack-trace-limit=50", startup());
   build.cache(goModules(), npm(), dir("./web/node_modules/", "web/package-lock.json"));
-  const capacity = new ConcurrencyGroup("builds", { scope: "box", capacity: 2, queueTimeoutMs: 0, cancelTimeoutMs: 0 });
+  const capacity = new ConcurrencyGroup("builds", { scope: "box", capacity: 2, queueTimeoutMs: 0 });
   plan.concurrency(capacity).resources({ cores: 0 });
   build.concurrency(capacity, 2);
   const doc = plan.toDoc();
   assert.deepEqual(Object.keys(doc).sort(), ["admission_class", "claim_wait_ms", "concurrency", "jobs", "priority", "resources", "source"]);
   assert.deepEqual(doc.source, { depth: 0, full_history: false, tags: false, submodules: false, lfs: false });
-  assert.deepEqual(doc.concurrency, [{ group: "builds", scope: "box", capacity: 2, queue_timeout_ms: 0, cancel_timeout_ms: 0 }]);
+  assert.deepEqual(doc.concurrency, [{ group: "builds", scope: "box", capacity: 2, queue_timeout_ms: 0 }]);
   assert.deepEqual(doc.jobs[0], {
     id: "gate",
     approval: { timeout_ms: 0, on_timeout: "deny" },

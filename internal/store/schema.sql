@@ -537,7 +537,6 @@ CREATE TABLE concurrency_waiters (
     cache_key_hash TEXT NOT NULL DEFAULT '',
     leader_run_id TEXT NOT NULL DEFAULT '',
     leader_node_id TEXT NOT NULL DEFAULT '',
-    cancel_timeout_ns BIGINT NOT NULL DEFAULT 0,
     cost BIGINT NOT NULL DEFAULT 1,
     declared_capacity BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),

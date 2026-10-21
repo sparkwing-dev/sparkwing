@@ -66,7 +66,7 @@ func validQueueGroup(result controllerwire.QueueGroup, group string) bool {
 		holders[h.HolderID] = true
 	}
 	for i, w := range result.Waiters {
-		if w.RunID == "" || w.ArrivedAt.IsZero() || w.Position != i+1 || w.Cost < 0 || w.CancelTimeout < 0 || w.Policy == "" {
+		if w.RunID == "" || w.ArrivedAt.IsZero() || w.Position != i+1 || w.Cost < 0 || w.Policy == "" {
 			return false
 		}
 	}

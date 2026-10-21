@@ -249,11 +249,6 @@ type ConcurrencyLimit struct {
     // before failing with failure_reason "queue_timeout". Zero waits
     // indefinitely. Only meaningful with OnLimit [Queue].
     QueueTimeout time.Duration
-    // CancelTimeout bounds how long evicted holders have to cooperatively
-    // release before they are force-released, so a stuck victim can't pin
-    // the budget indefinitely. Zero uses the backend default. Only
-    // meaningful with OnLimit [CancelOthers].
-    CancelTimeout time.Duration
 }
 ```
 

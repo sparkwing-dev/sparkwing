@@ -198,11 +198,27 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 }
 
 func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter ConcurrencyWaiter) (bool, error) {
-	generation, err := capacityGenerationTx(ctx, tx, team, waiter.RunID, waiter.NodeID)
+	var expires int64
+	if err := tx.QueryRowContext(ctx, `SELECT lease_expires_at FROM concurrency_waiters WHERE team=? AND key=? AND run_id=? AND node_id=?`, team, waiter.Key, waiter.RunID, waiter.NodeID).Scan(&expires); err != nil {
+		return false, err
+	}
+	return capacityContinuousTx(ctx, tx, team, CapacityBinding{RunID: waiter.RunID, NodeID: waiter.NodeID, Generation: waiter.generation}, expires)
+}
+
+func capacityContinuousTx(ctx context.Context, tx *storeTx, team Team, binding CapacityBinding, expires int64) (bool, error) {
+	generation, err := capacityGenerationTx(ctx, tx, team, binding.RunID, binding.NodeID)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
-	return generation == waiter.generation, err
+	if err != nil {
+		return false, err
+	}
+	// A node generation replaces execution; an owner generation only transfers reconciliation.
+	if binding.NodeID != "" && generation != binding.Generation {
+		return false, nil
+	}
+	ceiling, err := capacityLeaseCeilingTx(ctx, tx, team, binding.RunID, binding.NodeID, expires)
+	return ceiling > tx.now().UnixNano(), err
 }
 
 func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, keys []string, fence capacityFence) error {

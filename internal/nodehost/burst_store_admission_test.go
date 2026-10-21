@@ -133,7 +133,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := scopedConcurrencyKey("db", "run", fixture.Input.RunID, "")
+	key := fixtureJobCapacityKey("db", "run", fixture.Input.RunID, "")
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
 	admitter := admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {

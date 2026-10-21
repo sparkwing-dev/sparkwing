@@ -55,7 +55,7 @@ func (f *concurrencyTransactions) ReadAuthorizedGroup(_ context.Context, a capab
 	return &store.ConcurrencyState{
 		Key: group, Capacity: 2, EffectiveCapacity: 1, UsedCost: 1,
 		Holders: []store.ConcurrencyHolder{{HolderID: "other-holder", RunID: "run", NodeID: "sibling", Superseded: true, Cost: 1, ClaimedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), LeaseExpiresAt: time.Date(2026, 10, 14, 12, 1, 0, 0, time.UTC)}},
-		Waiters: []store.ConcurrencyWaiter{{RunID: "next", NodeID: "next-job", Position: 0, Policy: "queue", ArrivedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), CancelTimeout: 3 * time.Second}},
+		Waiters: []store.ConcurrencyWaiter{{RunID: "next", NodeID: "next-job", Position: 0, Policy: "queue", ArrivedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)}},
 	}, f.entered(a)
 }
 
@@ -111,7 +111,7 @@ func TestConcurrencyHTTPGroupRead(t *testing.T) {
 			h := concurrencyServer(b, f, "deploy")
 			w := concurrencyRequest(h, b, "GET", "/api/v1/queue/groups/deploy", "")
 			var result controllerwire.QueueGroup
-			if w.Code != 200 || f.calls != 1 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Group != "deploy" || len(result.Waiters) != 1 || result.Waiters[0].Position != 1 || result.Waiters[0].CancelTimeout != 3*time.Second || result.Holders[0].JobID != "sibling" || !result.Holders[0].Superseded {
+			if w.Code != 200 || f.calls != 1 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Group != "deploy" || len(result.Waiters) != 1 || result.Waiters[0].Position != 1 || result.Holders[0].JobID != "sibling" || !result.Holders[0].Superseded {
 				t.Fatalf("group HTTP %d %s calls=%d", w.Code, w.Body, f.calls)
 			}
 			w = concurrencyRequest(h, b, "GET", "/api/v1/queue/groups/foreign", "")

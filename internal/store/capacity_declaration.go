@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -78,9 +77,5 @@ func sealedCapacityRequestTx(ctx context.Context, tx *storeTx, team Team, req ac
 		return acquireSlotRequest{}, bindingRefusal()
 	}
 	req.Capacity, req.Cost, req.Policy = group.Capacity, group.Cost, group.OnLimit
-	req.CancelTimeout = 0
-	if group.CancelTimeoutMS != nil {
-		req.CancelTimeout = time.Duration(*group.CancelTimeoutMS) * time.Millisecond
-	}
 	return req, nil
 }

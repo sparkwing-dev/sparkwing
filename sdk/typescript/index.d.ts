@@ -78,7 +78,7 @@ export type Scope = "run" | "box" | "global";
 /** contract: Capacity behavior never implies result reuse. */
 export type OnLimit = "queue" | "fail" | "skip" | "cancel_others";
 /** contract: Optional fields distinguish inherited policy from explicit values. */
-export interface ConcurrencyLimit { capacity?: number; scope?: Scope; onLimit?: OnLimit; queueTimeoutMs?: number; cancelTimeoutMs?: number; }
+export interface ConcurrencyLimit { capacity?: number; scope?: Scope; onLimit?: OnLimit; queueTimeoutMs?: number; }
 /** contract: One declaration lets all members share the same capacity policy. */
 export declare class ConcurrencyGroup { constructor(name: string, limit?: ConcurrencyLimit); readonly name: string; readonly limit: Readonly<ConcurrencyLimit>; toString(): string; }
 /** contract: Approval zero timeout preserves indefinite waits where the owner can wait. */

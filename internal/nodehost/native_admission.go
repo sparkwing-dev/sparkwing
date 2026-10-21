@@ -64,9 +64,6 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 			return RunCompletion{}, err
 		}
 		ctx = context.WithValue(ctx, admissionContext{}, a)
-		if capacity != nil {
-			return capacity.Run(ctx, accepted, body)
-		}
 		return body(ctx)
 	}
 	// safety: readiness reserves no compute: a claimant may already hold the job's capacity.
@@ -74,7 +71,7 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		if err := a.check(row.Execution.Concurrency); err != nil {
 			return err
 		}
-		if capacity != nil && row.ReadyAt == nil && row.ClaimedBy == "" {
+		if capacity != nil {
 			if err := capacity.plan(ctx, accepted); err != nil {
 				return err
 			}

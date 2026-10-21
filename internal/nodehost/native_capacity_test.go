@@ -127,7 +127,7 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			}
 			var executed atomic.Int32
 			started, release := make(chan string, 2), make(chan struct{})
-			key := scopedConcurrencyKey("db", test.scope, fixture.Accepted.RunID, fixture.Actor.Owner.Holder)
+			key := fixtureJobCapacityKey("db", test.scope, fixture.Accepted.RunID, fixture.Actor.Owner.Holder)
 			owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				position := executed.Add(1)
 				state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
@@ -259,7 +259,7 @@ func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := scopedConcurrencyKey("db", "run", fixture.Accepted.RunID, "")
+			key := fixtureJobCapacityKey("db", "run", fixture.Accepted.RunID, "")
 			claimed.Acquire = func(ctx context.Context, spec source.Spec, _ source.Options) (*source.Entry, error) {
 				state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
 				if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 {

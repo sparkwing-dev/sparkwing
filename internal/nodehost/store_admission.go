@@ -34,18 +34,11 @@ type AdmissionFailure struct {
 	Outcome store.NodeState
 	Reason  string
 	Err     error
+	plan    bool
 }
 
 func (e *AdmissionFailure) Error() string { return e.Err.Error() }
 func (e *AdmissionFailure) Unwrap() error { return e.Err }
-
-// Run retains plan capacity under the unit lease, including after an owner exits.
-func (a *storeAdmission) Run(ctx context.Context, accepted AcceptedRun, body func(context.Context) (RunCompletion, error)) (RunCompletion, error) {
-	if err := a.plan(ctx, accepted); err != nil {
-		return RunCompletion{}, err
-	}
-	return body(ctx)
-}
 
 func (a *storeAdmission) plan(ctx context.Context, accepted AcceptedRun) error {
 	spec, err := admissionSpec(accepted)
@@ -98,12 +91,12 @@ func (a *storeAdmission) acquire(ctx context.Context, runID, jobID string, gener
 		case store.AcquireGranted, store.AcquireCancellingOthers:
 			return nil
 		case store.AcquireSkipped:
-			return &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("concurrency capacity is full")}
+			return &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("concurrency capacity is full"), plan: jobID == ""}
 		case store.AcquireFailed:
 			if response.FailureReason == store.FailureQueueTimeout {
-				return &AdmissionFailure{Outcome: store.NodeFailed, Reason: store.FailureQueueTimeout, Err: errQueueTimeout}
+				return &AdmissionFailure{Outcome: store.NodeFailed, Reason: store.FailureQueueTimeout, Err: errQueueTimeout, plan: jobID == ""}
 			}
-			return &AdmissionFailure{Outcome: store.NodeFailed, Err: errors.New("concurrency capacity is full")}
+			return &AdmissionFailure{Outcome: store.NodeFailed, Err: errors.New("concurrency capacity is full"), plan: jobID == ""}
 		case store.AcquireQueued:
 		default:
 			return errors.New("capacity acquisition returned an unknown decision")

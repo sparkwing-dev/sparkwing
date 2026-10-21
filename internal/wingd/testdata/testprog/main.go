@@ -114,7 +114,6 @@ func runHold(args []string) {
 	run := fs.String("run", "run", "")
 	sem := fs.String("sem", "", "")
 	policy := fs.String("sem-policy", "queue", "")
-	cancelTimeoutMS := fs.Int64("cancel-timeout-ms", 0, "")
 	cores := fs.Float64("cores", 0, "")
 	graceMS := fs.Int("daemon-grace-ms", 3000, "")
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
@@ -162,8 +161,7 @@ func runHold(args []string) {
 	if *sem != "" {
 		req.Semaphores = []wingwire.SemaphoreClaim{{
 			Name: *sem, Capacity: 1, Cost: 1,
-			Policy:          wingwire.Policy(*policy),
-			CancelTimeoutMS: *cancelTimeoutMS,
+			Policy: wingwire.Policy(*policy),
 		}}
 		if *semaphoresOnly {
 			req.SemaphoresOnly = true

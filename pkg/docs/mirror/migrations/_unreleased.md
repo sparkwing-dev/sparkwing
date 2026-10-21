@@ -2400,7 +2400,7 @@ policy was skip, fail or cancel-others. Queue views show
 `waiting to reacquire <group>`.
 
 Read a group through `GET /api/v1/queue/groups/{group}`. Group waiter positions
-are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds. Member
+are one-based. Member
 priority changes use `PUT /api/v1/queue/groups/{group}/priority`.
 
 The single-group `acquire`, `heartbeat`, `release`, `cancel-waiter`, `holder`,

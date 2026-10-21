@@ -2819,8 +2819,6 @@ components:
           type: string
         cache_key_hash:
           type: string
-        cancel_timeout_ns:
-          type: integer
         cost:
           type: integer
         job_id:
@@ -4484,10 +4482,6 @@ components:
     internal.nodeproto.ConcurrencySpec:
       additionalProperties: true
       properties:
-        cancel_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
         capacity:
           anyOf:
             - type: integer
@@ -5008,10 +5002,6 @@ components:
     internal.runspec.Concurrency:
       additionalProperties: true
       properties:
-        cancel_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
         capacity:
           type: integer
         cost:

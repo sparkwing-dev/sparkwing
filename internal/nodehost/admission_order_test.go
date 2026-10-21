@@ -66,7 +66,7 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 		return &source.Entry{Engine: engine.Resolved{Identity: *spec.Engine}, SHA: spec.SHA, RepoKey: spec.RepoKey}, nil
 	}
 	execute := ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-		state, err := fixture.Tenant.GetConcurrencyState(ctx, scopedConcurrencyKey("db", "run", fixture.Accepted.RunID, ""))
+		state, err := fixture.Tenant.GetConcurrencyState(ctx, fixtureJobCapacityKey("db", "run", fixture.Accepted.RunID, ""))
 		if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != input.NodeID {
 			return fmt.Errorf("execution lost logical capacity: %+v %v", state, err)
 		}

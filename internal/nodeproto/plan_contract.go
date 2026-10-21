@@ -85,13 +85,12 @@ type ClosureSpec struct {
 
 // ConcurrencySpec declares membership at plan or job scope; the host computes scoped keys.
 type ConcurrencySpec struct {
-	Group           string  `json:"group"`
-	Scope           *string `json:"scope,omitempty"`
-	Capacity        *int    `json:"capacity,omitempty"`
-	Cost            *int    `json:"cost,omitempty"`
-	OnLimit         *string `json:"on_limit,omitempty"`
-	QueueTimeoutMS  *int64  `json:"queue_timeout_ms,omitempty"`
-	CancelTimeoutMS *int64  `json:"cancel_timeout_ms,omitempty"`
+	Group          string  `json:"group"`
+	Scope          *string `json:"scope,omitempty"`
+	Capacity       *int    `json:"capacity,omitempty"`
+	Cost           *int    `json:"cost,omitempty"`
+	OnLimit        *string `json:"on_limit,omitempty"`
+	QueueTimeoutMS *int64  `json:"queue_timeout_ms,omitempty"`
 }
 
 // ResourceSpec preserves unset values until the setting's seal point.

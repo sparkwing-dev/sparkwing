@@ -3,7 +3,6 @@ package nodehost
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -22,7 +21,7 @@ func FuzzConcurrencyKeyRoundTrip(f *testing.F) {
 	f.Fuzz(func(t *testing.T, identity, group string) {
 		keys := map[string]bool{}
 		for _, scope := range []string{"global", "run", "box"} {
-			key := ConcurrencyKey(nodeproto.ConcurrencySpec{Scope: new(scope), Group: group}, identity, identity)
+			key := runspec.ConcurrencyKey("job", scope, identity, group)
 			gotLevel, gotScope, gotIdentity, gotGroup, ok := runspec.ParseConcurrencyKey(key)
 			wantIdentity := identity
 			if scope == "global" {
@@ -37,8 +36,8 @@ func FuzzConcurrencyKeyRoundTrip(f *testing.F) {
 }
 
 func TestScopeKeySeparatesScopes(t *testing.T) {
-	global := ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "collide@advbox-host"}, "run-1", "advbox-host")
-	box := ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "collide", Scope: new("box")}, "run-1", "advbox-host")
+	global := runspec.ConcurrencyKey("job", "global", "", "collide@advbox-host")
+	box := runspec.ConcurrencyKey("job", "box", "advbox-host", "collide")
 	if global == box {
 		t.Fatalf("global and box keys collide: %q", global)
 	}
@@ -47,7 +46,7 @@ func TestScopeKeySeparatesScopes(t *testing.T) {
 		{"box", "db", "box (host1)"},
 		{"run", "db", "run (run-7)"},
 	} {
-		key := ConcurrencyKey(nodeproto.ConcurrencySpec{Group: tc.name, Scope: new(tc.scope)}, "run-7", "host1")
+		key := fixtureJobCapacityKey(tc.name, tc.scope, "run-7", "host1")
 		if got := ScopeLabelFromKey(key); got != tc.want {
 			t.Errorf("label of %q = %q, want %q", key, got, tc.want)
 		}
@@ -59,7 +58,7 @@ func TestScopeKeyLabelRecoversQualifierWithSeparators(t *testing.T) {
 		{"box", "box (host:with@seps)"},
 		{"run", "run (run:1@x)"},
 	} {
-		key := ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "db", Scope: new(tc.scope)}, "run:1@x", "host:with@seps")
+		key := fixtureJobCapacityKey("db", tc.scope, "run:1@x", "host:with@seps")
 		if got := ScopeLabelFromKey(key); got != tc.want {
 			t.Errorf("label of %q = %q, want %q", key, got, tc.want)
 		}
@@ -75,11 +74,24 @@ func FuzzConcurrencyKeyPreservesIdentity(f *testing.F) {
 			return
 		}
 		for _, scope := range []string{"run", "box"} {
-			a := ConcurrencyKey(nodeproto.ConcurrencySpec{Group: nA, Scope: new(scope)}, qA, qA)
-			b := ConcurrencyKey(nodeproto.ConcurrencySpec{Group: nB, Scope: new(scope)}, qB, qB)
+			a := runspec.ConcurrencyKey("job", scope, qA, nA)
+			b := runspec.ConcurrencyKey("job", scope, qB, nB)
 			if a == b {
 				t.Fatalf("%s keys alias (%q,%q) and (%q,%q): %q", scope, qA, nA, qB, nB, a)
 			}
 		}
 	})
+}
+
+func fixtureJobCapacityKey(name, scope, runID, boxID string) string {
+	identity := ""
+	switch scope {
+	case "run":
+		identity = runID
+	case "box":
+		identity = boxID
+	default:
+		scope = "global"
+	}
+	return runspec.ConcurrencyKey("job", scope, identity, name)
 }

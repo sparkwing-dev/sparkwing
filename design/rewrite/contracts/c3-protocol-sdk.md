@@ -357,7 +357,7 @@ are part of this contract.
 | `nodehost.CapacityStore`, `NativeAdmission`, `ComposeNativeAdmission` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The private store adapter binds the current run owner on each invocation. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
 | `nodehost.NativeHostConfig.Admission`, `NativeConfig.Admission` | Carry one composed admission value. Required requester compute is independent of placement eligibility. Runners may omit compute while retaining the supplied capacity store. |
 | `nodehost.AdmissionFailure` | Preserve admission outcome and reason through cancellation and fenced executor reports. |
-| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Admit plan capacity around scheduling and validate readiness without holding compute. Store-owned groups retain capacity through persisted completion. Supersession requests holder cancellation before replacement. |
+| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Enter reconciliation immediately and gate new ready, approval and expansion releases on plan capacity without holding compute. Store-owned groups retain capacity through persisted completion. Supersession requests holder cancellation before replacement. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
@@ -372,7 +372,7 @@ are part of this contract.
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NewNodeInput` | Constructs execution from a persisted awarded row, its accepted seal, the selected engine and the granted runner. |
 | `nodehost.ProcessAuthorities`, `NewProcessAuthorities`, `ProcessAuthorityDependencies` | Own narrowed node-host bearers in memory, provide fresh authentication snapshots and process-bound resource checks, resolve live services, and revoke authority on process exit or registry shutdown. |
-| `nodehost.ConcurrencyKey` | Encode and decode scoped group identity without separator collisions. |
+| `runspec.ConcurrencyKey`, `runspec.ParseConcurrencyKey`, `nodehost.ScopeLabelFromKey` | Share the persisted key codec and render its scope without separator collisions. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
 | `nodehost.ExecutorDependencies.Log` | Delivers masked host diagnostics under the committed attempt after step/retry writes. Delivery errors stop further author code, prevent retries and propagate after joining work. |

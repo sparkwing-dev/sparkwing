@@ -36,17 +36,16 @@ type QueueGroupHolder struct {
 
 // QueueGroupWaiter retains the controller's position and coalescing selection.
 type QueueGroupWaiter struct {
-	BlockingReason string        `json:"blocking_reason,omitempty"`
-	RunID          string        `json:"run_id"`
-	JobID          string        `json:"job_id,omitempty"`
-	ArrivedAt      time.Time     `json:"arrived_at"`
-	Policy         string        `json:"policy"`
-	CacheKeyHash   string        `json:"cache_key_hash,omitempty"`
-	LeaderRunID    string        `json:"leader_run_id,omitempty"`
-	LeaderJobID    string        `json:"leader_job_id,omitempty"`
-	CancelTimeout  time.Duration `json:"cancel_timeout_ns,omitempty"`
-	Cost           int           `json:"cost"`
-	Position       int           `json:"position"`
+	BlockingReason string    `json:"blocking_reason,omitempty"`
+	RunID          string    `json:"run_id"`
+	JobID          string    `json:"job_id,omitempty"`
+	ArrivedAt      time.Time `json:"arrived_at"`
+	Policy         string    `json:"policy"`
+	CacheKeyHash   string    `json:"cache_key_hash,omitempty"`
+	LeaderRunID    string    `json:"leader_run_id,omitempty"`
+	LeaderJobID    string    `json:"leader_job_id,omitempty"`
+	Cost           int       `json:"cost"`
+	Position       int       `json:"position"`
 }
 
 // QueuePriorityWrite chooses an exact priority, including zero, or a relative

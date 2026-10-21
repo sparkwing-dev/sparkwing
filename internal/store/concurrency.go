@@ -43,9 +43,6 @@ const (
 // for the full window to be reaped.
 const defaultConcurrencyLease = DefaultLeaseDuration
 
-// DefaultCancelTimeout bounds CancelOthers eviction.
-const DefaultCancelTimeout = 60 * time.Second
-
 // AcquireKind covers user-selectable + non-selectable outcomes.
 type AcquireKind string
 
@@ -59,17 +56,16 @@ const (
 
 // acquireSlotRequest selects a group and the work consuming its capacity.
 type acquireSlotRequest struct {
-	Key           string
-	HolderID      string
-	RunID         string
-	NodeID        string
-	Capacity      int
-	Policy        string
-	CacheKeyHash  string
-	CacheTTL      time.Duration
-	CancelTimeout time.Duration
-	Lease         time.Duration
-	BypassRead    bool
+	Key          string
+	HolderID     string
+	RunID        string
+	NodeID       string
+	Capacity     int
+	Policy       string
+	CacheKeyHash string
+	CacheTTL     time.Duration
+	Lease        time.Duration
+	BypassRead   bool
 
 	// Cost is the admission weight this arrival draws from the key's
 	// capacity (author-defined units). Zero or negative is treated as
@@ -140,7 +136,6 @@ type ConcurrencyWaiter struct {
 	CacheKeyHash   string
 	LeaderRunID    string
 	LeaderNodeID   string
-	CancelTimeout  time.Duration
 
 	// Cost is the admission weight this waiter will draw once promoted;
 	// DeclaredCapacity is the capacity this waiter declared, a
@@ -214,9 +209,6 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	}
 	if req.Lease <= 0 {
 		req.Lease = defaultConcurrencyLease
-	}
-	if req.CancelTimeout <= 0 {
-		req.CancelTimeout = DefaultCancelTimeout
 	}
 
 	if req.Cost > req.Capacity {
@@ -1071,8 +1063,8 @@ func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, ar
 	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO concurrency_waiters
-		   (team, key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity, generation, lease_expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   (team, key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cost, declared_capacity, generation, lease_expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (team, key, run_id, node_id) DO UPDATE SET
 		   holder_id         = excluded.holder_id,
 		   arrived_at        = excluded.arrived_at,
@@ -1080,13 +1072,12 @@ func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, ar
 		   cache_key_hash    = excluded.cache_key_hash,
 		   leader_run_id     = excluded.leader_run_id,
 		   leader_node_id    = excluded.leader_node_id,
-		   cancel_timeout_ns = excluded.cancel_timeout_ns,
 		   cost              = excluded.cost,
 		   declared_capacity = excluded.declared_capacity,
 		   generation        = excluded.generation,
 		   lease_expires_at  = excluded.lease_expires_at`,
 		string(team), w.Key, w.RunID, w.NodeID, w.HolderID, arrivedNS, w.Policy, w.CacheKeyHash,
-		w.LeaderRunID, w.LeaderNodeID, int64(w.CancelTimeout), w.Cost, w.DeclaredCapacity, generation, expiresNS,
+		w.LeaderRunID, w.LeaderNodeID, w.Cost, w.DeclaredCapacity, generation, expiresNS,
 	)
 	return err
 }
@@ -1516,17 +1507,16 @@ func scanHolder(rs rowScanner) (ConcurrencyHolder, error) {
 
 func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
 	var w ConcurrencyWaiter
-	var arrivedNS, cancelNS int64
+	var arrivedNS int64
 	if err := rs.Scan(&w.Key, &w.RunID, &w.NodeID, &w.HolderID, &arrivedNS, &w.Policy,
-		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &cancelNS, &w.Cost, &w.DeclaredCapacity, &w.team, &w.generation); err != nil {
+		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &w.Cost, &w.DeclaredCapacity, &w.team, &w.generation); err != nil {
 		return ConcurrencyWaiter{}, err
 	}
 	w.ArrivedAt = time.Unix(0, arrivedNS)
-	w.CancelTimeout = time.Duration(cancelNS)
 	return w, nil
 }
 
-const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity, team, generation`
+const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cost, declared_capacity, team, generation`
 
 func nodeIDOrDash(nodeID string) string {
 	if strings.TrimSpace(nodeID) == "" {

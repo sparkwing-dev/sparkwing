@@ -397,8 +397,6 @@ type SemaphoreClaim struct {
 	Policy   Policy
 
 	QueueTimeoutMS int64
-
-	CancelTimeoutMS int64
 }
 func ServedMajor(client int) int
 type SetPriority struct {

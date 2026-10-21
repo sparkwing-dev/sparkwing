@@ -1413,7 +1413,9 @@ removes expired or terminal holders and abandoned waiters, and promotes live que
 one transaction. The fence is checked before work and before commit. Any failure
 returns zero counters and rolls back the whole pass. Expired waiter leases never
 retain arrival order. Waiters bound to terminal or missing jobs cannot promote.
-Live blocked waiters retain their arrival and lease. Options retain the existing
+Live blocked waiters retain their arrival and lease across owner generations.
+Queue precedence, promotion and adoption share the same continuity rule. A job
+generation still fences replacement executions. Options retain the existing
 promotion lease and abandoned-waiter age defaults.
 
 `Store.MaintainConcurrency`, the `Maintenance` function registry and its six

@@ -13,8 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -156,8 +155,8 @@ func TestQueueCommandPreservesGroupFacts(t *testing.T) {
 
 func TestQueueGroupScope(t *testing.T) {
 	for group, scope := range map[string]string{
-		nodehost.ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "payments@db", Scope: new("global")}, "r1", "host1"): "global",
-		nodehost.ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "db", Scope: new("box")}, "r1", "host1"):             "box (host1)",
+		runspec.ConcurrencyKey("job", "global", "", "payments@db"): "global",
+		runspec.ConcurrencyKey("job", "box", "host1", "db"):        "box (host1)",
 		"memo:abc123": "content-cache",
 	} {
 		var out bytes.Buffer

@@ -48,7 +48,7 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request, 
 			RunID:          wt.RunID, JobID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
 			Policy: wt.Policy, CacheKeyHash: wt.CacheKeyHash,
 			LeaderRunID: wt.LeaderRunID, LeaderJobID: wt.LeaderNodeID,
-			CancelTimeout: wt.CancelTimeout, Cost: wt.Cost, Position: wt.Position + 1,
+			Cost: wt.Cost, Position: wt.Position + 1,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

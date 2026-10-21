@@ -75,6 +75,19 @@ func TestCapacityMaintenanceCannotPromoteStaleWaiterBinding(t *testing.T) {
 	}
 }
 
+func TestCapacityAdoptionCannotRetainReplacedJobWaiter(t *testing.T) {
+	tenant, now, actor := capacityFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run','job',?,?,2,'queue')`, now.UnixNano(), now.Add(time.Hour).UnixNano())
+	got, err := tenant.AdoptCapacity(t.Context(), "job:global:key", "waiter", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
+	if err != nil || got != acquireAgain {
+		t.Fatalf("replacement execution retained its predecessor's arrival: %s, %v", got, err)
+	}
+	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
+	if err != nil || len(state.Waiters) != 0 {
+		t.Fatalf("stale waiter survived adoption: %+v, %v", state, err)
+	}
+}
+
 func TestCapacityQueueExpiryUsesPersistedPolicyAndStoreTime(t *testing.T) {
 	tenant, now, actor := capacityFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"concurrency":[{"group":"db","scope":"global","capacity":1,"cost":1,"on_limit":"queue","queue_timeout_ms":60000}]}`))

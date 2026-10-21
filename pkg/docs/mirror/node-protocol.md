@@ -185,7 +185,7 @@ Runner planning and SDK installation use the same remote base and
 job-declared environment. Proxy credentials are masked before either process starts.
 
 Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
-`on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`. Omitted values resolve to
+`on_limit` and `queue_timeout_ms`. Omitted values resolve to
 `global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. The host
 computes scoped keys and checks consistent group definitions. Scopes are
 `global`, `run` and `box`. Policies are `queue`, `fail`, `skip` and `cancel_others`.

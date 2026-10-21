@@ -205,7 +205,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 						}
 						admission := ComposeNativeAdmission(f.Tenant, nil, false)
 						if err := admission.claimedNode(ctx, input, func(ctx context.Context) error {
-							key := scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
+							key := fixtureJobCapacityKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
 							state, err := f.Tenant.GetConcurrencyState(ctx, key)
 							if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != id {
 								return fmt.Errorf("claimed job lost concurrency: %+v %v", state, err)
@@ -222,7 +222,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 					if live, granted, released := d.counts(); live != 0 || granted != 0 || released != 0 {
 						t.Fatalf("leases=%d/%d/%d", live, granted, released)
 					}
-					state, err := f.Tenant.GetConcurrencyState(ctx, scopedConcurrencyKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder))
+					state, err := f.Tenant.GetConcurrencyState(ctx, fixtureJobCapacityKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder))
 					if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 						t.Fatalf("remote concurrency leaked: %+v, %v", state, err)
 					}
@@ -294,7 +294,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	key := scopedConcurrencyKey("db", "global", f.Input.RunID, "")
+	key := fixtureJobCapacityKey("db", "global", f.Input.RunID, "")
 	state, err := f.Tenant.GetConcurrencyState(ctx, key)
 	if err != nil {
 		t.Fatal(err)

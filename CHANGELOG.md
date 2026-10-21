@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **concurrency (Breaking):** Remove the unused `CancelTimeout` option and its wire and stored waiter fields. Cancellation waits for holders to release their capacity.
+
 - **concurrency (Breaking):** Give plan and job groups separate namespaces, so the same name at both levels identifies independent budgets. Refuse box-scoped plan groups when accepting a pipeline because a run can span machines. Use job-level box scope for per-machine budgets. See [migration](docs/migrations/_unreleased.md#concurrency-admission-and-queue-views).
 
 - **admission:** Wait to reacquire a lapsed plan concurrency group after work has been released. Released jobs finish, further releases wait, and queue views name the group being reacquired.

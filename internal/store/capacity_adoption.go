@@ -24,16 +24,19 @@ const (
 )
 
 func adoptCapacityTx(ctx context.Context, tx *storeTx, team Team, key, id string, binding CapacityBinding) (adoptionKind, error) {
-	now := tx.now().UnixNano()
 	var current CapacityBinding
 	var expires int64
 	var superseded bool
-	err := tx.QueryRowContext(ctx, `SELECT run_id,node_id,lease_expires_at,superseded FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`, team, key, id).Scan(&current.RunID, &current.NodeID, &expires, &superseded)
+	err := tx.QueryRowContext(ctx, `SELECT run_id,node_id,generation,lease_expires_at,superseded FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`, team, key, id).Scan(&current.RunID, &current.NodeID, &current.Generation, &expires, &superseded)
 	if err == nil {
 		if current.RunID != binding.RunID || current.NodeID != binding.NodeID {
 			return "", holderRefusal()
 		}
-		if expires > now {
+		continuous, err := capacityContinuousTx(ctx, tx, team, current, expires)
+		if err != nil {
+			return "", err
+		}
+		if continuous {
 			if superseded {
 				return "", ErrConcurrencySuperseded
 			}
@@ -48,14 +51,19 @@ func adoptCapacityTx(ctx context.Context, tx *storeTx, team Team, key, id string
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	err = tx.QueryRowContext(ctx, `SELECT lease_expires_at FROM concurrency_waiters WHERE team = ? AND key = ? AND holder_id = ? AND run_id = ? AND node_id = ?`, team, key, id, binding.RunID, binding.NodeID).Scan(&expires)
+	current = binding
+	err = tx.QueryRowContext(ctx, `SELECT generation,lease_expires_at FROM concurrency_waiters WHERE team = ? AND key = ? AND holder_id = ? AND run_id = ? AND node_id = ?`, team, key, id, binding.RunID, binding.NodeID).Scan(&current.Generation, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return acquireAgain, nil
 	}
 	if err != nil {
 		return "", err
 	}
-	if expires <= now {
+	continuous, err := capacityContinuousTx(ctx, tx, team, current, expires)
+	if err != nil {
+		return "", err
+	}
+	if !continuous {
 		_, err := tx.ExecContext(ctx, `DELETE FROM concurrency_waiters WHERE team = ? AND key = ? AND run_id = ? AND node_id = ?`, team, key, binding.RunID, binding.NodeID)
 		return acquireAgain, err
 	}

@@ -174,7 +174,6 @@ func concurrencyFuzzOp(t *testing.T, ctx context.Context, s *store.Store, rng *r
 			Policy:   policies[rng.Intn(len(policies))],
 		}
 		if req.Policy == store.OnLimitCancelOthers && rng.Intn(2) == 0 {
-			req.CancelTimeout = time.Minute
 		}
 		if rng.Intn(5) == 0 {
 			req.Lease = time.Nanosecond

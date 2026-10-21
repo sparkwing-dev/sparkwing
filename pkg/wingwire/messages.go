@@ -137,11 +137,6 @@ type SemaphoreClaim struct {
 	// QueueTimeoutMS bounds a PolicyQueue wait in milliseconds; zero
 	// waits indefinitely.
 	QueueTimeoutMS int64 `json:"queue_timeout_ms,omitempty"`
-	// CancelTimeoutMS bounds, in milliseconds, how long a
-	// PolicyCancelOthers requester waits for the holders it superseded to
-	// wind down cooperatively before the daemon force-releases their
-	// leases. Zero leaves a non-cooperating holder to release on its own.
-	CancelTimeoutMS int64 `json:"cancel_timeout_ms,omitempty"`
 }
 
 // AdmissionRequest asks the daemon for one admission lease. A request

@@ -91,7 +91,7 @@ func contractSymbols(t *testing.T, directory string) map[string]string {
 func TestCurrentContractSymbolInventories(t *testing.T) {
 	const root = "../../"
 	packages := map[string]map[string]string{}
-	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire"} {
+	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire", "runspec"} {
 		packages[name] = contractSymbols(t, root+"internal/"+name)
 	}
 	path := root + "design/rewrite/contracts/c4-surface-config.md"

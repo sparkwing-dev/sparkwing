@@ -35,6 +35,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	defer func() { cancel(context.Canceled); workers.Wait() }()
 	completed := make(chan ownerExecution)
 	active := map[string]context.CancelCauseFunc{}
+	releasing := map[string]bool{}
 	debugged := map[string]int64{}
 	project, decide := h.Project, h.Decide
 	if project == nil {
@@ -47,10 +48,14 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		workCtx, stop := context.WithCancelCause(ctx)
 		active[nodeID] = stop
 		workers.Add(1)
+		isRelease := releasing[nodeID]
 		go func() {
 			defer workers.Done()
 			defer stop(nil)
 			err := work(workCtx)
+			if isRelease && context.Cause(workCtx) == context.Canceled && waitFailure(err, context.Canceled) == nil {
+				err = nil
+			}
 			var cancelled *lease.CancelError
 			if errors.As(context.Cause(workCtx), &cancelled) && waitFailure(err, cancelled) == nil {
 				err = h.executionError(ctx, input.RunID, ownerExecution{nodeID, err})
@@ -68,6 +73,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		select {
 		case result := <-completed:
 			delete(active, result.nodeID)
+			delete(releasing, result.nodeID)
 			if result.err != nil {
 				return RunCompletion{}, result.err
 			}
@@ -83,6 +89,9 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		for _, row := range snapshot.Nodes {
 			stop := active[row.Ref.NodeID]
+			if stop != nil && releasing[row.Ref.NodeID] && row.Status == store.StatusDone {
+				stop(context.Canceled)
+			}
 			if row.CancelRequestedAt == nil || row.Status == store.StatusDone {
 				continue
 			}
@@ -146,7 +155,6 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			return h.finish(ctx, input, decision)
 		}
 		changed := false
-		expanded := map[string]bool{}
 		for _, action := range decision.Nodes {
 			if active[action.NodeID] != nil {
 				continue
@@ -158,10 +166,8 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			if action.Kind == store.DecisionCancelHolder && row.CancelRequestedAt != nil {
 				continue
 			}
-			if action.Kind == store.DecisionExpand && expanded[action.NodeID] {
-				continue
-			}
 			if action.Kind == store.DecisionReady || action.Kind == store.DecisionApproval {
+				releasing[action.NodeID] = true
 				launch(action.NodeID, func(ctx context.Context) error {
 					return h.release(ctx, input, accepted, entry, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
 						return h.execute(ctx, input, accepted, entry, request)
@@ -169,10 +175,18 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				})
 				continue
 			}
+			if action.Kind == store.DecisionExpand {
+				launch(action.NodeID, func(ctx context.Context) error {
+					if h.Admit != nil {
+						return h.Admit(ctx, accepted, row, func(ctx context.Context) error { return h.expand(ctx, input, accepted, entry, row) })
+					}
+					return h.expand(ctx, input, accepted, entry, row)
+				})
+				continue
+			}
 			if err := h.apply(ctx, input, accepted, entry, row, action); err != nil {
 				return RunCompletion{}, err
 			}
-			expanded[action.NodeID] = action.Kind == store.DecisionExpand
 			changed = true
 		}
 		// safety: ready work and live holders can predate this owner; neither needs a second release event.
@@ -193,9 +207,6 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 						}
 						return h.execute(workCtx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
 					}
-					if h.Admit != nil {
-						return h.Admit(ctx, accepted, row, work)
-					}
 					return work(ctx)
 				})
 			}
@@ -203,6 +214,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		select {
 		case result := <-completed:
 			delete(active, result.nodeID)
+			delete(releasing, result.nodeID)
 			if result.err != nil {
 				return RunCompletion{}, result.err
 			}
@@ -218,6 +230,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		if result != nil {
 			delete(active, result.nodeID)
+			delete(releasing, result.nodeID)
 			if result.err != nil {
 				return RunCompletion{}, result.err
 			}
@@ -261,8 +274,6 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 	case store.DecisionCancelHolder:
 		change.To, change.Cause = store.NodeCancelled, store.CauseCancel
 		change.Extra.Result = &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}
-	case store.DecisionExpand:
-		return h.expand(ctx, input, accepted, entry, row)
 	default:
 		return fmt.Errorf("unknown scheduling decision %q", action.Kind)
 	}
@@ -366,7 +377,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	if h.Admit != nil {
 		err := h.Admit(ctx, accepted, row, work)
 		var refused *AdmissionFailure
-		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
+		if errors.As(err, &refused) && !refused.plan && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
 			policy := admissionPolicy(refused, row.Generation)
 			_, err = h.Store.TransitionNode(ctx, store.NodeTransition{
 				Ref: row.Ref, Actor: input.Owner, To: refused.Outcome, Cause: store.CauseOwnerPolicy,

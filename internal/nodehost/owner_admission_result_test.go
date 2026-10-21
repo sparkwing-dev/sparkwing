@@ -74,9 +74,10 @@ func TestResumedPlanWaitsToReacquireAndPreservesCompletedWork(t *testing.T) {
 			}
 			fixture := newStoreHostFixture(t, plan)
 			admission := &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
-			if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
+			if err := admission.plan(t.Context(), fixture.Accepted); err != nil {
 				t.Fatal(err)
 			}
+			configureNativeAdmission(&fixture.Host, nil, admission, false)
 			entry, err := fixture.Host.Acquire(t.Context(), fixture.Input)
 			if err != nil {
 				t.Fatal(err)
@@ -89,6 +90,9 @@ func TestResumedPlanWaitsToReacquireAndPreservesCompletedWork(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := capacityRow(t, fixture, "finished")
+			if before.Outcome != store.NodeSuccess {
+				t.Fatalf("completed fixture job did not succeed: %+v", before)
+			}
 			expired := time.Now().UnixNano()
 			if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id=?`, expired, fixture.Input.RunID); err != nil {
 				t.Fatal(err)
@@ -101,7 +105,7 @@ func TestResumedPlanWaitsToReacquireAndPreservesCompletedWork(t *testing.T) {
 			}
 			competitor := newStoreHostFixtureOn(t, fixture.Store, plan, runspec.Options{})
 			competing := &storeAdmission{Store: competitor.Tenant, Owner: competitor.Actor}
-			if _, err := competing.Run(t.Context(), competitor.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
+			if err := competing.plan(t.Context(), competitor.Accepted); err != nil {
 				t.Fatal(err)
 			}
 			claim, err := fixture.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: fixture.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: fixture.Input.RunID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
@@ -111,9 +115,9 @@ func TestResumedPlanWaitsToReacquireAndPreservesCompletedWork(t *testing.T) {
 			fixture.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 			fixture.Input.Owner = fixture.Actor
 			waiting := errors.New("waiting for plan reacquisition")
-			fixture.Host.Around = (&storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor, Queued: func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
+			configureNativeAdmission(&fixture.Host, nil, &storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor, Queued: func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
 				return waiting
-			}}).Run
+			}}, false)
 			completion, err := fixture.Host.Run(t.Context(), fixture.Input)
 			if !errors.Is(err, waiting) || completion.Outcome != "" {
 				t.Errorf("resumed wait=%+v error=%v", completion, err)
@@ -197,12 +201,12 @@ func TestOwnerPersistsPlanAdmissionRefusalAndEndsUnit(t *testing.T) {
 			plan.Jobs[0].Optional = true
 			first := newStoreHostFixture(t, plan)
 			admission := &storeAdmission{Store: first.Tenant, Owner: first.Actor}
-			if _, err := admission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
+			if err := admission.plan(t.Context(), first.Accepted); err != nil {
 				t.Fatal(err)
 			}
 			second := newStoreHostFixtureOn(t, first.Store, plan, runspec.Options{})
 			admission = &storeAdmission{Store: second.Tenant, Owner: second.Actor}
-			second.Host.Around = admission.Run
+			configureNativeAdmission(&second.Host, nil, admission, false)
 			completion, err := second.Host.Run(t.Context(), second.Input)
 			want := "failed"
 			if policy == "skip" {

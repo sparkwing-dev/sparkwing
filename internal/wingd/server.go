@@ -1029,7 +1029,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.flush(deliveries)
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", string(req.RunID), len(dec.Evicted))
-		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
 	}
 }
 
@@ -1147,51 +1146,6 @@ func claimRequestsMatch(got, want []wingwire.SemaphoreClaim) bool {
 		}
 	}
 	return true
-}
-
-func cancelTimeoutFor(sems []wingwire.SemaphoreClaim) time.Duration {
-	var t time.Duration
-	for _, s := range sems {
-		if s.Policy != wingwire.PolicyCancelOthers || s.CancelTimeoutMS <= 0 {
-			continue
-		}
-		d := time.Duration(s.CancelTimeoutMS) * time.Millisecond
-		if t == 0 || d < t {
-			t = d
-		}
-	}
-	return t
-}
-
-func (d *Daemon) armCancelTimeout(evicted []admission.LeaseID, timeout time.Duration) {
-	if timeout <= 0 || len(evicted) == 0 {
-		return
-	}
-	leases := append([]admission.LeaseID(nil), evicted...)
-	time.AfterFunc(timeout, func() { d.forceReleaseSuperseded(leases) })
-}
-
-func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
-	d.mu.Lock()
-	if d.shuttingDown {
-		d.mu.Unlock()
-		return
-	}
-	var holders []*conn
-	for _, id := range leases {
-		rid, ok := d.leaseRun[id]
-		if !ok {
-			continue
-		}
-		if c := d.byRun[rid]; c != nil && c.leaseID == id && c.role == roleHolder {
-			holders = append(holders, c)
-		}
-	}
-	d.mu.Unlock()
-	for _, holder := range holders {
-		d.cfg.logf("cancel timeout: stopping superseded holder %s", holder.runID)
-		go d.handleDisconnect(holder)
-	}
 }
 
 // safety: an orphaned run's mark lives on its own lease, not among the tombstones, so every guard checks both.
