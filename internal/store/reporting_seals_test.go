@@ -9,19 +9,22 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(423, 173))
 	for i := range 16 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
+			now := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+			s := storetest.Open(t, store.WithPolicies(sealStorePolicies), teststore.WithClock(func() time.Time { return now }))
 			secret := fmt.Sprintf("private-%x", random.Uint64())
 			public := fmt.Sprintf("visible-%x", random.Uint64())
 			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodeproto.PlanDoc) {

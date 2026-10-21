@@ -27,12 +27,13 @@ import (
 
 func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
-	s, dataController, err := openStorageData(path, objects)
+	now := time.Now().UTC()
+	s, dataController, err := openStorageData(path, objects, now)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	_, identity, err := seedDepcacheBoundary(t, ctx, s)
+	_, identity, err := seedDepcacheBoundary(t, ctx, s, now)
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, dataController, err := openStorageData(path, objects)
+	reopened, dataController, err := openStorageData(path, objects, now)
 	if err != nil {
 		return err
 	}
@@ -175,7 +176,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("failed archive read replaced destination: %v", err)
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", time.Now().UnixNano(), identity.CapabilityRef); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", now.UnixNano(), identity.CapabilityRef); err != nil {
 		return err
 	}
 	if _, err := binding.Signer.Commit(ctx, settlement); err == nil {
@@ -205,8 +206,8 @@ func checkDepcacheScopes(ctx context.Context, data depcacheblob.Data, key, desti
 	return nil
 }
 
-func seedDepcacheBoundary(t testing.TB, ctx context.Context, s *store.Store) (blob.Authority, blob.UploadIdentity, error) {
-	commit, err := seedStoreLogBoundary(ctx, teststore.SQL(t, s))
+func seedDepcacheBoundary(t testing.TB, ctx context.Context, s *store.Store, now time.Time) (blob.Authority, blob.UploadIdentity, error) {
+	commit, err := seedStoreLogBoundary(ctx, teststore.SQL(t, s), now)
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
@@ -268,12 +269,12 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 	return authority, identity, nil
 }
 
-func openStorageData(path string, objects blob.ObjectBackend) (*store.Store, *controller.DataController, error) {
+func openStorageData(path string, objects blob.ObjectBackend, now time.Time) (*store.Store, *controller.DataController, error) {
 	var data *controller.DataController
 	s, _, err := openControllerFixture(path, func(s *store.Store) *controller.Server {
 		data = controller.NewDataController(s, controller.DataController{Objects: objects})
 		return controller.New(s, nil).WithDataController(data)
-	})
+	}, teststore.WithClock(func() time.Time { return now }))
 	return s, data, err
 }
 

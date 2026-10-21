@@ -55,12 +55,13 @@ func credentialMutationServer(t *testing.T, path string, build func(*store.Store
 	return s, cipher, server
 }
 
-func openControllerFixture(path string, build func(*store.Store) *controller.Server) (*store.Store, *controller.Server, error) {
+func openControllerFixture(path string, build func(*store.Store) *controller.Server, opts ...store.Option) (*store.Store, *controller.Server, error) {
 	var server *controller.Server
-	s, err := teststore.OpenExisting(path, store.WithPolicies(func(s *store.Store) (store.Policies, error) {
+	opts = append(opts, store.WithPolicies(func(s *store.Store) (store.Policies, error) {
 		server = build(s)
 		return server.StorePolicies(), nil
 	}))
+	s, err := teststore.OpenExisting(path, opts...)
 	return s, server, err
 }
 
