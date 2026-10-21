@@ -12,11 +12,7 @@ func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capabilit
 	if err != nil || proof == nil {
 		return p, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return capability.Principal{}, clockErr1
-	}
-	if proof.Session != ref || tx.store.consolePolicy == nil || !tx.store.consolePolicy(p, clockTime1) {
+	if proof.Session != ref || tx.store.consolePolicy == nil || !tx.store.consolePolicy(p, tx.now(ctx)) {
 		return capability.Principal{}, authorityError(apierr.Forbidden, "direct operator session required")
 	}
 	p.Class = capability.CredentialConsole

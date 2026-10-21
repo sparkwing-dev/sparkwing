@@ -35,11 +35,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return blob.Blob{}, clockErr1
-	}
-	snapshot := capability.AuthenticationSnapshot{Now: clockTime1, Binding: state}
+	snapshot := capability.AuthenticationSnapshot{Now: tx.now(ctx), Binding: state}
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
@@ -78,11 +74,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return blob.Blob{}, clockErr2
-	}
-	if !found || !record.Pinned && record.ExpiresAt.Set && !record.ExpiresAt.Value.After(clockTime2) {
+	if !found || !record.Pinned && record.ExpiresAt.Set && !record.ExpiresAt.Value.After(tx.now(ctx)) {
 		return blob.Blob{}, blob.ErrNotFound
 	}
 	size, err := requireBlobTx(ctx, tx, t.team, record.Digest)

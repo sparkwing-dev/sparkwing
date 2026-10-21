@@ -214,12 +214,8 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	if err != nil {
 		return err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return clockErr1
-	}
 	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventRefillSettings, SubjectID: change, Actor: actor, At: clockTime1,
+		Team: team, Kind: BusinessEventRefillSettings, SubjectID: change, Actor: actor, At: tx.now(ctx),
 		Attrs: map[string]any{
 			"enabled": s.Enabled, "threshold_cents": s.ThresholdCents, "amount_cents": s.AmountCents,
 			"week_limit_cents": s.WeekLimitCents, "month_limit_cents": s.MonthLimitCents,
@@ -270,10 +266,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil {
 		return nil, err
 	}
-	now, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return nil, clockErr2
-	}
+	now := tx.now(ctx)
 	st, err := spendStandingTx(ctx, tx, team, now)
 	if err != nil {
 		return nil, err
@@ -417,10 +410,7 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 		if err != nil {
 			return err
 		}
-		now, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
+		now := tx.now(ctx)
 		st, err := spendStandingTx(ctx, tx, r.Team, now)
 		if err != nil {
 			return err
@@ -456,13 +446,9 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 // The record and payment binding remain available for reconciliation and audit.
 func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		clockTime4, clockErr4 := tx.now(ctx)
-		if clockErr4 != nil {
-			return clockErr4
-		}
 		_, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
 		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			clockTime4.UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
+			tx.now(ctx).UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
 		return err
 	})
 }

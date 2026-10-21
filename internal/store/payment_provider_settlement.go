@@ -65,11 +65,7 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		if event.CheckoutID != "" {
 			checkoutID = result.CheckoutID
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), clockTime1.UnixNano(), event.ObjectID, string(body), string(encoded))
+		_, err = tx.ExecContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), tx.now(ctx).UnixNano(), event.ObjectID, string(body), string(encoded))
 		return err
 	})
 	if err != nil {
@@ -296,10 +292,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		return checkout.result, err
 	case capability.PaymentWarningEvent:
 		w := PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}
-		now, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return PaymentSettlement{}, clockErr2
-		}
+		now := tx.now(ctx)
 		if w.WarningID == "" || w.PaymentIntent == "" {
 			return result, fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
 		}
@@ -412,11 +405,7 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 		return team, nil
 	}
 	card.AddedAt = time.Unix(created, 0)
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return "", clockErr3
-	}
-	if err := saveCardTx(ctx, tx, team, card, "payment_provider", clockTime3); err != nil && !errors.Is(err, ErrStaleCardSetup) {
+	if err := saveCardTx(ctx, tx, team, card, "payment_provider", tx.now(ctx)); err != nil && !errors.Is(err, ErrStaleCardSetup) {
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)

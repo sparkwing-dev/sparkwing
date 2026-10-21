@@ -373,11 +373,7 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 	}
 
 	c := node.principal.Capability
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return authorityNode{}, clockErr1
-	}
-	if !capability.CredentialAlive(c, clockTime1) {
+	if !capability.CredentialAlive(c, tx.now(ctx)) {
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if node.requirement != nil {
@@ -456,10 +452,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 		}
 		ref = *parent
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return nil, err
-	}
+	now := tx.now(ctx)
 	for _, node := range chain {
 		c := node.principal.Capability
 		if !capability.CredentialAlive(c, now) {
@@ -634,10 +627,7 @@ func (op *Operator) revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capa
 	}); err != nil {
 		return err
 	}
-	now, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return clockErr2
-	}
+	now := tx.now(ctx)
 	if ref.Kind == capability.AuthorityCapability {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {

@@ -42,11 +42,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			return nil, nil
 		}
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return nil, clockErr1
-	}
-	now = clockTime1
+	now = tx.now(ctx)
 	if owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}
@@ -133,11 +129,7 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err != nil {
 		return nil, err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return nil, clockErr2
-	}
-	now = clockTime2
+	now = tx.now(ctx)
 	if unit.lease.Valid && unit.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}

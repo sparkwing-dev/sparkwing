@@ -25,11 +25,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 		if err != nil {
 			return err
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE debug_pauses SET released_at=?,released_by=?,release_kind=? WHERE team=? AND run_id=? AND node_id=? AND released_at IS NULL`, clockTime1.UnixNano(), current.Capability.Subject.ID, PauseReleaseManual, t.team, target.RunID, target.NodeID)
+		result, err := tx.ExecContext(ctx, `UPDATE debug_pauses SET released_at=?,released_by=?,release_kind=? WHERE team=? AND run_id=? AND node_id=? AND released_at IS NULL`, tx.now(ctx).UnixNano(), current.Capability.Subject.ID, PauseReleaseManual, t.team, target.RunID, target.NodeID)
 		if err != nil {
 			return err
 		}
@@ -42,11 +38,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 				return err
 			}
 		}
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, clockTime2)
+		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, tx.now(ctx))
 		return err
 	})
 }

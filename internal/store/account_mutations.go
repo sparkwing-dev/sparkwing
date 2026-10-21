@@ -48,19 +48,11 @@ func selectAccountTeamTx(ctx context.Context, tx *storeTx, p capability.Principa
 	if err := authenticateSessionTeamTx(ctx, tx, p.Authority.ID, team, p.Capability.Subject.ID); err != nil {
 		return err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return clockErr1
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE sessions SET team=? WHERE hash=? AND account_id=? AND COALESCE(team,'')=? AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?`, team, p.Authority.ID, p.Capability.Subject.ID, p.Capability.Team, clockTime1.UnixNano())
+	result, err := tx.ExecContext(ctx, `UPDATE sessions SET team=? WHERE hash=? AND account_id=? AND COALESCE(team,'')=? AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?`, team, p.Authority.ID, p.Capability.Subject.ID, p.Capability.Team, tx.now(ctx).UnixNano())
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return clockErr2
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET active_team=?,updated_at=? WHERE id=?`, team, clockTime2.UnixNano(), p.Capability.Subject.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET active_team=?,updated_at=? WHERE id=?`, team, tx.now(ctx).UnixNano(), p.Capability.Subject.ID)
 	return err
 }
 
@@ -86,11 +78,7 @@ func (o *Operator) CreateAccountTeam(ctx context.Context, a capability.Authorize
 		if input.CreatedBy != "" && input.CreatedBy != p.Capability.Subject.ID {
 			return bindingRefusal()
 		}
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
-		out, err = createAccountTeamTx(ctx, tx, p.Capability.Subject.ID, input.Slug, input.DisplayName, clockTime3)
+		out, err = createAccountTeamTx(ctx, tx, p.Capability.Subject.ID, input.Slug, input.DisplayName, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -138,18 +126,11 @@ func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Autho
 		if err != nil {
 			return err
 		}
-		clockTime5, clockErr5 := tx.now(ctx)
-		if clockErr5 != nil {
-			return clockErr5
-		}
-		if clockTime5.Before(p.Capability.IssuedAt) || clockTime5.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
+		now := tx.now(ctx)
+		if now.Before(p.Capability.IssuedAt) || now.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
 			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return clockErr6
-		}
-		ended, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, clockTime6)
+		ended, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now(ctx))
 		return err
 	})
 	if err != nil {

@@ -66,15 +66,10 @@ func (o *Operator) runWindowLeased(ctx context.Context, name, stamp, holder stri
 		return true, err
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
-
 		if err := assertSingletonLeaseTx(ctx, tx, lease, name); err != nil {
 			return err
 		}
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, stamp, []byte(strconv.FormatInt(clockTime2.UnixNano(), 10)))
+		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, stamp, []byte(strconv.FormatInt(tx.now(ctx).UnixNano(), 10)))
 		return err
 	})
 	return true, err

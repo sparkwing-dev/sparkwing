@@ -24,11 +24,7 @@ func consoleAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorize
 	if err != nil {
 		return err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return clockErr1
-	}
-	if !p.DirectAccountSession() || a.Principal.Capability.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: p.Capability.Subject.ID}) || !tx.store.consolePolicy(p, clockTime1) {
+	if !p.DirectAccountSession() || a.Principal.Capability.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: p.Capability.Subject.ID}) || !tx.store.consolePolicy(p, tx.now(ctx)) {
 		return bindingRefusal()
 	}
 	for _, access := range route.Access {

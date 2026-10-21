@@ -56,10 +56,7 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref controll
 	if err := checkHolderTx(ctx, tx, t.team, row, actor); err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, now, funded)
 	if err != nil {
 		return err
@@ -117,10 +114,7 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		}
 	}
 	*beat = LeaseBeat{CancelRequested: run.CancelRequestedAt != nil || ownerCancelled, CancelReason: run.CancelReason}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	funded, err := renewOwnedNodesBillingTx(ctx, tx, t.team, actor, now)
 	if err != nil {
 		return err
@@ -139,10 +133,7 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	if err := checkOwnerLeaseTx(ctx, tx, t.team, actor, string(runID)); err != nil {
 		return err
 	}
-	now, err = tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now = tx.now(ctx)
 	var expiry time.Time
 	if actor.Owner.Kind == OwnerController {
 		var until int64

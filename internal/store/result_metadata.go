@@ -127,19 +127,11 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 		start = sql.NullInt64{Int64: report.StartedAt.UnixNano(), Valid: true}
 	}
 	if !start.Valid {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		start = sql.NullInt64{Int64: clockTime2.UnixNano(), Valid: true}
+		start = sql.NullInt64{Int64: tx.now(ctx).UnixNano(), Valid: true}
 	}
 	end := sql.NullInt64{}
 	if report.State != "running" {
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
-		end = sql.NullInt64{Int64: clockTime3.UnixNano(), Valid: true}
+		end = sql.NullInt64{Int64: tx.now(ctx).UnixNano(), Valid: true}
 		if report.FinishedAt != nil {
 			end.Int64 = report.FinishedAt.UnixNano()
 		}

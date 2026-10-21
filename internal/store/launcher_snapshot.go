@@ -258,11 +258,8 @@ EXISTS (SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.bind_run AND n.
 OR EXISTS (SELECT 1 FROM triggers t WHERE t.team=c.team AND t.id=c.bind_run AND t.capability_prefix=c.prefix AND t.status='claimed' AND t.finished_at IS NULL)
 OR EXISTS (SELECT 1 FROM eval_units e WHERE e.team=c.team AND e.run_id=c.bind_run AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.status IN ('claimed','running'))) AS live
 FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND c.unit_kind IN ('plan','eval','node')) a WHERE a.live`
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return nil, clockErr1
-	}
-	args := []any{clockTime1.UnixNano(), clockTime1.UnixNano(), root.Kind, root.ID, subject.Kind, subject.ID}
+	now := tx.now(ctx)
+	args := []any{now.UnixNano(), now.UnixNano(), root.Kind, root.ID, subject.Kind, subject.ID}
 	var wanted []string
 	for _, fence := range selected {
 		wanted = append(wanted, `(a.unit_kind=? AND a.unit_id=? AND a.bind_holder=? AND a.generation=?)`)
@@ -298,11 +295,8 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if c.Parent == nil || *c.Parent != root.Authority || c.Subject != claimant.Subject || c.Audience != capability.Controller || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, c.Unit) || c.Purpose != claimPurpose(c.Unit) || c.Billing == nil || c.Billing.ExecutorClass != launcherExecutor(claimant) || c.Delivery != capability.DeliveryBootstrap && c.Issuance != capability.Exchange {
 		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "invalid persisted launcher award")
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return LauncherAward{}, false, clockErr2
-	}
-	if c.RevokedAt != nil && !c.RevokedAt.After(clockTime2) || c.ExpiresAt != nil && !c.ExpiresAt.After(clockTime2) {
+	now := tx.now(ctx)
+	if c.RevokedAt != nil && !c.RevokedAt.After(now) || c.ExpiresAt != nil && !c.ExpiresAt.After(now) {
 		return LauncherAward{}, false, nil
 	}
 	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
@@ -321,11 +315,8 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return LauncherAward{}, false, clockErr3
-	}
-	if row.team != c.Team || row.run != c.Binding.RunID || row.node != c.Binding.NodeID || row.holder != fence.Holder || row.generation != fence.Generation || row.prefix != prefix || !row.lease.Valid || row.lease.Int64 <= clockTime3.UnixNano() || row.expiry.Valid && row.expiry.Int64 <= clockTime3.UnixNano() {
+	now = tx.now(ctx)
+	if row.team != c.Team || row.run != c.Binding.RunID || row.node != c.Binding.NodeID || row.holder != fence.Holder || row.generation != fence.Generation || row.prefix != prefix || !row.lease.Valid || row.lease.Int64 <= now.UnixNano() || row.expiry.Valid && row.expiry.Int64 <= now.UnixNano() {
 		return LauncherAward{}, false, nil
 	}
 	run, err := readRunTx(ctx, tx, Team(c.Team), string(unit.RunID))
@@ -365,11 +356,7 @@ func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (
 		return false, nil
 	}
 	var live int
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return false, clockErr4
-	}
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?`, award.Claim.Team, award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration, clockTime4.UnixNano()).Scan(&live)
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?`, award.Claim.Team, award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration, tx.now(ctx).UnixNano()).Scan(&live)
 	return live == 1, err
 }
 

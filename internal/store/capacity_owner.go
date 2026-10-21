@@ -145,10 +145,7 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 	if err := lockStateRunTx(ctx, tx, team, b.RunID); err != nil {
 		return err
 	}
-	now, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return clockErr1
-	}
+	now := tx.now(ctx)
 	if b.NodeID != "" {
 		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 		if err != nil {

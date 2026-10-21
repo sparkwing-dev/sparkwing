@@ -67,11 +67,7 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 	if !errors.Is(err, ErrNotFound) {
 		return UploadReservation{}, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return UploadReservation{}, clockErr1
-	}
-	if !request.ExpiresAt.After(clockTime1) {
+	if !request.ExpiresAt.After(tx.now(ctx)) {
 		return UploadReservation{}, authorityError(apierr.BadRequest, "upload expiry must be in the future")
 	}
 	reserved, objects, err := blobUploadReservationSizeTx(ctx, tx, t.team, a, request.Intent)
@@ -173,11 +169,7 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 		return blob.Receipt{}, err
 	}
 	if u.CommittedAt == nil {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return blob.Receipt{}, clockErr2
-		}
-		result, err := tx.ExecContext(ctx, "UPDATE uploads SET committed_at=? WHERE team=? AND id=? AND committed_at=0", clockTime2.UnixNano(), t.team, u.ID)
+		result, err := tx.ExecContext(ctx, "UPDATE uploads SET committed_at=? WHERE team=? AND id=? AND committed_at=0", tx.now(ctx).UnixNano(), t.team, u.ID)
 		if err != nil {
 			return blob.Receipt{}, err
 		}
@@ -278,11 +270,7 @@ func checkBlobUploadTx(ctx context.Context, tx *storeTx, team Team, a blobActor,
 		if err := tx.QueryRowContext(ctx, "SELECT state FROM quota_reservations WHERE team=? AND id=? AND quota='storage'", team, blobUploadQuotaID(u.ID)).Scan(&state); err != nil {
 			return err
 		}
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
-		if state != "held" || !u.ExpiresAt.After(clockTime3) {
+		if state != "held" || !u.ExpiresAt.After(tx.now(ctx)) {
 			return ErrLockHeld
 		}
 	}
@@ -318,11 +306,7 @@ func abandonBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string)
 	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(u.Blob.Digest)); err != nil {
 		return err
 	}
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return clockErr4
-	}
-	result, err := tx.ExecContext(ctx, "UPDATE uploads SET abandoned_at=? WHERE team=? AND id=? AND abandoned_at IS NULL", clockTime4.UnixNano(), team, id)
+	result, err := tx.ExecContext(ctx, "UPDATE uploads SET abandoned_at=? WHERE team=? AND id=? AND abandoned_at IS NULL", tx.now(ctx).UnixNano(), team, id)
 	if err != nil {
 		return err
 	}
@@ -331,18 +315,10 @@ func abandonBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string)
 		return err
 	}
 	if n != 0 {
-		clockTime5, clockErr5 := tx.now(ctx)
-		if clockErr5 != nil {
-			return clockErr5
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, u.Blob.Size, clockTime5.UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, u.Blob.Size, tx.now(ctx).UnixNano()); err != nil {
 			return err
 		}
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return clockErr6
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, clockTime6.UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, tx.now(ctx).UnixNano()); err != nil {
 			return err
 		}
 	}
@@ -378,11 +354,7 @@ func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, 
 		return nil
 	}
 	if period == current {
-		clockTime7, clockErr7 := tx.now(ctx)
-		if clockErr7 != nil {
-			return clockErr7
-		}
-		result, err := tx.ExecContext(ctx, "UPDATE quota_admission SET reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=?", amount, clockTime7.UnixNano(), team, quota, amount)
+		result, err := tx.ExecContext(ctx, "UPDATE quota_admission SET reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=?", amount, tx.now(ctx).UnixNano(), team, quota, amount)
 		if err != nil {
 			return err
 		}

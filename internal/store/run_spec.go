@@ -107,11 +107,7 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		t.s.uninstallLocalSecrets(key, &installed)
 		var err error
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		result, err = admitRun(ctx, tx, t.team, request, clockTime1)
+		result, err = admitRun(ctx, tx, t.team, request, tx.now(ctx))
 		if err == nil {
 			key = localSecretKey{t.team, result.RunID}
 			installed, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
@@ -137,11 +133,7 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 	var result AcceptedPlan
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		result, err = sealRunSpecTx(ctx, tx, t.team, request, clockTime2)
+		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -237,10 +229,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err := finishExpansionBillingTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
-		now, err := tx.now(ctx)
-		if err != nil {
-			return err
-		}
+		now := tx.now(ctx)
 		return settleControllerTx(ctx, tx, t.team, string(request.Source.RunID), now)
 	})
 	return result, err
@@ -302,10 +291,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	if err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if lease.Kind == capability.UnitEval && controllerUntil <= now.UnixNano() {
 		return holderRefusal()
 	}
@@ -513,11 +499,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 				return AcceptedPlan{}, err
 			}
 		}
-		clockTime7, clockErr7 := tx.now(ctx)
-		if clockErr7 != nil {
-			return AcceptedPlan{}, clockErr7
-		}
-		if err = settleControllerTx(ctx, tx, team, run.ID, clockTime7); err != nil {
+		if err = settleControllerTx(ctx, tx, team, run.ID, tx.now(ctx)); err != nil {
 			return AcceptedPlan{}, err
 		}
 		return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: &controller.Owner, Replayed: replay}, nil

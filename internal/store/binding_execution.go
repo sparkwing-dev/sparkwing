@@ -108,10 +108,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 	if err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now) {
 		return bindingRefusal()
 	}
@@ -148,10 +145,7 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	if err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if b.Expansion != nil {
 		lease := state.Expansion
 		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(now) || lease.Lease.Kind == capability.UnitEval && (lease.ControllerLeaseExpiresAt == nil || !lease.ControllerLeaseExpiresAt.After(now)) {

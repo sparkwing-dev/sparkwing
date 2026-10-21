@@ -119,19 +119,11 @@ func linkAccountIdentityTx(ctx context.Context, tx *storeTx, claim capability.Id
 	if err != nil {
 		return Identity{}, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return Identity{}, clockErr1
-	}
-	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, clockTime1)
+	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, tx.now(ctx))
 	if err != nil {
 		return Identity{}, err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return Identity{}, clockErr2
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, clockTime2.UnixNano(), claim.Nonce); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now(ctx).UnixNano(), claim.Nonce); err != nil {
 		return Identity{}, err
 	}
 	if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
@@ -166,10 +158,7 @@ func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.
 	if !principal.DirectAccountSession() || c.Subject.ID != claim.AccountID {
 		return identityLinkInvalid()
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if !claim.ExpiresAt.After(now) {
 		return identityLinkInvalid()
 	}
@@ -299,11 +288,7 @@ func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expire
 }
 
 func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, expires time.Time) (bool, error) {
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return false, clockErr4
-	}
-	if nonce == "" || !expires.After(clockTime4) {
+	if nonce == "" || !expires.After(tx.now(ctx)) {
 		return false, nil
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
@@ -314,10 +299,7 @@ func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, ex
 	if err != nil || n != 1 {
 		return false, err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return false, err
-	}
+	now := tx.now(ctx)
 	if !expires.After(now) {
 		return false, bindingRefusal()
 	}

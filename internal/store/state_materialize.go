@@ -84,11 +84,7 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nod
 }
 
 func checkSelfClaimTx(ctx context.Context, tx *storeTx, team Team, actor Actor, node NodeRow) error {
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	if node.Status != StatusPending || node.OwnerCapabilityPrefix != actor.CapabilityPrefix || node.ClaimedBy != actor.Owner.Holder || node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(clockTime3) {
+	if node.Status != StatusPending || node.OwnerCapabilityPrefix != actor.CapabilityPrefix || node.ClaimedBy != actor.Owner.Holder || node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(tx.now(ctx)) {
 		return holderRefusal()
 	}
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix}, true)

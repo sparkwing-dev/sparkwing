@@ -67,22 +67,14 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 		if next.MembersCanAddMachines == previous.MembersCanAddMachines && string(ranking) == stored {
 			return nil
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), clockTime1.UnixNano(), t.team); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), tx.now(ctx).UnixNano(), t.team); err != nil {
 			return err
 		}
 		id, err := newIdentityID()
 		if err != nil {
 			return err
 		}
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: clockTime2, Team: t.team, Kind: "team.settings_changed", SubjectID: id, Actor: p.Capability.Subject.ID, Attrs: map[string]any{
+		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: t.team, Kind: "team.settings_changed", SubjectID: id, Actor: p.Capability.Subject.ID, Attrs: map[string]any{
 			"members_can_add_machines": next.MembersCanAddMachines, "previous_members_can_add_machines": previous.MembersCanAddMachines,
 			"claim_ranking": next.ClaimRanking, "previous_claim_ranking": previous.ClaimRanking,
 		}})

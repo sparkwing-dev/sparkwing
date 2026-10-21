@@ -22,11 +22,7 @@ func (t *Tenant) StorageStanding(ctx context.Context) (_ StorageStanding, err er
 		return StorageStanding{}, err
 	}
 	out.BlobBytes, out.LogBytes = inventory.blobs, inventory.logs
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return StorageStanding{}, clockErr1
-	}
-	now := clockTime1.UnixNano()
+	now := tx.now(ctx).UnixNano()
 	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(q.amount),0)
 FROM uploads u JOIN quota_reservations q ON q.team=u.team AND q.id='upload:' || u.id
 WHERE u.team=? AND u.store='blob' AND u.committed_at=0 AND u.expires_at>?

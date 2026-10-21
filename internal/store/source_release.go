@@ -67,11 +67,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if policy == nil {
 			policy = sharedSourceReleaseContracts{}
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		audit, err = policy.AuthorizeSourceRelease(request, clockTime1)
+		audit, err = policy.AuthorizeSourceRelease(request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -148,10 +144,7 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM triggers WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&deadline); err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if deadline.Valid && deadline.Int64 <= now.UnixNano() {
 		return bindingRefusal()
 	}

@@ -49,11 +49,8 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 	if err != nil || account == "" {
 		return nil, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return nil, clockErr1
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, clockTime1.UnixNano(), clockTime1.UnixNano())
+	now := tx.now(ctx)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}

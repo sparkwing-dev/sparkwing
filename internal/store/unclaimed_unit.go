@@ -90,11 +90,8 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		}
 		standings = append(standings, standing)
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return nil, clockErr1
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", clockTime1.UnixNano(), clockTime1.UnixNano(), limits.RankingObservations)
+	now := tx.now(ctx)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", now.UnixNano(), now.UnixNano(), limits.RankingObservations)
 	if err != nil {
 		return nil, err
 	}

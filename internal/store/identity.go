@@ -393,11 +393,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 	var result SignInResult
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		result, err = tx.operator.resolveSignInTx(ctx, tx, p, c, clockTime1)
+		result, err = tx.operator.resolveSignInTx(ctx, tx, p, c, tx.now(ctx))
 		return err
 	})
 	if err != nil {
@@ -680,11 +676,7 @@ func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ 
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	var out []Membership
 	for rows.Next() {
 		m := Membership{AccountID: accountID}
@@ -707,21 +699,13 @@ func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (o
 	}
 	defer rollbackOrLog(tx)
 
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return nil, clockErr2
-	}
 	rows, err := tx.QueryContext(ctx, invitationSelect+`
 		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, NormalizeEmail(email), clockTime2.UTC().UnixNano())
+		ORDER BY i.created_at`, NormalizeEmail(email), tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	return scanInvitations(rows)
 }
 
@@ -786,10 +770,7 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	if err != nil {
 		return none, err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return none, err
-	}
+	now := tx.now(ctx)
 	if accepted.Valid || withdrawn.Valid || expires <= now.UnixNano() {
 		return none, ErrInvitationClosed
 	}
@@ -939,10 +920,7 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
 			return err
 		}
-		now, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
+		now := tx.now(ctx)
 		expires := now.Add(ttl)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
  VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
@@ -985,11 +963,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	var out []Membership
 	for rows.Next() {
 		m := Membership{Team: t.team}
@@ -1148,20 +1122,12 @@ func (t *Tenant) Invitations(ctx context.Context) (out []Invitation, err error) 
 	}
 	defer rollbackOrLog(tx)
 
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return nil, clockErr4
-	}
 	rows, err := tx.QueryContext(ctx, invitationSelect+`
 		WHERE i.team = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, string(t.team), clockTime4.UTC().UnixNano())
+		ORDER BY i.created_at`, string(t.team), tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	return scanInvitations(rows)
 }

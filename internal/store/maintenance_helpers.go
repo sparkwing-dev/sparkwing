@@ -20,10 +20,7 @@ func assertSingletonLeaseTx(ctx context.Context, tx *storeTx, lease SingletonLea
 		return err
 	}
 	// safety: a lock wait can cross expiry, so check the clock after obtaining the fence.
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if holder != lease.Holder || generation != lease.Generation || until <= now.UnixNano() {
 		return ErrLockHeld
 	}

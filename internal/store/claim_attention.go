@@ -58,19 +58,11 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 		if !facts.Observable && !here {
 			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: clockTime1})
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
 			return err
 		}
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, clockTime2.UnixNano(), c.Team, observation.CapabilityPrefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now(ctx).UnixNano(), c.Team, observation.CapabilityPrefix)
 		return err
 	})
 }
@@ -123,10 +115,7 @@ func registeredAgentsTx(ctx context.Context, tx *storeTx, team Team) ([]Register
 }
 
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
-	now, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return nil, clockErr3
-	}
+	now := tx.now(ctx)
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
  AND `+liveCredentialSQL("")+` ORDER BY prefix`, team, now.UnixNano(), now.UnixNano())

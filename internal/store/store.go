@@ -1074,11 +1074,7 @@ SELECT run_id, seq, node_id, kind, ts, payload
 // AppendEvent writes the run's next event in order.
 func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, clockTime1)
+		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("run", runID)
 		}

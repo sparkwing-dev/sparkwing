@@ -560,11 +560,7 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	}
 	var hereKey, owner string
 	err := tx.QueryRowContext(ctx, `SELECT here_proof_public_key,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&hereKey, &owner)
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return "", clockErr2
-	}
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, clockTime2) {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.now(ctx)) {
 		return "", nil
 	}
 	if err != nil {

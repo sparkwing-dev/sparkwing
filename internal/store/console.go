@@ -50,22 +50,16 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 		if err != nil {
 			return err
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), clockTime1, 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, clockTime1) {
+		now := tx.now(ctx)
+		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), now, 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, now) {
 			return authorityError(apierr.Forbidden, "direct operator session required")
 		}
 		result, err = write(tx, p.Capability.Subject.ID)
 		if err != nil {
 			return err
 		}
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), clockTime2, 0) || c.s.consolePolicy != nil && !c.s.consolePolicy(p, clockTime2) {
+		now = tx.now(ctx)
+		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), now, 0) || c.s.consolePolicy != nil && !c.s.consolePolicy(p, now) {
 			return authorityError(apierr.Forbidden, "operator account was removed")
 		}
 		return nil
@@ -129,11 +123,7 @@ func (c *Console) ConsoleSetBillingTrust(ctx context.Context, a capability.Autho
 			return BillingStanding{}, err
 		}
 		change.Actor = actor
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return BillingStanding{}, clockErr3
-		}
-		_, after, err := t.setBillingTrustTx(ctx, tx, change, clockTime3)
+		_, after, err := t.setBillingTrustTx(ctx, tx, change, tx.now(ctx))
 		return after, err
 	})
 }
@@ -153,11 +143,7 @@ func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}
-		clockTime4, clockErr4 := tx.now(ctx)
-		if clockErr4 != nil {
-			return TeamCreditFreeze{}, clockErr4
-		}
-		if _, err := holdCreditFreezeTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor, clockTime4); err != nil {
+		if _, err := holdCreditFreezeTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor, tx.now(ctx)); err != nil {
 			return TeamCreditFreeze{}, err
 		}
 		return teamCreditFreezeTx(ctx, tx, t.team)
@@ -176,11 +162,7 @@ func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, 
 			return TeamCreditFreeze{}, err
 		}
 		hold = strings.TrimSpace(hold)
-		clockTime5, clockErr5 := tx.now(ctx)
-		if clockErr5 != nil {
-			return TeamCreditFreeze{}, clockErr5
-		}
-		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", noFault, actor, reason, clockTime5)
+		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", noFault, actor, reason, tx.now(ctx))
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}
@@ -198,11 +180,7 @@ func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized
 		if err != nil {
 			return TeamDeletion{}, err
 		}
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return TeamDeletion{}, clockErr6
-		}
-		if _, err := t.markForDeletionTx(ctx, tx, actor, clockTime6); err != nil {
+		if _, err := t.markForDeletionTx(ctx, tx, actor, tx.now(ctx)); err != nil {
 			return TeamDeletion{}, err
 		}
 		return teamDeletionTx(ctx, tx, t.team)
@@ -221,11 +199,7 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 		if err != nil {
 			return AccountDeletion{}, err
 		}
-		clockTime7, clockErr7 := tx.now(ctx)
-		if clockErr7 != nil {
-			return AccountDeletion{}, clockErr7
-		}
-		return tx.operator.deleteAccountTx(ctx, tx, account.ID, clockTime7)
+		return tx.operator.deleteAccountTx(ctx, tx, account.ID, tx.now(ctx))
 	}, func(tx *storeTx, set lockSet) lockSet {
 		account, err := accountTx(ctx, tx, a.Target.AccountID)
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
@@ -325,11 +299,7 @@ func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Autho
 		replay = digest
 		out := []Account{}
 		for _, id := range ids {
-			clockTime8, clockErr8 := tx.now(ctx)
-			if clockErr8 != nil {
-				return nil, clockErr8
-			}
-			acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, clockTime8)
+			acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, tx.now(ctx))
 			if err != nil {
 				return nil, err
 			}

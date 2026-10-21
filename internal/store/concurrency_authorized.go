@@ -82,10 +82,7 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 	if err != nil {
 		return capability.Authorized{}, time.Time{}, err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return capability.Authorized{}, time.Time{}, err
-	}
+	now := tx.now(ctx)
 	snapshot := capability.AuthenticationSnapshot{Now: now}
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
@@ -132,11 +129,7 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 		if deadline.Valid && (until.IsZero() || time.Unix(0, deadline.Int64).Before(until)) {
 			until = time.Unix(0, deadline.Int64)
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return capability.Authorized{}, time.Time{}, clockErr1
-		}
-		if !until.After(clockTime1) {
+		if !until.After(tx.now(ctx)) {
 			return capability.Authorized{}, time.Time{}, holderRefusal()
 		}
 	}
@@ -195,11 +188,7 @@ func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.A
 	if readOnly {
 		return result, tx.Commit()
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return zero, clockErr2
-	}
-	if err := txCommitChecked(ctx, tx, clockTime2.UnixNano(), concurrencyKey{t.team, key}); err != nil {
+	if err := txCommitChecked(ctx, tx, tx.now(ctx).UnixNano(), concurrencyKey{t.team, key}); err != nil {
 		return zero, err
 	}
 	return result, nil
@@ -288,11 +277,8 @@ func (t *Tenant) HeartbeatAuthorizedSlot(ctx context.Context, a capability.Autho
 		if err != nil {
 			return renewal{}, err
 		}
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return renewal{}, clockErr3
-		}
-		expires := clockTime3.Add(slotLease(clockTime3, until, lease))
+		now := tx.now(ctx)
+		expires := now.Add(slotLease(now, until, lease))
 		expiresNS, err := capacityLeaseCeilingTx(ctx, tx, t.team, holder.RunID, holder.NodeID, expires.UnixNano())
 		if err != nil {
 			return renewal{}, err
@@ -315,11 +301,7 @@ func (t *Tenant) authorizedHolderTx(ctx context.Context, tx *storeTx, a capabili
 	if err != nil {
 		return ConcurrencyHolder{}, err
 	}
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return ConcurrencyHolder{}, clockErr4
-	}
-	if !holder.LeaseExpiresAt.After(clockTime4) {
+	if !holder.LeaseExpiresAt.After(tx.now(ctx)) {
 		return ConcurrencyHolder{}, ErrLockHeld
 	}
 	if holder.RunID != a.Binding.RunID || holder.NodeID != a.Binding.NodeID {
@@ -348,11 +330,8 @@ func (t *Tenant) ReleaseAuthorizedSlot(ctx context.Context, a capability.Authori
 		if err != nil {
 			return false, err
 		}
-		clockTime5, clockErr5 := tx.now(ctx)
-		if clockErr5 != nil {
-			return false, clockErr5
-		}
-		_, err = txPromoteWaiters(ctx, tx, t.team, key, clockTime5.UnixNano(), clockTime5.Add(DefaultConcurrencyLease).UnixNano())
+		now := tx.now(ctx)
+		_, err = txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
 		return released, err
 	})
 	return err
@@ -401,11 +380,7 @@ func (t *Tenant) ResolveAuthorizedWaiter(ctx context.Context, a capability.Autho
 				return WaiterResolution{}, err
 			}
 		}
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return WaiterResolution{}, clockErr6
-		}
-		response, err := t.resolveWaiterTx(ctx, tx, key, run, job, leaderRun, leaderJob, slotLease(clockTime6, until, DefaultConcurrencyLease), nil)
+		response, err := t.resolveWaiterTx(ctx, tx, key, run, job, leaderRun, leaderJob, slotLease(tx.now(ctx), until, DefaultConcurrencyLease), nil)
 		if err != nil {
 			return WaiterResolution{}, err
 		}
@@ -447,11 +422,8 @@ func (t *Tenant) CancelAuthorizedWaiter(ctx context.Context, a capability.Author
 		if err != nil {
 			return false, err
 		}
-		clockTime7, clockErr7 := tx.now(ctx)
-		if clockErr7 != nil {
-			return false, clockErr7
-		}
-		if _, err := txPromoteWaiters(ctx, tx, t.team, key, clockTime7.UnixNano(), clockTime7.Add(DefaultConcurrencyLease).UnixNano()); err != nil {
+		now := tx.now(ctx)
+		if _, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano()); err != nil {
 			return false, err
 		}
 		return removed || count > 0, nil
@@ -475,11 +447,8 @@ func (t *Tenant) ForceReleaseAuthorizedSlots(ctx context.Context, a capability.A
 			}
 			out = append(out, holder)
 		}
-		clockTime8, clockErr8 := tx.now(ctx)
-		if clockErr8 != nil {
-			return nil, clockErr8
-		}
-		_, err = txPromoteWaiters(ctx, tx, t.team, key, clockTime8.UnixNano(), clockTime8.Add(DefaultConcurrencyLease).UnixNano())
+		now := tx.now(ctx)
+		_, err = txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
 		return out, err
 	})
 }

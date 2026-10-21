@@ -29,10 +29,7 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
 		return RetentionResult{}, err
 	}
-	now, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return RetentionResult{}, clockErr2
-	}
+	now := tx.now(ctx)
 	runDays, err := numericSettingTx(ctx, tx, "operator.run_retention_days", 0)
 	if err != nil {
 		return RetentionResult{}, err

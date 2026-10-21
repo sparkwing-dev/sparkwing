@@ -41,11 +41,7 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 		if err := tx.QueryRowContext(ctx, `SELECT generation FROM triggers WHERE team=? AND id=?`, c.Team, unit.RunID).Scan(&generation); err != nil {
 			return err
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		if generation == 0 && (c.Binding.ClaimBy == nil || !c.Binding.ClaimBy.After(clockTime1)) {
+		if generation == 0 && (c.Binding.ClaimBy == nil || !c.Binding.ClaimBy.After(tx.now(ctx))) {
 			return holderRefusal()
 		}
 		return nil
@@ -56,11 +52,7 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 }
 
 func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	now := clockTime3.UnixNano()
+	now := tx.now(ctx).UnixNano()
 	run, err := readRunTx(ctx, tx, team, string(unit.RunID))
 	if err != nil {
 		return err
@@ -139,17 +131,9 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	var result sql.Result
 	var err error
 	if claim.Kind == capability.UnitEval {
-		clockTime4, clockErr4 := tx.now(ctx)
-		if clockErr4 != nil {
-			return clockErr4
-		}
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, clockTime4.UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
 	} else {
-		clockTime5, clockErr5 := tx.now(ctx)
-		if clockErr5 != nil {
-			return clockErr5
-		}
-		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, clockTime5.UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
 	}
 	if err != nil {
 		return err
@@ -174,11 +158,7 @@ type queuedClaim struct {
 func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
 	var candidates []queuedClaim
 	for _, kind := range kinds {
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return UnitRef{}, clockErr6
-		}
-		query, args := tx.operator.queuedClaimQuery(c, kind, clockTime6.UnixNano())
+		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now(ctx).UnixNano())
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return UnitRef{}, err

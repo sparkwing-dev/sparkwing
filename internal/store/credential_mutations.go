@@ -41,11 +41,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 				return ErrSecretLimit
 			}
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		at := clockTime1.UnixNano()
+		at := tx.now(ctx).UnixNano()
 		_, err := tx.ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at`, t.team, row.Name, row.Value, actor, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at, at)
 		return err
 	})
@@ -86,11 +82,7 @@ func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized
 		}
 		row.CreatedBy = actor
 		var err error
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		out, err = t.putGitCredentialTx(ctx, tx, row, clockTime2)
+		out, err = t.putGitCredentialTx(ctx, tx, row, tx.now(ctx))
 		return err
 	})
 	if err != nil {
@@ -117,10 +109,7 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 		if out.ConfirmedAt != nil {
 			return nil
 		}
-		at, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
+		at := tx.now(ctx)
 		result, err := tx.ExecContext(ctx, `UPDATE git_credentials SET confirmed_at=?,updated_at=? WHERE team=? AND id=? AND fingerprint=? AND confirmed_at IS NULL`, at.UnixNano(), at.UnixNano(), t.team, out.ID, fingerprint)
 		if err := credentialRowChanged(result, err); err != nil {
 			return err

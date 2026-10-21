@@ -47,11 +47,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		if err != nil {
 			return result, err
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return materializedRecords{}, clockErr1
-		}
-		if !found || record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(clockTime1) {
+		if !found || record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now(ctx)) {
 			return result, blob.ErrNotFound
 		}
 		if record.ExpiresAt.Set && !record.Pinned {
@@ -125,11 +121,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		return materializedRecords{}, err
 	}
 	for _, expiry := range expiries {
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return materializedRecords{}, clockErr3
-		}
-		if !expiry.After(clockTime3) {
+		if !expiry.After(tx.now(ctx)) {
 			return materializedRecords{}, blob.ErrNotFound
 		}
 	}

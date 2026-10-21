@@ -76,11 +76,7 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 			return err
 		}
 		if change.Role == nil {
-			clockTime1, clockErr1 := tx.now(ctx)
-			if clockErr1 != nil {
-				return clockErr1
-			}
-			if err := t.moveSessionsOffTeamTx(ctx, tx, change.AccountID, clockTime1); err != nil {
+			if err := t.moveSessionsOffTeamTx(ctx, tx, change.AccountID, tx.now(ctx)); err != nil {
 				return err
 			}
 		}

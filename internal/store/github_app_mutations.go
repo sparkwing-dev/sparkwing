@@ -33,11 +33,7 @@ func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Au
 		}
 		row.CreatedBy = p.Capability.Subject.ID
 		var err error
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		out, err = t.putGitHubAppTriggerTx(ctx, tx, row, clockTime1)
+		out, err = t.putGitHubAppTriggerTx(ctx, tx, row, tx.now(ctx))
 		return err
 	})
 	if err != nil {

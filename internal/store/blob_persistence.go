@@ -231,10 +231,7 @@ func insertBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadIde
 	if err != nil {
 		return blob.Receipt{}, err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
+	now := tx.now(ctx)
 	_, err = tx.ExecContext(ctx, `INSERT INTO blob_receipts(team,id,run_id,node_id,attempt,generation,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,uploader_principal,capability_prefix,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, source.Team, id, source.RunID, node, attempt, generation, source.Kind, unitKind, unitID, unitGeneration, unitSource, digest, source.Principal, source.CapabilityRef, now.UnixNano())
 	if err != nil {
 		return blob.Receipt{}, err
@@ -288,10 +285,7 @@ func blobIsCache(kind blob.Kind) bool         { return kind == blob.KindMemo || 
 func blobLocalRepo(repo runspec.RepoKey) bool { return strings.HasPrefix(string(repo), "local:") }
 
 func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.Blob, reserved int64) (int64, error) {
-	now, err := tx.now(ctx)
-	if err != nil {
-		return 0, err
-	}
+	now := tx.now(ctx)
 	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, now.UnixNano())
 	if err != nil {
 		return 0, err

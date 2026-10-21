@@ -60,24 +60,12 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			case capability.UnitPlan:
 				_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: target.ref.RunID, To: RunFailed, Actor: actor, Cause: RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"})
 				if err == nil {
-					clockTime3, clockErr3 := tx.now(ctx)
-					if clockErr3 != nil {
-						return clockErr3
-					}
-					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, clockTime3)
+					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, tx.now(ctx))
 				}
 			case capability.UnitEval:
-				clockTime4, clockErr4 := tx.now(ctx)
-				if clockErr4 != nil {
-					return clockErr4
-				}
-				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", clockTime4)
+				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.now(ctx))
 				if err == nil {
-					clockTime5, clockErr5 := tx.now(ctx)
-					if clockErr5 != nil {
-						return clockErr5
-					}
-					err = resolveExpansionLossTx(ctx, tx, target, "failed", clockTime5)
+					err = resolveExpansionLossTx(ctx, tx, target, "failed", tx.now(ctx))
 				}
 			}
 			if err != nil {

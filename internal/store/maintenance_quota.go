@@ -79,10 +79,7 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 		return QuotaReservation{}, err
 	}
 	defer rollbackOrLog(tx)
-	now, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return QuotaReservation{}, clockErr1
-	}
+	now := tx.now(ctx)
 	period, ceiling, err := quotaPolicyTx(ctx, tx, t.team, quota, now)
 	if err != nil {
 		return QuotaReservation{}, err
@@ -95,11 +92,7 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 	if err := tx.QueryRowContext(ctx, `SELECT period,used,reserved FROM quota_admission WHERE team = ? AND quota = ?`+tx.forUpdate(), t.team, quota).Scan(&prior, &used, &reserved); err != nil {
 		return QuotaReservation{}, err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return QuotaReservation{}, clockErr2
-	}
-	now = clockTime2
+	now = tx.now(ctx)
 	if quota == "download" {
 		period = now.UTC().Format("2006-01-02")
 	} else {
@@ -167,19 +160,11 @@ func (t *Tenant) settleQuota(ctx context.Context, id string, used int64) error {
 		}
 		return tx.Commit()
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	if used > 0 && expires <= clockTime3.UnixNano() {
+	if used > 0 && expires <= tx.now(ctx).UnixNano() {
 		return ErrLockHeld
 	}
 	if period == currentPeriod {
-		clockTime4, clockErr4 := tx.now(ctx)
-		if clockErr4 != nil {
-			return clockErr4
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used = used + ?, reserved = reserved - ?, updated_at = ? WHERE team = ? AND quota = ?`, used, amount, clockTime4.UnixNano(), t.team, quota); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used = used + ?, reserved = reserved - ?, updated_at = ? WHERE team = ? AND quota = ?`, used, amount, tx.now(ctx).UnixNano(), t.team, quota); err != nil {
 			return err
 		}
 	}

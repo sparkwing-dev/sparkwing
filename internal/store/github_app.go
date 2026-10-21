@@ -222,22 +222,14 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 		if err != nil {
 			return err
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
 		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-			WHERE team = ? AND installation_id = ?`, flag, clockTime1.UTC().UnixNano(), team, installation); err != nil {
+			WHERE team = ? AND installation_id = ?`, flag, tx.now(ctx).UTC().UnixNano(), team, installation); err != nil {
 			return err
 		}
 		if suspended {
-			clockTime2, clockErr2 := tx.now(ctx)
-			if clockErr2 != nil {
-				return clockErr2
-			}
 			if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-				clockTime2.UnixNano(), team, installation); err != nil {
+				tx.now(ctx).UnixNano(), team, installation); err != nil {
 				return err
 			}
 		}
@@ -445,34 +437,23 @@ const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 // reports whether event is that one. The binding is kept apart from the
 // processed record, so binding a delivery does not make it seen.
 func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string) (out bool, err error) {
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return out, err
-	}
-	defer rollbackOrLog(tx)
-	defer func() {
-		if err == nil {
-			err = tx.Commit()
+	err = o.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if err = forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
+			return err
 		}
-	}()
-
-	if err = forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
-		return false, err
-	}
-	key := "event:" + digest
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return false, clockErr3
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, key, delivery, clockTime3.Unix(), event); err != nil {
-		return false, err
-	}
-	var bound string
-	if err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
-		return false, err
-	}
-	return bound == event, nil
+		key := "event:" + digest
+		if _, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
+			ON CONFLICT (digest) DO NOTHING`, key, delivery, tx.now(ctx).Unix(), event); err != nil {
+			return err
+		}
+		var bound string
+		if err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
+			return err
+		}
+		out = bound == event
+		return nil
+	})
+	return out, err
 }
 
 // GitHubAppDeliverySeen reports whether a delivery with digest was processed
@@ -491,23 +472,15 @@ func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery
 		if err := forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
 			return err
 		}
-		clockTime4, clockErr4 := tx.now(ctx)
-		if clockErr4 != nil {
-			return clockErr4
-		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, digest, delivery, clockTime4.Unix())
+		ON CONFLICT (digest) DO NOTHING`, digest, delivery, tx.now(ctx).Unix())
 		return err
 	})
 }
 
 func forgetExpiredGitHubAppDeliveriesTx(ctx context.Context, tx *storeTx) error {
-	clockTime5, clockErr5 := tx.now(ctx)
-	if clockErr5 != nil {
-		return clockErr5
-	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		clockTime5.Add(-GitHubAppDeliveryRetention).Unix())
+		tx.now(ctx).Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
 
@@ -642,13 +615,9 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 		string(t.team), installation); err != nil {
 		return err
 	}
-	clockTime6, clockErr6 := tx.now(ctx)
-	if clockErr6 != nil {
-		return clockErr6
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		clockTime6.UnixNano(), string(t.team), installation); err != nil {
+		tx.now(ctx).UnixNano(), string(t.team), installation); err != nil {
 		return err
 	}
 	return nil

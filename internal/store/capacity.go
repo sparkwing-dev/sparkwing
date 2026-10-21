@@ -231,14 +231,10 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 	if !obs.CPUMeasured {
 		return nil
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return clockErr1
-	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_profiles
  (team,pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,updated_at)
  VALUES (?,?,?,0,0,0,0,0,?) ON CONFLICT (team,pipeline,node_id) DO NOTHING`,
-		string(t.team), pipeline, nodeID, clockTime1.UnixNano()); err != nil {
+		string(t.team), pipeline, nodeID, tx.now(ctx).UnixNano()); err != nil {
 		return err
 	}
 	st, err := loadProfileMutState(ctx, tx, t.team, pipeline, nodeID)
@@ -296,10 +292,6 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 	if err != nil {
 		return err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return clockErr2
-	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO pipeline_profiles
     (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json,
@@ -324,7 +316,7 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
 		string(t.team), pipeline, nodeID,
 		prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
 		prof.PeakCores, prof.PeakMemoryBytes, prof.SampleCount,
-		boolToInt(cpuMeasured), clockTime2.UnixNano(), raw,
+		boolToInt(cpuMeasured), tx.now(ctx).UnixNano(), raw,
 		planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
 		prof.SustainedCores, prevSustainedCores)
 	if err != nil {

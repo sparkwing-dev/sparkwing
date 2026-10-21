@@ -41,10 +41,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 		if err != nil {
 			return err
 		}
-		now, err := tx.now(ctx)
-		if err != nil {
-			return err
-		}
+		now := tx.now(ctx)
 		switch {
 		case result.Node.Status == StatusDone:
 			result.Kind = KeepTerminal

@@ -52,18 +52,10 @@ func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized c
 		if current.installation != before.installation || !slices.Equal(current.ids, before.ids) || !slices.Equal(current.names, before.names) {
 			return bindingRefusal()
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		if token.Token == "" || !token.ExpiresAt.After(clockTime1) {
+		if token.Token == "" || !token.ExpiresAt.After(tx.now(ctx)) {
 			return authorityError(apierr.Unavailable, "GitHub returned no live source token")
 		}
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		audit, err := capability.AuthorizeSourceRelease(current.request, clockTime2)
+		audit, err := capability.AuthorizeSourceRelease(current.request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -120,11 +112,7 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 		return out, err
 	}
 	request.GitHubApp, request.CredentialID = true, fmt.Sprintf("github_app:%d", installation)
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return githubSourceRelease{}, clockErr3
-	}
-	if _, err := capability.AuthorizeSourceRelease(request, clockTime3); err != nil {
+	if _, err := capability.AuthorizeSourceRelease(request, tx.now(ctx)); err != nil {
 		return out, err
 	}
 	return githubSourceRelease{request, installation, ids, names}, nil

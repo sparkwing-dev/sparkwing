@@ -66,7 +66,6 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 	var visited []ControllerRun
 	for _, ref := range targets {
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-
 			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner"); err != nil {
 				return err
 			}
@@ -90,11 +89,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 					return err
 				}
 			}
-			clockTime4, clockErr4 := tx.now(ctx)
-			if clockErr4 != nil {
-				return clockErr4
-			}
-			if err := settleControllerTx(ctx, tx, ref.Team, ref.RunID, clockTime4); err != nil {
+			if err := settleControllerTx(ctx, tx, ref.Team, ref.RunID, tx.now(ctx)); err != nil {
 				return err
 			}
 			var until int64

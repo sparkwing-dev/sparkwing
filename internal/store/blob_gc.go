@@ -57,11 +57,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 			if reachable {
 				continue
 			}
-			clockTime2, clockErr2 := tx.now(ctx)
-			if clockErr2 != nil {
-				return clockErr2
-			}
-			result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, clockTime2.UnixNano())
+			result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, tx.now(ctx).UnixNano())
 			if err != nil {
 				return err
 			}
@@ -81,11 +77,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease SingletonLease, limit int) error {
 	var expired []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return clockErr3
-		}
-		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=? ORDER BY team,id LIMIT ?", clockTime3.UnixNano(), limit)
+		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now(ctx).UnixNano(), limit)
 		return err
 	})
 	for _, u := range expired {
@@ -93,7 +85,6 @@ func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease Singleto
 			return err
 		}
 		err = o.s.inTx(ctx, func(tx *storeTx) error {
-
 			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 				return err
 			}
@@ -117,15 +108,10 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 	}
 	var settled []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-
 		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return clockErr6
-		}
-		settled, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND staging_deleted_at IS NULL AND (committed_at<>0 OR abandoned_at IS NOT NULL) AND expires_at<=? ORDER BY team,id LIMIT ?", clockTime6.Add(-limits.BlobGCGrace).UnixNano(), limit)
+		settled, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND staging_deleted_at IS NULL AND (committed_at<>0 OR abandoned_at IS NOT NULL) AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now(ctx).Add(-limits.BlobGCGrace).UnixNano(), limit)
 		return err
 	})
 	if err != nil {
@@ -138,15 +124,10 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 			continue
 		}
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-
 			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 				return err
 			}
-			clockTime8, clockErr8 := tx.now(ctx)
-			if clockErr8 != nil {
-				return clockErr8
-			}
-			_, err := tx.ExecContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", clockTime8.UnixNano(), u.team, u.key)
+			_, err := tx.ExecContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now(ctx).UnixNano(), u.team, u.key)
 			return err
 		})
 		if err != nil {
@@ -188,15 +169,10 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	}
 	var candidates []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-
 		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
-		clockTime10, clockErr10 := tx.now(ctx)
-		if clockErr10 != nil {
-			return clockErr10
-		}
-		candidates, err = teamKeysTx(ctx, tx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", clockTime10.Add(-limits.BlobGCGrace).UnixNano(), limit)
+		candidates, err = teamKeysTx(ctx, tx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now(ctx).Add(-limits.BlobGCGrace).UnixNano(), limit)
 		return err
 	})
 	if err != nil {
@@ -231,11 +207,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		clockTime11, clockErr11 := tx.now(ctx)
-		if clockErr11 != nil {
-			return clockErr11
-		}
-		if err != nil || clockTime11.Before(time.Unix(0, marked).Add(limits.BlobGCGrace)) {
+		if err != nil || tx.now(ctx).Before(time.Unix(0, marked).Add(limits.BlobGCGrace)) {
 			return err
 		}
 		reachable, err := blobReachableTx(ctx, tx, Team(b.Team), b.Digest)
@@ -254,11 +226,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		if collecting.Valid {
 			return nil
 		}
-		clockTime12, clockErr12 := tx.now(ctx)
-		if clockErr12 != nil {
-			return clockErr12
-		}
-		collectingAt = clockTime12.UnixNano()
+		collectingAt = tx.now(ctx).UnixNano()
 		_, err = tx.ExecContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", collectingAt, b.Team, b.Digest)
 		return err
 	})
@@ -307,7 +275,6 @@ func blobCollectionCurrentTx(ctx context.Context, tx *storeTx, lease SingletonLe
 }
 
 func lockCollectedBlobTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob) error {
-
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 		return err
 	}

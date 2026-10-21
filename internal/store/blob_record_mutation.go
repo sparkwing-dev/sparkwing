@@ -83,11 +83,7 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 		if replayed[i] {
 			continue
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return nil, clockErr1
-		}
-		result[i].CreatedAt = clockTime1
+		result[i].CreatedAt = tx.now(ctx)
 		if err := persistBlobRecordTx(ctx, tx, result[i], change.scope, current.source, target); err != nil {
 			return nil, err
 		}

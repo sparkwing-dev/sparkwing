@@ -34,11 +34,8 @@ func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[stri
 	if err != nil {
 		return nil, nil, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return nil, nil, clockErr1
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND bind_kind='none' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY subject_id,prefix`, t.team, clockTime1.UnixNano(), clockTime1.UnixNano())
+	now := tx.now(ctx)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND bind_kind='none' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY subject_id,prefix`, t.team, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,11 +137,7 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, ru
 		return true, tx.Commit()
 	}
 	for _, rule := range desired {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return false, clockErr2
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, t.team, rule.ID, rule.Pool, rule.RepositoryKey, rule.Branch, rule.Source, rule.Route, p.Capability.Subject.ID, clockTime2.UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, t.team, rule.ID, rule.Pool, rule.RepositoryKey, rule.Branch, rule.Source, rule.Route, p.Capability.Subject.ID, tx.now(ctx).UnixNano()); err != nil {
 			return false, err
 		}
 	}

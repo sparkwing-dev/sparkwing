@@ -54,10 +54,7 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 		if run.FinishedAt != nil || run.CancelRequestedAt != nil || row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return authorityError(apierr.IllegalTransition, "job cannot be paused")
 		}
-		now, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
+		now := tx.now(ctx)
 		if expires.IsZero() {
 			expires = now.Add(limits.DebugPause)
 		}

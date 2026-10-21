@@ -79,7 +79,11 @@ func (s *Store) inTxOnce(ctx context.Context, fn func(*storeTx) error) (err erro
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := fn(tx); err != nil {
+	err = fn(tx)
+	if tx.err != nil && !errors.Is(err, tx.err) {
+		return tx.err
+	}
+	if err != nil {
 		return err
 	}
 	return tx.Commit()

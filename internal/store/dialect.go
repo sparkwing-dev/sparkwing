@@ -112,10 +112,7 @@ func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, er
 }
 
 func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
-	if err := refuseLedgerWrite(q); err != nil {
-		return nil, err
-	}
-	return s.sqlRunner().QueryContext(context.Background(), rewritePh(s.dialect, q), args...)
+	return s.query(context.Background(), q, args...)
 }
 
 func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner {
@@ -126,10 +123,7 @@ func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner 
 }
 
 func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
-	if err := refuseLedgerWrite(q); err != nil {
-		return refusedLedgerRow{err}
-	}
-	return s.sqlRunner().QueryRowContext(context.Background(), rewritePh(s.dialect, q), args...)
+	return s.queryRow(context.Background(), q, args...)
 }
 
 type storeTx struct {
@@ -141,6 +135,7 @@ type storeTx struct {
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
 	clock                func(context.Context) (time.Time, error)
+	err                  error
 	cancelingTeam        Team
 	tx                   *sql.Tx
 	dialect              Dialect
@@ -180,9 +175,15 @@ func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeT
 	return t, nil
 }
 
-// now preserves read snapshots and rechecks write fences after lock or policy work.
-func (t *storeTx) now(ctx context.Context) (time.Time, error) {
-	return t.clock(ctx)
+// safety: read snapshots stay fixed while write fences use fresh time; clock
+// failure poisons SQL access and commit even if the caller ignores the time.
+func (t *storeTx) now(ctx context.Context) time.Time {
+	if t.err != nil {
+		return time.Time{}
+	}
+	now, err := t.clock(ctx)
+	t.err = err
+	return now
 }
 
 func (t *storeTx) readClock(ctx context.Context) (time.Time, error) {
@@ -213,7 +214,7 @@ func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
 		return time.Time{}, err
 	}
 	defer rollbackOrLog(tx)
-	return tx.now(ctx)
+	return tx.now(ctx), tx.err
 }
 
 // safety: Postgres takes a fresh snapshot per statement unless the isolation
@@ -262,6 +263,9 @@ func (s *Store) beginStoreTx(ctx context.Context, read bool) (*storeTx, error) {
 }
 
 func (t *storeTx) Commit() error {
+	if t.err != nil {
+		return errors.Join(t.err, t.Rollback())
+	}
 	if err := t.tx.Commit(); err != nil {
 		return err
 	}
@@ -272,43 +276,41 @@ func (t *storeTx) Commit() error {
 }
 func (t *storeTx) Rollback() error { return t.tx.Rollback() }
 
-func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {
-	if err := refuseLedgerWrite(q); err != nil {
-		return nil, err
+func (t *storeTx) checkSQL(q string) error {
+	if t.err != nil {
+		return t.err
 	}
-	return t.tx.Exec(rewritePh(t.dialect, q), args...)
+	return refuseLedgerWrite(q)
+}
+
+func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {
+	return t.ExecContext(context.Background(), q, args...)
 }
 
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	if err := refuseLedgerWrite(q); err != nil {
+	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
 func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error) {
-	if err := refuseLedgerWrite(q); err != nil {
-		return nil, err
-	}
-	return t.tx.Query(rewritePh(t.dialect, q), args...)
+	return t.QueryContext(context.Background(), q, args...)
 }
 
 func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if err := refuseLedgerWrite(q); err != nil {
+	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
 	return t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
 func (t *storeTx) QueryRow(q string, args ...any) rowScanner {
-	if err := refuseLedgerWrite(q); err != nil {
-		return refusedLedgerRow{err}
-	}
-	return t.tx.QueryRow(rewritePh(t.dialect, q), args...)
+	return t.QueryRowContext(context.Background(), q, args...)
 }
 
 func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) rowScanner {
-	if err := refuseLedgerWrite(q); err != nil {
+	if err := t.checkSQL(q); err != nil {
 		return refusedLedgerRow{err}
 	}
 	return t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)

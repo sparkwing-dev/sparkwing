@@ -141,11 +141,7 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err := expansionAuthorityTx(ctx, tx, team, request); err != nil {
 		return err
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, clockTime3, funded)
+	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, tx.now(ctx), funded)
 	if err != nil {
 		return err
 	}

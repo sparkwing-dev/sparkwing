@@ -92,19 +92,11 @@ func memberIssuancePolicy(ctx context.Context, tx *storeTx, spec capability.Prov
 		}
 		maximum = 30 * 24 * time.Hour
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return capability.Capability{}, clockErr1
-	}
-	ceiling := clockTime1.Add(maximum)
+	ceiling := tx.now(ctx).Add(maximum)
 	if c.ExpiresAt == nil {
 		c.ExpiresAt = &ceiling
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return capability.Capability{}, clockErr2
-	}
-	if c.ExpiresAt.After(ceiling) || !c.ExpiresAt.After(clockTime2) {
+	if c.ExpiresAt.After(ceiling) || !c.ExpiresAt.After(tx.now(ctx)) {
 		return c, authorityError(apierr.BadRequest, "member credential expiry exceeds its lifetime ceiling")
 	}
 	if tx.rotatingRoot != nil {

@@ -130,11 +130,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) 
 			return errors.New("run still has live work")
 		}
 		if finish.Unit.Kind == OwnerTrigger {
-			clockTime3, clockErr3 := tx.now(ctx)
-			if clockErr3 != nil {
-				return clockErr3
-			}
-			result, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=?`, clockTime3.UnixNano(), t.team, finish.Unit.RunID, finish.Unit.Generation, finish.Unit.Holder)
+			result, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=?`, tx.now(ctx).UnixNano(), t.team, finish.Unit.RunID, finish.Unit.Generation, finish.Unit.Holder)
 			if err != nil {
 				return err
 			}
@@ -145,11 +141,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) 
 			if n != 1 && !out.Replayed {
 				return holderRefusal()
 			}
-			clockTime4, clockErr4 := tx.now(ctx)
-			if clockErr4 != nil {
-				return clockErr4
-			}
-			if err := settleOwnerBillingTx(ctx, tx, t.team, string(finish.Unit.RunID), int64(finish.Unit.Generation), clockTime4); err != nil {
+			if err := settleOwnerBillingTx(ctx, tx, t.team, string(finish.Unit.RunID), int64(finish.Unit.Generation), tx.now(ctx)); err != nil {
 				return err
 			}
 		}
@@ -166,10 +158,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	if err := lockStateRunTx(ctx, tx, team, string(change.RunID)); err != nil {
 		return Applied{}, err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return Applied{}, err
-	}
+	now := tx.now(ctx)
 	row, err := readRunTx(ctx, tx, team, string(change.RunID))
 	if err != nil {
 		return Applied{}, err
@@ -512,11 +501,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 	if err := checkOwnerTx(ctx, tx, team, controller, request.RunID); err != nil {
 		return err
 	}
-	clockTime7, clockErr7 := tx.now(ctx)
-	if clockErr7 != nil {
-		return clockErr7
-	}
-	write, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, clockTime7.UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
+	write, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now(ctx).UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
 	if err != nil {
 		return err
 	}
@@ -525,11 +510,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 		return err
 	}
 	if count == 1 {
-		clockTime8, clockErr8 := tx.now(ctx)
-		if clockErr8 != nil {
-			return clockErr8
-		}
-		return settleOwnerBillingTx(ctx, tx, team, request.RunID, int64(request.Actor.Owner.Generation), clockTime8)
+		return settleOwnerBillingTx(ctx, tx, team, request.RunID, int64(request.Actor.Owner.Generation), tx.now(ctx))
 	}
 	if !replay {
 		return holderRefusal()
@@ -571,10 +552,8 @@ func writeEvalRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, u
 
 func startOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, actor Actor) error {
 	var result sql.Result
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	var err error
+	now := tx.now(ctx)
 	if unit.Kind == capability.UnitEval {
 		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='running',started_at=COALESCE(started_at,?) WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running')`, now.UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.Holder, actor.CapabilityPrefix)
 	} else {

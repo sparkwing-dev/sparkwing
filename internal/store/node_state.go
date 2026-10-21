@@ -427,11 +427,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	if err := lockStateRunTx(ctx, tx, team, string(change.Ref.RunID)); err != nil {
 		return Applied{}, err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return *new(Applied), clockErr2
-	}
-	now := clockTime2
+	now := tx.now(ctx)
 	row, err := readNodeTx(ctx, tx, team, change.Ref)
 	if err != nil {
 		return Applied{}, err

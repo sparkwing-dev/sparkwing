@@ -190,10 +190,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	now, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return UnitClaim{}, clockErr1
-	}
+	now := tx.now(ctx)
 	var deadline time.Time
 	if row.expiry.Valid {
 		deadline = time.Unix(0, row.expiry.Int64).UTC()
@@ -237,10 +234,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 			deadline = time.Unix(0, ownerUntil).UTC()
 		}
 	}
-	current, err := tx.now(ctx)
-	if err != nil {
-		return UnitClaim{}, err
-	}
+	current := tx.now(ctx)
 	if !deadline.After(current) {
 		return UnitClaim{}, holderRefusal()
 	}
@@ -254,19 +248,11 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		observation := demand
 		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
 		observation.Labels = match.SelfAsserted(observation.Labels)
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return UnitClaim{}, clockErr2
-		}
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: clockTime2})
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
 			return UnitClaim{}, err
 		}
-		clockTime3, clockErr3 := tx.now(ctx)
-		if clockErr3 != nil {
-			return UnitClaim{}, clockErr3
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, clockTime3.UnixNano(), team, observation.CapabilityPrefix); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now(ctx).UnixNano(), team, observation.CapabilityPrefix); err != nil {
 			return UnitClaim{}, err
 		}
 	}

@@ -89,10 +89,7 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor,
 	if err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if status != "claimed" || holder != ref.Holder || runspec.ClaimGeneration(generation) != ref.Generation || prefix != actor.CapabilityPrefix || !until.Valid || until.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
@@ -112,10 +109,7 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 	if err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	claimed := runspec.NodeFence{RunID: row.Ref.RunID, NodeID: row.Ref.NodeID, Holder: row.ClaimedBy, Generation: row.Generation}
 	if actor.Kind != ActorHolder || actor.Holder == "" || actor.CapabilityPrefix == "" || claimed != actor.NodeFence || row.CapabilityPrefix != actor.CapabilityPrefix || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now) {
 		return holderRefusal()

@@ -140,11 +140,8 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return tx.Commit()
 	}
 	if !exists {
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, clockTime1.UnixNano(), clockTime1.UnixNano())
+		now := tx.now(ctx)
+		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, now.UnixNano(), now.UnixNano())
 		if err != nil {
 			return err
 		}
@@ -156,22 +153,14 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		seal = clockTime2.UnixNano()
+		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
 		finalDigest = digest
 		if commit.IncompleteReason != "" {
 			completeness = "incomplete"
 		}
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, clockTime3.UnixNano(), t.team, commit.Subject.RunID, identity.id)
+	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.now(ctx).UnixNano(), t.team, commit.Subject.RunID, identity.id)
 	if err != nil {
 		return err
 	}
@@ -258,11 +247,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return holderRefusal()
 		}
 		if finished.Valid {
-			clockTime4, clockErr4 := tx.now(ctx)
-			if clockErr4 != nil {
-				return clockErr4
-			}
-			if row.Status != StatusDone || (!sealedReplay && clockTime4.UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
+			if row.Status != StatusDone || (!sealedReplay && tx.now(ctx).UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
 				return holderRefusal()
 			}
 			return nil
@@ -309,10 +294,7 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 			return err
 		}
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}

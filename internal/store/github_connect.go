@@ -93,11 +93,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		row.ConnectedBy = p.Capability.Subject.ID
 		var err error
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		out, err = t.bindGitHubInstallationTx(ctx, tx, row, clockTime1)
+		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -107,11 +103,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			for _, team := range []Team{previousTeam, t.team} {
-				clockTime2, clockErr2 := tx.now(ctx)
-				if clockErr2 != nil {
-					return clockErr2
-				}
-				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: clockTime2, Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
+				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
 					return err
 				}
 			}

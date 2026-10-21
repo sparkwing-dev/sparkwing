@@ -65,11 +65,7 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		if err := json.Unmarshal(body, &poll); err != nil {
 			return UnitDemand{}, err
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return UnitDemand{}, clockErr1
-		}
-		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(clockTime1) {
+		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.now(ctx)) {
 			continue
 		}
 		if !validMatchingResources(poll.Capacity) || !validMatchingResources(poll.Available) {

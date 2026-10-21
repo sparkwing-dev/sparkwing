@@ -50,11 +50,7 @@ func lockUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, id,
 	if err != nil {
 		return q, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return blobQuota{}, clockErr1
-	}
-	if q.state == "released" || (q.state == "held" && expires <= clockTime1.UnixNano()) {
+	if q.state == "released" || (q.state == "held" && expires <= tx.now(ctx).UnixNano()) {
 		return q, ErrLockHeld
 	}
 	return q, nil
@@ -77,11 +73,7 @@ func settleUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 		return authorityError(apierr.Conflict, "upload exceeds its reservation")
 	}
 	if q.period == q.currentPeriod {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used=used+?,reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=? AND used<=9223372036854775807-?`, d.amount, q.amount, clockTime2.UnixNano(), team, d.quota, q.amount, d.amount)
+		result, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used=used+?,reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=? AND used<=9223372036854775807-?`, d.amount, q.amount, tx.now(ctx).UnixNano(), team, d.quota, q.amount, d.amount)
 		if err != nil {
 			return err
 		}
@@ -97,13 +89,9 @@ func recordStorageUsageTx(ctx context.Context, tx *storeTx, team Team, run, repl
 	if size == 0 && objects == 0 {
 		return nil
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO storage_month_usage(team,period,replica_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?)
 ON CONFLICT(team,period,replica_id) DO UPDATE SET bytes=storage_month_usage.bytes+excluded.bytes,objects=storage_month_usage.objects+excluded.objects,updated_at=excluded.updated_at
-WHERE storage_month_usage.bytes<=9223372036854775807-excluded.bytes AND storage_month_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, size, objects, clockTime3.UnixNano())
+WHERE storage_month_usage.bytes<=9223372036854775807-excluded.bytes AND storage_month_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, size, objects, tx.now(ctx).UnixNano())
 	if err != nil {
 		return err
 	}
@@ -120,13 +108,9 @@ func recordStorageRunUsageTx(ctx context.Context, tx *storeTx, team Team, run, r
 	if size == 0 && objects == 0 {
 		return nil
 	}
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return clockErr4
-	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO storage_run_usage(team,period,replica_id,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(team,period,replica_id,run_id) DO UPDATE SET bytes=storage_run_usage.bytes+excluded.bytes,objects=storage_run_usage.objects+excluded.objects,updated_at=excluded.updated_at
-WHERE storage_run_usage.bytes<=9223372036854775807-excluded.bytes AND storage_run_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, run, size, objects, clockTime4.UnixNano())
+WHERE storage_run_usage.bytes<=9223372036854775807-excluded.bytes AND storage_run_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, run, size, objects, tx.now(ctx).UnixNano())
 	if err != nil {
 		return err
 	}

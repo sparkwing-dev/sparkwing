@@ -63,11 +63,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return RunSnapshot{}, clockErr1
-	}
-	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(clockTime1)) {
+	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.now(ctx))) {
 		return RunSnapshot{}, bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, t.team, runID)

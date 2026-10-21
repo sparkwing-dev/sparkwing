@@ -24,11 +24,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return capability.OIDCFacts{}, clockErr1
-	}
-	snapshot := capability.AuthenticationSnapshot{Now: clockTime1, Binding: state}
+	snapshot := capability.AuthenticationSnapshot{Now: tx.now(ctx), Binding: state}
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}

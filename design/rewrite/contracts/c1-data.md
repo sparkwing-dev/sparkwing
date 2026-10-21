@@ -4197,8 +4197,10 @@ the original seal. Invocation origin never selects environment storage.
 Successful transaction construction captures database time. Failure to read that
 clock aborts construction before any transaction body runs. Read transactions
 keep that instant and one database snapshot. Mutation authority and lease checks
-read fresh database time after lock waits or policy work, through the same
-error-returning clock owner. Mutation transactions expose no stored snapshot
+read fresh database time after lock waits or policy work through `storeTx.now`.
+A failed clock read poisons the transaction: later SQL returns that error,
+commit rolls back, and transaction callbacks cannot hide it behind success
+or a different refusal. Mutation transactions expose no stored snapshot
 timestamp, and lifecycle guards accept no caller-supplied time.
 Lifecycle, identity, billing and schedule mutations
 use store time instead of a caller clock. Schedule due times and provider event

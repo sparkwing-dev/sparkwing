@@ -229,11 +229,7 @@ func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setB
 		return SignUpGate{}, err
 	}
 	return s.updateSignUpGate(ctx, func(tx *storeTx, g *SignUpGate) error {
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
-		g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(reason), setBy, clockTime1
+		g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(reason), setBy, tx.now(ctx)
 		return nil
 	})
 }
@@ -261,11 +257,7 @@ func (o *Operator) SignUpCounts(ctx context.Context) (out SignUpCounts, err erro
 	defer rollbackOrLog(tx)
 
 	var c SignUpCounts
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return SignUpCounts{}, clockErr2
-	}
-	at := clockTime2.UTC().UnixNano()
+	at := tx.now(ctx).UTC().UnixNano()
 	err = tx.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
@@ -499,11 +491,7 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string) (Account, 
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return Account{}, false, clockErr3
-	}
-	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, clockTime3)
+	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, tx.now(ctx))
 	if err != nil {
 		return Account{}, false, err
 	}

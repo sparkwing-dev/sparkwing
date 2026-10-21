@@ -244,11 +244,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 				}
 			}
 			row.ArmedBy = p.Capability.Subject.ID
-			clockTime1, clockErr1 := tx.now(ctx)
-			if clockErr1 != nil {
-				return clockErr1
-			}
-			row.NextDueAt, err = scheduleNext(row, clockTime1, minimum)
+			row.NextDueAt, err = scheduleNext(row, tx.now(ctx), minimum)
 			if err != nil {
 				return err
 			}
@@ -271,11 +267,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 			if err != nil {
 				return err
 			}
-			clockTime2, clockErr2 := tx.now(ctx)
-			if clockErr2 != nil {
-				return clockErr2
-			}
-			stored, _, err := t.armCronScheduleTx(ctx, tx, row, repository, args, clockTime2)
+			stored, _, err := t.armCronScheduleTx(ctx, tx, row, repository, args, tx.now(ctx))
 			if err != nil {
 				return err
 			}
@@ -293,11 +285,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 		for _, row := range existing {
 			if row.RepoPath == repo && !keep[row.ID] && row.Declared {
 				if replace {
-					clockTime3, clockErr3 := tx.now(ctx)
-					if clockErr3 != nil {
-						return clockErr3
-					}
-					if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND id=?`, clockTime3.UnixNano(), t.team, row.ID); err != nil {
+					if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND id=?`, tx.now(ctx).UnixNano(), t.team, row.ID); err != nil {
 						return err
 					}
 					withdrawn = append(withdrawn, row.Pipeline+"/"+row.Name)
@@ -345,27 +333,16 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error) {
 	return t.editSchedule(ctx, a, id, func(tx *storeTx, row CronSchedule) error {
 		if row.Paused && !paused {
-			clockTime4, clockErr4 := tx.now(ctx)
-			if clockErr4 != nil {
-				return clockErr4
-			}
-			next, err := scheduleNext(row, clockTime4, 0)
+			next, err := scheduleNext(row, tx.now(ctx), 0)
 			if err != nil {
 				return err
 			}
-			clockTime5, clockErr5 := tx.now(ctx)
-			if clockErr5 != nil {
-				return clockErr5
-			}
-			if err := t.resolveCronDueTx(ctx, tx, row.ID, clockTime5, next, nil, clockTime5); err != nil {
+			now := tx.now(ctx)
+			if err := t.resolveCronDueTx(ctx, tx, row.ID, now, next, nil, now); err != nil {
 				return err
 			}
 		}
-		clockTime6, clockErr6 := tx.now(ctx)
-		if clockErr6 != nil {
-			return clockErr6
-		}
-		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET paused=?,updated_at=? WHERE team=? AND id=?`, boolToInt(paused), clockTime6.UnixNano(), t.team, row.ID)
+		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET paused=?,updated_at=? WHERE team=? AND id=?`, boolToInt(paused), tx.now(ctx).UnixNano(), t.team, row.ID)
 		return err
 	})
 }
@@ -379,11 +356,7 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 			if err := body.Validate(); err != nil {
 				return err
 			}
-			clockTime7, clockErr7 := tx.now(ctx)
-			if clockErr7 != nil {
-				return clockErr7
-			}
-			o := &CronOverride{Base: row.Declaration(), SetAt: clockTime7}
+			o := &CronOverride{Base: row.Declaration(), SetAt: tx.now(ctx)}
 			if body.Cron != nil {
 				o.Cron = *body.Cron
 			}
@@ -414,27 +387,15 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 		if a.Principal.Capability.Subject.Kind == capability.SubjectLocal {
 			minimum = 0
 		}
-		clockTime8, clockErr8 := tx.now(ctx)
-		if clockErr8 != nil {
-			return clockErr8
-		}
-		next, err := scheduleNext(row, clockTime8, minimum)
+		next, err := scheduleNext(row, tx.now(ctx), minimum)
 		if err != nil {
 			return err
 		}
 		if row.Override == nil {
-			clockTime9, clockErr9 := tx.now(ctx)
-			if clockErr9 != nil {
-				return clockErr9
-			}
-			_, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET override_cron=NULL,override_tz=NULL,override_overlap=NULL,override_catch_up_ns=NULL,override_args=NULL,override_base=NULL,override_set_at=NULL,next_due_at=?,updated_at=? WHERE team=? AND id=?`, nullNanos(next), clockTime9.UnixNano(), t.team, row.ID)
+			_, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET override_cron=NULL,override_tz=NULL,override_overlap=NULL,override_catch_up_ns=NULL,override_args=NULL,override_base=NULL,override_set_at=NULL,next_due_at=?,updated_at=? WHERE team=? AND id=?`, nullNanos(next), tx.now(ctx).UnixNano(), t.team, row.ID)
 			return err
 		}
-		clockTime10, clockErr10 := tx.now(ctx)
-		if clockErr10 != nil {
-			return clockErr10
-		}
-		if err = t.setCronOverrideTx(ctx, tx, row.ID, *row.Override, clockTime10); err != nil {
+		if err = t.setCronOverrideTx(ctx, tx, row.ID, *row.Override, tx.now(ctx)); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET next_due_at=? WHERE team=? AND id=?`, nullNanos(next), t.team, row.ID)

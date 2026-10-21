@@ -21,7 +21,6 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 		return nil, errors.New("reaper limit must be positive")
 	}
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-
 		return assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper")
 	}); err != nil {
 		return nil, err
@@ -35,10 +34,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 	for _, target := range targets {
 		var result *ReapedUnit
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			now, clockErr2 := tx.now(ctx)
-			if clockErr2 != nil {
-				return clockErr2
-			}
+			now := tx.now(ctx)
 			var holder string
 			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
@@ -131,11 +127,7 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err != nil {
 		return nil, err
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return nil, clockErr3
-	}
-	now = clockTime3
+	now = tx.now(ctx)
 	if row.Status == StatusDone {
 		return nil, nil
 	}

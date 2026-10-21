@@ -43,10 +43,7 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 		if err != nil {
 			return err
 		}
-		now, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return clockErr1
-		}
+		now := tx.now(ctx)
 		if row.team != string(claim.Team) || row.prefix != prefix || row.holder != claim.Award.Holder || row.generation != generation || !row.lease.Valid || row.lease.Int64 <= now.UnixNano() {
 			return holderRefusal()
 		}
@@ -89,15 +86,7 @@ func releaseOwnerUnitTx(ctx context.Context, tx *storeTx, claim UnitClaim, unit 
 	target := expiredUnit{team: claim.Team, ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, kind: claim.Kind, sourceGeneration: unit.SourceGeneration}
 	owner := ownerRecovery{generation: int64(claim.Award.Generation), disruptions: disruptions}
 	if claim.Kind == capability.UnitEval {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		return writeEvalRecoveryTx(ctx, tx, target, owner, "pending", clockTime2)
+		return writeEvalRecoveryTx(ctx, tx, target, owner, "pending", tx.now(ctx))
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}, clockTime3)
+	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}, tx.now(ctx))
 }

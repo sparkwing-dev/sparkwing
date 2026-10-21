@@ -117,11 +117,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			return err
 		}
 	}
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return clockErr1
-	}
-	now := clockTime1.UnixNano()
+	now := tx.now(ctx).UnixNano()
 	var requester string
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT CASE WHEN created_subject_kind='account' THEN created_principal ELSE '' END FROM runs WHERE team=? AND id=?),'')`, c.Team, c.Binding.RunID).Scan(&requester); err != nil {
 		return err
@@ -141,11 +137,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		}
 	}
 	if b.Start == capability.BillingAtAward {
-		clockTime2, clockErr2 := tx.now(ctx)
-		if clockErr2 != nil {
-			return clockErr2
-		}
-		return startBillableIntervalTx(ctx, tx, Team(c.Team), b.ReservationID, "award", 0, clockTime2)
+		return startBillableIntervalTx(ctx, tx, Team(c.Team), b.ReservationID, "award", 0, tx.now(ctx))
 	}
 	return nil
 }
@@ -161,11 +153,7 @@ func startBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reserv
 	if a.settled.Valid {
 		return authorityError(apierr.Conflict, "billing award is settled")
 	}
-	clockTime3, clockErr3 := tx.now(ctx)
-	if clockErr3 != nil {
-		return clockErr3
-	}
-	if at.After(clockTime3) || at.UnixNano() < a.awarded {
+	if at.After(tx.now(ctx)) || at.UnixNano() < a.awarded {
 		return authorityError(apierr.BadRequest, "compute start is outside its awarded time range")
 	}
 	if !a.provenance.Metered {
@@ -208,11 +196,7 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 	if err := tx.QueryRowContext(ctx, "SELECT started_at,finished_at,charged_through FROM billable_intervals WHERE team=? AND reservation_id=? AND id=?", team, reservation, id).Scan(&start, &end, &charged); err != nil {
 		return err
 	}
-	clockTime4, clockErr4 := tx.now(ctx)
-	if clockErr4 != nil {
-		return clockErr4
-	}
-	if at.After(clockTime4) || at.UnixNano() < start {
+	if at.After(tx.now(ctx)) || at.UnixNano() < start {
 		return authorityError(apierr.BadRequest, "compute finish is outside its started time range")
 	}
 	if end.Valid {
@@ -243,11 +227,7 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	if a.settled.Valid {
 		return settledBillingResultTx(ctx, tx, a)
 	}
-	clockTime5, clockErr5 := tx.now(ctx)
-	if clockErr5 != nil {
-		return capability.BillingSettlement{}, clockErr5
-	}
-	if through.After(clockTime5) || through.UnixNano() < a.awarded {
+	if through.After(tx.now(ctx)) || through.UnixNano() < a.awarded {
 		return capability.BillingSettlement{}, authorityError(apierr.BadRequest, "billing checkpoint is outside its awarded time range")
 	}
 	intervals, err := billingIntervalsTx(ctx, tx, a, through, final)
@@ -270,11 +250,7 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	if !final {
 		return result, nil
 	}
-	clockTime6, clockErr6 := tx.now(ctx)
-	if clockErr6 != nil {
-		return capability.BillingSettlement{}, clockErr6
-	}
-	_, err = tx.ExecContext(ctx, "UPDATE billing_awards SET settled_at=? WHERE team=? AND reservation_id=? AND settled_at IS NULL", clockTime6.UnixNano(), team, reservation)
+	_, err = tx.ExecContext(ctx, "UPDATE billing_awards SET settled_at=? WHERE team=? AND reservation_id=? AND settled_at IS NULL", tx.now(ctx).UnixNano(), team, reservation)
 	return result, err
 }
 
@@ -312,14 +288,10 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 	if ahead <= 0 {
 		return nil
 	}
-	clockTime7, clockErr7 := tx.now(ctx)
-	if clockErr7 != nil {
-		return clockErr7
-	}
 	return l.insertCharge(ctx, CreditCharge{
 		ID: billingID("slice", team, reservation, through.UTC().Format(time.RFC3339Nano)), Team: team, RunID: a.run,
 		NodeID: a.node, TokenPrefix: a.prefix, Kind: CreditChargeSlice, Seconds: ahead, AmountMicro: want - paid,
-		CPUClassCores: class, RateMicroPerSecond: rate, ChargedAt: clockTime7,
+		CPUClassCores: class, RateMicroPerSecond: rate, ChargedAt: tx.now(ctx),
 	})
 }
 
@@ -408,10 +380,7 @@ func settleBillingChargesTx(ctx context.Context, l *ledgerTx, a billingAward, re
 	if !final {
 		id = billingID("checkpoint", a.team, a.provenance.ReservationID, through.UTC().Format(time.RFC3339Nano))
 	}
-	chargedAt, err := l.now(ctx)
-	if err != nil {
-		return err
-	}
+	chargedAt := l.now(ctx)
 	kind := CreditChargeUsage
 	if delta < 0 {
 		kind, chargedAt = CreditChargeRefund, time.Unix(0, a.awarded)

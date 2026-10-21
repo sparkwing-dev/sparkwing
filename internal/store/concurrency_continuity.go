@@ -68,10 +68,7 @@ func renewCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID 
 	if err := lockBoundCapacityTx(ctx, tx, team, runID, nodeID, true); err != nil {
 		return err
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if !expires.After(now) {
 		return holderRefusal()
 	}
@@ -133,10 +130,6 @@ func rebindCapacityGenerationTx(ctx context.Context, tx *storeTx, team Team, ref
 	if err := lockBoundCapacityTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), false); err != nil {
 		return err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return clockErr2
-	}
-	_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET generation=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND lease_expires_at>? AND superseded=0`, generation, team, ref.RunID, ref.NodeID, previous, clockTime2.UnixNano())
+	_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET generation=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND lease_expires_at>? AND superseded=0`, generation, team, ref.RunID, ref.NodeID, previous, tx.now(ctx).UnixNano())
 	return err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
@@ -304,5 +305,36 @@ func TestSecretReadRefusesLeaseExpiredWhileWaitingForLock(t *testing.T) {
 	var releases int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&releases); err != nil || releases != 0 {
 		t.Fatalf("expired release audit count = %d, error = %v", releases, err)
+	}
+}
+
+func TestSecretReadClockFailureCommitsNothing(t *testing.T) {
+	tenant, authorized := secretReadStoreFixture(t)
+	s := tenant.s
+	s.pinnedClock = s.clock
+	connection := recordStoreFences(t, s)
+	clockErr := errors.New("clock unavailable during secret release")
+	audited, failed := false, false
+	connection.beforeExec = func(query string) {
+		if strings.HasPrefix(strings.TrimSpace(query), "INSERT INTO events ") {
+			// safety: fail the final authority check after the audit has been written.
+			audited = true
+			s.pinnedClock = nil
+		}
+	}
+	connection.beforeQuery = func(query string) error {
+		if audited && query == databaseTimeSQL(s.dialect) {
+			failed = true
+			return clockErr
+		}
+		return nil
+	}
+	secret, err := tenant.ReadSecret(t.Context(), authorized)
+	if !audited || !failed || secret != nil || !errors.Is(err, clockErr) {
+		t.Fatalf("audited=%v failed=%v secret=%+v error=%v", audited, failed, secret, err)
+	}
+	var releases int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&releases); err != nil || releases != 0 {
+		t.Fatalf("committed releases = %d, error = %v", releases, err)
 	}
 }

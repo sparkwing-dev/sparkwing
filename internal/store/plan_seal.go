@@ -71,10 +71,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if status == "done" && expected == capability.UnitPlan && accepted == generation && request.Actor.Result == nil {
 		return nil
 	}
-	now, err := tx.now(ctx)
-	if err != nil {
-		return err
-	}
+	now := tx.now(ctx)
 	if status != "claimed" || holder != owner.Holder || prefix != c.Prefix || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
@@ -95,11 +92,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 		return runspec.Spec{}, nil, authorityError(apierr.SpecDrift, "request seal cannot change")
 	}
 	input.Request = run.Request
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return runspec.Spec{}, nil, clockErr1
-	}
-	input.Now = clockTime1
+	input.Now = tx.now(ctx)
 	if err = validateResolvedIntake(&input); err != nil {
 		return runspec.Spec{}, nil, err
 	}

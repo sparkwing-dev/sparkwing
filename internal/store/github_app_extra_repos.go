@@ -64,13 +64,9 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 		if canonical[x] <= 0 {
 			return nil, ErrInvalidInput
 		}
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return nil, clockErr1
-		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO github_app_extra_repos (team, repository, repository_id, extra_repo, extra_repo_id, created_by, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?)`, string(t.team), source, canonical[source], x, canonical[x], by, clockTime1.UnixNano()); err != nil {
+   VALUES (?, ?, ?, ?, ?, ?, ?)`, string(t.team), source, canonical[source], x, canonical[x], by, tx.now(ctx).UnixNano()); err != nil {
 			return nil, err
 		}
 	}

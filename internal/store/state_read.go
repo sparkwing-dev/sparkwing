@@ -125,11 +125,7 @@ func stateTime(v sql.NullInt64) *time.Time {
 }
 
 func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (RunSnapshot, error) {
-	clockTime1, clockErr1 := tx.now(ctx)
-	if clockErr1 != nil {
-		return RunSnapshot{}, clockErr1
-	}
-	out := RunSnapshot{StoreNow: clockTime1}
+	out := RunSnapshot{StoreNow: tx.now(ctx)}
 	var err error
 	if out.Run, err = readRunTx(ctx, tx, team, id); err != nil {
 		return out, err

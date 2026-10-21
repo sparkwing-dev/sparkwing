@@ -20,11 +20,7 @@ func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTr
 		return Applied{}, err
 	}
 	if !applied.Replayed {
-		clockTime1, clockErr1 := tx.now(ctx)
-		if clockErr1 != nil {
-			return Applied{}, clockErr1
-		}
-		if err = settleControllerTx(ctx, tx, team, string(change.Ref.RunID), clockTime1); err != nil {
+		if err = settleControllerTx(ctx, tx, team, string(change.Ref.RunID), tx.now(ctx)); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -48,11 +44,7 @@ func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string
 	if err != nil {
 		return nil, err
 	}
-	clockTime2, clockErr2 := tx.now(ctx)
-	if clockErr2 != nil {
-		return nil, clockErr2
-	}
-	if until <= clockTime2.UnixNano() {
+	if until <= tx.now(ctx).UnixNano() {
 		return nil, nil
 	}
 	return &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(runID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}, nil
