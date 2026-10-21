@@ -176,12 +176,12 @@ type retainedStorageInventory struct {
 }
 
 func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (out retainedStorageInventory, err error) {
+	out.oldest = tx.now(ctx).UnixNano()
 	rows, err := tx.QueryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at,1 FROM log_streams WHERE team=?", team, team)
 	if err != nil {
 		return out, err
 	}
 	defer closeRowsInto(rows, &err)
-	out.oldest = tx.now(ctx).UnixNano()
 	for rows.Next() {
 		var size, created, log int64
 		if err := rows.Scan(&size, &created, &log); err != nil {

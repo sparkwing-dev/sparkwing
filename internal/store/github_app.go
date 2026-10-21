@@ -151,7 +151,7 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 	return scanGitHubAppInstallations(rows)
 }
 
-func scanGitHubAppInstallations(rows *sql.Rows) (_ []GitHubAppInstallation, err error) {
+func scanGitHubAppInstallations(rows rowCursor) (_ []GitHubAppInstallation, err error) {
 	defer closeRowsInto(rows, &err)
 	var out []GitHubAppInstallation
 	for rows.Next() {
@@ -241,7 +241,7 @@ const githubAppTriggerCols = `repository_id, pipeline, repository, installation_
        branches, base_branches, created_by, created_at, on_pr_closed, on_pr_labeled, pr_labels, on_pr_ready_for_review,
        on_release_published, on_release_prereleased, release_tag_patterns, on_branch_create, on_branch_delete, runner`
 
-func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
+func (t *Tenant) scanGitHubAppTriggers(rows rowCursor) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}

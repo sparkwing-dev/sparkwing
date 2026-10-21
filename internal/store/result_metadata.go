@@ -99,19 +99,16 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 	if err := boundedResultText(report.MaskedError); err != nil {
 		return err
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)}, report.Actor)
-	if err != nil {
-		return err
-	}
-	if row.Attempt != runspec.AttemptOrdinal(report.Attempt.Attempt) || row.Generation != runspec.ClaimGeneration(report.Attempt.Generation) {
-		return holderRefusal()
-	}
-	return writeStepTx(ctx, tx, t.team, row, report)
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)}, report.Actor)
+		if err != nil {
+			return err
+		}
+		if row.Attempt != runspec.AttemptOrdinal(report.Attempt.Attempt) || row.Generation != runspec.ClaimGeneration(report.Attempt.Generation) {
+			return holderRefusal()
+		}
+		return writeStepTx(ctx, tx, t.team, row, report)
+	})
 }
 
 func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, report StepReport) error {
@@ -149,7 +146,7 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 		if state != report.State || message != report.MaskedError || started != start || finished != end {
 			return authorityError(apierr.IllegalTransition, "finished step is immutable")
 		}
-		return tx.Commit()
+		return nil
 	}
 	if exists && started != start {
 		return authorityError(apierr.Conflict, "step start time is immutable")
@@ -158,7 +155,7 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 type storedAnnotation struct {

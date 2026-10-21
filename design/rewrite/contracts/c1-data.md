@@ -4202,6 +4202,11 @@ A failed clock read poisons the transaction: later SQL returns that error,
 commit rolls back, and transaction callbacks cannot hide it behind success
 or a different refusal. Mutation transactions expose no stored snapshot
 timestamp, and lifecycle guards accept no caller-supplied time.
+Transaction cursors must close or reach exhaustion before another statement or
+clock read. The transaction owner enforces this for both database dialects;
+a violation poisons the transaction and rolls back its writes. Pending single-row
+queries also retain their cursor until scanned. Retained-storage sampling reads
+its database clock before opening the inventory cursor.
 Lifecycle, identity, billing and schedule mutations
 use store time instead of a caller clock. Schedule due times and provider event
 timestamps remain domain facts.
@@ -4219,8 +4224,11 @@ slot leases. Renewal uses `leaseBound` for the authority, cancellation and funde
 bounds. The schema baseline is version 16.
 The shared capacity writer applies the bound to each holder and waiter,
 including controller reconciliation.
-Plan capacity follows the latest owner or claimed-job lease because jobs can
-outlive their owner during recovery. Cancellation still bounds the whole run.
+Node capacity follows the later live claim or owner lease; plan capacity follows
+the latest owner or claimed-job lease because jobs can outlive their owner during
+recovery. Cancellation still bounds the whole run, and a live owner cannot extend
+a metered node's funded horizon. The holder's own lease must remain continuous;
+renewal never revives expired capacity.
 
 `Tenant.TransitionNode` accepts the closed `NodeCommand` interface. `StartNode`,
 `RetryNode`, `ReportNode` and `ReleaseNode` carry the captured attempt. Start,

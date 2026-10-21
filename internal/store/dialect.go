@@ -104,14 +104,14 @@ func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
 	return s.exec(context.Background(), q, args...)
 }
 
-func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+func (s *Store) query(ctx context.Context, q string, args ...any) (rowCursor, error) {
 	if err := refuseLedgerWrite(q); err != nil {
 		return nil, err
 	}
 	return s.sqlRunner().QueryContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
-func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
+func (s *Store) queryNoCtx(q string, args ...any) (rowCursor, error) {
 	return s.query(context.Background(), q, args...)
 }
 
@@ -141,6 +141,7 @@ type storeTx struct {
 	dialect              Dialect
 	store                *Store
 	snapshotRead         bool
+	rowsOpen             bool
 	rotatingRoot         *capability.Capability
 	createdTeam          *TeamInfo
 	blobIO               *blobIO
@@ -178,7 +179,7 @@ func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeT
 // safety: read snapshots stay fixed while write fences use fresh time; clock
 // failure poisons SQL access and commit even if the caller ignores the time.
 func (t *storeTx) now(ctx context.Context) time.Time {
-	if t.err != nil {
+	if t.checkCursor() != nil {
 		return time.Time{}
 	}
 	now, err := t.clock(ctx)
@@ -263,7 +264,7 @@ func (s *Store) beginStoreTx(ctx context.Context, read bool) (*storeTx, error) {
 }
 
 func (t *storeTx) Commit() error {
-	if t.err != nil {
+	if t.checkCursor() != nil {
 		return errors.Join(t.err, t.Rollback())
 	}
 	if err := t.tx.Commit(); err != nil {
@@ -285,8 +286,18 @@ func rollbackTx(tx *sql.Tx) error {
 	return err
 }
 
+var errOpenCursor = errors.New("store: SQL or clock read while a row cursor is open")
+
+// pgx cannot multiplex statements on a transaction's connection; enforce this on SQLite too.
+func (t *storeTx) checkCursor() error {
+	if t.err == nil && t.rowsOpen {
+		t.err = errOpenCursor
+	}
+	return t.err
+}
+
 func (t *storeTx) checkSQL(q string) error {
-	if t.err != nil {
+	if t.checkCursor() != nil {
 		return t.err
 	}
 	return refuseLedgerWrite(q)
@@ -303,15 +314,20 @@ func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.R
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
-func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error) {
+func (t *storeTx) Query(q string, args ...any) (rowCursor, error) {
 	return t.QueryContext(context.Background(), q, args...)
 }
 
-func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (rowCursor, error) {
 	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
-	return t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
+	rows, err := t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
+	if err != nil {
+		return nil, err
+	}
+	t.rowsOpen = true
+	return &storeRows{Rows: rows, tx: t}, nil
 }
 
 func (t *storeTx) QueryRow(q string, args ...any) rowScanner {
@@ -322,7 +338,9 @@ func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) ro
 	if err := t.checkSQL(q); err != nil {
 		return refusedLedgerRow{err}
 	}
-	return t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
+	row := t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
+	t.rowsOpen = true
+	return &storeRow{Row: row, tx: t}
 }
 
 func itoa(n int) string {
@@ -337,4 +355,50 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+type rowCursor interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+	Close() error
+}
+
+type storeRows struct {
+	*sql.Rows
+	tx *storeTx
+}
+
+func (r *storeRows) Next() bool {
+	more := r.Rows.Next()
+	if !more {
+		_ = r.Close()
+	}
+	return more
+}
+
+func (r *storeRows) Close() error {
+	err := r.Rows.Close()
+	if r.tx != nil {
+		r.tx.rowsOpen = false
+		r.tx = nil
+	}
+	return err
+}
+
+type storeRow struct {
+	*sql.Row
+	tx *storeTx
+}
+
+func (r *storeRow) Scan(dest ...any) error {
+	err := r.Row.Scan(dest...)
+	if r.tx != nil {
+		r.tx.rowsOpen = false
+		if r.tx.err != nil {
+			err = r.tx.err
+		}
+		r.tx = nil
+	}
+	return err
 }

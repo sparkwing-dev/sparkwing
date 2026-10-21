@@ -113,7 +113,7 @@ func ledgerSQL(q string) string {
 
 // safety: this is the one statement path allowed to write the ledger tables, and only ledgerTx holds it.
 func (l *ledgerTx) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	if l.err != nil {
+	if l.checkCursor() != nil {
 		return nil, l.err
 	}
 	return l.tx.ExecContext(ctx, rewritePh(l.dialect, q), args...)

@@ -177,7 +177,7 @@ func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCred
 	return scanCreditFreeze(rows)
 }
 
-func scanCreditFreeze(rows *sql.Rows) (TeamCreditFreeze, error) {
+func scanCreditFreeze(rows rowCursor) (TeamCreditFreeze, error) {
 	var out TeamCreditFreeze
 	for rows.Next() {
 		var id, cause string

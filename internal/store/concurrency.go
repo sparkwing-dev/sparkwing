@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func fitsBudget(used, cost, capacity int) bool {
@@ -956,27 +959,32 @@ type holderRow struct {
 
 func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, job string, expires int64) (int64, error) {
 	var lease sql.NullInt64
-	var err error
-	if job != "" {
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
-	} else {
-		// Running jobs keep plan capacity through owner recovery.
-		err = tx.QueryRowContext(ctx, `SELECT MAX(deadline) FROM (
- SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END AS deadline FROM runs r WHERE team=? AND id=?
- UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL
-) live`, team, run, team, run).Scan(&lease)
-	}
+	err := tx.QueryRowContext(ctx, `SELECT MAX(deadline) FROM (
+ SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner' AND holder<>'') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id AND status='claimed') END AS deadline FROM runs r WHERE team=? AND id=?
+ UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL AND (?='' OR node_id=?)
+) live`, team, run, team, run, job, job).Scan(&lease)
 	if err != nil {
 		return 0, err
+	}
+	if !lease.Valid {
+		return 0, holderRefusal()
 	}
 	drain, err := cancelDrainTx(ctx, tx, team, run, job)
 	if err != nil {
 		return 0, err
 	}
 	now := tx.now(ctx)
-	bounds := []time.Time{time.Unix(0, expires), drain}
-	if lease.Valid {
-		bounds = append(bounds, time.Unix(0, lease.Int64))
+	bounds := []time.Time{time.Unix(0, expires), drain, time.Unix(0, lease.Int64)}
+	if job != "" {
+		generation, err := capacityGenerationTx(ctx, tx, team, run, job)
+		if err != nil {
+			return 0, err
+		}
+		funded, err := fundedBoundTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, generation, now)
+		if err != nil {
+			return 0, err
+		}
+		bounds = append(bounds, funded)
 	}
 	bound, err := leaseBound(now, bounds...)
 	return bound.UnixNano(), err

@@ -210,7 +210,7 @@ func (t *Tenant) TeamOwnerEmails(ctx context.Context) ([]string, error) {
 	return t.teamOwnerEmails(ctx, t.s.query)
 }
 
-func (t *Tenant) teamOwnerEmails(ctx context.Context, query func(context.Context, string, ...any) (*sql.Rows, error)) (_ []string, err error) {
+func (t *Tenant) teamOwnerEmails(ctx context.Context, query func(context.Context, string, ...any) (rowCursor, error)) (_ []string, err error) {
 	rows, err := query(ctx, `SELECT a.email FROM memberships m JOIN accounts a ON a.id = m.account_id
 	  WHERE m.team = ? AND m.role = 'owner' AND a.email_verified = 1 ORDER BY a.email`, string(t.team))
 	if err != nil {

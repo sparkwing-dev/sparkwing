@@ -1005,7 +1005,7 @@ func rollbackUnlessDone(tx *storeTx, err *error) {
 
 // closeRowsInto closes a result set on the way out and surfaces a close
 // failure as the function's error when nothing else already failed.
-func closeRowsInto(rows *sql.Rows, err *error) {
+func closeRowsInto(rows rowCursor, err *error) {
 	if cerr := rows.Close(); cerr != nil && *err == nil {
 		*err = cerr
 	}

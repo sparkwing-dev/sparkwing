@@ -1016,7 +1016,7 @@ func rollbackOrLog(tx *storeTx) {
 
 // safety: closes the cursor on an early return, where the caller's own Close
 // never runs; a second close after that one reports nothing.
-func closeRowsOrLog(rows *sql.Rows) {
+func closeRowsOrLog(rows rowCursor) {
 	if err := rows.Close(); err != nil {
 		slog.Warn("closing a store row cursor failed", "err", err)
 	}

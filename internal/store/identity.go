@@ -713,7 +713,7 @@ const invitationSelect = `
 	SELECT i.id, i.team, t.display_name, i.email, i.role, i.invited_by, i.created_at, i.expires_at
 	FROM invitations i JOIN teams t ON t.name = i.team`
 
-func scanInvitations(rows *sql.Rows) ([]Invitation, error) {
+func scanInvitations(rows rowCursor) ([]Invitation, error) {
 	var out []Invitation
 	for rows.Next() {
 		var inv Invitation
@@ -1008,7 +1008,7 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 	return err
 }
 
-func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
+func scanPrefixes(rows rowCursor) (_ []string, err error) {
 	defer closeRowsInto(rows, &err)
 	var prefixes []string
 	for rows.Next() {

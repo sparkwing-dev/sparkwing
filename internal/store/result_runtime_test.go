@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +215,37 @@ func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 		if err != nil || node.Summary != "" || len(node.Annotations) != 0 || int64(node.AttemptsConsumed) != int64(applied.Attempt) {
 			t.Fatalf("new attempt inherited metadata: %+v, %v", node, err)
 		}
+	}
+}
+
+func TestRecordStepReturnsClockFailure(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	started := s.now().Add(-time.Second)
+	report := StepReport{Attempt: attempt, Actor: actor, StepID: "compile", State: "running", StartedAt: &started}
+	if err := tenant.RecordStep(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	connection := recordStoreFences(t, s)
+	clockErr := errors.New("clock unavailable during step completion")
+	connection.beforeQuery = func(query string) error {
+		if strings.Contains(query, "SELECT status,error,started_at,finished_at FROM node_steps") {
+			s.pinnedClock = nil
+			s.clock = nil
+			connection.beforeQuery = func(query string) error {
+				if query == databaseTimeSQL(s.dialect) {
+					return clockErr
+				}
+				return nil
+			}
+		}
+		return nil
+	}
+	report.State = "passed"
+	if err := tenant.RecordStep(t.Context(), report); !errors.Is(err, clockErr) {
+		t.Fatalf("step clock failure = %v", err)
+	}
+	var state string
+	if err := s.db.QueryRow(`SELECT status FROM node_steps WHERE step_id='compile'`).Scan(&state); err != nil || state != "running" {
+		t.Fatalf("step after failure = %q: %v", state, err)
 	}
 }

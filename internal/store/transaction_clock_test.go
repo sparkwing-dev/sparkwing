@@ -284,3 +284,102 @@ type clockFailureTx struct{ c *clockFailureConnector }
 
 func (tx clockFailureTx) Commit() error   { tx.c.commits++; return tx.c.commitErr }
 func (tx clockFailureTx) Rollback() error { tx.c.rollbacks++; return nil }
+
+func TestTransactionRejectsStatementsWithOpenCursor(t *testing.T) {
+	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
+		for _, operation := range []string{"clock", "exec", "query", "row", "ledger"} {
+			t.Run(dialect.String()+"/"+operation, func(t *testing.T) {
+				connector := &clockFailureConnector{}
+				db := sql.OpenDB(connector)
+				defer db.Close()
+				s := &Store{db: db, dialect: dialect}
+				err := s.inTx(t.Context(), func(tx *storeTx) error {
+					rows, err := tx.QueryContext(t.Context(), `SELECT 1`)
+					if err != nil {
+						return err
+					}
+					defer rows.Close()
+					if !rows.Next() {
+						t.Fatal("missing fixture row")
+					}
+					queries := connector.queries
+					switch operation {
+					case "clock":
+						tx.now(t.Context())
+						err = tx.err
+					case "exec":
+						_, err = tx.ExecContext(t.Context(), `SELECT 2`)
+					case "query":
+						_, err = tx.QueryContext(t.Context(), `SELECT 2`)
+					case "row":
+						var n int
+						err = tx.QueryRowContext(t.Context(), `SELECT 2`).Scan(&n)
+					case "ledger":
+						_, err = (&ledgerTx{storeTx: tx}).exec(t.Context(), `INSERT INTO credit_grants VALUES (1)`)
+					}
+					if !errors.Is(err, errOpenCursor) || connector.queries != queries || connector.writes != 0 {
+						t.Fatalf("nested statement = %v, database = %+v", err, connector)
+					}
+					return nil
+				})
+				if !errors.Is(err, errOpenCursor) || connector.commits != 0 || connector.rollbacks != 1 {
+					t.Fatalf("transaction = %v, database = %+v", err, connector)
+				}
+			})
+		}
+	}
+}
+
+func TestTransactionCursorClosureAndPoisonRollback(t *testing.T) {
+	for _, finish := range []string{"close", "exhaust", "unscanned row"} {
+		t.Run(finish, func(t *testing.T) {
+			s := authorityStore(t)
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				if _, err := tx.ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('rolled-back',1,1)`); err != nil {
+					return err
+				}
+				rows, err := tx.QueryContext(t.Context(), `SELECT 1`)
+				if err != nil {
+					return err
+				}
+				if finish == "exhaust" {
+					for rows.Next() {
+					}
+				} else if err := rows.Close(); err != nil {
+					return err
+				}
+				tx.now(t.Context())
+				if tx.err != nil {
+					t.Fatal(tx.err)
+				}
+				if finish == "unscanned row" {
+					row := tx.QueryRowContext(t.Context(), `SELECT 1`)
+					tx.now(t.Context())
+					var n int
+					if err := row.Scan(&n); !errors.Is(err, errOpenCursor) {
+						t.Fatalf("poisoned row = %v", err)
+					}
+				} else {
+					next, err := tx.QueryContext(t.Context(), `SELECT 2`)
+					if err != nil {
+						return err
+					}
+					defer next.Close()
+					// A second close of an exhausted cursor must not hide the current cursor.
+					if err := rows.Close(); err != nil {
+						return err
+					}
+					tx.now(t.Context())
+				}
+				return nil
+			})
+			if !errors.Is(err, errOpenCursor) {
+				t.Fatalf("cursor violation = %v", err)
+			}
+			var n int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM teams WHERE name='rolled-back'`).Scan(&n); err != nil || n != 0 {
+				t.Fatalf("committed rows = %d: %v", n, err)
+			}
+		})
+	}
+}

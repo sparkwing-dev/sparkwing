@@ -60,13 +60,14 @@ func TestConcurrencyAdmissionPersistsWorkAndWaiterFences(t *testing.T) {
 	}
 }
 
-func TestConcurrencyQueuedPromotionUsesOwnerLease(t *testing.T) {
+func TestConcurrencyQueuedPromotionRequiresClaimOrOwnerLease(t *testing.T) {
 	for _, live := range []bool{true, false} {
 		t.Run(map[bool]string{true: "live", false: "expired"}[live], func(t *testing.T) {
 			tenant, now, _ := capacityFixture(t)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','key','waiter','run','job',?,?,3,'queue')`, now.Add(-time.Minute).UnixNano(), now.Add(time.Hour).UnixNano())
 			if !live {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=1 WHERE name='controller.owner'`)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=1`)
 			}
 			promoted, err := tenant.PromoteNextWaiters(t.Context(), "key", time.Hour)
 			if err != nil || len(promoted) != map[bool]int{true: 1, false: 0}[live] {
