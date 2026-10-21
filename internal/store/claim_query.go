@@ -175,12 +175,13 @@ func recordClaimAwardTx(ctx context.Context, tx *storeTx, team Team) error {
 }
 
 type claimSQL struct {
-	dialect  Dialect
-	args     []any
-	askSQL   string
-	askArgs  []any
-	policy   ClaimPlacement
-	overflow []claimOverflowFacts
+	projected bool
+	dialect   Dialect
+	args      []any
+	askSQL    string
+	askArgs   []any
+	policy    ClaimPlacement
+	overflow  []claimOverflowFacts
 }
 
 func (q *claimSQL) param(v any) string { q.args = append(q.args, v); return "?" }
@@ -393,6 +394,11 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 	for _, kind := range kinds {
 		switch kind {
 		case capability.UnitNode:
+			// A private projection precedes readiness and never reserves work.
+			if q.projected {
+				queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,COALESCE(n.ready_at,clock.now) AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution FROM nodes n,clock`)
+				continue
+			}
 			queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,n.ready_at AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution FROM nodes n,clock WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=clock.now AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND NOT EXISTS (SELECT 1 FROM runs dr WHERE dr.team=n.team AND dr.id=n.run_id AND dr.claim_wait_ns>0 AND (n.queue_started_at IS NULL OR n.queue_started_at<=clock.now-dr.claim_wait_ns))`)
 		case capability.UnitEval:
 			queries = append(queries, `SELECT e.team,e.run_id,e.source_node_id,e.source_generation,n.finished_at,'eval',NULL FROM eval_units e JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name,clock WHERE e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='' AND (e.expires_at IS NULL OR e.expires_at>clock.now) AND l.name='controller.owner' AND l.until>clock.now AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`)
@@ -487,35 +493,40 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	return ctes + final, nil
 }
 
-func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind, q *claimSQL) (string, error) {
 	current, err := claimFactsTx(ctx, tx, demand)
 	if err != nil {
-		return UnitRef{}, err
+		return "", err
 	}
 	current.Current = 1
 	facts, err := tx.operator.claimObserversTx(ctx, tx, current)
 	if err != nil {
-		return UnitRef{}, err
+		return "", err
 	}
 	teams, err := claimTeamFactsTx(ctx, tx, current)
 	if err != nil {
-		return UnitRef{}, err
+		return "", err
 	}
 	rates, err := creditRateTableTx(ctx, tx)
 	if err != nil {
-		return UnitRef{}, err
+		return "", err
 	}
-	overflow, err := tx.operator.claimOverflowFactsTx(ctx, tx, current.Team, current.Cloud == 1)
+	q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, current.Team, current.Cloud == 1)
+	if err != nil {
+		return "", err
+	}
+	q.dialect = tx.dialect
+	q.policy, _ = ClaimPlacementFromContext(ctx)
+	return q.query(facts, teams, rates, kinds, demand, tx.now(ctx).UnixNano())
+}
+
+func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+	q := claimSQL{}
+	query, err := claimQueryTx(ctx, tx, demand, kinds, &q)
 	if err != nil {
 		return UnitRef{}, err
 	}
-	policy, _ := ClaimPlacementFromContext(ctx)
-	q := claimSQL{dialect: tx.dialect, policy: policy, overflow: overflow}
-	query, err := q.query(facts, teams, rates, kinds, demand, tx.now(ctx).UnixNano())
-	if err != nil {
-		return UnitRef{}, err
-	}
-	collect, err := tx.operator.claimCollectsAsksTx(ctx, tx, current, demand)
+	collect, err := tx.operator.claimCollectsAsksTx(ctx, tx, c, demand)
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -591,11 +602,11 @@ func firstPreferenceHold(policy ClaimPlacement) int64 {
 	return int64(policy.Preferences[0].Hold)
 }
 
-func (o *Operator) claimCollectsAsksTx(ctx context.Context, tx *storeTx, current claimFacts, demand UnitDemand) (bool, error) {
+func (o *Operator) claimCollectsAsksTx(ctx context.Context, tx *storeTx, current capability.Capability, demand UnitDemand) (bool, error) {
 	q := claimSQL{dialect: tx.dialect}
 	request := q.blob("r.request_json")
 	query := `SELECT EXISTS (SELECT 1 FROM runs r WHERE ` + q.at(request, "request", "mode") + `='execute' AND ` + q.at(request, "request", "dispatch") + `='controller' AND r.finished_at IS NULL`
-	if current.Cloud == 0 {
+	if !capability.CloudLauncher(current) {
 		query += ` AND r.team=` + q.param(current.Team)
 	}
 	if demand.Target != nil {

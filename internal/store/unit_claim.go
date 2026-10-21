@@ -174,11 +174,11 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	}
 	policy, _ := ClaimPlacementFromContext(ctx)
 	preferences := policy.preferencesFor(requirements.Prefers)
-	placement := placementDecision{reason: PlacementNone}
+	placement := PlacementNone
 	if unit.Kind == capability.UnitNode && len(preferences) > 0 && len(preferences[0].Prefers) > 0 {
-		placement.reason = PlacementFallback
+		placement = PlacementFallback
 		if placementRank(profile, requirements, preferences) == 0 {
-			placement.reason = PlacementPreferred
+			placement = PlacementPreferred
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=?`, team, unit.RunID, unit.Kind, unit.NodeID); err != nil {
@@ -233,7 +233,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement.reason, team, unit.RunID, unit.NodeID)
+			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement, team, unit.RunID, unit.NodeID)
 		}
 	} else {
 		err = writeOwnerClaimTx(ctx, tx, claim)

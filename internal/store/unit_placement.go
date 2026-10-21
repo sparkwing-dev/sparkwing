@@ -2,14 +2,10 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
-	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -23,93 +19,6 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 		}
 	}
 	return len(preferences)
-}
-
-func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, prefix string, claimant match.Profile, demand match.Demand) (placementDecision, error) {
-	decision := placementDecision{reason: PlacementNone}
-	policy, _ := ClaimPlacementFromContext(ctx)
-	seal, err := sealedRequestTx(ctx, tx, team, string(unit.RunID))
-	if err != nil {
-		return decision, err
-	}
-	liveness := claimLiveness(ctx, seal.Request)
-	if rankedUnit(seal.Request, demand) {
-		decision.hold, err = rankingHoldTx(ctx, tx, team, unit, seal.Request, prefix, liveness)
-		return decision, err
-	}
-	if unit.Kind != capability.UnitNode {
-		return decision, nil
-	}
-	preferences := policy.preferencesFor(demand.Prefers)
-	if burst := seal.Request.Burst; burst != nil {
-		preferences, err = burstPreferencesTx(ctx, tx, team, string(unit.RunID), *burst)
-		if err != nil {
-			return decision, err
-		}
-	}
-	if len(preferences) == 0 || len(preferences[0].Prefers) == 0 {
-		return decision, nil
-	}
-	rank := placementRank(claimant, demand, preferences)
-	decision.reason = PlacementFallback
-	if rank == 0 && len(preferences[0].Prefers) != 0 {
-		decision.reason = PlacementPreferred
-	}
-	var since sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT ready_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&since); err != nil {
-		return decision, err
-	}
-	if !since.Valid {
-		return decision, nil
-	}
-	deadline := time.Unix(0, since.Int64)
-	held := make([]bool, len(preferences))
-	for i, preference := range preferences {
-		if preference.Hold < 0 {
-			return decision, authorityError(apierr.BadRequest, "placement hold must not be negative")
-		}
-		deadline = deadline.Add(preference.Hold)
-		held[i] = i < rank && tx.now(ctx).Before(deadline)
-	}
-	if !slices.Contains(held, true) {
-		return decision, nil
-	}
-	live, err := placementRunnersTx(ctx, tx, team, liveness, false)
-	if err != nil {
-		return decision, err
-	}
-	for _, poll := range live {
-		runner := poll.UnitDemand
-		profile, required, err := placementRunnerTx(ctx, tx, team, unit, runner)
-		if err != nil {
-			var denied *apierr.Error
-			if errors.As(err, &denied) && (denied.Code == apierr.Unauthenticated || denied.Code == apierr.Forbidden) {
-				continue
-			}
-			return decision, err
-		}
-		earlier := placementRank(profile, required, preferences)
-		if earlier < len(held) && held[earlier] {
-			decision.hold = true
-			break
-		}
-	}
-	return decision, nil
-}
-
-func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, runner UnitDemand) (match.Profile, match.Demand, error) {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: runner.CapabilityPrefix}, false)
-	if err != nil {
-		return match.Profile{}, match.Demand{}, err
-	}
-	c := chain[0].principal.Capability
-	if !capability.CloudLauncher(c) && (c.Team != string(team) || !registeredClaimant(c) && !actionsClaimant(c) && c.Binding.RunID != string(unit.RunID)) {
-		return match.Profile{}, match.Demand{}, bindingRefusal()
-	}
-	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {
-		return match.Profile{}, match.Demand{}, err
-	}
-	return readMatchingInputsTx(ctx, tx, runner, unit, false)
 }
 
 func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness time.Duration, launchers bool) ([]runnerPoll, error) {

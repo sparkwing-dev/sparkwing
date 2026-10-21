@@ -29,7 +29,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"launcherSweep", "launcher_sweep/", "launcher_claim_team", "queuedLauncherUnitTx", "SAVEPOINT launcher_award", "lockRankedUnitTx", `"ranking:"`} {
+		for _, forbidden := range []string{"launcherSweep", "launcher_sweep/", "launcher_claim_team", "queuedLauncherUnitTx", "SAVEPOINT launcher_award", "lockRankedUnitTx", `"ranking:"`, "rankingHoldTx", "unitPlacementTx", "placementRunnerTx"} {
 			if strings.Contains(string(raw), forbidden) {
 				t.Fatalf("%s restores %s", path, forbidden)
 			}
@@ -60,6 +60,28 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 		}
 		if !checked {
 			t.Fatalf("%s bypasses SQL eligibility", name)
+		}
+	}
+	owner, err := parser.ParseFile(token.NewFileSet(), filepath.Join(directory, "owner_placement.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range owner.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "ownerDemandEligibleTx" {
+			continue
+		}
+		shared := false
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				if name, ok := call.Fun.(*ast.Ident); ok && name.Name == "claimQueryTx" {
+					shared = true
+				}
+			}
+			return true
+		})
+		if !shared {
+			t.Fatal("owner execution projection bypasses SQL eligibility")
 		}
 	}
 }

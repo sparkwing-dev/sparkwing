@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // OwnerExecution binds a private placement decision to its owner and declaration.
@@ -99,17 +99,17 @@ func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Pr
 	if _, err := claimKinds(owner.Capability, UnitDemand{Target: &unit}); err != nil {
 		return false, nil
 	}
-	profile, required, err := readMatchingInputsTx(ctx, tx, demand, unit, false)
+	demand.Target, demand.Kinds = &unit, nil
+	q := claimSQL{projected: true}
+	query, err := claimQueryTx(ctx, tx, demand, []capability.UnitKind{unit.Kind}, &q)
 	if err != nil {
-		var denied *apierr.Error
-		if errors.As(err, &denied) && denied.Code == apierr.Forbidden {
-			return false, nil
-		}
 		return false, err
 	}
-	if !match.Evaluate(profile, required).OK() {
+	var team Team
+	var selected UnitRef
+	err = tx.QueryRowContext(ctx, query, q.args...).Scan(&team, &selected.RunID, &selected.NodeID, &selected.SourceGeneration, &selected.Kind)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	placement, err := unitPlacementTx(ctx, tx, Team(owner.Capability.Team), unit, demand.CapabilityPrefix, profile, required)
-	return !placement.hold, err
+	return err == nil, err
 }

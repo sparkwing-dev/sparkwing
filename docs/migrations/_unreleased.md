@@ -36,7 +36,9 @@ identity. Queue preference scores are removed. Explicit preference holds and
 placement ranking remain. Concurrent claims share queue arbitration before
 billing. Registration and temporary occupancy do not decide whether a push
 needs credits. A placement policy permitting unmetered execution can wait for
-its runner. Cloud-only work still needs funds at intake.
+its runner. Cloud-only work still needs funds at intake. Private owner placement snapshots
+use the same eligibility and funding checks as awards. Reading a snapshot
+leaves readiness, asks, reservations and fair-share accounting unchanged.
 
 The store baseline is 21. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted

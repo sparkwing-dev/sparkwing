@@ -833,6 +833,9 @@ lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration after a ledger lock poisons the transaction before acquiring the queue
 lock. Award rechecks SQL eligibility and reserves the unit and funding atomically.
 A committed ask can still hold the award for its preferred claimant.
+Private owner placement projections use that same SQL predicate before readiness.
+They write no asks, awards, reservations or fair-share ordinals. Readiness is
+rechecked when the owner asks to execute.
 Runner matching has no CPU or memory fit. Cloud size labels map to credit classes
 in one catalog. Existing AND-between-terms and OR-within-terms semantics remain.
 

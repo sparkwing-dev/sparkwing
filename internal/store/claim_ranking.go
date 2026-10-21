@@ -2,16 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -103,74 +98,4 @@ func claimRankTx(ctx context.Context, tx *storeTx, team Team, chain []authorityN
 		return -1, errTierOutsideRanking
 	}
 	return rank, nil
-}
-
-func unitReadyTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) (time.Time, bool, error) {
-	var at sql.NullInt64
-	var err error
-	switch unit.Kind {
-	case capability.UnitNode:
-		err = tx.QueryRowContext(ctx, `SELECT ready_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&at)
-	case capability.UnitEval:
-		err = tx.QueryRowContext(ctx, `SELECT finished_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&at)
-	case capability.UnitPlan:
-		err = tx.QueryRowContext(ctx, `SELECT available_at FROM triggers WHERE team=? AND id=? AND unit_kind='plan'`, team, unit.RunID).Scan(&at)
-	}
-	return time.Unix(0, at.Int64).UTC(), at.Valid, err
-}
-
-// safety: a held claimant's ask is written in the claim transaction, whether that transaction awards another unit
-// or nothing, so later polls cannot erase it. For RankingAward after the window, only the window's winner, the
-// best-ranked asker recorded inside it, may take the unit; a newcomer of any rank waits for the deadline.
-func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request, claimant string, liveness time.Duration) (bool, error) {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant}, false)
-	if err != nil {
-		return false, err
-	}
-	rank, err := claimRankTx(ctx, tx, team, chain, request)
-	if err != nil || rank < 0 {
-		return false, err
-	}
-	since, ready, err := unitReadyTx(ctx, tx, team, unit)
-	if err != nil || !ready {
-		return false, err
-	}
-	now, end := tx.now(ctx), since.Add(limits.RankingWindow)
-	if !now.Before(end) {
-		if !now.Before(end.Add(limits.RankingAward)) {
-			return false, nil
-		}
-		var winner string
-		err := tx.QueryRowContext(ctx, `SELECT claimant FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=? AND asked_at>=? AND asked_at<? ORDER BY claim_rank,asked_at,claimant LIMIT 1`, team, unit.RunID, unit.Kind, unit.NodeID, since.UnixNano(), end.UnixNano()).Scan(&winner)
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return winner != claimant, err
-	}
-	if rank == 0 {
-		return false, nil
-	}
-	polls, err := placementRunnersTx(ctx, tx, team, liveness, true)
-	if err != nil {
-		return false, err
-	}
-	for _, poll := range polls {
-		if poll.CapabilityPrefix == claimant {
-			continue
-		}
-		theirs, err := explainUnitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand)
-		if err != nil {
-			return false, err
-		}
-		if !theirs.ok() {
-			continue
-		}
-		better, err := claimRankTx(ctx, tx, team, theirs.chain, request)
-		if err != nil || better < 0 || better >= rank {
-			continue
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(team,run_id,unit_kind,node_id,claimant) DO UPDATE SET claim_rank=excluded.claim_rank,asked_at=excluded.asked_at WHERE unit_asks.asked_at<?`, team, unit.RunID, unit.Kind, unit.NodeID, claimant, rank, now.UnixNano(), since.UnixNano())
-		return true, err
-	}
-	return false, nil
 }
