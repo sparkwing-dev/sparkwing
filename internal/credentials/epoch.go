@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +18,16 @@ func epochPath(dir string) string { return filepath.Join(dir, "credential-epoch"
 // LoadOrCreateEpoch loads the external credential fence, creating it on first startup.
 // A restored database must retain this file from the current deployment.
 func LoadOrCreateEpoch(dir string) (string, error) {
+	if err := fssecure.EnsureDir(dir); err != nil {
+		return "", err
+	}
 	path := epochPath(dir)
-	body, err := os.ReadFile(path)
+	f, err := fssecure.OpenCredential(dir, "credential-epoch")
 	if err == nil {
+		body, readErr := io.ReadAll(f)
+		if err := errors.Join(readErr, f.Close()); err != nil {
+			return "", err
+		}
 		return parseEpoch(body)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
@@ -29,7 +37,7 @@ func LoadOrCreateEpoch(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return LoadOrCreateEpoch(dir)
 	}
@@ -47,6 +55,9 @@ func LoadOrCreateEpoch(dir string) (string, error) {
 // RotateEpoch invalidates every bearer and session from before an offline restore.
 // Stop the controller before replacing its database or rotating this fence.
 func RotateEpoch(dir string) (string, error) {
+	if err := fssecure.EnsureDir(dir); err != nil {
+		return "", err
+	}
 	epoch, err := newEpoch()
 	if err != nil {
 		return "", err

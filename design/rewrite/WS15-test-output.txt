@@ -182,3 +182,59 @@ NOT RUN: full suites, PostgreSQL and socket-dependent tests; harness lead owns t
 No web changes. Xwing candidate context cannot create its read-only session-index lock.
 No candidate installed. No product binary used against real HOME. No git mutation commands run.
 Temporary directory /tmp/sw-astra-WS15 removed after all checks completed.
+
+WS15 lead-review corrections verification
+Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-WS15/<worker>
+Integration: git merge-base --is-ancestor bw-3095-rewrite HEAD succeeded; clean start, no merge pending.
+
+RED before fixes:
+- TestEpochRejectsUntrustedFiles: old reader accepted group-writable epoch and escaping symlink.
+- TestRestoreUsesSeparatePersistentEpochDirectory: old restore rejected --credential-epoch-dir.
+- TestControllerEpochSurvivesPodAndDatabaseReplacement: old chart omitted epoch directory/claim.
+- TestPurgedPaidTeamDoesNotBlockPaymentRecovery: old sweep refused legitimate purged parent as lost correlation.
+- go test ./internal/capability -run '^TestPaymentPullSetupCompletionAndDetachedHistory$' -count=1
+  false: completion order lost, setup A Created=10, B Created=20 (expected 40, 30).
+  true: invalid payment event from detached method customer:null.
+- TestPaymentPullReportsFailedRefill, with old discarded-settlement behavior restored temporarily:
+  pull dropped reporting: logs= mail=[]; exit 1. Reporting restored before further checks.
+
+GREEN:
+$ go test ./internal/capability ./internal/credentials ./internal/fssecure -count=1
+ok capability 0.168s; credentials 0.691s; fssecure 1.084s
+
+$ go test ./internal/store ./internal/controller ./cmd/sparkwing-controller ./internal/crons -run '^(TestPayment|TestPurgedPaid|TestRestore|TestRestored|TestCredentialEpoch|TestSessionCredentialEpoch|TestSchemaError|TestSchemaDocumentationNamesBaseline|TestTenantSQLScope|TestTableClassifications|TestPurgeNever|TestRunCronTickLeased|TestTick)' -count=1
+ok store 19.600s; controller 1.833s; sparkwing-controller 0.557s; crons 3.278s
+
+$ go test ./internal/store -run '^(TestProvider|TestPayment)' -count=1
+ok store 27.165s
+
+$ go test -tags rewrite_integration ./internal/capability ./internal/credentials ./internal/store ./internal/controller ./cmd/sparkwing-controller ./internal/crons ./tests/acceptance -run '^(TestProvider|TestPayment|TestPurgedPaid|TestEpoch|TestRestore|TestRestored|TestCredentialEpoch|TestSessionCredentialEpoch|TestSchemaError|TestSchemaDocumentationNamesBaseline|TestTenantSQLScope|TestTableClassifications|TestPurgeNever|TestRunCronTickLeased|TestTick)' -count=1
+ok capability 0.333s; credentials 0.141s; store 23.699s; controller 1.362s; sparkwing-controller 0.611s; crons 2.180s; acceptance 0.947s
+
+Epoch worker: focused normal and tagged credentials/restore/admin/chart render checks passed.
+$ go test ./charts -count=1
+ok charts 141.690s
+Purge worker: normal/tagged focused purge, atomic closure rollback, classification, scope and payment acceptance checks passed.
+Drill worker: normal/tagged TestPaymentPullRestoresUnsettledPaymentOnce passed (0.867s/1.372s).
+
+$ go test ./internal/doccheck -count=1
+ok doccheck 4.977s
+$ go vet ./internal/capability ./internal/credentials ./internal/store ./internal/controller ./cmd/sparkwing-controller ./charts ./tests/acceptance
+exit 0
+$ GOLANGCI_LINT_CACHE=<worktree>/.cache/golangci-lint go run ./internal/guardcheck <worktree>
+guardcheck: every guard matches its allow-list
+Guard's first run caught an unmigrated acceptance fake; fixed and tested. Its next run caught the unused exported setup-evidence interface; unexported. Store allowance shrank 261 -> 260.
+
+Independent correctness review: identical setup replay initially lost Replayed=true under unconditional UPSERT. Restricted updates to detached-state transitions; existing provider replay tests now pass. No remaining findings.
+Docs regenerated via bin/sync-docs.sh. Whitespace checks passed.
+NOT RUN: full repository suites, PostgreSQL and socket-dependent checks; harness lead owns them. No web changes. No cluster/cloud access or product binary against real HOME. No git mutation commands.
+
+Final checks after offline mail wiring:
+$ go test ./cmd/sparkwing-controller ./internal/controller ./internal/capability -run '^(TestRestore|TestPaymentPull)' -count=1
+ok sparkwing-controller 0.689s; controller 0.611s; capability 0.044s
+$ go test -tags rewrite_integration ./cmd/sparkwing-controller -run '^(TestRestore|TestAdmin)' -count=1
+ok sparkwing-controller 0.629s
+$ go run ./internal/sleepcheck -base HEAD <worktree>
+sleepcheck: clean
+$ bash bin/sync-docs.sh --check
+pkg/docs/mirror and changelog match source docs.

@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // PaymentPuller reconciles provider-owned current facts, including objects older than
@@ -14,13 +17,22 @@ type PaymentPuller interface {
 	PullPayments(context.Context, PaymentScope, func(VerifiedPaymentEvent) error) error
 }
 
+type paymentSetupRecords interface {
+	PaymentSetupCompletion(context.Context, PaymentMode, string) (int64, error)
+}
+
 // PullPayments scans complete provider collections. Repeating a sweep is safe: proof
 // identities are stable for a given provider outcome and settlement also deduplicates money.
 func (a *paymentAuthenticator) PullPayments(ctx context.Context, scope PaymentScope, settle func(VerifiedPaymentEvent) error) error {
-	for _, collection := range []string{"checkout/sessions", "setup_intents", "payment_intents", "refunds", "disputes", "radar/early_fraud_warnings"} {
+	completed := map[string]int64{}
+	var incomplete error
+	for _, collection := range []string{"checkout/sessions", "events", "setup_intents", "payment_intents", "refunds", "disputes", "radar/early_fraud_warnings"} {
 		cursor := ""
 		for {
 			query := url.Values{"limit": {"100"}}
+			if collection == "events" {
+				query.Set("type", "setup_intent.succeeded")
+			}
 			if cursor != "" {
 				query.Set("starting_after", cursor)
 			}
@@ -45,12 +57,23 @@ func (a *paymentAuthenticator) PullPayments(ctx context.Context, scope PaymentSc
 					Status        string          `json:"status"`
 					PaymentStatus string          `json:"payment_status"`
 					LastError     json.RawMessage `json:"last_payment_error"`
+					Type          string          `json:"type"`
+					Data          struct {
+						Object struct {
+							ID string `json:"id"`
+						} `json:"object"`
+					} `json:"data"`
 				}
 				if json.Unmarshal(raw, &head) != nil || head.ID == "" || head.LiveMode == nil || *head.LiveMode != (a.mode == PaymentLive) {
 					return invalidPaymentEvent()
 				}
 				policy := PaymentEventPolicy{}
 				switch collection {
+				case "events":
+					if head.Object != "event" || head.Type != "setup_intent.succeeded" || head.Created <= 0 || head.Data.Object.ID == "" {
+						return invalidPaymentEvent()
+					}
+					completed[head.Data.Object.ID] = max(completed[head.Data.Object.ID], head.Created)
 				case "checkout/sessions":
 					if head.Object != "checkout.session" {
 						return invalidPaymentEvent()
@@ -109,13 +132,32 @@ func (a *paymentAuthenticator) PullPayments(ctx context.Context, scope PaymentSc
 						case PaymentCheckoutPaid, PaymentCheckoutExpired, PaymentCheckoutFailed:
 							proof, err = a.checkoutEvent(ctx, "pull", raw, policy)
 						default:
-							proof, err = a.providerEvent(ctx, "pull", head.Created, raw, policy)
+							created := head.Created
+							if route.Kind == PaymentCardSetup {
+								created = completed[head.ID]
+								if created == 0 {
+									if records, ok := scope.Records.(paymentSetupRecords); ok {
+										created, err = records.PaymentSetupCompletion(ctx, a.mode, head.ID)
+									}
+									if err != nil {
+										return err
+									}
+								}
+								if created == 0 {
+									incomplete = errors.Join(incomplete, &apierr.Error{Code: apierr.Conflict, Message: "card setup has no provider completion evidence; repair card selection before acknowledging restore"})
+									break
+								}
+							}
+							proof, err = a.providerEvent(ctx, "pull", created, raw, policy)
 						}
 						if err != nil {
 							return err
 						}
 						if proof != nil {
-							identity, err := json.Marshal(proof.event.Identity())
+							identity, err := json.Marshal(struct {
+								Event    PaymentEvent
+								Detached bool
+							}{proof.event.Identity(), proof.event.MethodDetached})
 							if err != nil {
 								return err
 							}
@@ -136,7 +178,7 @@ func (a *paymentAuthenticator) PullPayments(ctx context.Context, scope PaymentSc
 			}
 		}
 	}
-	return nil
+	return incomplete
 }
 
 func paymentPullPolicy(providerType string) PaymentEventPolicy {

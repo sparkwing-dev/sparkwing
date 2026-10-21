@@ -182,8 +182,11 @@ func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) 
 
 type recordsAll bool
 
-func (r recordsAll) RecordsPaymentParent(context.Context, PaymentRoute) (bool, error) {
-	return bool(r), nil
+func (r recordsAll) RecordsPaymentParent(context.Context, PaymentRoute) (PaymentParentState, error) {
+	if r {
+		return PaymentParentRecorded, nil
+	}
+	return PaymentParentMissing, nil
 }
 
 var testPaymentScope = PaymentScope{Deployment: "staging.sparkwing.dev", Records: recordsAll(true)}

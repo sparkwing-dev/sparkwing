@@ -213,7 +213,7 @@ func openState(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	teststore.RegisterSQLite(st, p.StateDB())
-	if err := writeDeploymentRecord(t.Context(), p.StateDB(), deployment.Config{}, "", st); err != nil {
+	if err := writeDeploymentRecord(t.Context(), p.StateDB(), deployment.Config{}, "", p.Root, st); err != nil {
 		t.Fatal(err)
 	}
 	return st

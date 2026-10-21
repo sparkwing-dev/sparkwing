@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -40,32 +39,18 @@ func TestPaymentPullRestoresUnsettledPaymentOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.AsOperator().PrepareRestore(t.Context(), epoch); err != nil {
-		t.Fatal(err)
-	}
-	_, token, err := teststore.ProvisionCredential(t.Context(), s.store, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "restore-drill"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}, ExpiresAt: teststore.CredentialExpiry(time.Now(), time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var encoded []byte
-	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), `SELECT authority_json FROM capabilities WHERE prefix=?`, token.Prefix).Scan(&encoded); err != nil {
-		t.Fatal(err)
-	}
-	var record store.CapabilityRecord
-	if err := json.Unmarshal(encoded, &record); err != nil {
-		t.Fatal(err)
-	}
-	record.Value.CredentialEpoch = epoch
-	encoded, err = json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, s.store, `UPDATE capabilities SET authority_json=? WHERE prefix=?`, encoded, token.Prefix)
 	livePath := filepath.Join(dir, "live.db")
 	if _, err := teststore.SQL(t, s.store).ExecContext(t.Context(), `VACUUM INTO ?`, livePath); err != nil {
 		t.Fatal(err)
 	}
-	live, err := teststore.OpenExisting(livePath, store.WithCredentialEpoch(epoch))
+	now := time.Now().UTC()
+	options := []store.Option{
+		teststore.WithClock(func() time.Time { return now }),
+		store.WithPolicies(func(*store.Store) (store.Policies, error) {
+			return store.Policies{Intake: scheduleIntakePolicy{}}, nil
+		}),
+	}
+	live, err := teststore.OpenExisting(livePath, append(options, store.WithCredentialEpoch(epoch))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,26 +59,44 @@ func TestPaymentPullRestoresUnsettledPaymentOnce(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	if err := live.EnsureCredentialEpoch(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := teststore.ProvisionCredential(t.Context(), live, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap})
+	if err != nil {
+		t.Fatal(err)
+	}
 	liveTenant, err := live.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := liveTenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "restore-nightly", RepoPath: "https://example.com/acme/repo", Pipeline: "nightly", Cron: "* * * * *", CatchUp: 24 * time.Hour}); err != nil {
+	schedule, _, err := liveTenant.ArmCronSchedule(t.Context(), store.CronSchedule{
+		ID: "restore-nightly", RepoPath: "https://github.com/acme/repo.git", Pipeline: "nightly", Cron: "* * * * *", CatchUp: 24 * time.Hour,
+		Where: store.CronWhereController, GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567",
+		GitHubInstallationID: 7, GitHubRepositoryID: 701, ArmedBy: "owner",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, live, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1)`)
+	engineSQL(t, live, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a',?,701,'acme/repo',7,'owner',1)`, schedule.RepositoryKey)
+	if status, err := live.AsOperator().RestoreStatus(t.Context()); err != nil || status.Pending {
+		t.Fatalf("backup must be normally operating: %+v %v", status, err)
+	}
+	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: token.Prefix}
+	if _, err := live.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
 		t.Fatal(err)
 	}
 	backupPath := filepath.Join(dir, "backup.db")
 	if _, err := teststore.SQL(t, live).ExecContext(t.Context(), `VACUUM INTO ?`, backupPath); err != nil {
 		t.Fatal(err)
 	}
-	firedAfterBackup := time.Now().UTC()
-	if _, err := teststore.SQL(t, live).ExecContext(t.Context(), `UPDATE cron_schedules SET cursor_at=?,last_fired_at=? WHERE id='restore-nightly'`, firedAfterBackup.UnixNano(), firedAfterBackup.UnixNano()); err != nil {
-		t.Fatal(err)
+	firedAfterBackup := now.Add(time.Minute).Truncate(time.Minute)
+	now = firedAfterBackup.Add(time.Second)
+	if result, err := liveTenant.AdmitScheduledRun(t.Context(), schedule, firedAfterBackup); err != nil || result.RunID == "" {
+		t.Fatalf("live cron admission: %+v %v", result, err)
 	}
-	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: token.Prefix}
-	if _, err := live.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := teststore.SQL(t, live).ExecContext(t.Context(), `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, token.Prefix); err != nil {
+	if err := live.AsOperator().RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := live.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
@@ -120,7 +123,7 @@ func TestPaymentPullRestoresUnsettledPaymentOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ReconcilePayments(t.Context(), verifier, "restore.test", live.AsOperator()); err != nil {
+	if err := New(live, nil).WithPayments(verifier, live.AsOperator()).WithPaymentDeployment("restore.test").ReconcilePayments(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	backup, err := os.ReadFile(backupPath)
@@ -135,7 +138,7 @@ func TestPaymentPullRestoresUnsettledPaymentOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := teststore.OpenExisting(restoredPath, store.WithCredentialEpoch(restoredEpoch))
+	restored, err := teststore.OpenExisting(restoredPath, append(options, store.WithCredentialEpoch(restoredEpoch))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,13 +160,16 @@ func TestPaymentPullRestoresUnsettledPaymentOnce(t *testing.T) {
 	if ran, err := restored.AsOperator().RunCronTickLeased(t.Context(), "restore-drill", time.Minute, func(context.Context) error { t.Fatal("restored cron tick ran before acknowledgement"); return nil }); ran || !errors.Is(err, store.ErrRestorePending) {
 		t.Fatalf("restored cron hold: ran=%t err=%v", ran, err)
 	}
+	if result, err := tenant.AdmitScheduledRun(t.Context(), schedule, firedAfterBackup); !errors.Is(err, store.ErrRestorePending) || result.RunID != "" {
+		t.Fatalf("restored cron admission before acknowledgement: %+v %v", result, err)
+	}
 	state, err := tenant.CreditState(t.Context(), 0)
 	if err != nil || state.BalanceMicro != 0 {
 		t.Fatalf("restored backup already has post-backup payment: %+v %v", state, err)
 	}
 	for sweep := 0; sweep < 2; sweep++ {
 		if err := restored.AsOperator().ReconcileRestore(t.Context(), func(ctx context.Context) error {
-			return ReconcilePayments(ctx, verifier, "restore.test", restored.AsOperator())
+			return New(restored, nil).WithPayments(verifier, restored.AsOperator()).WithPaymentDeployment("restore.test").ReconcilePayments(ctx)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -175,19 +181,30 @@ func TestPaymentPullRestoresUnsettledPaymentOnce(t *testing.T) {
 	if err := restored.AsOperator().AcknowledgeRestore(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	schedule, err := tenant.GetCronSchedule(t.Context(), "restore-nightly")
+	schedule, err = tenant.GetCronSchedule(t.Context(), "restore-nightly")
 	if err != nil || schedule.CursorAt.Before(firedAfterBackup) || schedule.NextDueAt != nil {
 		t.Fatalf("acknowledgement can replay an already fired instant: %+v %v", schedule, err)
+	}
+	if result, err := tenant.AdmitScheduledRun(t.Context(), schedule, firedAfterBackup); !errors.Is(err, store.ErrRestorePending) || result.RunID != "" {
+		t.Fatalf("acknowledgement admitted an already fired instant: %+v %v", result, err)
+	}
+	next := firedAfterBackup.Add(time.Minute)
+	now = next.Add(time.Second)
+	if result, err := tenant.AdmitScheduledRun(t.Context(), schedule, next); err != nil || result.RunID == "" || result.Replayed {
+		t.Fatalf("future cron admission after acknowledgement: %+v %v", result, err)
+	}
+	if fires, err := tenant.ListCronFires(t.Context(), schedule.ID, 0); err != nil || len(fires) != 1 || !fires[0].DueAt.Equal(next) {
+		t.Fatalf("restored cron fired a duplicate instant: %+v %v", fires, err)
 	}
 	// A backup can predate the reservation too; an owned payment must stop restore
 	// for operator repair rather than report a successful sweep with missing money.
 	checkoutID = "cs_lost_after_backup"
-	if err := ReconcilePayments(t.Context(), verifier, "restore.test", restored.AsOperator()); err == nil {
+	if err := New(restored, nil).WithPayments(verifier, restored.AsOperator()).WithPaymentDeployment("restore.test").ReconcilePayments(t.Context()); err == nil {
 		t.Fatal("owned payment without restored reservation was silently skipped")
 	}
 	checkoutID, unknownRefill = "", true
 	for sweep := 0; sweep < 2; sweep++ {
-		err := ReconcilePayments(t.Context(), verifier, "restore.test", restored.AsOperator())
+		err := New(restored, nil).WithPayments(verifier, restored.AsOperator()).WithPaymentDeployment("restore.test").ReconcilePayments(t.Context())
 		var refusal *apierr.Error
 		if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || !strings.Contains(refusal.Message, "no restored team correlation") {
 			t.Fatalf("owned succeeded refill needs explicit correlation refusal, got %v", err)

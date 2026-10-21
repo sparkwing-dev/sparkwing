@@ -80,7 +80,7 @@ func purgeRows(t *testing.T, s *Store, team Team, target bool) []string {
 	t.Helper()
 	var out []string
 	for _, table := range SchemaTables {
-		if table.Name == "teams" || table.Name == "audit_events" {
+		if table.Name == "teams" || table.Name == "audit_events" || table.Name == "payment_closures" {
 			continue
 		}
 		predicate := ""

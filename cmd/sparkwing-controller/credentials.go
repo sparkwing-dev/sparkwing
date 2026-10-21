@@ -13,6 +13,8 @@ import (
 )
 
 const (
+	epochDirectoryFlag         = "credential-epoch-dir"
+	epochDirectoryHelp         = "writable persistent directory for credential-epoch; defaults to --credentials-dir, or the local state directory when unset"
 	credPGURL                  = "pg-url"
 	credSecretsKey             = "secrets-key"
 	credSecretsPreviousKey     = "secrets-key.previous"
@@ -30,6 +32,16 @@ const (
 	credStripeAPIKey           = "stripe-api-key"
 	credStripeWebhookSecret    = "stripe-webhook-secret"
 )
+
+func credentialEpochDirectory(explicit, credentialsDir, home string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if credentialsDir != "" {
+		return credentialsDir
+	}
+	return home
+}
 
 // controllerCredentialNames is every file the credentials directory may
 // hold; any other name is refused, so a misspelled one fails startup

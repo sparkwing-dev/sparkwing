@@ -31,6 +31,41 @@ and `authority has ended`. The peer-placement test passed all 20 runs. This
 does not establish the cause of either failure. They are outside the restore
 diff. Test commands and output are in `WS15-test-output.txt`.
 
+## Lead review corrections
+
+The ws15a startup, trusted-file, purge, card ordering, detached-card, reporting
+and drill findings are fixed. The usage-recovery finding remains deferred to
+Korey. No usage journal was added.
+
+Startup, admin and restore share the epoch directory. Helm retains its dedicated
+PVC across pod and database replacement. Epoch reads use OpenCredential.
+Provider-parent classification distinguishes recorded, purged and missing
+identities using redacted closure evidence committed with parent erasure.
+Setup ordering uses provider completion events or retained completion evidence;
+missing evidence holds acknowledgment after monetary recovery. Detached methods
+remain historical evidence, clear the latest saved selection, and preserve its
+completion watermark. Webhooks and pull recovery share reporting. Offline
+reconciliation accepts the controller's mail settings. The corrected drill uses
+a normal backup, supported revocation and actual cron admission.
+
+This session adds 162 production Go lines, 8 SQL lines and 29 Helm/values lines.
+Cumulative production growth is 894 Go lines and 9 SQL lines. The growth supplies
+durable deployment storage, one parent-classification owner and distinct setup
+completion/usability facts. The obsolete free reconciliation entrypoint and
+forged drill envelope writes are removed. The store unexport allowance shrinks
+from 261 to 260. No parallel redesign files changed.
+
+Focused normal and rewrite_integration tests, leaf suites, all chart tests,
+provider replay tests, acceptance payment tests, doccheck, vet and guardcheck
+pass. New regressions demonstrated the reported failures before their fixes.
+Independent correctness review caught and resolved an identical-setup replay
+regression. Commands and evidence are in WS15-test-output.txt. Full repository
+suites, PostgreSQL and socket-dependent checks remain with the harness lead.
+No commits were made. Xwing candidate inspection remains blocked by its
+read-only session lock. The task used the selected worktree directly.
+
 ## Decisions needing the lead
 
-B63 is covered. B61 cannot be fully closed without authoritative recovery of reservations created after the backup and usage lost after it. Provider metadata only routes payments; it cannot recreate trusted team correlations. Uncorrelated pulls fail before settlement and keep the restore held. Recommend an external authoritative correlation/usage journal rather than weakening settlement authority. The limitation is explicit in the operator and migration docs.
+B63 is covered. B61 remains partial: authoritative recovery of post-backup usage
+and lost reservations waits for Korey. Missing correlations continue to block
+restore acknowledgment.

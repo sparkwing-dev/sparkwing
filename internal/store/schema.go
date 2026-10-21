@@ -229,6 +229,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "node_steps", Owner: SchemaTenant},
 	{Name: "nodes", Owner: SchemaTenant},
 	{Name: "payment_correlations", Owner: SchemaTenant},
+	{Name: "payment_closures", Owner: SchemaOperator},
 	{Name: "payment_events", Owner: SchemaOperator},
 	{Name: "payment_warnings", Owner: SchemaOperator},
 	{Name: "payment_cards", Owner: SchemaOperator},

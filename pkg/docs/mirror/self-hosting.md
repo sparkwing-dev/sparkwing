@@ -145,7 +145,7 @@ these file names, mounted whole.
 |---|---|---|
 | `pg-url` | PostgreSQL connection string for the state store | `--store=postgres` refuses to start |
 | `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
-| `credential-epoch` | Live bearer and session epoch kept outside database backups | created on startup; preserve the latest value through a restore |
+| `credential-epoch` | Live bearer and session epoch, when kept beside `secrets-key` | created on startup; preserve the latest value through a restore |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
 | `license` | Signed multi-team license | `--deployment=team` and `cloud` refuse to start |
@@ -167,11 +167,15 @@ administrators, and their ACL must grant no write access to other principals.
 Use `0700` directories and `0600` files for private local storage. Kubernetes
 projected volumes can use `defaultMode: 0400`.
 
-The controller writes `credential-epoch` in this directory, or beside
-`state.db` when no credentials directory is configured. Keep this file on
-persistent writable storage. An immutable Kubernetes Secret projection alone
-cannot hold epoch rotation; arrange a writable credentials directory with
-persisted epoch state. Preserve the latest epoch when restoring a database.
+The controller writes `credential-epoch` beside `secrets-key`, or beside
+`state.db` when no credentials directory is configured. If credentials are
+read-only, set `--credential-epoch-dir` to a separate persistent writable
+directory. Use the same flag for startup and every restore command. The
+controller restricts that directory to its owner and applies the credential
+file checks above to the epoch. The Helm chart always mounts a dedicated,
+retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
+flag, including when `/data` uses `emptyDir`. Preserve the latest epoch when
+restoring a database. Retain its volume independently of database backups.
 Use the [declared restore procedure](backup-restore.md#restore) to rotate it,
 reconcile payments and acknowledge schedule suppression. All earlier bearer
 tokens and dashboard sessions are invalidated. Supply a fresh

@@ -68,6 +68,7 @@ func run(args []string) error {
 			strings.Join(controllerCredentialNames, ", ")+
 			". An absent file leaves its feature off, and any other file name refuses startup; "+
 			"docs/self-hosting.md says what each one turns on.")
+	credentialEpochDir := fs.String(epochDirectoryFlag, "", epochDirectoryHelp)
 	dashboardURL := fs.String("dashboard-url", "",
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services. Empty disables the announcement.")
@@ -471,10 +472,7 @@ func run(args []string) error {
 	}
 	var srv *controller.Server
 	var closeObjects func() error
-	epochDir := *credentialsDir
-	if epochDir == "" {
-		epochDir = p.Root
-	}
+	epochDir := credentialEpochDirectory(*credentialEpochDir, *credentialsDir, p.Root)
 	epoch, err := credentials.LoadOrCreateEpoch(epochDir)
 	if err != nil {
 		return err
@@ -590,11 +588,6 @@ func run(args []string) error {
 	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
-	// safety: these are the only database writes startup makes, and they come
-	// after every check above and after every listener is bound, so a start
-	// that fails earlier changes nothing. The payment mode and free team
-	// slots are shared settings: active and standby controllers must declare
-	// the same values.
 	deployment, err := st.AsOperator().DeploymentID(ctx)
 	if err != nil {
 		return fmt.Errorf("payment deployment identity: %w", err)
@@ -615,7 +608,7 @@ func run(args []string) error {
 	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
 		return fmt.Errorf("--free-team-slots: %w", err)
 	}
-	if err := writeDeploymentRecord(ctx, p.StateDB(), cfg, *credentialsDir, st); err != nil {
+	if err := writeDeploymentRecord(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st); err != nil {
 		return err
 	}
 	return controller.ServeWith(ctx, srv, listeners.Listeners)

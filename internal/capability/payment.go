@@ -103,6 +103,8 @@ type PaymentEvent struct {
 	IntentID       string
 	Created        int64
 	Actionable     bool
+	// MethodDetached records current usability separately from the succeeded setup.
+	MethodDetached bool
 }
 
 // Identity is the event as Stripe signed it. Settlement snapshots card facts and protection policy
@@ -110,6 +112,7 @@ type PaymentEvent struct {
 func (e PaymentEvent) Identity() PaymentEvent {
 	e.Fingerprint, e.Brand, e.Last4, e.ThreeDS = "", "", "", ""
 	e.LiabilityShift = false
+	e.MethodDetached = false
 	return e
 }
 

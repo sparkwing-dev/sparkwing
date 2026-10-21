@@ -62,6 +62,20 @@ than falling back to an ephemeral `/data`.
 
 ## Credentials and bootstrap
 
+The credential epoch uses a dedicated retained 1Mi PVC, mounted at
+`/var/lib/sparkwing/credential-epoch`. The chart passes this writable path as
+`--credential-epoch-dir`, so credentials can stay in a read-only Secret
+projection. This PVC exists with either store and with either `/data` storage
+type. It uses `controller.storage.pvc.storageClassName`, or the cluster default
+when empty. The volume-permissions initializer gives the controller ownership;
+the controller restricts the directory to `0700` before using it. If
+`volumePermissions.enabled=false`, provision the volume with that ownership.
+
+Retain this PVC across pod replacement, uninstall, and database restores.
+Attach it to the offline restore pod and pass the same `--credential-epoch-dir`
+to every [restore command](../../docs/backup-restore.md#restore). Restore
+preparation rotates its epoch. Never roll this volume back with the database.
+
 Secrets are mounted as files under `/etc/sparkwing/credentials`. They never become
 controller or launcher arguments or environment values. Create them in the release
 namespace. [examples/external-secrets.yaml](examples/external-secrets.yaml) maps
@@ -151,7 +165,8 @@ same bucket and prefix for multi-team storage accounting. The example uses
 `s3://sparkwing-cloud-data/controller`. Every blob, artifact, source bundle,
 upload and log key stays under `controller/`; record metadata lives in RDS.
 The example uses `controller.storage.type=emptyDir` for the process home at
-`/data`, because RDS and S3 hold durable state.
+`/data`, because RDS and S3 hold database and object state. The credential epoch
+still uses its dedicated retained PVC.
 `controller.storage.type=pvc` remains available for filesystem/SQLite installs.
 The example declares `deployment: cloud` and `store: postgres`.
 
@@ -267,7 +282,7 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   node root, and the boundary probe measures egress from the Pod only.
 
 The Cloud example enables `volumePermissions` so the controller owns `/data`
-and can set its private mode to `0700`. `fsGroup: 65534` grants group access but
+and its epoch volume and can set their private mode to `0700`. `fsGroup: 65534` grants group access but
 cannot authorize that mode change on a root-owned emptyDir. The example also
 enables `trustedProxyListener` for the `ingress-nginx` namespace, because a
 VPC-wide pod CIDR would let any pod in the cluster claim a client address.

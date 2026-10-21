@@ -72,6 +72,7 @@ type deploymentRecord struct {
 	Kind           deployment.Kind  `json:"kind"`
 	Store          deployment.Store `json:"store"`
 	CredentialsDir string           `json:"credentials_dir"`
+	EpochDir       string           `json:"epoch_dir"`
 	Connection     store.Connection `json:"connection"`
 }
 
@@ -79,7 +80,7 @@ func deploymentRecordPath(stateDB string) string {
 	return filepath.Join(filepath.Dir(stateDB), "deployment.json")
 }
 
-func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir string, st *store.Store) error {
+func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir, epochDir string, st *store.Store) error {
 	conn, err := st.Connection(ctx)
 	if err != nil {
 		return err
@@ -89,7 +90,11 @@ func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.C
 			return err
 		}
 	}
-	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir, Connection: conn})
+	epochDir, err = filepath.Abs(epochDir)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir, EpochDir: epochDir, Connection: conn})
 	if err != nil {
 		return err
 	}
@@ -135,10 +140,7 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 		}
 		dialect, target = store.DialectPostgres, creds.PGURL
 	}
-	epochDir := rec.CredentialsDir
-	if epochDir == "" {
-		epochDir = filepath.Dir(stateDB)
-	}
+	epochDir := credentialEpochDirectory(rec.EpochDir, rec.CredentialsDir, filepath.Dir(stateDB))
 	epoch, err := credentials.LoadOrCreateEpoch(epochDir)
 	if err != nil {
 		return nil, err

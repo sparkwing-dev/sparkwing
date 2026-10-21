@@ -106,7 +106,8 @@ var _ PaymentSettler = (*store.Operator)(nil)
 
 // ReconcilePayments pulls provider-owned facts through the same settlement transaction
 // as webhooks. Restore must complete this sweep before acknowledging recovered state.
-func ReconcilePayments(ctx context.Context, verifier capability.PaymentAuthenticator, deployment string, ledger PaymentSettler) error {
+func (s *Server) ReconcilePayments(ctx context.Context) error {
+	verifier, deployment, ledger := s.paymentVerifier, s.paymentDeployment, s.paymentLedger
 	puller, ok := verifier.(capability.PaymentPuller)
 	if !ok || ledger == nil || strings.TrimSpace(deployment) == "" {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "payment reconciliation is not configured"}
@@ -117,11 +118,18 @@ func ReconcilePayments(ctx context.Context, verifier capability.PaymentAuthentic
 		if err != nil {
 			return err
 		}
-		if !recorded {
+		if recorded == capability.PaymentParentPurged {
+			return nil
+		}
+		if recorded != capability.PaymentParentRecorded {
 			return &apierr.Error{Code: apierr.Conflict, Message: "provider payment has no restored team correlation; repair its reservation before acknowledging restore"}
 		}
-		_, err = ledger.SettlePayment(ctx, proof)
-		return err
+		settled, err := ledger.SettlePayment(ctx, proof)
+		if err != nil {
+			return err
+		}
+		s.reportPaymentSettlement(ctx, settled)
+		return nil
 	})
 }
 
@@ -132,7 +140,7 @@ func (s *Server) runPaymentReconciliation(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
-		if err := ReconcilePayments(ctx, s.paymentVerifier, s.paymentDeployment, s.paymentLedger); err != nil && ctx.Err() == nil {
+		if err := s.ReconcilePayments(ctx); err != nil && ctx.Err() == nil {
 			s.logger.Error("payment provider reconciliation failed; next sweep retries", "err", err)
 		}
 		select {

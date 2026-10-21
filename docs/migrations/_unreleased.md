@@ -19,8 +19,10 @@ For a restore at a matching schema, stop the controller and follow
 [the restore procedure](../backup-restore.md#restore):
 
 1. Preserve the latest live `credential-epoch` instead of restoring an old
-   copy. Its credentials directory must be writable and persistent; an
-   immutable projected Secret alone cannot store epoch rotation.
+   copy. Its directory must be writable and persistent. Set
+   `--credential-epoch-dir` on startup and every restore command when
+   credentials are read-only. The Helm chart mounts a dedicated retained
+   PVC at `/var/lib/sparkwing/credential-epoch`, independent of `/data`.
 2. Run `sparkwing-controller restore prepare`. Every invocation rotates the
    epoch and invalidates all earlier bearer tokens and dashboard sessions.
 3. Run `sparkwing-controller restore reconcile`. Provider facts settle through

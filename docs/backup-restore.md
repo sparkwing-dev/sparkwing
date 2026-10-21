@@ -13,6 +13,10 @@ restores a controller that starts and still cannot do its job.
   PostgreSQL database named by the controller's `pg-url` credential. It holds runs,
   nodes, events, secrets, credits, API tokens, dashboard users, cron
   schedules, and the schema version the binary matches itself against.
+  Team purge retains payment mode and SHA-256 provider-identity hashes, with
+  no team, customer or card metadata. These closure records belong in database
+  backups because reconciliation uses them to distinguish purged parents from
+  correlations lost during restore.
 - **The secrets key**: the `secrets-key` file in the controller's
   `--credentials-dir`, or, on a single-team SQLite controller given none,
   the `secrets.key` it created beside `state.db`. Secret values are sealed
@@ -21,12 +25,16 @@ restores a controller that starts and still cannot do its job.
   once that key opens none of the values it samples, and started with no
   key it refuses to create a new one beside sealed values.
   During a key rotation the same is true of `secrets-key.previous`.
-- **The live credential epoch.** Keep `credential-epoch` beside `secrets-key`
-  outside the database backup. Preserve its latest value through a restore.
+- **The live credential epoch.** Keep `credential-epoch` outside the database
+  backup. Locally it lives beside `secrets-key`, or beside `state.db` without
+  a credentials directory. `--credential-epoch-dir` selects a separate
+  persistent writable directory when credentials are read-only. The Helm
+  chart keeps it on a dedicated retained PVC at
+  `/var/lib/sparkwing/credential-epoch`. Preserve its latest value through a restore.
   Copying an older epoch back can revive credentials revoked after the backup.
   A declared restore rotates it and invalidates every earlier bearer token and
-  dashboard session. Keep the epoch with the controller credentials when
-  moving the install to another machine.
+  dashboard session. Move the latest epoch and the controller credentials
+  together when moving the install to another machine.
 - **The controller's own start-up configuration**: its flags and the
   rest of its credentials directory, including the GitHub App settings
   and the announced service URLs. On Kubernetes that is the Helm values file and the Secrets it
@@ -219,15 +227,22 @@ pg_restore --no-owner --no-privileges --exit-on-error \
 Keep the controller stopped through preparation, reconciliation and
 acknowledgment. Point `secrets-key` at the key from the backup and `pg-url`
 at the restored database when using PostgreSQL. Preserve the latest live
-`credential-epoch` instead of copying one from the backup. The credentials
-directory must be writable for epoch rotation; an immutable projected
-credentials mount needs an operator-managed writable location.
+`credential-epoch` instead of copying one from the backup. Use the serving
+controller's `--credential-epoch-dir` for every restore command when it has one.
+With Helm this is `/var/lib/sparkwing/credential-epoch`, on its dedicated PVC;
+attach that PVC to the offline restore pod, with the controller stopped. Keep
+it separate from any volume or snapshot being rolled back with the database.
+The process user must own the directory and be able to write it. The controller
+restricts its mode to `0700`; epoch files must pass the credential-file owner,
+mode and symlink checks. Kubernetes Secret projections remain read-only.
 
+Set `$EPOCH_DIR` to the directory selected above, or `$CREDS` for the local
+default (`$SPARKWING_HOME` when no credentials directory is configured).
 Declare the restore before restarting. Use `--store postgres` for PostgreSQL:
 
 ```bash
-sparkwing-controller restore prepare --credentials-dir "$CREDS" --store sqlite
-sparkwing-controller restore reconcile --credentials-dir "$CREDS" --store sqlite
+sparkwing-controller restore prepare --credentials-dir "$CREDS" --credential-epoch-dir "$EPOCH_DIR" --store sqlite
+sparkwing-controller restore reconcile --credentials-dir "$CREDS" --credential-epoch-dir "$EPOCH_DIR" --store sqlite
 ```
 
 Preparation rotates the external epoch, so every pre-restore bearer token
@@ -236,18 +251,31 @@ backup. It also holds schedules. Every preparation, including a retry,
 rotates the epoch again. Issue replacement credentials only after the last
 preparation. Reconciliation pulls provider payments through the same idempotent
 settlement path as webhooks. Cloud reconciliation needs the payment mode's
-provider and webhook credentials. Every sweep clears the previous success
-before contacting the provider. A failed or interrupted resweep keeps
+provider and webhook credentials. Recovery uses webhook alerting and owner mail;
+pass the serving controller's `--email-sender`, `--email-configuration-set` and
+`--dashboard-url` to `restore reconcile` to send email with the same links.
+Without an email sender, notification bodies go to stderr. Every sweep clears
+the previous success before contacting the provider. A failed or interrupted resweep keeps
 acknowledgment blocked until a new sweep succeeds. A Checkout reservation
 created after the backup is absent from the restored database. Its provider metadata carries
 routing identity only, so reconciliation fails rather than inventing the
 missing reservation. Stop and repair the reservation with an operator before
 retrying. There is no supported reservation-repair API.
 
+Card recovery selects the latest completion using the provider's
+`setup_intent.succeeded` event time, then the committed `payment_setups`
+completion time when the event is unavailable. [Stripe lists events for
+30 days](https://docs.stripe.com/api/events/list). If both completion records
+are missing, acknowledgment stays blocked while monetary recovery continues.
+A [detached payment method](https://docs.stripe.com/api/payment_methods/detach)
+is retained as unusable historical evidence and is never selected as the
+current card. Its detached state does not stop refunds, disputes or other
+monetary recovery.
+
 Inspect the restored state and quarantined jobs before acknowledging:
 
 ```bash
-sparkwing-controller restore acknowledge --credentials-dir "$CREDS" --store sqlite
+sparkwing-controller restore acknowledge --credentials-dir "$CREDS" --credential-epoch-dir "$EPOCH_DIR" --store sqlite
 ```
 
 Acknowledgment advances every schedule cursor to the database's current
