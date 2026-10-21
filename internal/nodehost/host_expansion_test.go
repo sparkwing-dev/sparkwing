@@ -140,16 +140,12 @@ func TestOwnerExpansion(t *testing.T) {
 				if result.Outcome != "failed" || s.submission.Failure == nil || len(s.submission.Body) != 0 || strings.Contains(s.submission.Failure.MaskedError, "private") {
 					t.Fatalf("failure = %+v", s.submission)
 				}
-				reason := map[string]string{
-					"unknown": "unknown field", "duplicate": "duplicate field", "null": "null is not a declaration",
-					"concurrency": "explicit capacity and cost must be positive", "cycle": "dependency cycle",
-					"fan257": "generator fan-out exceeds 256 jobs",
-				}[mode]
-				if reason != "" && (s.submission.Failure.Code != apierr.PlanInvalid || !strings.Contains(s.submission.Failure.MaskedError, reason)) {
-					t.Fatalf("expansion failed for a different reason: %+v", s.submission.Failure)
+				wantCode := apierr.PlanInvalid
+				if mode == "failure" {
+					wantCode = apierr.SDKError
 				}
-				if mismatch != mode && !strings.Contains(s.submission.Failure.MaskedError, "jobs[0].concurrency[0]."+mismatch) {
-					t.Fatalf("mismatch lost its field path: %+v", s.submission.Failure)
+				if s.submission.Failure.Code != wantCode || s.submission.Failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" {
+					t.Fatalf("expansion failed for a different reason: %+v", s.submission.Failure)
 				}
 				return
 			}

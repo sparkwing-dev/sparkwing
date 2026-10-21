@@ -15,15 +15,20 @@ func TestEngineSnapshotRetainsEmptyExpansionAndPersistedState(t *testing.T) {
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 	plan := []byte(`{"jobs":[{"id":"source","closures":{"generate":["empty"]}},{"id":"consumer","needs_generated":["empty"]}]}`)
 	expansion := json.RawMessage(`{"jobs":[]}`)
+	registration := runspec.SecretRegistration{Version: 1}
 	digest, err := runspec.CanonicalHash(struct {
 		Body         json.RawMessage
 		Registration runspec.SecretRegistration
-	}{expansion, runspec.SecretRegistration{}})
+	}{expansion, registration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrationJSON, err := json.Marshal(registration)
 	if err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, plan, []byte(`{}`))
-	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,outcome,finished_at,generation,attempt,state_seq,spec_json,execution_json,expansion,expansion_body,expansion_registration,expansion_digest) VALUES ('a','run','source',0,'done','success',1,3,2,7,?,?,'accepted',?,?,?)`, []byte(`{"id":"source","closures":{"generate":["empty"]}}`), []byte(`{}`), expansion, []byte(`{}`), digest)
+	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,outcome,finished_at,generation,attempt,state_seq,spec_json,execution_json,expansion,expansion_body,expansion_registration,expansion_digest) VALUES ('a','run','source',0,'done','success',1,3,2,7,?,?,'accepted',?,?,?)`, []byte(`{"id":"source","closures":{"generate":["empty"]}}`), []byte(`{}`), expansion, registrationJSON, digest)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,spec_json,execution_json) VALUES ('a','run','consumer',1,'pending',?,?)`, []byte(`{"id":"consumer","needs_generated":["empty"]}`), []byte(`{}`))
 	got, err := server.Snapshot(t.Context(), owner)
 	if err != nil {

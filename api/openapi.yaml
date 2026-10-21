@@ -5775,6 +5775,10 @@ components:
                 type: string
               type: array
             - type: "null"
+        version:
+          type: integer
+      required:
+        - version
       type: object
       x-sparkwing-go-type: runspec.SecretRegistration
     internal.runspec.SecretValue:

@@ -66,6 +66,9 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 				if request.Args["token"] != supplied || request.Args["empty"] != "" || request.Args["label"] != "explicit" || request.Run.RunID != "run" {
 					t.Fatalf("planning inputs changed: %+v", request)
 				}
+				if _, ok := request.Args["empty"]; ok {
+					t.Fatal("empty default became a supplied argument")
+				}
 				return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nil
 			}
 			return nil, nil
@@ -78,7 +81,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || prepared.Args["empty"] != "" || len(prepared.Args) != 3 {
+	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || !reflect.DeepEqual(prepared.Args, map[string]string{"label": "explicit", "token": supplied}) {
 		t.Fatalf("description = %+v", prepared)
 	}
 	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {

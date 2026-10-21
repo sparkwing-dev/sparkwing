@@ -93,13 +93,17 @@ func TestNativeHostDefaultExpansionUsesSharedEvaluator(t *testing.T) {
 	}
 	state.run.Spec = &spec
 	refused := errors.New("evaluation delegation refused")
-	config.Evaluation.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) { return ProcessGrant{}, refused }
+	bound := false
+	config.Evaluation.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) {
+		bound = true
+		return ProcessGrant{}, refused
+	}
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _, failure, err := owner.Expand(t.Context(), input, state.row, StorageBinding{})
-	if err != nil || len(body) != 0 || failure == nil || failure.MaskedError != refused.Error() {
+	if !bound || err != nil || len(body) != 0 || failure == nil || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" {
 		t.Fatalf("body=%s failure=%+v error=%v", body, failure, err)
 	}
 }
