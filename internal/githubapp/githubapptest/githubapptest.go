@@ -157,6 +157,7 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", g.handleContents)
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", g.handleCommit)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{sha}/check-runs", g.handleListCheckRuns)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
@@ -329,6 +330,10 @@ func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {
 	g.mu.Unlock()
 	if sha == "" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	if strings.Contains(r.URL.Path, "/git/ref/") {
+		writeJSON(w, http.StatusOK, map[string]any{"ref": "refs/" + r.PathValue("ref"), "object": map[string]string{"type": "commit", "sha": sha}})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"sha": sha})

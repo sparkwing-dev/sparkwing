@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type admittedSnapshot struct {
@@ -250,15 +251,15 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		waiting, err := readUnclaimedUnitTx(ctx, tx, team, run)
+		creditRefusal, err := intakeCreditRefusalTx(ctx, tx, team, run)
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		if waiting != nil && waiting.CreditHold != "" {
+		if creditRefusal != "" {
 			if snapshot.execution.Retry != nil {
-				return AdmissionResult{}, authorityError(apierr.Conflict, waiting.CreditHold)
+				return AdmissionResult{}, authorityError(apierr.Conflict, creditRefusal)
 			}
-			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: id, To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + waiting.CreditHold}, now); err != nil {
+			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: id, To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}, now); err != nil {
 				return AdmissionResult{}, err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
@@ -268,6 +269,65 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		}
 	}
 	return result, nil
+}
+
+// Credit admission judges the sealed placement even before a Cloud launcher is registered.
+func intakeCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, run RunRow) (string, error) {
+	request := run.Request.Request
+	if request.Mode != runspec.IntakeExecute || request.Dispatch != runspec.DispatchController || request.Burst != nil {
+		return "", nil
+	}
+	if runner := request.Options.Runner; runner.Set && runner.Value.Kind != runspec.RunnerAny {
+		return "", nil
+	}
+	options := request.Options
+	if run.Spec != nil {
+		options = run.Spec.Resolved.Settings.Options
+	}
+	// Observed labels and platform can change when capacity registers; only granted placement facts exclude Cloud.
+	var selector []string
+	for _, term := range options.Requires.Value {
+		placementOnly := true
+		for _, alternative := range strings.Split(term, ",") {
+			key, _, _ := strings.Cut(strings.TrimSpace(alternative), "=")
+			if key != "class" && key != "pool" && key != "name" && key != "location" && key != "local" {
+				placementOnly = false
+			}
+		}
+		if placementOnly {
+			selector = append(selector, term)
+		}
+	}
+	if !match.Evaluate(match.Profile{Class: match.ClassCloud, Location: TierCloud}, match.Demand{Selector: selector}).OK() {
+		return "", nil
+	}
+	if rankedUnit(request, match.Demand{Selector: options.Requires.Value}) {
+		ranking, err := claimRankingTx(ctx, tx, team)
+		if err != nil {
+			return "", err
+		}
+		if len(ranking) > 0 && !slices.Contains(ranking, TierCloud) {
+			return "", nil
+		}
+	}
+	unit, err := ownerUnitTx(ctx, tx, team, run.ID)
+	if err != nil {
+		return "", err
+	}
+	polls, err := placementRunnersTx(ctx, tx, team, claimLiveness(ctx, request), true)
+	if err != nil {
+		return "", err
+	}
+	for _, poll := range polls {
+		eligible, err := unitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand, eligibilityChecks{fit: true})
+		if err != nil {
+			return "", err
+		}
+		if eligible.ok() && !eligible.metered {
+			return "", nil
+		}
+	}
+	return unitCreditHoldTx(ctx, tx, team, run, unit)
 }
 
 func intakeDigest(tx *storeTx, request IntakeRequest, snapshot admittedSnapshot) (runspec.Hash, error) {

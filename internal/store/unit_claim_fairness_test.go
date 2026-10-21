@@ -1,8 +1,10 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -163,4 +165,217 @@ func TestLauncherMixedKindsKeepUnawardedEligibleContenders(t *testing.T) {
 		}
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=? WHERE team='a' AND id=?`, s.now().Add(time.Hour).UnixNano(), claim.RunID)
 	}
+}
+
+func TestLauncherMatchingDemandsDoNotShareScanProgress(t *testing.T) {
+	for _, observation := range []string{"labels", "availability"} {
+		t.Run(observation, func(t *testing.T) {
+			s, demand := launcherFairnessFixture(t)
+			if observation == "availability" {
+				demand.Capacity.MemoryBytes = 8
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL`)
+			for i := range 16 {
+				label := "A"
+				if i >= 8 {
+					label = "B"
+				}
+				execution := []byte(fmt.Sprintf(`{"requires":{"set":true,"value":[%q]}}`, label))
+				if observation == "availability" {
+					cores, memory := 4, 1
+					if label == "B" {
+						cores, memory = 1, 4
+					}
+					execution = []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d},"memory_bytes":{"set":true,"value":%d}}}}`, cores, memory))
+				}
+				rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, fmt.Sprintf("job-%02d", i), []byte(`{}`), execution)
+			}
+			counts := map[string]int{}
+			for round := range 16 {
+				for _, label := range []string{"B", "A"} {
+					demand.Labels = []string{label}
+					if observation == "availability" {
+						demand.Labels = nil
+						demand.Available = match.Resources{Cores: 8, MemoryBytes: 1}
+						if label == "B" {
+							demand.Available = match.Resources{Cores: 1, MemoryBytes: 8}
+						}
+					}
+					claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+					if errors.Is(err, ErrNotFound) {
+						continue
+					}
+					if err != nil {
+						t.Fatalf("round %d claimant %s: %v", round, label, err)
+					}
+					first := 0
+					if label == "B" {
+						first = 8
+					}
+					if claim.NodeID != fmt.Sprintf("job-%02d", first+counts[label]) {
+						t.Fatalf("claimant %s skipped its oldest work: %s", label, claim.NodeID)
+					}
+					counts[label]++
+					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+						t.Fatal(err)
+					}
+					rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL WHERE team=? AND run_id=? AND node_id=?`, claim.Team, claim.RunID, claim.NodeID)
+				}
+			}
+			if counts["A"] != 8 || counts["B"] != 8 {
+				t.Fatalf("matching demands starved each other: %v", counts)
+			}
+		})
+	}
+}
+
+func TestLauncherSeededMatchingDemandFairness(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL`)
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=?`, s.now().Add(time.Hour).UnixNano())
+	var request []byte
+	if err := s.db.QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&request); err != nil {
+		t.Fatal(err)
+	}
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(request, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	type waiting struct {
+		label string
+		born  int
+	}
+	pending := map[UnitRef]waiting{}
+	serial := 0
+	add := func(label string, kind capability.UnitKind, born int) {
+		serial++
+		id := fmt.Sprintf("sim-%05d", serial)
+		unit := UnitRef{Kind: kind, RunID: "run", NodeID: id}
+		if kind == capability.UnitNode {
+			execution := []byte(fmt.Sprintf(`{"requires":{"set":true,"value":[%q]}}`, label))
+			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(`{}`), execution)
+		} else {
+			unit.RunID, unit.NodeID = id, ""
+			seal := sealed
+			seal.Request.Options.Requires.Value = []string{label}
+			seal.Request.Options.Requires.Set = true
+			body := sealWith(t, seal, sealed.Provenance)
+			rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,?,'ci','running',?,'request',request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days FROM runs WHERE id='run'`, id, serial+10, body, serial+2)
+			rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a',?,?,1,1,?,?,?)`, id, kind, s.now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
+		}
+		pending[unit] = waiting{label: label, born: born}
+	}
+	for _, label := range []string{"A", "B"} {
+		for range 8 {
+			add(label, capability.UnitNode, 0)
+		}
+	}
+	for range 4 {
+		add("C", capability.UnitPlan, 0)
+		add("C", capability.UnitPlan, 0)
+	}
+	rng := rand.New(rand.NewPCG(47, 113))
+	labels := []string{"B", "A", "C"}
+	for turn := range 240 {
+		// Arrivals continue through each sweep, slower than aggregate claimant capacity.
+		if turn < 150 && turn%3 != 0 {
+			label := labels[rng.IntN(len(labels))]
+			kind := capability.UnitNode
+			if label == "C" {
+				kind = capability.UnitPlan
+			}
+			add(label, kind, turn)
+		}
+		label := labels[turn%len(labels)]
+		demand.Labels = []string{label}
+		demand.Kinds = []capability.UnitKind{capability.UnitNode}
+		if label == "C" {
+			demand.Kinds = []capability.UnitKind{capability.UnitPlan}
+		}
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if err == nil {
+			unit := UnitRef{Kind: claim.Kind, RunID: claim.RunID, NodeID: claim.NodeID, SourceGeneration: claim.SourceGeneration}
+			job, ok := pending[unit]
+			if !ok || job.label != label {
+				t.Fatalf("claimant %s claimed ineligible work %+v (%+v)", label, unit, job)
+			}
+			delete(pending, unit)
+			if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+				t.Fatal(err)
+			}
+			if claim.Kind == capability.UnitNode {
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL WHERE run_id=? AND node_id=?`, claim.RunID, claim.NodeID)
+			} else {
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=? WHERE id=?`, s.now().Add(time.Hour).UnixNano(), claim.RunID)
+			}
+		}
+		for unit, job := range pending {
+			if turn-job.born > 96 {
+				t.Fatalf("eligible %s work %+v starved for %d polls", job.label, unit, turn-job.born)
+			}
+		}
+	}
+	if len(pending) != 0 {
+		t.Fatalf("%d eligible jobs remained after arrivals stopped", len(pending))
+	}
+}
+
+func TestLauncherSweepRetentionFollowsClaimantLifetime(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["missing"]}}`))
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rejected sweep: %v", err)
+	}
+	var key string
+	if err := s.db.QueryRow(`SELECT key FROM settings WHERE key LIKE 'launcher_sweep/%' LIMIT 1`).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('launcher_sweep/live',?)`, []byte(`{"claimant":"runner"}`))
+	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET expires_at=? WHERE prefix=?`, s.now().Add(-8*24*time.Hour).UnixNano(), demand.CapabilityPrefix)
+	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM settings WHERE key=?`, key).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("orphan sweep retained: %d %v", count, err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM settings WHERE key='launcher_sweep/live'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("live sweep removed: %d %v", count, err)
+	}
+}
+
+func TestLauncherSweepFrontierExcludesLaterArrivalsInOldRun(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL`)
+	for i := range launcherProbePerTeam {
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, fmt.Sprintf("a%03d", i), []byte(`{}`), []byte(`{"requires":{"set":true,"value":["missing"]}}`))
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','z-target','pending',2,?,?)`, []byte(`{}`), []byte(`{}`))
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("initial bounded sweep: %v", err)
+	}
+	for poll := range 4 {
+		for i := range launcherProbePerTeam {
+			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',?, ?,?)`, fmt.Sprintf("b%03d-%03d", poll, i), poll+3, []byte(`{}`), []byte(`{"requires":{"set":true,"value":["missing"]}}`))
+		}
+		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claim.NodeID != "z-target" {
+			t.Fatalf("later arrival bypassed target: %+v", claim)
+		}
+		return
+	}
+	t.Fatal("continuous arrivals extended the sweep past its frontier")
 }

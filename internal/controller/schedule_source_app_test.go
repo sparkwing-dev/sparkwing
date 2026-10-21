@@ -41,7 +41,7 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 		{name: "explicit branch pin", pin: "refs/heads/main", trust: runspec.TrustSchedule},
 		{name: "explicit tag pin", pin: "refs/tags/main", trust: runspec.TrustAsserted},
 		{name: "matching branch and tag pin", pin: "main", matchingTag: true, trust: runspec.TrustSchedule},
-		{name: "tag cannot replace missing execution branch", missingBranch: true, refusal: true},
+		{name: "tag heads/main cannot replace missing execution branch", missingBranch: true, refusal: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lookups := map[string]int{}
@@ -57,20 +57,28 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 					body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":42,"login":"acme","type":"Organization"}}]}`
 				case "GET /repositories/701":
 					body = `{"id":701,"default_branch":"main"}`
-				case "GET /repos/acme/widgets/commits/heads/main", "GET /repos/acme/widgets/commits/refs/heads/main":
+				case "GET /repos/acme/widgets/git/ref/heads/main":
 					lookups["main"]++
-					body = `{"sha":"` + execution + `"}`
+					body = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + execution + `"}}`
 					if tc.missingBranch {
 						status = http.StatusNotFound
 					}
-				case "GET /repos/acme/widgets/commits/refs/heads/main~1", "GET /repos/acme/widgets/commits/heads/main~1", "GET /repos/acme/widgets/commits/refs/tags/main", "GET /repos/acme/widgets/commits/main", "GET /repos/acme/widgets/commits/tags/main", "GET /repos/acme/widgets/commits/" + pinned[:12]:
-					body = `{"sha":"` + pinned + `"}`
+				case "GET /repos/acme/widgets/git/ref/tags/main":
+					sha := pinned
 					if tc.matchingTag {
-						body = `{"sha":"` + execution + `"}`
+						sha = execution
 					}
-				case "GET /repos/acme/widgets/commits/code", "GET /repos/acme/widgets/commits/heads/code":
-					lookups["code"]++
+					body = `{"ref":"refs/tags/main","object":{"type":"commit","sha":"` + sha + `"}}`
+				case "GET /repos/acme/widgets/commits/heads/main", "GET /repos/acme/widgets/commits/heads/main~1":
+					// The commits endpoint accepts the attacker's tag literally named heads/main.
 					body = `{"sha":"` + pinned + `"}`
+				case "GET /repos/acme/widgets/commits/" + pinned:
+					body = `{"sha":"` + pinned + `"}`
+				case "GET /repos/acme/widgets/git/ref/heads/code":
+					lookups["code"]++
+					body = `{"ref":"refs/heads/code","object":{"type":"commit","sha":"` + pinned + `"}}`
+				case "GET /repos/acme/widgets/git/ref/tags/code":
+					status = http.StatusNotFound
 				case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
 					if got := r.URL.Query().Get("ref"); got != execution {
 						t.Fatalf("configuration read at %q, want fire-time execution commit", got)
@@ -79,7 +87,7 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 					if tc.pin != "" {
 						body += "    source: " + tc.pin + "\n"
 					}
-				case "GET /repos/acme/widgets/commits/heads/" + pinned[:12], "GET /repos/acme/widgets/commits/tags/" + pinned[:12]:
+				case "GET /repos/acme/widgets/git/ref/heads/" + pinned[:12], "GET /repos/acme/widgets/git/ref/tags/" + pinned[:12], "GET /repos/acme/widgets/git/ref/heads/main~1":
 					status = http.StatusNotFound
 				default:
 					t.Fatalf("unexpected GitHub call: %s %s", r.Method, r.URL)

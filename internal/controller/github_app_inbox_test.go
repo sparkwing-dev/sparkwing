@@ -47,8 +47,8 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 				} else {
 					body = `{"id":701,"default_branch":"main"}`
 				}
-			case "GET /repos/acme/widgets/commits/heads/main":
-				body = `{"sha":"0123456789abcdef0123456789abcdef01234567"}`
+			case "GET /repos/acme/widgets/git/ref/heads/main":
+				body = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}}`
 			case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
 				if projectConfig != "" && (configRef == "" || r.URL.Query().Get("ref") == configRef) {
 					body = projectConfig

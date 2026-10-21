@@ -53,9 +53,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
-	"(*Operator).RecordBusinessEvent":          "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
-	"(*Operator).githubInstallationTeamTx":     "a global installation ID resolves its tenant before tenant-scoped mutation or delivery scheduling",
-	"(*Operator).revokeSelectedCapabilitiesTx": "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
+	"(*Operator).RecordBusinessEvent":            "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Operator).githubInstallationConnectionTx": "a global installation ID resolves its tenant before tenant-scoped mutation or delivery scheduling",
+	"(*Operator).revokeSelectedCapabilitiesTx":   "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
 	"(*Operator).hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Operator).LookupCapability":              "a presentation digest identifies the credential before its tenant is known",

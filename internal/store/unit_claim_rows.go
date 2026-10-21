@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -150,7 +152,7 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 type queuedClaim struct {
 	team    Team
 	unit    UnitRef
-	created int64
+	arrived int64
 	score   int
 }
 
@@ -159,8 +161,14 @@ const (
 	launcherClaimCursorKey = "launcher_claim_team"
 )
 
-type launcherProbePosition struct {
-	Created    int64  `json:"created"`
+type launcherSweep struct {
+	Claimant string                `json:"claimant"`
+	After    launcherSweepPosition `json:"after"`
+	Through  launcherSweepPosition `json:"through"`
+}
+
+type launcherSweepPosition struct {
+	Arrival    int64  `json:"arrival"`
 	RunID      string `json:"run_id"`
 	NodeID     string `json:"node_id"`
 	Generation int64  `json:"generation"`
@@ -179,7 +187,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		}
 		for rows.Next() {
 			v := queuedClaim{unit: UnitRef{Kind: kind}}
-			if err = rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.created); err != nil {
+			if err = rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.arrived); err != nil {
 				_ = rows.Close()
 				return UnitRef{}, err
 			}
@@ -221,10 +229,10 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		if a.score < b.score {
 			return 1
 		}
-		if a.created < b.created {
+		if a.arrived < b.arrived {
 			return -1
 		}
-		if a.created > b.created {
+		if a.arrived > b.arrived {
 			return 1
 		}
 		if a.unit.RunID < b.unit.RunID {
@@ -262,6 +270,20 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err := json.Unmarshal(raw, &cursor); err != nil {
 		return UnitRef{}, err
 	}
+	// Free CPU and memory can make otherwise identical claimants match disjoint work.
+	matching := demand
+	matching.Target, matching.JobNamespace, matching.ExcludedTeamLabels, matching.Kinds = nil, "", nil, nil
+	matching.Labels = slices.Clone(matching.Labels)
+	slices.Sort(matching.Labels)
+	matching.Labels = slices.Compact(matching.Labels)
+	if len(matching.Labels) == 0 {
+		matching.Labels = nil
+	}
+	body, err := json.Marshal(matching)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	demandKey := fmt.Sprintf("launcher_sweep/%x", sha256.Sum256(body))
 	now := tx.now().UnixNano()
 	var ready []string
 	var readyArgs []any
@@ -300,7 +322,7 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		var candidates []queuedClaim
 		perKind := max(1, launcherProbePerTeam/len(kinds))
 		for _, kind := range kinds {
-			found, err := launcherKindCandidatesTx(ctx, tx, c, team, kind, perKind)
+			found, err := launcherSweepCandidatesTx(ctx, tx, c, team, kind, demandKey, perKind)
 			if err != nil {
 				return UnitRef{}, err
 			}
@@ -328,17 +350,27 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			}
 			contenders[candidate.unit.Kind] = true
 			candidate.score = standing.score
-			if best == nil || candidate.score > best.score || candidate.score == best.score && candidate.created < best.created {
+			if best == nil || candidate.score > best.score || candidate.score == best.score && candidate.arrived < best.arrived {
 				best = candidate
 			}
 		}
-		// Eligible rows stay ahead of scan progress until an award removes them.
+		// Only this matching demand consumes rejected rows; other claimants keep their own frontier.
 		for kind, last := range rejected {
-			value, err := json.Marshal(launcherProbePosition{Created: last.created, RunID: last.unit.RunID, NodeID: last.unit.NodeID, Generation: last.unit.SourceGeneration})
+			key := demandKey + "/" + string(team) + "/" + string(kind)
+			var raw []byte
+			if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw); err != nil {
+				return UnitRef{}, err
+			}
+			var sweep launcherSweep
+			if err := json.Unmarshal(raw, &sweep); err != nil {
+				return UnitRef{}, err
+			}
+			sweep.After = launcherSweepPosition{Arrival: last.arrived, RunID: last.unit.RunID, NodeID: last.unit.NodeID, Generation: last.unit.SourceGeneration}
+			value, err := json.Marshal(sweep)
 			if err != nil {
 				return UnitRef{}, err
 			}
-			if err := setCreditSettingTx(ctx, tx, "launcher_probe/"+string(team)+"/"+string(kind), string(value)); err != nil {
+			if err := setCreditSettingTx(ctx, tx, key, string(value)); err != nil {
 				return UnitRef{}, err
 			}
 		}
@@ -356,44 +388,43 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	return UnitRef{}, notFound("eligible work", "")
 }
 
-func launcherKindCandidatesTx(ctx context.Context, tx *storeTx, c capability.Capability, team Team, kind capability.UnitKind, limit int) ([]queuedClaim, error) {
-	key := "launcher_probe/" + string(team) + "/" + string(kind)
+func launcherSweepCandidatesTx(ctx context.Context, tx *storeTx, c capability.Capability, team Team, kind capability.UnitKind, demandKey string, limit int) ([]queuedClaim, error) {
+	key := demandKey + "/" + string(team) + "/" + string(kind)
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	var cursor launcherProbePosition
+	var sweep launcherSweep
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &cursor); err != nil {
+		if err := json.Unmarshal(raw, &sweep); err != nil {
 			return nil, err
 		}
 	}
 	query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
 	query += ` AND r.team=?`
 	args = append(args, team)
-	order := `r.created_at,r.id`
-	if cursor.RunID != "" {
-		switch kind {
-		case capability.UnitNode:
-			query += ` AND (r.created_at,r.id,n.node_id)>(?,?,?)`
-			args = append(args, cursor.Created, cursor.RunID, cursor.NodeID)
-		case capability.UnitEval:
-			query += ` AND (r.created_at,r.id,e.source_node_id,e.source_generation)>(?,?,?,?)`
-			args = append(args, cursor.Created, cursor.RunID, cursor.NodeID, cursor.Generation)
-		default:
-			query += ` AND (r.created_at,r.id)>(?,?)`
-			args = append(args, cursor.Created, cursor.RunID)
-		}
-	}
+	columns := []string{"t.available_at", "r.id"}
 	switch kind {
 	case capability.UnitNode:
-		order += `,n.node_id`
+		columns[0] = "n.ready_at"
+		columns = append(columns, "n.node_id")
 	case capability.UnitEval:
-		order += `,e.source_node_id,e.source_generation`
+		columns[0] = "n.finished_at"
+		columns = append(columns, "e.source_node_id", "e.source_generation")
 	}
-	query += ` ORDER BY ` + order + ` LIMIT ?`
-	args = append(args, limit)
+	tuple := "(" + strings.Join(columns, ",") + ")"
+	placeholders := "(" + strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",") + ")"
+	values := func(p launcherSweepPosition) []any {
+		v := []any{p.Arrival, p.RunID}
+		switch kind {
+		case capability.UnitNode:
+			v = append(v, p.NodeID)
+		case capability.UnitEval:
+			v = append(v, p.NodeID, p.Generation)
+		}
+		return v
+	}
 	read := func(query string, args []any) ([]queuedClaim, error) {
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -402,7 +433,7 @@ func launcherKindCandidatesTx(ctx context.Context, tx *storeTx, c capability.Cap
 		var found []queuedClaim
 		for rows.Next() {
 			v := queuedClaim{unit: UnitRef{Kind: kind}}
-			if err := rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.created); err != nil {
+			if err := rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.arrived); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -410,23 +441,43 @@ func launcherKindCandidatesTx(ctx context.Context, tx *storeTx, c capability.Cap
 		}
 		return found, errors.Join(rows.Err(), rows.Close())
 	}
-	found, err := read(query, args)
-	if err != nil {
-		return nil, err
-	}
-	if len(found) == 0 && cursor.RunID != "" {
-		query, args = tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
-		query += ` AND r.team=? ORDER BY ` + order + ` LIMIT ?`
-		args = append(args, team, limit)
-		found, err = read(query, args)
+	for range 2 {
+		if sweep.Through.RunID == "" {
+			last, err := read(query+` ORDER BY `+strings.Join(columns, " DESC,")+` DESC LIMIT 1`, args)
+			if err != nil {
+				return nil, err
+			}
+			if len(last) == 0 {
+				_, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, key)
+				return nil, err
+			}
+			v := last[0]
+			sweep.Claimant = c.Prefix
+			sweep.Through = launcherSweepPosition{Arrival: v.arrived, RunID: v.unit.RunID, NodeID: v.unit.NodeID, Generation: v.unit.SourceGeneration}
+		}
+		bounded := query + ` AND ` + tuple + `<=` + placeholders
+		boundedArgs := append(slices.Clone(args), values(sweep.Through)...)
+		if sweep.After.RunID != "" {
+			bounded += ` AND ` + tuple + `>` + placeholders
+			boundedArgs = append(boundedArgs, values(sweep.After)...)
+		}
+		found, err := read(bounded+` ORDER BY `+strings.Join(columns, ",")+` LIMIT ?`, append(boundedArgs, limit))
 		if err != nil {
 			return nil, err
 		}
-		if err := setCreditSettingTx(ctx, tx, key, `{}`); err != nil {
-			return nil, err
+		if len(found) > 0 {
+			value, err := json.Marshal(sweep)
+			if err != nil {
+				return nil, err
+			}
+			if err := setCreditSettingTx(ctx, tx, key, string(value)); err != nil {
+				return nil, err
+			}
+			return found, nil
 		}
+		sweep = launcherSweep{}
 	}
-	return found, nil
+	return nil, nil
 }
 
 func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int64) (string, []any) {
@@ -434,13 +485,13 @@ func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.Uni
 	args := []any{}
 	switch kind {
 	case capability.UnitNode:
-		query = `SELECT r.team,r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
+		query = `SELECT r.team,r.id,n.node_id,0,n.ready_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
 		args = append(args, now, now)
 	case capability.UnitEval:
-		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
+		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,n.finished_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
 		args = append(args, now, now)
 	default:
-		query = `SELECT r.team,r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
+		query = `SELECT r.team,r.id,'',0,t.available_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
 		args = append(args, string(kind), now, now)
 	}
 	query += ` AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=?)`

@@ -166,7 +166,16 @@ ORDER BY c.prefix LIMIT ?)`, cutoff.UnixNano(), cutoff.UnixNano(), limit)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	claimant := `json_extract(value,'$.claimant')`
+	if tx.store.dialect == DialectPostgres {
+		claimant = `convert_from(value,'UTF8')::jsonb->>'claimant'`
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM settings WHERE key IN (SELECT key FROM settings WHERE key LIKE 'launcher_sweep/%' AND NOT EXISTS (SELECT 1 FROM capabilities WHERE prefix=`+claimant+`) ORDER BY key LIMIT ?)`, limit)
+	return count, err
 }
 
 func (op *Operator) deleteRetentionEffectsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {

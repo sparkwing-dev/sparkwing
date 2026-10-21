@@ -2,7 +2,6 @@ package store
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -95,57 +94,89 @@ func TestFailedGitHubDeliveryManualProcessingIsTeamScopedAndAudited(t *testing.T
 	}
 }
 
-func TestFailedGitHubDeliveryCannotMutateMovedInstallation(t *testing.T) {
-	for _, effect := range []string{"suspend", "unbind", "suspend-after-claim", "unbind-after-claim"} {
-		t.Run(effect, func(t *testing.T) {
-			s := authorityStore(t)
-			actor := authorityMember(t, s, "owner", RoleOwner)
-			tenant := &Tenant{s: s, team: "a"}
-			a := teamAuthorization(t, s, actor, "a", "PATCH", "/api/v1/team")
-			now := time.Now()
-			op := s.AsOperator()
-			ctx := t.Context()
-			if _, err := tenant.TestOnlySeedGitHubInstallation(ctx, GitHubAppInstallation{InstallationID: 7, AccountID: 7, AccountLogin: "org", AccountType: "Organization"}, now); err != nil {
-				t.Fatal(err)
+func TestFailedGitHubDeliveryCannotMutateReplacementConnection(t *testing.T) {
+	for _, replacement := range []string{"move", "move-back", "reconnect"} {
+		for _, boundary := range []string{"process-again", "mutation"} {
+			for _, effect := range []string{"suspend", "deleted"} {
+				t.Run(replacement+"/"+boundary+"/"+effect, func(t *testing.T) {
+					s := authorityStore(t)
+					actor := authorityMember(t, s, "owner", RoleOwner)
+					tenant := &Tenant{s: s, team: "a"}
+					a := teamAuthorization(t, s, actor, "a", "PATCH", "/api/v1/team")
+					now := time.Now()
+					op, ctx := s.AsOperator(), t.Context()
+					bind := func(team Team) {
+						t.Helper()
+						if _, err := (&Tenant{s: s, team: team}).TestOnlySeedGitHubInstallation(ctx, GitHubAppInstallation{InstallationID: 7, AccountID: 7, AccountLogin: "org", AccountType: "Organization"}, now); err != nil {
+							t.Fatal(err)
+						}
+					}
+					replace := func() Team {
+						t.Helper()
+						if _, err := op.UnbindGitHubAppInstallation(ctx, 7); err != nil {
+							t.Fatal(err)
+						}
+						if replacement != "reconnect" {
+							bind("b")
+							if replacement == "move" {
+								return "b"
+							}
+							if _, err := op.UnbindGitHubAppInstallation(ctx, 7); err != nil {
+								t.Fatal(err)
+							}
+						}
+						bind("a")
+						return "a"
+					}
+					bind("a")
+					if err := op.EnqueueGitHubDelivery(ctx, "old", "installation", []byte(`{"installation":{"id":7}}`), now); err != nil {
+						t.Fatal(err)
+					}
+					claim, err := op.ClaimGitHubDelivery(ctx, now)
+					if err != nil || claim == nil {
+						t.Fatalf("claim: %+v %v", claim, err)
+					}
+					if err := op.FinishGitHubDelivery(ctx, *claim, "failed before mutation", now); err != nil {
+						t.Fatal(err)
+					}
+					var current Team
+					if boundary == "process-again" {
+						current = replace()
+						if err := tenant.ProcessGitHubDeliveryAgain(ctx, a, "old"); err == nil {
+							t.Fatal("old delivery requeued against replacement connection")
+						}
+						if replay, err := op.ClaimGitHubDelivery(ctx, now); err != nil || replay != nil {
+							t.Fatalf("refused delivery became claimable: %+v %v", replay, err)
+						}
+					} else {
+						if err := tenant.ProcessGitHubDeliveryAgain(ctx, a, "old"); err != nil {
+							t.Fatal(err)
+						}
+						replay, err := op.ClaimGitHubDelivery(ctx, now)
+						if err != nil || replay == nil {
+							t.Fatalf("replay: %+v %v", replay, err)
+						}
+						current = replace()
+						if effect == "suspend" {
+							err = op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true, now)
+						} else {
+							_, err = op.UnbindGitHubAppInstallation(replay.Context(ctx), 7)
+						}
+						if err == nil {
+							t.Fatal("old delivery mutated replacement connection")
+						}
+					}
+					installation, err := op.GitHubAppInstallationTeam(ctx, 7)
+					if err != nil || installation.Team != current || installation.Suspended {
+						t.Fatalf("replacement changed: %+v %v", installation, err)
+					}
+					rewriteSchemaCount(t, s.db, "github_app_delivery_effects", 0)
+					events, err := tenant.BusinessEvents(ctx, "github.delivery_reprocessed")
+					if err != nil || boundary == "process-again" && len(events) != 0 {
+						t.Fatalf("refused requeue was audited as successful: %+v %v", events, err)
+					}
+				})
 			}
-			if err := op.EnqueueGitHubDelivery(ctx, "old", "installation", []byte(`{"installation":{"id":7}}`), now); err != nil {
-				t.Fatal(err)
-			}
-			first, err := op.ClaimGitHubDelivery(ctx, now)
-			if err != nil || first == nil {
-				t.Fatalf("claim: %+v %v", first, err)
-			}
-			if err := op.FinishGitHubDelivery(ctx, *first, "failed before mutation", now); err != nil {
-				t.Fatal(err)
-			}
-			// The delivery stays scoped to its original team after the installation moves.
-			if !strings.HasSuffix(effect, "after-claim") {
-				rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b' WHERE installation_id=7`)
-			}
-			if err := tenant.ProcessGitHubDeliveryAgain(ctx, a, "old"); err != nil {
-				t.Fatal(err)
-			}
-			replay, err := op.ClaimGitHubDelivery(ctx, now)
-			if err != nil || replay == nil {
-				t.Fatalf("replay: %+v %v", replay, err)
-			}
-			if strings.HasSuffix(effect, "after-claim") {
-				rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b' WHERE installation_id=7`)
-			}
-			if strings.HasPrefix(effect, "suspend") {
-				err = op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true, now)
-			} else {
-				_, err = op.UnbindGitHubAppInstallation(replay.Context(ctx), 7)
-			}
-			if err == nil {
-				t.Fatal("old team's manual replay mutated the new team's installation")
-			}
-			var team string
-			var suspended bool
-			if err := s.db.QueryRow(`SELECT team,suspended FROM github_app_installations WHERE installation_id=7`).Scan(&team, &suspended); err != nil || team != "b" || suspended {
-				t.Fatalf("new owner changed: %q %v %v", team, suspended, err)
-			}
-			rewriteSchemaCount(t, s.db, "github_app_delivery_effects", 0)
-		})
+		}
 	}
 }

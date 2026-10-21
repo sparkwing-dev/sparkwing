@@ -3859,15 +3859,16 @@ source location, owner unit, first seal and completion intent. Failed validation
 or effects roll all of them back. A retry of the signed body and pipeline returns
 the existing run without spending another number or admission slot.
 
-`github_app_deliveries.admitted_team` is an empty string until the first successful
-admission of that signed body. The same transaction binds it to the tenant.
-Partial deliveries retain that binding even while another pipeline is shed.
-Moving the installation cannot admit the body into a second tenant. The event
-row expires with the existing replay retention. No schema migration is added.
+A fresh installation connection receives a random generation. Ingress records
+that generation and installation ID with the signed body under the installation
+lock. One transaction fence compares the receipt with the live connection before
+manual processing, every delivery mutation, and admission. Moving away and back,
+or disconnecting and reconnecting within one team, cannot revive an old delivery.
+The receipt expires with the existing replay retention.
 
 Replay keys use the signed body digest plus pipeline and are selected inside the
-tenant. The processed-body marker still prevents replays across installations
-that move teams. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
+tenant. The connection fence prevents replays across replacement installation
+bindings. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
 sealed requests in one query by tenant, numeric repository and exact SHA.
 Re-request selection uses those facts rather than removed trigger environment
 columns. OIDC classification uses the event in the seal, so expiry of the replay

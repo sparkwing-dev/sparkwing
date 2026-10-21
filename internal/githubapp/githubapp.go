@@ -509,20 +509,80 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	if err != nil {
 		return "", err
 	}
-	var commit struct {
-		SHA string `json:"sha"`
+	return c.resolveCommit(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo), "Bearer "+tok.Token, ref)
+}
+
+type gitObject struct {
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
+func (c *Client) resolveCommit(ctx context.Context, root, auth, ref string) (string, error) {
+	if ref == "HEAD" {
+		var repository struct {
+			DefaultBranch string `json:"default_branch"`
+		}
+		if err := c.getJSON(ctx, root, auth, &repository); err != nil {
+			return "", err
+		}
+		if repository.DefaultBranch == "" {
+			return "", errors.New("githubapp: repository has no default branch")
+		}
+		ref = "refs/heads/" + repository.DefaultBranch
 	}
-	err = c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(strings.TrimPrefix(ref, "refs/")), "Bearer "+tok.Token, &commit)
+	if runspec.IsCommitID(ref) {
+		var commit struct {
+			SHA string `json:"sha"`
+		}
+		err := c.getJSON(ctx, root+"/commits/"+url.PathEscape(ref), auth, &commit)
+		if errors.Is(err, errNotFound) {
+			return "", ErrRefNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		if commit.SHA != ref {
+			return "", errors.New("githubapp: commit identity changed")
+		}
+		return commit.SHA, nil
+	}
+	var reference struct {
+		Ref    string    `json:"ref"`
+		Object gitObject `json:"object"`
+	}
+	err := c.getJSON(ctx, root+"/git/ref/"+url.PathEscape(strings.TrimPrefix(ref, "refs/")), auth, &reference)
 	if errors.Is(err, errNotFound) {
 		return "", ErrRefNotFound
 	}
 	if err != nil {
 		return "", err
 	}
-	if !runspec.IsCommitID(commit.SHA) {
+	if reference.Ref != ref {
+		return "", errors.New("githubapp: reference identity changed")
+	}
+	object := reference.Object
+	seen := map[string]bool{}
+	for object.Type == "tag" && strings.HasPrefix(ref, "refs/tags/") {
+		if !runspec.IsCommitID(object.SHA) || seen[object.SHA] {
+			return "", errors.New("githubapp: invalid annotated tag chain")
+		}
+		seen[object.SHA] = true
+		var tag struct {
+			SHA    string    `json:"sha"`
+			Object gitObject `json:"object"`
+		}
+		if err := c.getJSON(ctx, root+"/git/tags/"+url.PathEscape(object.SHA), auth, &tag); err != nil {
+			return "", err
+		}
+		if tag.SHA != object.SHA {
+			return "", errors.New("githubapp: tag identity changed")
+		}
+		object = tag.Object
+	}
+	if object.Type != "commit" || !runspec.IsCommitID(object.SHA) {
 		return "", errors.New("githubapp: ref did not resolve to a commit")
 	}
-	return commit.SHA, nil
+	return object.SHA, nil
 }
 
 // RepositoryFileSnapshot reads one file at the current default-branch head
@@ -553,17 +613,12 @@ func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owne
 	if meta.ID <= 0 || meta.DefaultBranch == "" {
 		return RepositoryFileSnapshot{}, errors.New("githubapp: repository has no id or default branch")
 	}
-	var head struct {
-		SHA string `json:"sha"`
-	}
-	if err := c.getJSON(ctx, root+"/commits/"+url.PathEscape("heads/"+meta.DefaultBranch), auth, &head); err != nil {
+	head, err := c.resolveCommit(ctx, root, auth, "refs/heads/"+meta.DefaultBranch)
+	if err != nil {
 		return RepositoryFileSnapshot{}, err
 	}
-	if !runspec.IsCommitID(head.SHA) {
-		return RepositoryFileSnapshot{}, errors.New("githubapp: default branch did not resolve to a commit")
-	}
-	out := RepositoryFileSnapshot{RepositoryID: meta.ID, DefaultBranch: meta.DefaultBranch, HeadSHA: head.SHA}
-	out.Content, out.Found, err = c.fileAt(ctx, auth, root, head.SHA, file)
+	out := RepositoryFileSnapshot{RepositoryID: meta.ID, DefaultBranch: meta.DefaultBranch, HeadSHA: head}
+	out.Content, out.Found, err = c.fileAt(ctx, auth, root, head, file)
 	return out, err
 }
 

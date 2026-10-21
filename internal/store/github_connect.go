@@ -76,7 +76,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		var previousTeam Team
 		if row.Reclaim {
-			previous, err := tx.operator.githubInstallationTeamTx(ctx, tx, row.InstallationID)
+			previous, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, row.InstallationID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}

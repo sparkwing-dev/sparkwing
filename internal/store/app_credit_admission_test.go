@@ -15,10 +15,6 @@ func TestUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T) {
 	s, tenant, in := appAdmissionFixture(t, true, "unfunded")
 	defer s.Close()
 	in.Request.Dispatch = runspec.DispatchController
-	launcher := authorityRoot("launcher", "")
-	launcher.Subject.Kind = capability.SubjectService
-	launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
-	authorityPersist(t, s, launcher)
 	result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +35,10 @@ func TestUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T) {
 	if err != nil || !replay.Replayed || replay.RunID != result.RunID {
 		t.Fatalf("redelivery after funding changed history: %+v, %v", replay, err)
 	}
+	launcher := authorityRoot("launcher", "")
+	launcher.Subject.Kind = capability.SubjectService
+	launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
+	authorityPersist(t, s, launcher)
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Kinds: []capability.UnitKind{capability.UnitPlan}}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("funding started the old push: %v", err)
 	}
@@ -89,5 +89,46 @@ func TestUnfundedPushCanStillUseAnEligibleUnmeteredRunner(t *testing.T) {
 	run, err := tenant.ReadRun(t.Context(), result.RunID)
 	if err != nil || run.State != RunPending || result.OwnerUnit == nil {
 		t.Fatalf("unmetered push was blocked by credits: state=%s owner=%+v err=%v", run.State, result.OwnerUnit, err)
+	}
+}
+
+func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		requires []string
+		ranking  string
+		failed   bool
+	}{
+		{name: "Cloud required", requires: []string{"class=cloud"}, failed: true},
+		{name: "Cloud labels before registration", requires: []string{"linux", "arch=arm64"}, failed: true},
+		{name: "mixed class or label can use Cloud", requires: []string{"class=agent,gpu"}, failed: true},
+		{name: "self hosted required", requires: []string{"class=agent"}},
+		{name: "pool required", requires: []string{"pool=private"}},
+		{name: "Cloud excluded from ranking", ranking: `["self-hosted"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, tenant, in := appAdmissionFixture(t, true, "placement")
+			defer s.Close()
+			in.Request.Dispatch = runspec.DispatchController
+			in.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: tc.requires}}
+			if tc.ranking != "" {
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_ranking=? WHERE name='a'`, tc.ranking)
+			}
+			result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := tenant.ReadRun(t.Context(), result.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := RunPending
+			if tc.failed {
+				want = RunFailed
+			}
+			if run.State != want || (result.OwnerUnit == nil) != tc.failed {
+				t.Fatalf("state=%s owner=%+v want %s", run.State, result.OwnerUnit, want)
+			}
+		})
 	}
 }

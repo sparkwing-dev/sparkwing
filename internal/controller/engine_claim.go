@@ -88,8 +88,8 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		}
 	}
 	c := principal.Capability
-	if (len(body.ExcludedTeamLabels) > 0 || body.JobNamespace != "") && !capability.CloudLauncher(c) {
-		return controllerwire.ClaimResponse{}, invalidEngineBody("only a Cloud launcher can exclude faulted teams")
+	if (len(body.ExcludedTeamLabels) > 0 || body.JobNamespace != "") && !capability.Launcher(c) {
+		return controllerwire.ClaimResponse{}, invalidEngineBody("only a launcher can report its job namespace or exclude faulted teams")
 	}
 	if len(body.ExcludedTeamLabels) > 0 && body.JobNamespace == "" {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("faulted team labels require the job namespace")

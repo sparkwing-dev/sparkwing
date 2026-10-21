@@ -238,7 +238,7 @@ func (op *Operator) discoverInstallationLocks(ctx context.Context, tx *storeTx, 
 	if set.err != nil {
 		return set
 	}
-	team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+	team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 	if err == nil {
 		set.add(lockTeam, true, string(team))
 	} else if !errors.Is(err, sql.ErrNoRows) {

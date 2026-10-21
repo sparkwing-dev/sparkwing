@@ -101,6 +101,10 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || (in.AccountType != "User" && in.AccountType != "Organization") {
 		return GitHubAppInstallation{}, fmt.Errorf("%w: a binding needs the installation and its account", ErrInvalidInput)
 	}
+	generation, err := newIdentityID()
+	if err != nil {
+		return GitHubAppInstallation{}, err
+	}
 	at := now.UTC().UnixNano()
 	suspended := 0
 	if in.Suspended {
@@ -109,8 +113,8 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 	// safety: the conflict guard compares teams, so a second team's connect
 	// updates nothing and cannot take the installation over.
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO github_app_installations (`+githubAppInstallationCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO github_app_installations (`+githubAppInstallationCols+`, connection_generation)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (installation_id) DO UPDATE SET
 		    account_id = excluded.account_id, account_login = excluded.account_login,
 		    account_type = excluded.account_type, suspended = excluded.suspended,
@@ -118,7 +122,7 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 		    updated_at = excluded.updated_at
 		WHERE github_app_installations.team = excluded.team`,
 		in.InstallationID, string(t.team), in.AccountID, in.AccountLogin, in.AccountType, suspended,
-		in.ConnectedBy, in.GitHubUserID, at, at)
+		in.ConnectedBy, in.GitHubUserID, at, at, generation)
 	if err != nil {
 		return GitHubAppInstallation{}, err
 	}
@@ -188,7 +192,7 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 		}); err != nil {
 			return err
 		}
-		owner, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+		owner, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -215,7 +219,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 		}); err != nil {
 			return err
 		}
-		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+		team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -567,8 +571,9 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	return nil
 }
 
-func (o *Operator) githubInstallationTeamTx(ctx context.Context, tx *storeTx, installation int64) (Team, error) {
+func (o *Operator) githubInstallationConnectionTx(ctx context.Context, tx *storeTx, installation int64) (Team, string, error) {
 	var team Team
-	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
-	return team, err
+	var generation string
+	err := tx.QueryRowContext(ctx, `SELECT team,connection_generation FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team, &generation)
+	return team, generation, err
 }

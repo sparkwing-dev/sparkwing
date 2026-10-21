@@ -627,6 +627,7 @@ CREATE TABLE github_runner_bindings (
 );
 
 CREATE TABLE github_app_installations (
+    connection_generation TEXT NOT NULL DEFAULT '',
     installation_id BIGINT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
     account_id BIGINT NOT NULL,
@@ -668,7 +669,8 @@ CREATE TABLE github_app_triggers (
 );
 
 CREATE TABLE github_app_deliveries (
-    admitted_team TEXT NOT NULL DEFAULT '',
+    installation_id BIGINT NOT NULL DEFAULT 0,
+    connection_generation TEXT NOT NULL DEFAULT '',
     queue_team TEXT NOT NULL DEFAULT '',
     digest TEXT NOT NULL PRIMARY KEY,
     delivery_id TEXT NOT NULL UNIQUE,

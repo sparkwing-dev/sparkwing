@@ -44,7 +44,7 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 		}
 		in.Subscription = &sub
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event) VALUES (?,?,?,?)`, digest, "delivery", now.UnixNano(), "push")
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,installation_id,connection_generation) SELECT ?,?,?,?,installation_id,connection_generation FROM github_app_installations WHERE installation_id=7`, digest, "delivery", now.UnixNano(), "push")
 	s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
 		delivery, err := VerifiedAppIntake(ctx, resolver, request)
 		location := request.Request.Source.Location
@@ -149,10 +149,6 @@ func TestAppAdmissionRefusesUntypedOriginAndRollsBack(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "runs", 0)
 	rewriteSchemaCount(t, s.db, "triggers", 0)
-	var boundTeam string
-	if err := s.db.QueryRow(`SELECT admitted_team FROM github_app_deliveries WHERE digest='signed'`).Scan(&boundTeam); err != nil || boundTeam != "" {
-		t.Fatalf("failed intake bound replay team=%q err=%v", boundTeam, err)
-	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER fail_run_effect`)
 	first, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 	if err != nil || first.Number != 1 || !first.Request.Request.Git.App.Value.DefaultBranchPush || !first.Request.Request.Git.DefaultBranch.Set || first.Request.Request.Source.Location != in.Request.Source.Location {
@@ -227,7 +223,7 @@ func TestAppPartialDeliveryCannotMoveTeamsProperty(t *testing.T) {
 		if _, err := tenant.AdmitGitHubAppRun(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}
-		rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b',created_at=created_at+1`)
+		rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b',created_at=created_at+1,connection_generation='replacement'`)
 		rewriteSchemaExec(t, s.db, `UPDATE github_app_automation SET team='b'`)
 		rewriteSchemaExec(t, s.db, `UPDATE github_app_triggers SET team='b',pipeline='other'`)
 		in.Installation.Team = "b"
@@ -291,7 +287,7 @@ func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
 			in.Request.Git.App.Value.DeliveryKey = fmt.Sprintf("%x", sha256.Sum256(body))
 			switch state {
 			case "moved":
-				rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b' WHERE installation_id=7`)
+				rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b',connection_generation='replacement' WHERE installation_id=7`)
 				rewriteSchemaExec(t, s.db, `UPDATE github_app_automation SET team='b' WHERE installation_id=7`)
 				in.Installation.Team, in.Request.Team = "b", "b"
 				tenant = &Tenant{s: s, team: "b"}
@@ -325,6 +321,38 @@ func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
 				rewriteSchemaCount(t, s.db, "runs", 0)
 				rewriteSchemaCount(t, s.db, "triggers", 0)
 			}
+		})
+	}
+}
+
+func TestAppAdmissionRejectsReplacementConnectionWithoutDeliveryContext(t *testing.T) {
+	for _, replacement := range []string{"reconnect", "move-back"} {
+		t.Run(replacement, func(t *testing.T) {
+			s, tenant, in := appAdmissionFixture(t, true, "old-delivery")
+			defer s.Close()
+			ctx, op := t.Context(), s.AsOperator()
+			if _, err := op.UnbindGitHubAppInstallation(ctx, 7); err != nil {
+				t.Fatal(err)
+			}
+			if replacement == "move-back" {
+				if _, err := (&Tenant{s: s, team: "b"}).TestOnlySeedGitHubInstallation(ctx, in.Installation, in.Installation.CreatedAt); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := op.UnbindGitHubAppInstallation(ctx, 7); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var err error
+			in.Installation, err = tenant.TestOnlySeedGitHubInstallation(ctx, in.Installation, in.Installation.CreatedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := tenant.AdmitGitHubAppRun(ctx, in)
+			if err == nil || result.RunID != "" {
+				t.Fatalf("old receipt admitted against replacement connection: %+v %v", result, err)
+			}
+			rewriteSchemaCount(t, s.db, "runs", 0)
+			rewriteSchemaCount(t, s.db, "triggers", 0)
 		})
 	}
 }

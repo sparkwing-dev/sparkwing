@@ -37,7 +37,6 @@ type GitHubDelivery struct {
 	Body       []byte
 	Lease      int64
 	ReceivedAt time.Time
-	queueTeam  Team
 }
 
 type githubDeliveryContextKey struct{}
@@ -72,14 +71,18 @@ func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event 
 		return err
 	}
 	defer rollbackOrLog(tx)
-	queueTeam, err := o.githubInstallationTeamTx(ctx, tx, githubDeliveryInstallation(body))
+	installation := githubDeliveryInstallation(body)
+	if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation) }); err != nil {
+		return err
+	}
+	queueTeam, generation, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries
-		(digest,delivery_id,received_at,event,body,state,queue_team)
-		VALUES (?,?,?,?,?,'pending',?)
-		ON CONFLICT DO NOTHING`, digest, deliveryID, now.UnixNano(), event, body, queueTeam)
+		(digest,delivery_id,received_at,event,body,state,queue_team,installation_id,connection_generation)
+		VALUES (?,?,?,?,?,'pending',?,?,?)
+		ON CONFLICT DO NOTHING`, digest, deliveryID, now.UnixNano(), event, body, queueTeam, installation, generation)
 	if err != nil {
 		return err
 	}
@@ -173,14 +176,13 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	d.queueTeam = Team(team)
 	d.Lease++
 	d.ReceivedAt = time.Unix(0, receivedAt).UTC()
 	return &d, nil
 }
 
 // githubDeliveryMutationTx fences every inbox mutation to its live claim and
-// original team. Lifecycle receipts make applied effects survive manual replay.
+// original connection. Lifecycle receipts make applied effects survive manual replay.
 func githubDeliveryMutationTx(ctx context.Context, tx *storeTx, effect string) (bool, error) {
 	delivery, ok := ctx.Value(githubDeliveryContextKey{}).(GitHubDelivery)
 	if !ok {
@@ -202,6 +204,9 @@ func githubDeliveryMutationTx(ctx context.Context, tx *storeTx, effect string) (
 	if err != nil {
 		return false, err
 	}
+	if err := githubDeliveryConnectionTx(ctx, tx, digest); err != nil {
+		return false, err
+	}
 	if effect != "" {
 		result, err := tx.ExecContext(ctx, `INSERT INTO github_app_delivery_effects(digest,effect)
 			VALUES (?,?) ON CONFLICT DO NOTHING`, digest, effect)
@@ -213,19 +218,27 @@ func githubDeliveryMutationTx(ctx context.Context, tx *storeTx, effect string) (
 			return false, err
 		}
 	}
-	if installation != 0 {
-		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, ErrNotFound
-		}
-		if err != nil {
-			return false, err
-		}
-		if team != delivery.queueTeam {
-			return false, bindingRefusal()
-		}
-	}
 	return true, nil
+}
+
+// A receipt belongs to one connection, even when an installation returns to its former team.
+func githubDeliveryConnectionTx(ctx context.Context, tx *storeTx, digest string) error {
+	var installation int64
+	var receivedGeneration string
+	if err := tx.QueryRowContext(ctx, `SELECT installation_id,connection_generation FROM github_app_deliveries WHERE digest=?`, digest).Scan(&installation, &receivedGeneration); err != nil {
+		return err
+	}
+	if installation == 0 {
+		return nil
+	}
+	if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation) }); err != nil {
+		return err
+	}
+	_, generation, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && generation != receivedGeneration {
+		return bindingRefusal()
+	}
+	return err
 }
 
 func (s *Store) githubDeliveryEffect(ctx context.Context, effect string, apply func(*storeTx) error) error {
@@ -298,18 +311,35 @@ func (t *Tenant) ListFailedGitHubDeliveries(ctx context.Context, a capability.Au
 
 // ProcessGitHubDeliveryAgain queues one failed delivery and its audit atomically.
 func (t *Tenant) ProcessGitHubDeliveryAgain(ctx context.Context, a capability.Authorized, deliveryID string) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
-		result, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id=? AND queue_team=? AND state='failed'`, deliveryID, t.team)
-		if err != nil {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		var digest string
+		var installation int64
+		if err := tx.QueryRowContext(ctx, `SELECT digest,installation_id FROM github_app_deliveries WHERE delivery_id=? AND queue_team=? AND state='failed'`, deliveryID, t.team).Scan(&digest, &installation); err != nil {
 			return err
 		}
-		n, err := result.RowsAffected()
-		if err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set.add(lockTeam, true, string(t.team))
+			return tx.operator.discoverInstallationLocks(ctx, tx, set, installation)
+		}); err != nil {
 			return err
 		}
-		if n != 1 {
-			return sql.ErrNoRows
-		}
-		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "github.delivery_reprocessed", SubjectID: deliveryID, Actor: p.Capability.Subject.ID})
+		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, p capability.Principal) error {
+			if err := githubDeliveryConnectionTx(ctx, tx, digest); err != nil {
+				return err
+			}
+			result, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id=? AND queue_team=? AND state='failed'`, deliveryID, t.team)
+			if err != nil {
+				return err
+			}
+			n, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return sql.ErrNoRows
+			}
+			return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "github.delivery_reprocessed", SubjectID: deliveryID, Actor: p.Capability.Subject.ID})
+		})
 	})
 }

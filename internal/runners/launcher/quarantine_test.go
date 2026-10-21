@@ -250,3 +250,42 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 		t.Fatalf("team stayed blocked after returning within its budget: excluded=%v err=%v", control.excluded, err)
 	}
 }
+
+func TestReleaseConflictsConsumeOnlyProtectedTeamFaultBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		l.Boundary = &KubernetesBoundary{Kube: kube, Namespace: l.Config.Namespace, Clear: func(context.Context, CloudNodeReservation) error { return nil }}
+		control.remove, control.award = true, nil
+		for i := range maxQuarantinesPerSync + 1 {
+			binding := boundaryBinding("team")
+			binding.UnitID = "unit-" + string(rune('a'+i))
+			node := reservedNode(t, "node-"+string(rune('a'+i)), binding, "")
+			if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		other := reservedNode(t, "other", boundaryBinding("other"), "")
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), other, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+			node := action.(ktesting.UpdateAction).GetObject().(*corev1.Node)
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, node.Name, errors.New("changed"))
+		})
+		if err := l.Sync(t.Context()); err == nil || blocking(err) != nil {
+			t.Fatalf("release faults were not contained: %v", err)
+		}
+		if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
+			t.Fatalf("release faults did not stop only their protected team: excluded=%v err=%v", control.excluded, err)
+		}
+		if err := kube.CoreV1().Nodes().Delete(t.Context(), "node-a", metav1.DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Sync(t.Context()); blocking(err) != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+			t.Fatalf("repaired team stayed blocked: %v %v", control.excluded, err)
+		}
+	})
+}

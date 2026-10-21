@@ -95,14 +95,8 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 			return capability.Principal{}, err
 		}
 	}
-	bound, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET admitted_team=? WHERE digest=? AND (admitted_team='' OR admitted_team=?)`, in.Installation.Team, app.DeliveryKey, in.Installation.Team)
-	if err != nil {
+	if err := githubDeliveryConnectionTx(ctx, tx, app.DeliveryKey); err != nil {
 		return capability.Principal{}, err
-	}
-	if n, err := bound.RowsAffected(); err != nil {
-		return capability.Principal{}, err
-	} else if n != 1 {
-		return refuse()
 	}
 	ref := in.authority()
 	return capability.Principal{Authority: ref, Capability: capability.Capability{Team: string(in.Installation.Team), Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectService, ID: ref.ID}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}}}, nil
