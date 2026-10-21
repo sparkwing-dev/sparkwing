@@ -54,7 +54,7 @@ func TestExpansionRechecksControllerExpiryAfterEvalFenceRead(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 	expires := now.Add(time.Minute)
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, expires.UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4)`, now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4,?,?)`, now.Add(time.Hour).UnixNano(), now.UnixNano(), now.UnixNano())
 	connection := recordStoreFences(t, s)
 	s.pinnedClock = func() time.Time { return *now }
 	reads := 0
