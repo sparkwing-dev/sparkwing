@@ -20,8 +20,7 @@ import (
 )
 
 const installerFixtureSource = `package main
-import("encoding/json";"fmt";"os";"path/filepath";"strings";"runtime"
- "slices")
+import("encoding/json";"fmt";"os";"path/filepath";"strings";"runtime")
 var Version="dev"
 func main(){
  if len(os.Args)!=2 || os.Args[1]!="__sdk-install" { os.Exit(20) }
