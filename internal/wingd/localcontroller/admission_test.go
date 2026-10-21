@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
@@ -43,7 +44,8 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 	if terminal, err := owner.IsRunTerminal("run"); terminal || err != nil {
 		t.Fatalf("live run: terminal=%t error=%v", terminal, err)
 	}
-	if _, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE triggers SET status='claimed',claimed_by='owner',capability_prefix='owner',lease_expires_at=?,started_at=1 WHERE id='run'`, time.Now().Add(limits.DefaultLease).UnixNano()); err != nil {
+	started := time.Unix(0, 1)
+	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), "run", store.Actor{Holder: "owner", CapabilityPrefix: "owner", Generation: 7}, time.Now().Add(limits.DefaultLease), &started); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -114,7 +116,7 @@ func FuzzAdmissionCancellationKeepsTenantAndFence(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			seedOwner(t, Binding{Store: b.Store, Tenant: tenant}, foreign, false)
+			seedOwner(t, Binding{Home: b.Home, Store: b.Store, Tenant: tenant}, foreign, false)
 			return serviceFixture(b), nil
 		})
 		if _, err := c.Reconcile(t.Context()); err != nil {

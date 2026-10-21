@@ -83,7 +83,7 @@ func (f *gitReleaseFixture) registerRunner(personal bool) {
 		if err := teststore.SQL(f.t, f.s.store).QueryRow(`SELECT json_extract(authority_json,'$.origin.requirement') FROM capabilities WHERE prefix=?`, issued.Prefix).Scan(&requirement); err != nil {
 			f.t.Fatal(err)
 		}
-		engineSQL(f.t, f.s.store, `UPDATE capabilities SET authority_json=json_set(authority_json,'$.origin.personal',json('true'),'$.origin.requirement',json(?)) WHERE prefix='runner'`, requirement)
+		engineSQL(f.t, f.s.store, `UPDATE capabilities SET authority_json=CAST(json_set(authority_json,'$.origin.personal',json('true'),'$.origin.requirement',json(?)) AS BLOB) WHERE prefix='runner'`, requirement)
 	}
 }
 

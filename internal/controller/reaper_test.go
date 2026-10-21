@@ -26,11 +26,15 @@ func TestReaperRecoversExpiredOwnerAndKeepsLiveOwner(t *testing.T) {
 			if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"request":{"origin":"trigger"},"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`), []byte(`[]`)); err != nil {
 				t.Fatal(err)
 			}
-			until := time.Now().Add(time.Hour).UnixNano()
+			until := time.Now().Add(time.Hour)
 			if expired {
-				until = 1
+				until = time.Unix(0, 1)
 			}
-			if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels) VALUES (?,'run','claimed','trigger',1,1,'owner','owner-cap',7,?,1,?,?)`, store.DefaultTeam, until, []byte(`[]`), []byte(`[]`)); err != nil {
+			if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES (?,'run','trigger',1,1,?,?)`, store.DefaultTeam, []byte(`[]`), []byte(`[]`)); err != nil {
+				t.Fatal(err)
+			}
+			started := time.Unix(0, 1)
+			if err := teststore.SeedTriggerClaim(st, ctx, store.DefaultTeam, "run", store.Actor{Holder: "owner", CapabilityPrefix: "owner-cap", Generation: 7}, until, &started); err != nil {
 				t.Fatal(err)
 			}
 			srv := New(st, slog.New(slog.DiscardHandler))

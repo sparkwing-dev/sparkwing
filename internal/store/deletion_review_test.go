@@ -300,12 +300,14 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		`UPDATE triggers SET claim_principal = 'leaver@example.com' WHERE id = 'run-l'`,
 		`INSERT INTO credit_grants (id, kind, amount_micro, created_by, created_at, team) VALUES ('g2', 'free', 5, 'deploy-bot', 1, '` + bystander + `')`,
 		`INSERT INTO credit_grants (id, kind, amount_micro, created_by, created_at, team) VALUES ('g1', 'free', 5, 'leaver@example.com', 1, '` + team + `')`,
-		`INSERT INTO events (run_id, seq, ts, kind, payload, team) VALUES ('run-l', 1, 1, 'note', '{"by":"leaver@example.com"}', '` + team + `')`,
 		`UPDATE runs SET created_principal = 'leaver@example.com' WHERE id = 'run-l'`,
 	} {
 		if _, err := st.DB().ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
+	}
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO events (run_id, seq, ts, kind, payload, team) VALUES ('run-l', 1, 1, 'note', ?, ?)`), []byte(`{"by":"leaver@example.com"}`), team); err != nil {
+		t.Fatal(err)
 	}
 
 	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {

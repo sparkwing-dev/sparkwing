@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -137,15 +138,19 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 }
 
 func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *testing.T) {
-	for _, damage := range []struct{ name, query string }{
-		{"capability-envelope", `UPDATE capabilities SET authority_json='{' WHERE prefix=?`},
-		{"capability-projection", `UPDATE capabilities SET unit_id='damaged' WHERE prefix=?`},
-		{"node-state", `UPDATE nodes SET status='running',attempt=0 WHERE run_id='run'`},
-		{"billing-price", `UPDATE credit_charges SET cpu_class=0 WHERE kind='reservation' AND run_id='run'`},
-		{"node-syntax", `UPDATE nodes SET execution_json='{' WHERE run_id='run'`},
-		{"node-type", `UPDATE nodes SET execution_json='[]' WHERE run_id='run'`},
-		{"run-syntax", `UPDATE runs SET request_json='{' WHERE id='run'`},
-		{"run-type", `UPDATE runs SET request_json='[]' WHERE id='run'`},
+	for _, damage := range []struct {
+		name, query string
+		body        []byte
+	}{
+		{"capability-envelope", `UPDATE capabilities SET authority_json=? WHERE prefix=?`, []byte(`{`)},
+		{"capability-projection", `UPDATE capabilities SET unit_id='damaged' WHERE prefix=?`, nil},
+		{"node-state", `UPDATE nodes SET status='running',attempt=0 WHERE run_id='run'`, nil},
+		{"node-scalar", `UPDATE nodes SET ready_at='damaged' WHERE run_id='run'`, nil},
+		{"billing-price", `UPDATE credit_charges SET cpu_class=0 WHERE kind='reservation' AND run_id='run'`, nil},
+		{"node-syntax", `UPDATE nodes SET execution_json=? WHERE run_id='run'`, []byte(`{`)},
+		{"node-type", `UPDATE nodes SET execution_json=? WHERE run_id='run'`, []byte(`[]`)},
+		{"run-syntax", `UPDATE runs SET request_json=? WHERE id='run'`, []byte(`{`)},
+		{"run-type", `UPDATE runs SET request_json=? WHERE id='run'`, []byte(`[]`)},
 	} {
 		t.Run(damage.name, func(t *testing.T) {
 			e, tenant := engineRuntimeStore(t)
@@ -176,33 +181,44 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 					badPrefix = claim.Award.CapabilityPrefix
 				}
 			}
+			var args []any
+			if damage.body != nil {
+				args = append(args, damage.body)
+			}
 			if strings.HasPrefix(damage.name, "capability-") {
-				engineSQL(t, e.Store, damage.query, badPrefix)
-			} else {
-				engineSQL(t, e.Store, damage.query)
+				args = append(args, badPrefix)
+			}
+			_, err := teststore.SQL(t, e.Store).ExecContext(t.Context(), damage.query, args...)
+			rejected := damage.name == "node-state" || damage.name == "node-scalar"
+			if rejected && err == nil {
+				t.Fatal("schema accepted an invalid node")
+			}
+			if !rejected && err != nil {
+				t.Fatal(err)
 			}
 			principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"})
 			if err != nil {
 				t.Fatal(err)
 			}
+			checkResponse := func(response controllerwire.LauncherSyncResponse, err error) {
+				t.Helper()
+				if rejected {
+					if err != nil || len(response.Deferred) != 0 || len(response.Awards) != 2 || len(response.Retired) != 0 || response.Awards[0].RunID == response.Awards[1].RunID {
+						t.Fatalf("healthy response after rejected corruption=%+v, %v", response, err)
+					}
+				} else if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
+					t.Fatalf("damaged response=%+v, %v", response, err)
+				}
+			}
 			response, err := e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed})
-			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
-				t.Fatalf("observed-only response=%+v, %v", response, err)
-			}
+			checkResponse(response, err)
 			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed, Preparing: preparing})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
-				t.Fatalf("response=%+v", response)
-			}
+			checkResponse(response, err)
 			for i := range observed {
 				observed[i].Reservation = true
 			}
 			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed, Preparing: preparing})
-			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
-				t.Fatalf("reservation response=%+v, %v", response, err)
-			}
+			checkResponse(response, err)
 			engineSQL(t, e.Store, `UPDATE nodes SET lease_expires_at=1 WHERE run_id='sibling'`)
 			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed[1:], Preparing: preparing[1:]})
 			if err != nil || len(response.Deferred) != 0 || len(response.Retired) != 1 {

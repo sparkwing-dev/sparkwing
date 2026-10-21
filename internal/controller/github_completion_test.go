@@ -524,7 +524,7 @@ func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 					input.Options.ClaimWait = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Second}}
 				})
 				engineSQL(t, f.server.store, `UPDATE runs SET status='pending',sealed_at=NULL,spec_json=NULL,spec_hash='',plan_json=NULL,plan_hash='',claim_wait_ns=? WHERE team='a' AND id='run'`, int64(time.Second))
-				engineSQL(t, f.server.store, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',started_at=NULL,lease_expires_at=NULL WHERE team='a' AND id='run'`)
+				engineSQL(t, f.server.store, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',claimed_at=NULL,started_at=NULL,lease_expires_at=NULL WHERE team='a' AND id='run'`)
 			}
 			lease, err := f.server.store.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "test", time.Minute)
 			if err != nil {

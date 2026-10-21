@@ -137,7 +137,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 			}
 		case 3:
 			if trigger {
-				engineSQL(t, e.Store, `UPDATE triggers SET status='done',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND id='run'`)
+				engineSQL(t, e.Store, `UPDATE triggers SET status='done',finished_at=1,claimed_by=NULL,claimed_at=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND id='run'`)
 			} else {
 				engineSQL(t, e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run' AND node_id='job'`)
 			}
