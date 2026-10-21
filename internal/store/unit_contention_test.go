@@ -21,11 +21,11 @@ func TestUnitClaimRenewReleaseContentionProperty(t *testing.T) {
 				target = storetest.NewPostgres(t)
 			}
 			s := target.Open(t)
+			now := time.Unix(1700000000, 0).UTC()
+			s.SetTestClock(t, func() time.Time { return now })
 			demand := s.TestOnlyUnitDemand(t)
 			replica := target.Open(t)
-			if dialect == "sqlite" {
-				replica.TestOnlyClock(time.Unix(1700000000, 0).UTC())
-			}
+			replica.SetTestClock(t, func() time.Time { return now })
 			for round := range 8 {
 				t.Run(fmt.Sprint(round), func(t *testing.T) {
 					if _, err := s.DB().ExecContext(t.Context(), `UPDATE nodes SET ready_at=1 WHERE run_id='run'`); err != nil {

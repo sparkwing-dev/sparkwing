@@ -16,12 +16,16 @@ import (
 func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
-	root := authorityRoot("deploy-launcher", "a")
-	root.Grants = []capability.Grant{capability.ClaimsLaunch}
-	root.ReservedPools = []string{"deploy"}
-	root.Trust = capability.TrustVerifiedDefault
-	authorityPersist(t, s, root)
-	demand.CapabilityPrefix = root.Prefix
+	owner := authorityMember(t, s, "pool-admin", RoleOwner)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:deploy-launcher", Team: "a",
+		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "deploy-launcher"}, Grants: []capability.Grant{capability.ClaimsLaunch},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"deploy"}, Trust: capability.TrustVerifiedDefault,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	demand.CapabilityPrefix = issued.Capability.Prefix
 	var body []byte
 	if err := s.db.QueryRowContext(t.Context(), `SELECT request_json FROM runs WHERE id='run'`).Scan(&body); err != nil {
 		t.Fatal(err)
@@ -31,12 +35,12 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 		t.Fatal(err)
 	}
 	seal.Provenance, seal.Request.Git = referenceAppProvenance(t, "refs/heads/main", fixtureOtherSHA)
-	body, err := json.Marshal(seal)
+	body, err = json.Marshal(seal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,allowed_pools=? WHERE id='run'`, body, []byte(`["deploy"]`))
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=json_set(execution_json, '$.requires', json(?)) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy"]}`)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=CAST(json_set(execution_json, '$.requires', json(?)) AS BLOB) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy","sparkwing-4cpu"]}`)
 	return s, demand
 }
 

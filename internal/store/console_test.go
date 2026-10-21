@@ -20,7 +20,7 @@ func consoleFixture(t *testing.T) (*Store, *Console, capability.Authorized) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "operator", RoleReader)
 	c := s.AsConsole(func(id string) bool { return id == "operator" })
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "b"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "b"}}
 	return s, c, a
 }
 
@@ -106,7 +106,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 			}
 		}
 		var count int
-		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM credit_grants)+(SELECT COUNT(*) FROM credit_freezes)+(SELECT COUNT(*) FROM team_deletions)+(SELECT COUNT(*) FROM business_events)+(SELECT COUNT(*) FROM standing_requests WHERE state<>'open')`).Scan(&count)
+		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM credit_grants)+(SELECT COUNT(*) FROM credit_freezes)+(SELECT COUNT(*) FROM team_deletions)+(SELECT COUNT(*) FROM audit_events)+(SELECT COUNT(*) FROM standing_requests WHERE state<>'open')`).Scan(&count)
 		return err == nil && count == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
@@ -130,7 +130,7 @@ func TestConsoleWritesRecheckConfigurationBeforeCommit(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM credit_freezes`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("hold survived rollback: %d %v", count, err)
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events`).Scan(&count); err != nil || count != 0 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("audit survived rollback: %d %v", count, err)
 	}
 }
@@ -154,7 +154,7 @@ func TestConsoleNativeFinanceAndStableWaitlistBatch(t *testing.T) {
 		t.Fatalf("freeze: %+v %v", freeze, err)
 	}
 	if err := s.inTx(ctx, func(tx *storeTx) error {
-		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", transactionTime(t, tx))
+		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", transactionTime(t, tx), auditActor{system: auditBreakGlass})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestConsoleTeamDeletionUsesNativeCancellation(t *testing.T) {
 	s := tenant.s
 	owner := authorityMember(t, s, "operator", RoleReader, "b")
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a'`, now.Add(time.Minute).UnixNano())
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
 	c := s.AsConsole(func(id string) bool { return id == "operator" })
 	if _, err := c.ConsoleDeleteTeam(t.Context(), a); err != nil {
 		t.Fatal(err)
@@ -259,25 +259,25 @@ func TestConsoleTeamDeletionUsesNativeCancellation(t *testing.T) {
 	}
 }
 
-func TestConsoleGlobalAdmissionAuditDeduplicatesAndDeletes(t *testing.T) {
+func TestConsoleGlobalAdmissionAuditDeduplicatesAndSurvivesDeletion(t *testing.T) {
 	s, c, a := consoleFixture(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('victim','victim@example.test',1,1)`)
 	for range 2 {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			return recordAdmissionEventTx(tx, "victim", "waitlist", "operator", transactionTime(t, tx))
+			return recordAdmissionEventTx(t.Context(), tx, "victim", "waitlist", auditActor{system: auditBreakGlass}, transactionTime(t, tx))
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE team IS NULL AND account='victim'`).Scan(&count); err != nil || count != 1 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team IS NULL AND account='victim'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("global audit: %d %v", count, err)
 	}
 	a.Target.AccountID = "victim"
 	if _, err := c.ConsoleDeleteAccount(t.Context(), a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE account='victim'`).Scan(&count); err != nil || count != 0 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE account='victim'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("deleted audit: %d %v", count, err)
 	}
 }

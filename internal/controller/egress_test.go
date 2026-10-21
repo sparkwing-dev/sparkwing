@@ -61,7 +61,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	meter := egress.New(cfg)
 	s := fixture.Server.WithEngineController(e.EngineController).WithEgressMeter(meter).WithDataController(NewDataController(e.Store, DataController{Objects: objects}))
 	h := s.Handler()
-	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
+	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("claim: %s %v", response.Body, err)

@@ -11,14 +11,14 @@ import (
 func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *testing.T) {
 	property := func(rate uint16, additional uint8) bool {
 		s, demand, _ := meteredUnitFixture(t, true)
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json='{}'`)
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
 		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil {
 			t.Fatal(err)
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}
 		before, err := s.AsOperator().CloudAwardResources(t.Context(), ref)
-		if err != nil || before == nil || before.Cores != 1 || before.MemoryBytes != CPUClassMemoryBytes(1) {
+		if err != nil || before == nil || before.Cores != 2 || before.MemoryBytes != CPUClassMemoryBytes(2) {
 			t.Fatalf("implicit demand lost priced class: %+v %v", before, err)
 		}
 		table := CreditRateTable{{Cores: 4, MicroPerSecond: int64(rate) + 1}, {Cores: int64(additional) + 5, MicroPerSecond: int64(rate) + 2}}

@@ -117,7 +117,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err := entry.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM git_credential_releases WHERE team='a' AND run_id=?`, created.RunID).Scan(&count); err != nil || count != 0 {
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released' AND team='a' AND run_id=?`, created.RunID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("complete bundle released a source credential: audits=%d: %v", count, err)
 	}
 	engineClaimHTTP(t, s.Handler(), runner, "POST", "/api/v1/data/download", `{"digest":"`+digest+`"}`, 403)

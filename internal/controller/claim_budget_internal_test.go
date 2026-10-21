@@ -17,7 +17,7 @@ func TestClaimBudgetAnAwardDoesNotSpendBudget(t *testing.T) {
 	s := New(engine.Store, nil).WithEngineController(engine.EngineController).WithRequestBudget(RequestBudget{ClaimsPerMinute: 1})
 	call := func(want int) *httptest.ResponseRecorder {
 		t.Helper()
-		return engineClaimHTTP(t, s.Handler(), raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, want)
+		return engineClaimHTTP(t, s.Handler(), raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, want)
 	}
 	if w := call(200); !strings.Contains(w.Body.String(), `"capability"`) {
 		t.Fatalf("no award: %s", w.Body)

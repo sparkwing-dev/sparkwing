@@ -192,7 +192,11 @@ func TestRewriteReplicasRaceQuotaAndSingletonLease(t *testing.T) {
 		})
 		stores[i] = &Store{db: db, clock: func() time.Time { return now }}
 	}
-	rewriteSchemaExec(t, stores[0].db, schemaNeutral)
+	schema, err := TranslateSchema(schemaNeutral, DialectSQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, stores[0].db, schema)
 	rewriteSchemaExec(t, stores[0].db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 	rewriteSchemaExec(t, stores[0].db, `INSERT INTO settings(key,value) VALUES ('operator.download_daily_max_bytes',?)`, []byte(`100`))
 	rewriteSchemaExec(t, stores[0].db, `INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES ('a','download',?,90,1)`, now.UTC().Format("2006-01-02"))

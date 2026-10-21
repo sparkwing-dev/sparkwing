@@ -27,7 +27,7 @@ func readRunnerInventory(t *testing.T, s *Store, team Team) capability.RunnerSna
 	return out
 }
 
-func TestRunnerInventorySeparatesRenewalLivenessFromHeadroom(t *testing.T) {
+func TestRunnerInventoryKeepsLabelObservationsAcrossRenewal(t *testing.T) {
 	s, demand, claim, now := renewalFixture(t, capability.UnitNode)
 	demand.Labels = []string{"gpu", "name=forged", "class=cloud"}
 	if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
@@ -38,7 +38,7 @@ func TestRunnerInventorySeparatesRenewalLivenessFromHeadroom(t *testing.T) {
 		t.Fatalf("inventory: %+v", before)
 	}
 	runner := before.Runners[0]
-	if runner.Team != "a" || runner.Runner.Name != "runner" || runner.Runner.Type != "runner" || !reflect.DeepEqual(runner.Runner.Labels, []string{"gpu"}) || !reflect.DeepEqual(runner.ActiveJobs, []string{"run/job"}) || runner.Headroom == nil || runner.Headroom.Cores != 3 || runner.Headroom.MemoryBytes != 1024 || !runner.Headroom.ObservedAt.Equal(*now) || !runner.LastSeen.Equal(*now) {
+	if runner.Team != "a" || runner.Runner.Name != "runner" || runner.Runner.Type != "runner" || !reflect.DeepEqual(runner.Runner.Labels, []string{"gpu"}) || !reflect.DeepEqual(runner.ActiveJobs, []string{"run/job"}) || runner.Headroom != nil || !runner.LastSeen.Equal(*now) {
 		t.Fatalf("runner facts: %+v", runner)
 	}
 	*now = now.Add(time.Second)
@@ -47,7 +47,7 @@ func TestRunnerInventorySeparatesRenewalLivenessFromHeadroom(t *testing.T) {
 	}
 	after := readRunnerInventory(t, s, "a")
 	if !after.Now.Equal(*now) || !after.Runners[0].LastSeen.Equal(*now) || !reflect.DeepEqual(after.Runners[0].Headroom, runner.Headroom) {
-		t.Fatalf("renewal replaced capacity or missed liveness: %+v", after)
+		t.Fatalf("renewal replaced labels or missed liveness: %+v", after)
 	}
 }
 

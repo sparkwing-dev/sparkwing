@@ -58,7 +58,7 @@ func TestDebugNumericSelectorsThroughPersistedController(t *testing.T) {
 func TestDebugCurrentExecutionProjection(t *testing.T) {
 	s, session := pauseHTTPFixture(t)
 	c, _ := debugSelectorClient(t, s, session, `{"grants":["runs.read"]}`)
-	engineSQL(t, s.store, `UPDATE nodes SET status='running',generation=2,attempt=3,claimed_by='private-holder',capability_prefix='private-prefix',lease_expires_at=?,spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, time.Now().Add(time.Hour).UnixNano(), []byte(`{"id":"job","env":{"PRIVATE":"private-environment"}}`))
+	engineSQL(t, s.store, `UPDATE nodes SET status='running',generation=2,attempt=3,claimed_by='private-holder',capability_prefix='private-prefix',started_at=1,lease_expires_at=?,spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, time.Now().Add(time.Hour).UnixNano(), []byte(`{"id":"job","env":{"PRIVATE":"private-environment"}}`))
 	engineSQL(t, s.store, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','job',3,2,'private-holder','private-prefix','runner','public-runner','private-location',1)`)
 	for _, execution := range []struct{ persisted, location, public string }{
 		{"runner", "private-location", "runner"},

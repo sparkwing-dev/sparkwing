@@ -326,7 +326,10 @@ func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDeliv
 // ListFailedGitHubDeliveries exposes processing failures under current team administration.
 func (t *Tenant) ListFailedGitHubDeliveries(ctx context.Context, a capability.Authorized) ([]controllerwire.FailedGitHubDelivery, error) {
 	out := []controllerwire.FailedGitHubDelivery{}
-	err := t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
+			return err
+		}
 		rows, err := tx.QueryContext(ctx, `SELECT delivery_id,event,received_at,last_error FROM github_app_deliveries WHERE queue_team=? AND state='failed' ORDER BY received_at DESC,digest`, t.team)
 		if err != nil {
 			return err
@@ -361,7 +364,7 @@ func (t *Tenant) ProcessGitHubDeliveryAgain(ctx context.Context, a capability.Au
 		}); err != nil {
 			return err
 		}
-		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, p capability.Principal) error {
+		return t.teamMutationInTx(ctx, tx, a, "ProcessGitHubDeliveryAgain", deliveryID, func(tx *storeTx, _ capability.Principal) error {
 			if err := githubDeliveryConnectionTx(ctx, tx, digest); err != nil {
 				return err
 			}
@@ -376,7 +379,7 @@ func (t *Tenant) ProcessGitHubDeliveryAgain(ctx context.Context, a capability.Au
 			if n != 1 {
 				return sql.ErrNoRows
 			}
-			return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: t.team, Kind: "github.delivery_reprocessed", SubjectID: deliveryID, Actor: p.Capability.Subject.ID})
+			return nil
 		})
 	})
 }

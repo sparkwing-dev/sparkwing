@@ -242,7 +242,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	}
 	launcher := controller.EngineHTTPRoot(t, e, "", "eval-launcher", []capability.Grant{capability.ClaimsLaunch})
 	handler := controller.New(e.Store, nil).WithSecretsCipher(cipher).WithEngineController(e.EngineController).Handler()
-	response := controller.EngineClaimHTTP(t, handler, launcher, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1.2.3","kinds":["eval"],"available_cores":1}`, 200)
+	response := controller.EngineClaimHTTP(t, handler, launcher, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1.2.3","kinds":["eval"]}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("eval award: %s %v", response.Body, err)

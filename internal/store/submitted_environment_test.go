@@ -66,7 +66,7 @@ func FuzzSubmittedEnvironmentStaysPrivateAndClaimBound(f *testing.F) {
 		owner.Grants = []capability.Grant{capability.TriggerHost}
 		owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 		persistPlanOwner(t, tenant.s, owner)
-		rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',generation=1,lease_expires_at=?,capability_prefix=? WHERE id=?`, now.Add(time.Minute).UnixNano(), owner.Prefix, admitted.RunID)
+		seedTriggerClaim(t, tenant.s, admitted.RunID, "host", owner.Prefix, 1, now.Add(time.Minute))
 		authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}
 		got, err := tenant.ReadSubmittedEnvironment(t.Context(), authority)
 		if err != nil || string(got["APP_NOTE"]) != value || len(got) != 2 {

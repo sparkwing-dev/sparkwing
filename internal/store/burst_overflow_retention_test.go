@@ -78,6 +78,6 @@ func overflowRetainedUsage(t *testing.T, name string, account bool) {
 		t.Fatal(err)
 	}
 	check("after deletion")
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,log_retention_class,log_retention_days) VALUES ('a','run',999,'replacement','pending','{}','replacement',1,'gh:1','host','execute','[]',?,'account',1,'default',1)`, name+"-other")
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,log_retention_class,log_retention_days) VALUES ('a','run',999,'replacement','pending',?,'replacement',1,'gh:1','host','execute',?,?,'account',1,'default',1)`, []byte(`{}`), []byte(`[]`), name+"-other")
 	check("after run identity reuse")
 }

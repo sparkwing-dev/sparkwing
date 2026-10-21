@@ -69,7 +69,7 @@ func TestFailedGitHubDeliveryManualProcessingIsTeamScopedAndAudited(t *testing.T
 	if err := tenant.ProcessGitHubDeliveryAgain(t.Context(), forged, "ours"); err == nil {
 		t.Fatal("processed with foreign authority")
 	}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_delivery_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_delivery_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if err := tenant.ProcessGitHubDeliveryAgain(t.Context(), a, "ours"); err == nil {
 		t.Fatal("processed without audit")
 	}
@@ -81,7 +81,7 @@ func TestFailedGitHubDeliveryManualProcessingIsTeamScopedAndAudited(t *testing.T
 	if err != nil || claim == nil || claim.ID != "ours" {
 		t.Fatalf("manual claim: %+v %v", claim, err)
 	}
-	events, err := tenant.BusinessEvents(t.Context(), "github.delivery_reprocessed")
+	events, err := tenant.BusinessEvents(t.Context(), "team.mutated", 100, "")
 	if err != nil || len(events) != 1 || events[0].SubjectID != "ours" {
 		t.Fatalf("audit: %+v %v", events, err)
 	}
@@ -171,7 +171,7 @@ func TestFailedGitHubDeliveryCannotMutateReplacementConnection(t *testing.T) {
 						t.Fatalf("replacement changed: %+v %v", installation, err)
 					}
 					rewriteSchemaCount(t, s.db, "github_app_delivery_effects", 0)
-					events, err := tenant.BusinessEvents(ctx, "github.delivery_reprocessed")
+					events, err := tenant.BusinessEvents(ctx, "team.mutated", 100, "")
 					if err != nil || boundary == "process-again" && len(events) != 0 {
 						t.Fatalf("refused requeue was audited as successful: %+v %v", events, err)
 					}

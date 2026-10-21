@@ -162,10 +162,10 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 		}
 		allocated := 0
 		for i := range 9 {
-			cores := 1 << ((seed >> uint(i*3%27)) % 5)
+			cores := 2 << ((seed >> uint(i*3%27)) % 4)
 			id := fmt.Sprintf("generated-%d", i)
 			billingModelJob(t, s, id)
-			execution := fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)
+			execution := fmt.Sprintf(`{"requires":{"set":true,"value":["sparkwing-%dcpu"]}}`, cores)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND run_id='run' AND node_id=?`, []byte(execution), id)
 			demand.Target.NodeID = runspec.NodeID(id)
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)

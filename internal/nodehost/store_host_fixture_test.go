@@ -169,7 +169,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 		}
 		body, _ := json.Marshal(record)
 		grants, _ := json.Marshal(credential.Grants)
-		_, err = teststore.SQL(t, database).ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,created_at,created_by,expires_at,repo_scope) VALUES (?,?,?,'machine','host','controller',?,'delegate',1,?,'none','[]',?,'fixture',?,'null')`, root, hex.EncodeToString(credential.Digest[:]), store.DefaultTeam, grants, body, now.UnixNano(), until.UnixNano())
+		_, err = teststore.SQL(t, database).ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,created_at,created_by,expires_at,repo_scope) VALUES (?,?,?,'machine','host','controller',?,'delegate',1,?,'none',?,?,'fixture',?,?)`, root, hex.EncodeToString(credential.Digest[:]), store.DefaultTeam, grants, body, []byte(`[]`), now.UnixNano(), until.UnixNano(), []byte(`null`))
 		if err != nil {
 			t.Fatal(err)
 		}

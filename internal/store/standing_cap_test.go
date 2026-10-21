@@ -137,27 +137,36 @@ func TestStandingCapPrepayStaysWithinOneTierAndBelowHighProperty(t *testing.T) {
 }
 
 func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
-	s, tenant, now := standingCapFixture(t)
-	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
-	checkout, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 2000*MicroCreditsPerCent, *now, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.TestOnlyAttachCreditCheckout(t.Context(), checkout, "3ds-session", now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "3ds", CheckoutID: "3ds-session", PaymentID: "pi_3ds", Kind: capability.PaymentCheckoutPaid, AmountMinor: 2000, Currency: "usd", ThreeDS: "authenticated"}); err != nil {
-		t.Fatal(err)
-	}
-	var recorded, attrs string
-	if err := s.db.QueryRow(`SELECT three_d_secure FROM credit_checkouts WHERE id=?`, checkout).Scan(&recorded); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.db.QueryRow(`SELECT attrs FROM business_events WHERE team='a' AND kind=?`, BusinessEventCheckoutPaid).Scan(&attrs); err != nil {
-		t.Fatal(err)
-	}
-	if recorded != "authenticated" || !strings.Contains(attrs, `"three_d_secure":"authenticated"`) {
-		t.Fatalf("3-D Secure outcome column=%q event=%s", recorded, attrs)
+	for _, outcome := range []struct{ provider, audit string }{
+		{"authenticated", "authenticated"},
+		{"processing_error", "processing_error"},
+		{"unknown", "unknown"},
+		{"Jane Doe; phone 208-555-0100", "unknown"},
+	} {
+		t.Run(outcome.audit+"_"+outcome.provider, func(t *testing.T) {
+			s, tenant, now := standingCapFixture(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+			checkout, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 2000*MicroCreditsPerCent, *now, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tenant.TestOnlyAttachCreditCheckout(t.Context(), checkout, "3ds-session", now.Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "3ds", CheckoutID: "3ds-session", PaymentID: "pi_3ds", Kind: capability.PaymentCheckoutPaid, AmountMinor: 2000, Currency: "usd", ThreeDS: outcome.provider}); err != nil {
+				t.Fatal(err)
+			}
+			var recorded, attrs string
+			if err := s.db.QueryRow(`SELECT three_d_secure FROM credit_checkouts WHERE id=?`, checkout).Scan(&recorded); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.db.QueryRow(`SELECT attrs FROM audit_events WHERE team='a' AND kind=?`, BusinessEventCheckoutPaid).Scan(&attrs); err != nil {
+				t.Fatal(err)
+			}
+			if recorded != outcome.provider || !strings.Contains(attrs, `"three_d_secure":"`+outcome.audit+`"`) || strings.Contains(attrs, "Jane Doe") {
+				t.Fatalf("3-D Secure outcome column=%q event=%s", recorded, attrs)
+			}
+		})
 	}
 }
 
@@ -165,7 +174,7 @@ func standingCapOperatorHold(t *testing.T, s *Store, id string, placed, released
 	t.Helper()
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES (?,'a','review','operator','operator',?)`, id, placed.UnixNano())
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released)
+		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released, auditActor{system: auditBreakGlass})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -183,7 +192,7 @@ func TestStandingCapNoFaultOperatorReleaseKeepsCleanDays(t *testing.T) {
 	standingCapWant(t, tenant, now.Add(42*24*time.Hour-time.Nanosecond), "Trusted", "Established", "Trusted")
 	standingCapWant(t, tenant, now.Add(42*24*time.Hour), "High", "High", "High")
 	var noFault int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE team='a' AND kind=? AND attrs LIKE '%"no_fault":true%'`, BusinessEventTeamUnfrozen).Scan(&noFault); err != nil || noFault != 1 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team='a' AND kind=? AND attrs LIKE '%"no_fault":true%'`, BusinessEventTeamUnfrozen).Scan(&noFault); err != nil || noFault != 1 {
 		t.Fatalf("no-fault audit events=%d: %v", noFault, err)
 	}
 }
@@ -192,7 +201,7 @@ func TestStandingCapNoFaultReleaseOnlyForOperatorHolds(t *testing.T) {
 	s, _, now := standingCapFixture(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES ('dp_1','a','dispute','dispute',?)`, now.UnixNano())
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "dp_1", false, true, "operator", "checked", *now)
+		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "dp_1", false, true, "operator", "checked", *now, auditActor{system: auditBreakGlass})
 		return err
 	})
 	var open int

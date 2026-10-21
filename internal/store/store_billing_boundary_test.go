@@ -148,7 +148,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "customer", PaymentMethod: "method", Fingerprint: "card"}, "provider", *now); err != nil {
 		t.Fatal(err)
 	}
-	table := CreditRateTable{{Cores: 1, MicroPerSecond: 1000000}, {Cores: 4, MicroPerSecond: 1000000}}
+	table := CreditRateTable{{Cores: 2, MicroPerSecond: 1000000}, {Cores: 4, MicroPerSecond: 1000000}}
 	if _, err := op.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}

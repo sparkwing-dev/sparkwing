@@ -12,7 +12,7 @@ type claimOverflowFacts struct {
 	MonthlyMinutes *int64 `json:"monthly_minutes"`
 }
 
-func claimOverflowFactsTx(ctx context.Context, tx *storeTx, team string, cloud bool) ([]claimOverflowFacts, error) {
+func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team string, cloud bool) ([]claimOverflowFacts, error) {
 	q := claimSQL{dialect: tx.dialect}
 	query := `SELECT DISTINCT team,created_principal FROM runs WHERE team IN (` + liveTeamsSQL + `) AND status IN ('pending','running') AND ` + q.at(q.blob("request_json"), "request", "burst") + ` IS NOT NULL`
 	if !cloud {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -83,7 +85,7 @@ func (f *gitReleaseFixture) registerRunner(personal bool) {
 		if err := teststore.SQL(f.t, f.s.store).QueryRow(`SELECT json_extract(authority_json,'$.origin.requirement') FROM capabilities WHERE prefix=?`, issued.Prefix).Scan(&requirement); err != nil {
 			f.t.Fatal(err)
 		}
-		engineSQL(f.t, f.s.store, `UPDATE capabilities SET authority_json=json_set(authority_json,'$.origin.personal',json('true'),'$.origin.requirement',json(?)) WHERE prefix='runner'`, requirement)
+		engineSQL(f.t, f.s.store, `UPDATE capabilities SET authority_json=CAST(json_set(authority_json,'$.origin.personal',json('true'),'$.origin.requirement',json(?)) AS BLOB) WHERE prefix='runner'`, requirement)
 	}
 }
 
@@ -134,7 +136,7 @@ func (f *gitReleaseFixture) audits(want int) {
 		f.t.Fatalf("audits=%s, want %d", w.Body, want)
 	}
 	for _, row := range got.Releases {
-		if row.RunID != "run" || row.JobID != "job" || row.Generation != 1 || row.Host != "gitlab.example.com" || row.Runner != "runner" || row.CapabilityPrefix == "" || row.Repository != "git:gitlab.example.com/acme/tools" {
+		if row.RunID != "run" || row.JobID != fmt.Sprintf("%x", sha256.Sum256([]byte("job"))) || row.Generation != 1 || row.Host != "" || row.Runner != fmt.Sprintf("%x", sha256.Sum256([]byte("runner"))) || len(row.CapabilityPrefix) != sha256.Size*2 || row.Repository != fmt.Sprintf("%x", sha256.Sum256([]byte("git:gitlab.example.com/acme/tools"))) {
 			f.t.Fatalf("unbound audit: %+v", row)
 		}
 	}

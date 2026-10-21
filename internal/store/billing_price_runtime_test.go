@@ -7,14 +7,13 @@ import (
 	"time"
 )
 
-func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
+func TestMeteredAwardPricesRequiredSizeDespiteProfilePins(t *testing.T) {
 	for _, pin := range []struct {
-		cores               float64
-		memory, class, rate int64
+		class, rate int64
 	}{
-		{1, 0, 2, 10_000}, {1.5, 0, 2, 10_000}, {3, 0, 4, 20_000}, {8, 0, 8, 36_667}, {15.5, 0, 16, 70_000}, {64, 0, 64, 270_000}, {3, 20 << 30, 8, 36_667},
+		{2, 10_000}, {4, 20_000}, {8, 36_667}, {16, 70_000}, {64, 270_000},
 	} {
-		t.Run(fmt.Sprintf("cores=%g/memory=%d", pin.cores, pin.memory), func(t *testing.T) {
+		t.Run(fmt.Sprint(pin.class), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, true)
 			if _, _, err := (&Tenant{s: s, team: "a"}).TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
 				t.Fatal(err)
@@ -24,7 +23,7 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
 				t.Fatal(err)
 			}
-			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%g},"memory_bytes":{"set":true,"value":%d}}}}`, pin.cores, pin.memory)))
+			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"requires":{"set":true,"value":["sparkwing-%dcpu"]}}`, pin.class)))
 			sealedRun, err := (&Tenant{s: s, team: "a"}).GetRun(t.Context(), "run")
 			if err != nil {
 				t.Fatal(err)
@@ -77,11 +76,11 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 	}
 }
 
-func TestMeteredAwardRefusesUnpricedResourcesAtomically(t *testing.T) {
-	for _, cores := range []int{9, 16, 96} {
+func TestMeteredAwardRefusesUnpricedSizesAtomically(t *testing.T) {
+	for _, cores := range []int{8, 16, 64} {
 		t.Run(fmt.Sprint(cores), func(t *testing.T) {
 			s, demand, _ := meteredUnitFixture(t, true)
-			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)))
+			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"requires":{"set":true,"value":["sparkwing-%dcpu"]}}`, cores)))
 			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if !errors.Is(err, ErrUnpricedCPUClass) {
 				t.Fatalf("unpriced claim: %v", err)

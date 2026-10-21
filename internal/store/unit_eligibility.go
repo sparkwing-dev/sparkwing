@@ -77,11 +77,9 @@ func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit 
 		if e.price, err = unitBillingPriceTx(ctx, tx, e.demand.Selector, e.profile); err != nil {
 			var unpriced *UnpricedCPUClassError
 			if errors.As(err, &unpriced) {
+				unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
 				e.failed, e.refused = stepBilling, err
 				return e, nil
-			}
-			if errors.As(err, &unpriced) {
-				unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
 			}
 			return e, err
 		}
@@ -92,12 +90,13 @@ func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit 
 		return e, nil
 	}
 	if e.metered {
-		funded, err := eligibleUnitBillingTx(ctx, tx, team, unit, e.price, e.launcher, false)
-		if err != nil {
+		if err := checkUnitBillingTx(ctx, tx, team, unit, e.price, capability.CloudLauncher(c)); err != nil {
+			var refused *apierr.Error
+			if errors.Is(err, ErrInsufficientCredits) || errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) {
+				e.failed, e.refused = stepBilling, err
+				return e, nil
+			}
 			return e, err
-		}
-		if !funded {
-			e.failed, e.refused = stepBilling, ErrInsufficientCredits
 		}
 	}
 	return e, nil

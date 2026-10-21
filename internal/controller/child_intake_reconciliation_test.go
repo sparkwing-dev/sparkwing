@@ -46,7 +46,7 @@ func childIntakeFixtureWith(t *testing.T, prepare func(*engineFixture)) (*engine
 	if prepare != nil {
 		prepare(e)
 	}
-	claimed := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
+	claimed := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(claimed.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("claim: %s: %v", claimed.Body, err)
@@ -121,7 +121,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	}
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) VALUES ('a','run','sibling','pending',1,?,?,?)`, time.Now().UnixNano(), []byte(`{"id":"sibling"}`), []byte(`{}`))
 	root := engineHTTPRoot(t, e, "a", "sibling-runner", []capability.Grant{capability.NodesClaim})
-	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
+	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
 	var sibling controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &sibling); err != nil || sibling.Claim == nil || sibling.Claim.Binding.NodeID != "sibling" {
 		t.Fatalf("sibling: %s: %v", response.Body, err)

@@ -23,7 +23,7 @@ import (
 const testIdleWindow = 5 * time.Minute
 
 func namedClaimRequest(runner string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", strings.NewReader(`{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", strings.NewReader(`{"runner_version":"v1.2.3","kinds":["node"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	secret := sha256.Sum256([]byte("advice"))
 	req.Header.Set("Authorization", "Bearer "+capability.ControllerPrefix+base64.RawURLEncoding.EncodeToString(secret[:]))

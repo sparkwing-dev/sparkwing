@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -90,7 +91,8 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 		}
 		claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 		if repository == "foreign" {
-			if !errors.Is(err, store.ErrNotFound) || len(claim.Bearer) != 0 {
+			var denied *apierr.Error
+			if !(errors.As(err, &denied) && denied.Code == apierr.Forbidden) || len(claim.Bearer) != 0 {
 				return errors.Join(errors.New("enrollment permitted another repository"), err)
 			}
 			continue

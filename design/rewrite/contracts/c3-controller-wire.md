@@ -110,7 +110,10 @@ W2 derives those fields from authorization and current state, compares the sourc
 ordinal with that state, and calls C1 `RecordStep` with the derived
 `AttemptIdentity`. C1 rechecks that identity in the committing transaction.
 `error` is already masked text. Optional start and finish timestamps retain
-nanosecond precision. Success is `StepRecorded{recorded:true}` after persistence.
+nanosecond precision in separate source observation columns. The store records
+its own lifecycle timestamps, so runner clock skew cannot prevent step closure
+or attempt recovery. Temporal CHECKs compare only store-clock timestamps.
+Success is `StepRecorded{recorded:true}` after persistence.
 False, absent or malformed acknowledgements fail. Exact-body retries retain the
 original source ordinal and timestamps. W2's native route/store binding and W3's
 remote executor adapter remain open.
@@ -1265,3 +1268,11 @@ OperatorManager adds ReadOperatorTeam(ctx, team) returning OperatorTeam with
 team and display_name. It uses the existing GET /api/v1/operator/teams/{team}
 route. C2 defines the deployment authorization and identity-only projection.
 The CLI derives node placement through the launcher's shared hash owner.
+
+The operator session's team view includes at most 50 audit events, newest first
+with IDs breaking timestamp ties. `next_cursor` names the last returned event
+when older events remain. `GET /api/v1/operator/teams/{team}?cursor=<next_cursor>`
+continues strictly before it. The cursor must belong to that team's audit.
+Each event retains `subject_id`, `run_id` and `attrs.operation` when present.
+The console renders those targets and appends older pages through its continuation
+control.

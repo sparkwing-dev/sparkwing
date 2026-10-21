@@ -18,7 +18,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	st := e.Store
 	now := time.Now().UTC()
-	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform"]},"resources":{"value":{"cores":{"set":true,"value":4}}}}`))
+	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform","sparkwing-4cpu"]}}`))
 	e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, error) {
 		return match.Profile{}, nil
 	})

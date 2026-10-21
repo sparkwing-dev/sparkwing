@@ -30,7 +30,7 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
+	p.Class = capability.CredentialConsole
 	p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	route, ok := capability.LookupRoute("POST", "/api/v1/operator/runners/{runner}/metered")
 	if !ok {

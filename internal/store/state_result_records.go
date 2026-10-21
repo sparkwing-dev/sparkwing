@@ -29,7 +29,6 @@ func attachNodeResultRecordsTx(ctx context.Context, tx *storeTx, team Team, row 
 		return err
 	}
 	if change.Cause == CauseReport {
-
 		return checkHolderTx(ctx, tx, team, row, change.Actor)
 	}
 	return nil

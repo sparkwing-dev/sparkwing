@@ -48,9 +48,7 @@ func TestClaimRankingAndNoticeMatchIndependentClaimantModel(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			f := rankingFixture(t, model.funded)
-			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='done'`); err != nil {
-				t.Fatal(err)
-			}
+			finishRankingTrigger(t, f)
 			prefix := f.Self
 			switch model.tier {
 			case "personal":

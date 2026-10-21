@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -86,18 +87,22 @@ func stateSQL(t testing.TB, b Binding) *sql.DB {
 
 func seedOwner(t *testing.T, binding Binding, id string, started bool) {
 	t.Helper()
-	var start any
+	var start *time.Time
 	if started {
-		start = int64(1)
+		at := time.Unix(0, 1)
+		start = &at
 	}
 	_, err := stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
 VALUES (?,?,(SELECT COALESCE(MAX(number),0)+1 FROM runs),'pipeline','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, binding.Tenant.Team(), id, []byte(`{"version":1,"request":{"origin":"local"},"provenance":{"trust":"asserted","pipeline":"pipeline","writer":"account/fixture"}}`), []byte(`[]`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels)
-VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',7,1,?,?,?)`, binding.Tenant.Team(), id, start, []byte(`[]`), []byte(`[]`))
+	_, err = stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels)
+VALUES (?,?,'trigger',1,1,?,?)`, binding.Tenant.Team(), id, []byte(`[]`), []byte(`[]`))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), id, store.Actor{CapabilityPrefix: "owner-cap", NodeFence: runspec.NodeFence{RunID: runspec.RunID(id), Holder: "owner", Generation: 7}}, time.Unix(0, 1), start); err != nil {
 		t.Fatal(err)
 	}
 }

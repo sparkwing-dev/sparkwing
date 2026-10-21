@@ -26,7 +26,7 @@ type runnerPoll struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
-// RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
+// RecordRunnerPoll stores a live claimant's advertised labels and platform with the store clock.
 func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
 	observation.Labels = match.SelfAsserted(observation.Labels)
 	raw, err := json.Marshal(observation.Labels)
@@ -143,7 +143,7 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 				return nil, err
 			}
 			if a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(now) {
-				return nil, authorityError(apierr.IntegrityFailure, "invalid runner capacity observation")
+				return nil, authorityError(apierr.IntegrityFailure, "invalid runner label observation")
 			}
 		}
 		observations = append(observations, a)

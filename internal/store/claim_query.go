@@ -200,24 +200,28 @@ func (q *claimSQL) jsonParam(v any) (string, error) {
 	}
 	return q.param(string(raw)), nil
 }
+
 func (q *claimSQL) blob(v string) string {
 	if q.dialect == DialectPostgres {
 		return `convert_from(` + v + `,'UTF8')`
 	}
 	return `CAST(` + v + ` AS TEXT)`
 }
+
 func (q *claimSQL) at(v string, path ...string) string {
 	if q.dialect == DialectPostgres {
 		return `((` + v + `)::jsonb #>> '{` + strings.Join(path, ",") + `}')`
 	}
 	return `json_extract(` + v + `,'$.` + strings.Join(path, ".") + `')`
 }
+
 func (q *claimSQL) array(v, alias string) string {
 	if q.dialect == DialectPostgres {
 		return `jsonb_array_elements(COALESCE((` + v + `)::jsonb,'[]'::jsonb)) AS ` + alias + `(value)`
 	}
 	return `json_each(COALESCE(` + v + `,'[]')) AS ` + alias
 }
+
 func (q *claimSQL) text(v string) string {
 	if q.dialect == DialectPostgres {
 		return `(` + v + ` #>> '{}')`
@@ -231,9 +235,11 @@ func (q *claimSQL) pos(v, needle string) string {
 	}
 	return `instr(` + v + `,` + needle + `)`
 }
+
 func (q *claimSQL) contains(array, value string) string {
 	return `EXISTS (SELECT 1 FROM ` + q.array(array, "item") + ` WHERE ` + q.text("item.value") + `=` + value + `)`
 }
+
 func (q *claimSQL) trim(value string) string {
 	function := "trim"
 	if q.dialect == DialectPostgres {
@@ -241,11 +247,13 @@ func (q *claimSQL) trim(value string) string {
 	}
 	return function + "(" + value + ",' \t\n\v\f\r\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000')"
 }
+
 func (q *claimSQL) pinned(selector string) string {
 	return q.anyAlternative(selector, func(alt string) string {
 		return `substr(` + alt + `,1,5)='pool=' OR substr(` + alt + `,1,5)='name=' OR substr(` + alt + `,1,6)='class='`
 	})
 }
+
 func (q *claimSQL) anywhere(request string) string {
 	at := func(path ...string) string { return q.at(request, append([]string{"request"}, path...)...) }
 	return `COALESCE(` + at("mode") + `,'')='execute' AND COALESCE(` + at("dispatch") + `,'')='controller' AND ` + at("burst") + ` IS NULL AND (COALESCE(CAST(` + at("options", "runner", "set") + ` AS TEXT),'false') IN ('false','0') OR COALESCE(` + at("options", "runner", "value", "kind") + `,'')='any') AND NOT (` + q.pinned(at("options", "requires", "value")) + `)`
@@ -340,7 +348,7 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, current claimFacts) ([]c
 	return out, nil
 }
 
-func claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts) ([]claimFacts, error) {
+func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts) ([]claimFacts, error) {
 	policy, _ := ClaimPlacementFromContext(ctx)
 	horizon := policy.Liveness
 	if horizon <= 0 {
@@ -391,7 +399,7 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 	for _, kind := range kinds {
 		switch kind {
 		case capability.UnitNode:
-			queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,n.ready_at AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution FROM nodes n,clock WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=clock.now AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND NOT EXISTS (SELECT 1 FROM runs dr WHERE dr.id=n.run_id AND dr.claim_wait_ns>0 AND (n.queue_started_at IS NULL OR n.queue_started_at<=clock.now-dr.claim_wait_ns))`)
+			queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,n.ready_at AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution FROM nodes n,clock WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=clock.now AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND NOT EXISTS (SELECT 1 FROM runs dr WHERE dr.team=n.team AND dr.id=n.run_id AND dr.claim_wait_ns>0 AND (n.queue_started_at IS NULL OR n.queue_started_at<=clock.now-dr.claim_wait_ns))`)
 		case capability.UnitEval:
 			queries = append(queries, `SELECT e.team,e.run_id,e.source_node_id,e.source_generation,n.finished_at,'eval',NULL FROM eval_units e JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name,clock WHERE e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='' AND (e.expires_at IS NULL OR e.expires_at>clock.now) AND l.name='controller.owner' AND l.until>clock.now AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`)
 		default:
@@ -402,7 +410,7 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 }
 
 func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates CreditRateTable, kinds []capability.UnitKind, demand UnitDemand, now int64) (string, error) {
-	clock := q.param(now)
+	clock := `CAST(` + q.param(now) + ` AS BIGINT)`
 	factsParam, err := q.jsonParam(facts)
 	if err != nil {
 		return "", err
@@ -491,7 +499,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		return UnitRef{}, err
 	}
 	current.Current = 1
-	facts, err := claimObserversTx(ctx, tx, current)
+	facts, err := tx.operator.claimObserversTx(ctx, tx, current)
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -503,7 +511,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	if err != nil {
 		return UnitRef{}, err
 	}
-	overflow, err := claimOverflowFactsTx(ctx, tx, current.Team, current.Cloud == 1)
+	overflow, err := tx.operator.claimOverflowFactsTx(ctx, tx, current.Team, current.Cloud == 1)
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -513,7 +521,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	if err != nil {
 		return UnitRef{}, err
 	}
-	collect, err := claimCollectsAsksTx(ctx, tx, current, demand)
+	collect, err := tx.operator.claimCollectsAsksTx(ctx, tx, current, demand)
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -537,15 +545,18 @@ func (q *claimSQL) indexed(v, alias string) string {
 	}
 	return q.array(v, alias)
 }
+
 func (q *claimSQL) index(alias string) string {
 	if q.dialect == DialectPostgres {
 		return alias + `.ordinal-1`
 	}
 	return `CAST(` + alias + `.key AS BIGINT)`
 }
+
 func unitIdentitySQL(a, b string) string {
 	return a + `.team=` + b + `.team AND ` + a + `.run_id=` + b + `.run_id AND ` + a + `.kind=` + b + `.kind AND ` + a + `.node_id=` + b + `.node_id AND ` + a + `.source_generation=` + b + `.source_generation`
 }
+
 func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 	param, err := q.jsonParam(policy.Preferences)
 	if err != nil {
@@ -578,6 +589,7 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 	available := `available AS (SELECT w.* FROM pairs w,clock WHERE (w.ranked=0 OR (w.claim_rank>=0 OR w.claim_ranking='[]') AND NOT (` + rankHold + `)) AND (w.ranked=1 OR w.kind<>'node' OR NOT (` + prefHold + `)))`
 	return `,` + steps + `,` + pairs + `,` + available, nil
 }
+
 func firstPreferenceHold(policy ClaimPlacement) int64 {
 	if len(policy.Preferences) == 0 {
 		return 0
@@ -585,7 +597,7 @@ func firstPreferenceHold(policy ClaimPlacement) int64 {
 	return int64(policy.Preferences[0].Hold)
 }
 
-func claimCollectsAsksTx(ctx context.Context, tx *storeTx, current claimFacts, demand UnitDemand) (bool, error) {
+func (o *Operator) claimCollectsAsksTx(ctx context.Context, tx *storeTx, current claimFacts, demand UnitDemand) (bool, error) {
 	q := claimSQL{dialect: tx.dialect}
 	request := q.blob("r.request_json")
 	query := `SELECT EXISTS (SELECT 1 FROM runs r WHERE ` + q.at(request, "request", "mode") + `='execute' AND ` + q.at(request, "request", "dispatch") + `='controller' AND r.finished_at IS NULL`

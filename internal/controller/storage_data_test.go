@@ -149,7 +149,7 @@ func TestStoreDataStorageSettingsRouteUsesFinalPolicy(t *testing.T) {
 		t.Fatalf("settings=%d %s", w.Code, w.Body.String())
 	}
 	got, err := s.store.AsOperator().StorageSettings(t.Context())
-	if err != nil || got != (store.StorageSettings{RunRetentionDays: 90, NodeMetricRetentionDays: 7, DatabaseAlarmBytes: 123, DefaultTier: "paid"}) {
+	if err != nil || got != (store.StorageSettings{AuditRetentionDays: 400, RunRetentionDays: 90, NodeMetricRetentionDays: 7, DatabaseAlarmBytes: 123, DefaultTier: "paid"}) {
 		t.Fatalf("stored policy=%+v: %v", got, err)
 	}
 }

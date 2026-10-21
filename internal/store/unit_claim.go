@@ -42,7 +42,7 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if errors.Is(err, ErrNotFound) {
 			waiting = err
 			if demand.Target != nil {
-				waiting = claimRefusalTx(ctx, tx, demand, *demand.Target)
+				waiting = tx.operator.claimRefusalTx(ctx, tx, demand, *demand.Target)
 			}
 			return nil
 		}
@@ -267,6 +267,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
 		observation := demand
 		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
+		observation.Target, observation.Kinds = nil, nil
 		observation.Labels = match.SelfAsserted(observation.Labels)
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
@@ -318,7 +319,7 @@ func claimPurpose(kind capability.UnitKind) capability.AwardPurpose {
 	}
 }
 
-func claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) error {
+func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) error {
 	var team Team
 	if err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
 		return err

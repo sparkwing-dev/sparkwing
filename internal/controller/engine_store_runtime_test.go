@@ -68,7 +68,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 
 func engineSQL(t *testing.T, s *store.Store, query string, args ...any) {
 	t.Helper()
-	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), query, args...); err != nil {
+	if _, err := teststore.Exec(t.Context(), s, query, args...); err != nil {
 		t.Fatal(err)
 	}
 }

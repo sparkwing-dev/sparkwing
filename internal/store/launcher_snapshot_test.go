@@ -109,7 +109,8 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				case 1:
 					query = `UPDATE ` + table + ` SET claimed_by='another-holder' WHERE ` + predicate
 				case 2:
-					query = `UPDATE ` + table + ` SET capability_prefix='' WHERE ` + predicate
+					rewriteSchemaRefuses(t, s.db, `UPDATE `+table+` SET capability_prefix='' WHERE `+predicate)
+					return true
 				case 3:
 					query, args = `UPDATE `+table+` SET lease_expires_at=? WHERE `+predicate, []any{now.UnixNano() - int64(offset)}
 				case 4:
@@ -122,7 +123,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 					} else if kind == capability.UnitNode {
 						query = `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE run_id='run'`
 					} else {
-						query = `UPDATE ` + table + ` SET status='done',finished_at=1 WHERE ` + predicate
+						query = `UPDATE ` + table + ` SET status='done',finished_at=1,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL WHERE ` + predicate
 					}
 				case 7:
 					if kind == capability.UnitEval {
@@ -143,7 +144,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				if kind == capability.UnitNode {
 					status = "pending"
 				}
-				extra := ""
+				extra := ",claimed_at=1,finished_at=NULL"
 				if kind == capability.UnitNode {
 					extra = ",outcome='',finished_at=NULL"
 				}
@@ -220,12 +221,24 @@ func TestLauncherSnapshotDelegationRetainsRootOwnership(t *testing.T) {
 }
 
 func TestLauncherSnapshotIsolatesIntegrityButRejectsStorageFailures(t *testing.T) {
-	for _, query := range []string{`UPDATE nodes SET execution_json='{' WHERE run_id='run'`, `UPDATE nodes SET status='running',attempt=0 WHERE run_id='run'`, `DROP TABLE eval_units`} {
-		t.Run(query, func(t *testing.T) {
+	for _, test := range []struct {
+		query  string
+		args   []any
+		refuse bool
+	}{
+		{query: `UPDATE nodes SET execution_json=? WHERE run_id='run'`, args: []any{[]byte(`{`)}},
+		{query: `UPDATE nodes SET status='running',attempt=0 WHERE run_id='run'`, refuse: true},
+		{query: `DROP TABLE eval_units`},
+	} {
+		t.Run(test.query, func(t *testing.T) {
 			s, demand, _, _ := launcherSnapshotFixture(t, capability.UnitNode)
-			rewriteSchemaExec(t, s.db, query)
+			if test.refuse {
+				rewriteSchemaRefuses(t, s.db, test.query, test.args...)
+				return
+			}
+			rewriteSchemaExec(t, s.db, test.query, test.args...)
 			rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil)
-			if query == `DROP TABLE eval_units` {
+			if test.query == `DROP TABLE eval_units` {
 				if err == nil || rows != nil {
 					t.Fatalf("storage failure returned snapshot: %+v, %v", rows, err)
 				}
@@ -349,7 +362,7 @@ func TestLauncherSnapshotCorruptAwardDoesNotHideHealthySibling(t *testing.T) {
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json='{' WHERE node_id='job'`)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE node_id='job'`, []byte(`{`))
 	rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("snapshot=%+v, %v", rows, err)

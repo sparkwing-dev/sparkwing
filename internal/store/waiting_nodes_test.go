@@ -12,7 +12,7 @@ import (
 func TestWaitingNodesReadSealedDemandAndPageReadyWork(t *testing.T) {
 	s, _ := unitClaimFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET allowed_pools=?`, []byte(`["prod"]`))
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["gpu","pool=prod"]},"resources":{"set":true,"value":{"cores":{"set":true,"value":4},"memory_bytes":{"set":true,"value":1024}}}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["gpu","pool=prod"]}}`))
 	for _, id := range []string{"next", "last"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',ready_at,spec_json,execution_json FROM nodes WHERE node_id='job'`, id)
 	}
@@ -54,7 +54,7 @@ func TestWaitingNodesRetainTheRunsRunnerSelection(t *testing.T) {
 			if selected.Kind == runspec.RunnerName {
 				want = "name=" + want
 			}
-			if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{want}) || waiting[0].Repo.URL != "https://github.com/acme/repo" {
+			if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"sparkwing-4cpu", want}) || waiting[0].Repo.URL != "https://github.com/acme/repo" {
 				t.Fatalf("run selection: %+v, %v", waiting, err)
 			}
 		})
@@ -64,7 +64,7 @@ func TestWaitingNodesRetainTheRunsRunnerSelection(t *testing.T) {
 func TestNodeAttentionUpdatesOnlyWaitingJobsInTheNamedTeam(t *testing.T) {
 	for _, update := range []string{
 		`UPDATE nodes SET ready_at=NULL`,
-		`UPDATE nodes SET claimed_by='runner'`,
+		`UPDATE nodes SET claimed_by='runner',capability_prefix='claim',lease_expires_at=2,generation=1`,
 		`UPDATE nodes SET status='done',outcome='success',finished_at=1`,
 		`UPDATE nodes SET cancel_requested_at=1`,
 		`UPDATE runs SET cancel_requested_at=1`,
@@ -101,7 +101,7 @@ func TestWaitingNodesExcludeWithdrawnAndUnclaimableWork(t *testing.T) {
 	for _, update := range []string{
 		`UPDATE nodes SET ready_at=NULL`,
 		`UPDATE nodes SET ready_at=2`,
-		`UPDATE nodes SET claimed_by='runner'`,
+		`UPDATE nodes SET claimed_by='runner',capability_prefix='claim',lease_expires_at=2,generation=1`,
 		`UPDATE nodes SET cancel_requested_at=1`,
 		`UPDATE nodes SET status='done',outcome='success',finished_at=1`,
 		`UPDATE runs SET status='success',finished_at=1`,
@@ -121,7 +121,7 @@ func TestWaitingNodesExcludeWithdrawnAndUnclaimableWork(t *testing.T) {
 }
 
 func TestWaitingNodesRejectCorruptDemand(t *testing.T) {
-	for _, body := range []string{`{`, `{"requires":{"value":true}}`, `{"resources":{"value":{"cores":{"value":-1}}}}`} {
+	for _, body := range []string{`{`, `{"requires":{"value":true}}`} {
 		t.Run(body, func(t *testing.T) {
 			s, _ := unitClaimFixture(t)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(body))

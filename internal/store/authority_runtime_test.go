@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"errors"
 	"slices"
 	"testing"
@@ -168,7 +169,7 @@ func authorityClaimFixture(t *testing.T, s *Store, root capability.Capability) c
 	future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'sealed',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"ci","writer":"account/fixture"}}`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, future, []byte(`[]`), []byte(`[]`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,claimed_by,generation,attempt,lease_expires_at,spec_json,execution_json) VALUES ('a','run','job','running',?,7,2,?,?,?)`, root.Subject.ID, future, []byte(`{}`), []byte(`{}`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,generation,attempt,spec_json,execution_json) VALUES ('a','run','job','pending',6,2,?,?)`, []byte(`{}`), []byte(`{}`))
 	unit, err := encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +187,7 @@ func TestAuthorityAwardDerivesBindingAndBilling(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	issued, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec})
+	issued, err := issueFixtureAward(t, s, tx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,14 +254,14 @@ func TestAuthorityAwardRefusesForeignStaleAndUnreservedMeteredClaims(t *testing.
 			}
 			spec := authorityClaimFixture(t, s, root)
 			if kind == "stale" {
-				rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation = 0 WHERE run_id = 'run'")
+				rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation = 7 WHERE run_id = 'run'")
 			}
 			tx, err := s.beginTx(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer rollbackOrLog(tx)
-			if _, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec}); err == nil {
+			if _, err := issueFixtureAward(t, s, tx, spec); err == nil {
 				t.Fatal("invalid award accepted")
 			}
 			if err := tx.Rollback(); err != nil {
@@ -293,4 +294,24 @@ func TestRemoteCacheReadsNeedTheRoleThatRunsCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func issueFixtureAward(t *testing.T, s *Store, tx *storeTx, spec capability.AwardSpec) (capability.Issued, error) {
+	t.Helper()
+	unit, err := decodeAwardUnit(spec.Unit, spec.UnitID)
+	if err != nil {
+		return capability.Issued{}, err
+	}
+	expiry := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+	prospective := &awardRow{team: "a", run: string(unit.RunID), node: string(unit.NodeID), generation: 7, holder: "machine", lease: sql.NullInt64{Int64: expiry, Valid: true}}
+	issued, err := s.issueTx(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec}, prospective)
+	if err != nil {
+		return capability.Issued{}, err
+	}
+	if spec.Unit == capability.UnitNode {
+		_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET status='running',claimed_by='machine',capability_prefix=?,lease_expires_at=?,generation=7,attempt=2,started_at=1 WHERE run_id=? AND node_id=?`, issued.Capability.Prefix, expiry, unit.RunID, unit.NodeID)
+	} else {
+		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
+	}
+	return issued, err
 }

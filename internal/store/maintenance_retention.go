@@ -77,6 +77,15 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err != nil {
 		return RetentionResult{}, err
 	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM audit_events WHERE id IN
+(SELECT id FROM audit_events WHERE recorded_at < `+auditRetentionCutoffSQL(tx.dialect)+` ORDER BY recorded_at,id LIMIT ?)`, request.Limit)
+	if err != nil {
+		return RetentionResult{}, err
+	}
+	result.AuditEvents, err = res.RowsAffected()
+	if err != nil {
+		return RetentionResult{}, err
+	}
 	if err := tx.operator.deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
@@ -90,8 +99,10 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	return result, nil
 }
 
+const maxRetentionDays = math.MaxInt64 / int64(24*time.Hour)
+
 func retentionBoundary(now time.Time, days int64) (time.Time, error) {
-	if days > math.MaxInt64/int64(24*time.Hour) {
+	if days > maxRetentionDays {
 		return time.Time{}, fmt.Errorf("retention duration overflows")
 	}
 	return now.Add(-time.Duration(days) * 24 * time.Hour), nil

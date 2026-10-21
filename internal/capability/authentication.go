@@ -142,10 +142,8 @@ func validIdentity(p Principal) bool {
 	switch p.Class {
 	case CredentialBearer:
 		return p.Authority.Kind == AuthorityCapability && p.Authority.ID != "" && c.Prefix == p.Authority.ID
-	case CredentialSession:
+	case CredentialSession, CredentialConsole:
 		return p.Authority.Kind == AuthoritySession && p.Authority.ID != "" && c.Subject.Kind == SubjectAccount
-	case CredentialConsole:
-		return p.Authority.Kind == AuthoritySession && p.Authority.ID != "" && c.Subject.Kind == SubjectOperator
 	case CredentialPeer:
 		return c.Subject.Kind == SubjectLocal && c.Binding.Kind == BindingNone && c.Unit == ""
 	case CredentialAnonymous:

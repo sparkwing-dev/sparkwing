@@ -195,7 +195,7 @@ func SeedGitHubInstallation(t T, st *store.Store, team store.Team, in store.GitH
 
 func projectClaimRunIdentities(ctx context.Context, db *sql.DB, st *store.Store, query string) error {
 	upper := strings.ToUpper(strings.TrimSpace(query))
-	if !strings.HasPrefix(upper, "INSERT INTO RUNS") && !(strings.HasPrefix(upper, "UPDATE RUNS") && strings.Contains(upper, "REPO_")) {
+	if !strings.HasPrefix(upper, "INSERT INTO RUNS") && !(strings.HasPrefix(upper, "UPDATE RUNS") && (strings.Contains(upper, "REPO_") || strings.Contains(upper, "REQUEST_JSON"))) {
 		return nil
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id,repo_key,repo_display,request_json FROM runs`)

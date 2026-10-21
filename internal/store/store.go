@@ -944,7 +944,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 
 // Step status constants. Steps are inserted as StepRunning on
 // step_start and transitioned to passed/failed/cancelled on step_end. Skipped
-// steps insert directly as StepSkipped with started_at == finished_at.
+// steps insert directly as StepSkipped with both lifecycle timestamps set.
 const (
 	StepRunning   = "running"
 	StepPassed    = "passed"
@@ -975,7 +975,7 @@ type NodeStep struct {
 // ListNodeSteps returns persisted step observations for a tenant run.
 func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
 	rows, err := t.s.query(ctx, `
-SELECT node_id, step_id, attempt, status, error, started_at, finished_at, annotations_json, summary
+SELECT node_id, step_id, attempt, status, error, COALESCE(source_started_at,started_at), COALESCE(source_finished_at,finished_at), annotations_json, summary
 FROM node_steps
 WHERE team = ? AND run_id = ?
 ORDER BY node_id, attempt, started_at, step_id`, string(t.team), runID)
@@ -1424,7 +1424,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 18
+const expectedSchemaVersion = 21
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1495,17 +1495,15 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 		return fmt.Errorf("sparkwing: this store predates the baseline (it records schema version %d, this build "+
 			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
 	}
-	if s.dialect == DialectPostgres {
-		var translated string
-		translated, err = TranslateSchema(schemaNeutral, s.dialect)
-		if err == nil {
-			err = execStatements(ctx, tx, translated)
-		}
-	} else {
-		_, err = tx.ExecContext(ctx, schemaNeutral)
+	translated, err := TranslateSchema(schemaNeutral, s.dialect)
+	if err == nil {
+		err = execStatements(ctx, tx, translated)
 	}
 	if err != nil {
 		return fmt.Errorf("create baseline schema: %w", err)
+	}
+	if err := tx.operator.installAuditProtection(ctx, tx); err != nil {
+		return fmt.Errorf("protect audit history: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,

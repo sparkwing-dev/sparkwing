@@ -117,8 +117,8 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 		s.logger.Error("storage retention failed", "err", err)
 		return
 	}
-	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 || retained.FreeSlotsReleased > 0 {
-		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions, "free_slots_released", retained.FreeSlotsReleased)
+	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 || retained.AuditEvents > 0 || retained.FreeSlotsReleased > 0 {
+		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions, "audit_events", retained.AuditEvents, "free_slots_released", retained.FreeSlotsReleased)
 	}
 	if _, err := operator.SealAbandonedLogStreams(ctx, lease, 5000); err != nil {
 		s.logger.Error("seal abandoned log streams failed", "err", err)
@@ -204,6 +204,7 @@ type storageTeamJSON struct {
 }
 
 type storageSettingsJSON struct {
+	AuditRetentionDays      int64  `json:"audit_retention_days"`
 	RunRetentionDays        int64  `json:"run_retention_days"`
 	NodeMetricRetentionDays int64  `json:"node_metric_retention_days"`
 	DatabaseAlarmBytes      int64  `json:"database_alarm_bytes"`
@@ -287,12 +288,13 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
 	}
 	settings := store.StorageSettings{
+		AuditRetentionDays:      body.AuditRetentionDays,
 		RunRetentionDays:        body.RunRetentionDays,
 		NodeMetricRetentionDays: body.NodeMetricRetentionDays,
 		DatabaseAlarmBytes:      body.DatabaseAlarmBytes,
 		DefaultTier:             body.DefaultTier,
 	}
-	if body.RunRetentionDays < 0 || body.NodeMetricRetentionDays < 0 || body.DatabaseAlarmBytes < 0 || !validStorageTier(body.DefaultTier) {
+	if body.AuditRetentionDays < 0 || body.RunRetentionDays < 0 || body.NodeMetricRetentionDays < 0 || body.DatabaseAlarmBytes < 0 || !validStorageTier(body.DefaultTier) {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "storage settings require nonnegative limits and a known tier"}
 	}
 	writer, err := s.settingsWriter()
@@ -347,6 +349,7 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request, a
 
 func storageSettingsToJSON(in store.StorageSettings) storageSettingsJSON {
 	return storageSettingsJSON{
+		AuditRetentionDays:      in.AuditRetentionDays,
 		RunRetentionDays:        in.RunRetentionDays,
 		NodeMetricRetentionDays: in.NodeMetricRetentionDays,
 		DatabaseAlarmBytes:      in.DatabaseAlarmBytes,

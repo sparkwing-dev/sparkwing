@@ -16,6 +16,12 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
+	"(*Operator).claimOverflowFactsTx":           "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
+	"(*Operator).claimCollectsAsksTx":            "deployment claims check for open ranking windows across teams; ordinary claimants append their bound team",
+	"(*Operator).claimRefusalTx":                 "a globally unique named run resolves its tenant before the authenticated claimant receives scoped eligibility diagnostics",
+	"(*Operator).installAuditProtection":         "baseline audit collision protection checks globally unique event IDs across teams",
+	"(*Operator).installRunTombstones":           "baseline tombstone trigger writes OLD.team for each deleted run, including bulk retention and purge",
 	"(*Operator).readAuthorityNodeTx":            "a global capability prefix or session hash identifies authority before its authenticated team and immutable membership epoch can be resolved",
 	"(*Operator).recordSessionMembershipsTx":     "sign-in discovers all current memberships of its authenticated session before recording each through a tenant handle",
 	"(*Operator).lookupSessionTx":                "a global session digest identifies the one session being validated and renewed before its team is known",
@@ -35,7 +41,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).SealAbandonedLogStreams":   "leased log maintenance discovers abandoned streams across every tenant",
 	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
 	"(*Operator).expiredUnits":              "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
-	"(*Operator).queuedClaimQuery":          "launcher claims scan deployment queues; ordinary claimant queries append their bound tenant predicate",
 	"(*Operator).launcherKeysTx":            "launcher observations name global unit identities whose stored fence and capability ancestry prove ownership before any award is returned",
 	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",
 	"(*Operator).lockMaintenanceCapacityTx": "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
@@ -53,7 +58,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
-	"(*Operator).RecordBusinessEvent":            "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Operator).recordAudit":                    "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Operator).githubInstallationConnectionTx": "a global installation ID resolves its tenant before tenant-scoped mutation or delivery scheduling",
 	"(*Operator).revokeSelectedCapabilitiesTx":   "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
@@ -161,6 +166,10 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 				continue
 			}
 		}
+		if _, fragment := reviewedClaimSQLFragments[stmt.key]; fragment {
+			seen[stmt.key] = true
+			continue
+		}
 		if exemptFromScope(stmt.key) {
 			seen[stmt.key] = true
 			continue
@@ -174,6 +183,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		t.Errorf("%s: statement in %s touches %s with no team predicate.\n"+
 			"Scope it, or add %q to reviewedUnscopedSQL with the reason it crosses teams.\n\t%s",
 			stmt.pos, stmt.key, strings.Join(tables, ", "), stmt.key, collapse(stmt.text))
+	}
+	for key, why := range reviewedClaimSQLFragments {
+		if !strings.HasPrefix(key, "(*claimSQL).") || why == "" || !seen[key] {
+			t.Errorf("stale or unexplained claim SQL fragment %s", key)
+		}
 	}
 	for key, why := range reviewedUnscopedSQL {
 		if !strings.HasPrefix(key, "(*Operator).") {
@@ -308,7 +322,7 @@ func tenantTablesTouchedBy(sql string) []string {
 	var out []string
 	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
 		name := strings.ToLower(m[1])
-		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"business_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
+		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"audit_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}

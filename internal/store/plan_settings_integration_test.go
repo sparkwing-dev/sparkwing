@@ -39,7 +39,7 @@ func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcce
 	owner.Grants = []capability.Grant{capability.NodeResult}
 	owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 	persistPlanOwner(t, tenant.s, owner)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, now.Add(time.Hour).UnixNano(), admitted.RunID)
+	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, now.Add(time.Hour))
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)

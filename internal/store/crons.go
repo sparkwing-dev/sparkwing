@@ -555,6 +555,7 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
 	}
 	var overrideArgs any
 	var overrideTZ any
+	overrideOverlap := sql.NullString{String: o.Overlap, Valid: o.Overlap != ""}
 	if o.TZSet || o.TZ != "" {
 		overrideTZ = o.TZ
 	}
@@ -583,7 +584,7 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
                 override_catch_up_ns = ?, override_args = ?, override_base = ?,
                 override_set_at = ?, updated_at = ?
           WHERE team = ? AND id = ?`,
-		o.Cron, overrideTZ, o.Overlap, catchUp, overrideArgs, string(base),
+		o.Cron, overrideTZ, overrideOverlap, catchUp, overrideArgs, string(base),
 		setAt.UnixNano(), now.UnixNano(), string(t.team), id)
 	return credentialRowChanged(result, err)
 }

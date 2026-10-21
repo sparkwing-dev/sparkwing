@@ -72,6 +72,10 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	}
 	unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "git:github.com/team/repo"}, SHA: strings.Repeat("a", 40)}
 	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
+	unit.OwnerDeadline, unit.AttemptDeadline, unit.ParentCapabilityExpiry = &deadline, &deadline, &deadline
+	unit.Binding.Deadline = &deadline
+	unit.Engine = &identity
+	unit.Execution = &runspec.JobExecutionSettings{}
 	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: identity}}}
 	switch kind {
 	case capability.UnitPlan:

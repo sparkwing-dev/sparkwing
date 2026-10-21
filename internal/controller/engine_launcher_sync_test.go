@@ -33,7 +33,7 @@ func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
-	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
+	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"]}`, 200)
 	var claim controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &claim); err != nil || claim.Claim == nil {
 		t.Fatalf("claim: %s, %v", w.Body.String(), err)

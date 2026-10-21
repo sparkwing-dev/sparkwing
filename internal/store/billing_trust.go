@@ -77,7 +77,7 @@ type BillingTrustChange struct {
 	Request string
 }
 
-func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
+func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time, actor auditActor) (before, after BillingStanding, err error) {
 	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
 		return before, after, fmt.Errorf("%w: trust must be granted, revoked or automatic", ErrInvalidInput)
 	}
@@ -97,7 +97,7 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 		return before, after, err
 	}
 	if c.Request != "" {
-		if _, err = decideStandingRequestTx(ctx, tx, t.team, c.Request, StandingRequestApproved, c.Actor, c.Reason); err != nil {
+		if _, err = decideStandingRequestTx(ctx, tx, t.team, c.Request, StandingRequestApproved, c.Actor, c.Reason, actor); err != nil {
 			return before, after, err
 		}
 	}
@@ -116,6 +116,6 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	if err != nil {
 		return before, after, err
 	}
-	err = tx.operator.RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventBillingTrustChanged, Team: t.team, SubjectID: subject, Actor: c.Actor, At: now, Attrs: map[string]any{"reason": c.Reason, "trust_before": before.Trust, "trust_after": after.Trust, "standing_before": before.Tier, "standing_after": after.Tier}})
+	err = tx.operator.recordAudit(ctx, tx, auditContext{Team: t.team, Actor: actor, At: now}, auditTrust{ReceiptID: subject, Before: auditTrustValue(before.Trust), After: auditTrustValue(after.Trust), StandingBefore: auditStanding(before.Tier), StandingAfter: auditStanding(after.Tier)})
 	return before, after, err
 }

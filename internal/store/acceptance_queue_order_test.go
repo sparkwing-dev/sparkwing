@@ -87,7 +87,6 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	order := []string{"job", "z-preferred"}
 	if preferred {
 		demand.Labels = []string{"gpu"}
-		order[0], order[1] = order[1], order[0]
 	}
 	for _, id := range order {
 		claim, err := s.AsOperator().ClaimUnit(ctx, demand)

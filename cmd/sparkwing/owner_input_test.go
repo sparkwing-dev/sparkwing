@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
@@ -99,11 +100,14 @@ func TestOwnerInputMatchesPersistedTriggerFence(t *testing.T) {
 	}{
 		{`INSERT INTO teams(name,created_at,updated_at) VALUES ('team',1,1)`, nil},
 		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('team',?,1,'ci','running',?,?,1,?,'host','execute',?,'account',1,'r30',30)`, []any{award.RunID, request, string(award.Request.Hash), string(award.Request.Request.Git.Repository.Key), []byte(`[]`)}},
-		{`INSERT INTO triggers(team,id,unit_kind,status,claimed_by,generation,available_at,created_at,needs_labels,prefers_labels) VALUES ('team',?,'trigger','claimed',?,?,1,1,?,?)`, []any{award.RunID, award.Binding.Holder, award.Binding.Generation, []byte(`[]`), []byte(`[]`)}},
+		{`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES ('team',?,'trigger',1,1,?,?)`, []any{award.RunID, []byte(`[]`), []byte(`[]`)}},
 	} {
 		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := teststore.SeedTriggerClaim(state, t.Context(), "team", award.RunID, store.Actor{CapabilityPrefix: award.Capability, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)}}, award.LeaseExpiresAt, nil); err != nil {
+		t.Fatal(err)
 	}
 	tenant := teststore.ForTeam(t, state, "team")
 	snapshot, err := tenant.ReadSnapshot(t.Context(), award.RunID)

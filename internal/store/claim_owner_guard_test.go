@@ -63,3 +63,58 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 		}
 	}
 }
+
+// Fragments correlate team keys with the final authenticated work/claimant pair.
+// They cannot execute SQL or accept database handles.
+var reviewedClaimSQLFragments = map[string]string{
+	"(*claimSQL).predicate":     "eligibility correlates every tenant row with the work team's authenticated claimant facts",
+	"(*claimSQL).source":        "the final predicate restricts the union of ready work to authorized teams",
+	"(*claimSQL).query":         "the generated query joins tenant-keyed source rows and applies authenticated scope before selection or asks",
+	"(*claimSQL).placementCTEs": "ranking asks correlate with the already eligible tenant/work pair",
+}
+
+func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "claim_query.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(n ast.Node) {
+		ast.Inspect(n, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.Ident:
+				switch v.Name {
+				case "Store", "storeTx", "Operator", "Tenant", "sql", "rowCursor":
+					t.Errorf("claim SQL builder refers to database handle %s", v.Name)
+				}
+			case *ast.CallExpr:
+				if sel, ok := v.Fun.(*ast.SelectorExpr); ok {
+					switch sel.Sel.Name {
+					case "Exec", "ExecContext", "Query", "QueryContext", "QueryRow", "QueryRowContext", "Begin", "BeginTx", "Commit", "Rollback", "Prepare", "PrepareContext":
+						t.Errorf("claim SQL builder executes %s", sel.Sel.Name)
+					}
+				}
+			}
+			return true
+		})
+	}
+	for _, decl := range file.Decls {
+		switch v := decl.(type) {
+		case *ast.GenDecl:
+			for _, spec := range v.Specs {
+				if typ, ok := spec.(*ast.TypeSpec); ok && typ.Name.Name == "claimSQL" {
+					check(typ.Type)
+				}
+			}
+		case *ast.FuncDecl:
+			if v.Recv != nil && len(v.Recv.List) == 1 {
+				star, ok := v.Recv.List[0].Type.(*ast.StarExpr)
+				if ok {
+					if typ, ok := star.X.(*ast.Ident); ok && typ.Name == "claimSQL" {
+						check(v.Type)
+						check(v.Body)
+					}
+				}
+			}
+		}
+	}
+}

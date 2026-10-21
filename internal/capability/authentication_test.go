@@ -200,9 +200,6 @@ func TestAuthenticationSessionLookupIncludesControllerAudience(t *testing.T) {
 				Digest: sha256.Sum256([]byte(presentation.Raw)), Audience: capability.Controller, Team: "a",
 				Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone},
 			}}
-			if class == capability.CredentialConsole {
-				principal.Capability.Subject.Kind = capability.SubjectOperator
-			}
 			reader.snapshot.Authorities = []capability.AuthorityState{{Principal: principal}}
 			route, ok := capability.LookupRoute("GET", "/api/v1/runs")
 			if !ok {

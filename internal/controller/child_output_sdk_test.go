@@ -111,7 +111,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	}
 
 	handler := server.WithEngineController(e.EngineController).HTTP().API
-	parent := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	parent := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award struct {
 		Claim struct {
 			Capability string `json:"capability"`
@@ -326,7 +326,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	}))
 
 	handler := server.WithEngineController(e.EngineController).HTTP().API
-	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award struct {
 		Claim struct {
 			Capability string `json:"capability"`

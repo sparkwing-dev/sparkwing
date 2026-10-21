@@ -190,6 +190,7 @@ func TestGitHubAppRepositoryKeysSurviveRenamesProperty(t *testing.T) {
 			targets := []*store.Tenant{teamHandle(t, st, "acme"), teamHandle(t, st, "other")}
 			ids := []int64{1 + random.Int64N(1<<60), 1 + random.Int64N(1<<60)}
 			now := time.Unix(1700000000, int64(1+random.IntN(999999999))).UTC()
+			st.SetTestClock(t, func() time.Time { return now })
 			for j, target := range targets {
 				installation := acmeInstallation()
 				installation.InstallationID += int64(j)

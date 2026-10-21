@@ -300,12 +300,12 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 		t.Fatalf("reclaim notification: %+v", got)
 	}
 	for _, team := range []*Tenant{old, tenant} {
-		events, err := team.BusinessEvents(t.Context(), "github.installation_reclaimed")
+		events, err := team.BusinessEvents(t.Context(), "github.installation_reclaimed", 1000, "")
 		if err != nil || len(events) != 1 {
 			t.Fatalf("team %s audit: %+v %v", team.team, events, err)
 		}
 		ev := events[0]
-		if ev.Actor != a.Principal.Capability.Subject.ID || ev.Attrs["previous_team"] != "b" || ev.Attrs["new_team"] != "a" || ev.Attrs["installation_id"] != float64(8) || ev.Attrs["github_user_id"] != float64(row.GitHubUserID) {
+		if ev.Actor != a.Principal.Capability.Subject.ID || ev.Attrs["previous_team"] != "b" || ev.Attrs["new_team"] != "a" || ev.Attrs["installation_id"] != float64(8) || ev.Attrs["github_user_id"] != nil {
 			t.Fatalf("missing transfer facts: %+v", ev)
 		}
 	}
@@ -326,7 +326,7 @@ func TestGitHubReclaimRollsBackWhenAuditCannotCommit(t *testing.T) {
 	if _, err := old.TestOnlySeedGitHubInstallation(t.Context(), row, *now); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_reclaim_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_reclaim_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if _, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row); err == nil {
 		t.Fatal("reclaim committed without audit")
 	}

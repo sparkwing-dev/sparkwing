@@ -21,8 +21,9 @@ import (
 func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
 	property := func(selection uint8, value string) bool {
 		e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-		field := []string{"pipelines", "sources", "allow_repos", "repos", "holder_id", "lease_secs", "capacity"}[selection%7]
-		body, err := json.Marshal(map[string]any{"runner_version": "v1", "kinds": []string{"node"}, "available_cores": 1, field: value})
+		fields := []string{"pipelines", "sources", "allow_repos", "repos", "holder_id", "lease_secs", "capacity", "available_cores", "available_memory_bytes"}
+		field := fields[int(selection)%len(fields)]
+		body, err := json.Marshal(map[string]any{"runner_version": "v1", "kinds": []string{"node"}, field: value})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -34,7 +35,7 @@ func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
 		if count != 0 || strings.Contains(w.Body.String(), `"capability"`) {
 			return false
 		}
-		w = engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, http.StatusOK)
+		w = engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, http.StatusOK)
 		var got controllerwire.ClaimResponse
 		return json.Unmarshal(w.Body.Bytes(), &got) == nil && got.Claim != nil && got.Claim.RunID == "run" && got.Claim.JobID == "job"
 	}
@@ -116,7 +117,7 @@ func TestEngineClaimHTTPTriggerQueueKeepsOrder(t *testing.T) {
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
 	h := e.Server.WithEngineController(e.EngineController).Handler()
 	for _, id := range []string{"run", "second", "third", ""} {
-		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`, http.StatusOK)
+		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["trigger"]}`, http.StatusOK)
 		var response controllerwire.ClaimResponse
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
@@ -137,7 +138,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
 	h := e.Server.WithEngineController(e.EngineController).Handler()
-	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`, http.StatusOK)
+	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", `{"runner_version":"v1","kinds":["trigger"]}`, http.StatusOK)
 	var claimed controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &claimed); err != nil || claimed.Claim == nil {
 		t.Fatalf("claim: %s %v", w.Body, err)
@@ -201,7 +202,7 @@ func TestEngineNamedClaimHTTPRequiresReadyMatchingWork(t *testing.T) {
 	for _, state := range []string{"ready", "held", "missing", "wrong grant", "unready", "finished", "missing label", "matching label"} {
 		t.Run(state, func(t *testing.T) {
 			e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-			body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":1}`
+			body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job"}`
 			status := http.StatusOK
 			switch state {
 			case "held":

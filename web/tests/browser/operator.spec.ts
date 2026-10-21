@@ -75,6 +75,29 @@ test("the operator finds a team and reads its standing", async ({ page }) => {
   await expect(page.getByText("billing.trust_changed")).toBeVisible();
 });
 
+test("audit history continues through the browser client and preserves mutation targets", async ({ page }) => {
+  await mockOperator(page, {
+    ...acme,
+    events: [{ at: 1_790_000_000, kind: "team.mutated", actor: "operator-1", subject_id: "account-1", attrs: { operation: "membership_removed" } }],
+    next_cursor: "fact:older/1",
+  });
+  const cursors: string[] = [];
+  await page.route("**/api/v1/operator/teams/acme?cursor=*", async (route) => {
+    cursors.push(new URL(route.request().url()).searchParams.get("cursor") ?? "");
+    await route.fulfill({ json: {
+      ...acme,
+      events: [{ at: 1_789_000_000, kind: "run.deleted", run_id: "run-1", subject_id: "run-1" }],
+    } });
+  });
+  await page.goto("/operator?team=acme");
+  await expect(page.getByText(/membership_removed · subject account-1/)).toBeVisible();
+  await page.getByRole("button", { name: "Load older events" }).click();
+  await expect(page.getByText(/subject run-1 · run run-1/)).toBeVisible();
+  await expect(page.getByText(/membership_removed · subject account-1/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load older events" })).toHaveCount(0);
+  expect(cursors).toEqual(["fact:older/1"]);
+});
+
 test("an action is sent only after its confirmation names the team and effect", async ({
   page,
 }) => {

@@ -105,14 +105,14 @@ func TestCredentialMemberHTTPMembershipAndSessionLifecycle(t *testing.T) {
 func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 	property := func(mutation uint8, header []byte, trigger bool) bool {
 		e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-		body := `{"runner_version":"v1","kinds":["node"],"available_cores":1}`
+		body := `{"runner_version":"v1","kinds":["node"]}`
 		if trigger {
 			e, _ = engineRuntimeStore(t)
 			e.claimProfiles = engineProfileFake{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root = engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})
 			h = New(e.Store, nil).WithEngineController(e.EngineController).Handler()
-			body = `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`
+			body = `{"runner_version":"v1","kinds":["trigger"]}`
 		}
 		w := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", body, 200)
 		var response controllerwire.ClaimResponse
@@ -137,7 +137,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 			}
 		case 3:
 			if trigger {
-				engineSQL(t, e.Store, `UPDATE triggers SET status='done',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND id='run'`)
+				engineSQL(t, e.Store, `UPDATE triggers SET status='done',finished_at=1,claimed_by=NULL,claimed_at=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND id='run'`)
 			} else {
 				engineSQL(t, e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run' AND node_id='job'`)
 			}
@@ -295,7 +295,7 @@ func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 
 func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
+	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
 	var response controllerwire.ClaimResponse
 	if json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Claim == nil {
 		t.Fatal("missing awarded capability")

@@ -99,7 +99,7 @@ func TestDataStorageSignedFilesystemRoutes(t *testing.T) {
 
 func TestNativeBindingForbiddenReasonProperty(t *testing.T) {
 	_, handler, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	response := engineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	response := engineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("claim: %v %s", err, response.Body)

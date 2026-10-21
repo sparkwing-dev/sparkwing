@@ -43,7 +43,7 @@ func TestRunnerRoutesMaskDependencyFailuresProperty(t *testing.T) {
 		fail                    func(error)
 	}{
 		{"GET", "/api/v1/runners", "", member, runners, func(err error) { inventory.err = err }},
-		{"POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, machine, claims, func(err error) {
+		{"POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, machine, claims, func(err error) {
 			engine.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return err })
 		}},
 	} {

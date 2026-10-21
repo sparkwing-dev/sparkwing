@@ -26,7 +26,7 @@ func TestEngineClaimHTTPChunkedBody(t *testing.T) {
 			t.Fatalf("HTTP %d %s", w.Code, w.Body)
 		}
 	}
-	r := httptest.NewRequest("POST", "/api/v1/runners/claim", unsizedRequestBody{strings.NewReader(`{"runner_version":"v1","kinds":["node"],"available_cores":1}`)})
+	r := httptest.NewRequest("POST", "/api/v1/runners/claim", unsizedRequestBody{strings.NewReader(`{"runner_version":"v1","kinds":["node"]}`)})
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+raw)
 	if r.ContentLength != -1 {

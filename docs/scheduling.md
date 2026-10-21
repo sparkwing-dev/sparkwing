@@ -119,9 +119,10 @@ worker loop. All claim paths apply the same matcher before awarding authority.
 
 ## Waiting jobs
 
-An eligible runner must also have available capacity. A busy machine leaves
-work queued. A request that cannot fit its capacity is ineligible. Preferences
-order eligible work without widening the eligible set. Queue observations retain
+Runners ask for work when they can execute it. A job requires every selector
+term to match the runner's labels. Within a term, comma-separated alternatives
+are ORed. Claims order eligible jobs by the team's last award, then arrival and
+identity. Preference holds can delay a later placement without widening eligibility. Queue observations retain
 holders, ordered waiters, pressure, estimates and missing measurements:
 
 ```bash

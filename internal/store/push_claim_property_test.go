@@ -87,7 +87,7 @@ func TestPushAwardRefusesScopeEscape(t *testing.T) {
 	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, root)
 	writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureOtherSHA})
-	rewriteSchemaExec(t, s.db, `UPDATE triggers SET claimed_by='actions',generation=1,lease_expires_at=?`, s.now().Add(time.Hour).UnixNano())
+	seedTriggerClaim(t, s, "run", "actions", "actions", 1, s.now().Add(time.Hour))
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
 		_, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect}})
 		return err

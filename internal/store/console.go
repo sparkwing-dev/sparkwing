@@ -26,9 +26,9 @@ func (s *Store) AsConsole(allowed func(string) bool) *Console {
 	return &Console{s: s, allowed: allowed}
 }
 
-func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorized, write func(*storeTx, string) (T, error), discovery ...func(*storeTx, lockSet) lockSet) (T, error) {
+func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorized, write func(*storeTx, auditActor) (T, error), discovery ...func(*storeTx, lockSet) lockSet) (T, error) {
 	var zero T
-	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectOperator {
+	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectAccount {
 		return zero, authorityError(apierr.Forbidden, "direct operator session required")
 	}
 	var result T
@@ -54,7 +54,7 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), now, 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, now) {
 			return authorityError(apierr.Forbidden, "direct operator session required")
 		}
-		result, err = write(tx, p.Capability.Subject.ID)
+		result, err = write(tx, auditPrincipalActor(p))
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ func consoleReason(reason string) (string, error) {
 
 // ConsoleGrantCredit grants free credits once under the current operator's identity.
 func (c *Console) ConsoleGrantCredit(ctx context.Context, a capability.Authorized, req CreditGrantRequest) (CreditGrantResult, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (CreditGrantResult, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (CreditGrantResult, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return CreditGrantResult{}, err
@@ -106,14 +106,14 @@ func (c *Console) ConsoleGrantCredit(ctx context.Context, a capability.Authorize
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
-		req.CreatedBy = actor
-		return recordCreditGrantTx(ctx, tx, t.team, req)
+		req.CreatedBy = actor.subject.ID
+		return recordCreditGrantTx(ctx, tx, t.team, req, actor)
 	})
 }
 
 // ConsoleSetBillingTrust records trust and its audit under current operator authority.
 func (c *Console) ConsoleSetBillingTrust(ctx context.Context, a capability.Authorized, change BillingTrustChange) (BillingStanding, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (BillingStanding, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (BillingStanding, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return BillingStanding{}, err
@@ -122,15 +122,15 @@ func (c *Console) ConsoleSetBillingTrust(ctx context.Context, a capability.Autho
 		if err != nil {
 			return BillingStanding{}, err
 		}
-		change.Actor = actor
-		_, after, err := t.setBillingTrustTx(ctx, tx, change, tx.now(ctx))
+		change.Actor = actor.subject.ID
+		_, after, err := t.setBillingTrustTx(ctx, tx, change, tx.now(ctx), actor)
 		return after, err
 	})
 }
 
 // ConsoleFreeze places a new operator hold and returns the committed freeze snapshot.
 func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, reason string) (TeamCreditFreeze, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (TeamCreditFreeze, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (TeamCreditFreeze, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return TeamCreditFreeze{}, err
@@ -143,7 +143,7 @@ func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}
-		if _, err := holdCreditFreezeTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor, tx.now(ctx)); err != nil {
+		if _, err := holdCreditFreezeTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor.subject.ID, tx.now(ctx), actor); err != nil {
 			return TeamCreditFreeze{}, err
 		}
 		return teamCreditFreezeTx(ctx, tx, t.team)
@@ -152,7 +152,7 @@ func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, re
 
 // ConsoleUnfreeze releases a named hold or only operator holds when none is named.
 func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string, noFault bool) (TeamCreditFreeze, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (TeamCreditFreeze, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (TeamCreditFreeze, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return TeamCreditFreeze{}, err
@@ -162,7 +162,7 @@ func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, 
 			return TeamCreditFreeze{}, err
 		}
 		hold = strings.TrimSpace(hold)
-		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", noFault, actor, reason, tx.now(ctx))
+		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", noFault, actor.subject.ID, reason, tx.now(ctx), actor)
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}
@@ -175,12 +175,12 @@ func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, 
 
 // ConsoleDeleteTeam queues deletion after checking money in flight under current authority.
 func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized) (TeamDeletion, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (TeamDeletion, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (TeamDeletion, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return TeamDeletion{}, err
 		}
-		if _, err := t.markForDeletionTx(ctx, tx, actor, tx.now(ctx)); err != nil {
+		if _, err := t.markForDeletionTx(ctx, tx, actor.subject.ID, tx.now(ctx)); err != nil {
 			return TeamDeletion{}, err
 		}
 		return teamDeletionTx(ctx, tx, t.team)
@@ -191,7 +191,7 @@ func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized
 
 // ConsoleDeleteAccount resolves the selected account and erases it in the authorized transaction.
 func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authorized) (AccountDeletion, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, _ string) (AccountDeletion, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, _ auditActor) (AccountDeletion, error) {
 		account, err := accountTx(ctx, tx, a.Target.AccountID)
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
 			account, err = accountByEmailTx(ctx, tx, a.Target.AccountID)
@@ -215,7 +215,7 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 
 // ConsoleSetCreditSettings preserves installed price tables under current operator authority.
 func (c *Console) ConsoleSetCreditSettings(ctx context.Context, a capability.Authorized, up CreditSettingsUpdate) (CreditSettings, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, _ string) (CreditSettings, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, _ auditActor) (CreditSettings, error) {
 		if err := advisoryLockTx(ctx, tx, "sparkwing/credit-settings"); err != nil {
 			return CreditSettings{}, err
 		}
@@ -225,7 +225,7 @@ func (c *Console) ConsoleSetCreditSettings(ctx context.Context, a capability.Aut
 
 // ConsoleUnbindGitHubInstallation removes the current installation and its dependent schedules atomically.
 func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capability.Authorized, installation int64) (Team, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, _ string) (Team, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, _ auditActor) (Team, error) {
 		if installation <= 0 {
 			return "", ErrInvalidInput
 		}
@@ -245,7 +245,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 
 // ConsoleApproveWaitlist admits one stable batch per request key under current operator authority.
 func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Authorized, ids []string, oldest int, key string) ([]Account, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) ([]Account, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) ([]Account, error) {
 		ids := slices.Clone(ids)
 		if key == "" || oldest < 0 || (len(ids) > 0) == (oldest > 0) {
 			return nil, ErrInvalidInput
@@ -258,7 +258,7 @@ func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Autho
 			return nil, err
 		}
 		digest := sha256.Sum256(request)
-		identity, err := json.Marshal([]string{actor, key})
+		identity, err := json.Marshal([]string{actor.subject.ID, key})
 		if err != nil {
 			return nil, err
 		}

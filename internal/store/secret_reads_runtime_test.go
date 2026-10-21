@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -88,30 +87,30 @@ func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T
 	if err != nil || row == nil || row.Value != "sealed" || row.Pipeline != "p" {
 		t.Fatalf("read: %+v %v", row, err)
 	}
-	events, err := tenant.ReadStateEvents(t.Context(), a.Binding.RunID, 0, 100)
+	events, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	count := 0
 	for _, event := range events {
-		if event.Kind != "secret_released" {
+		if event.Kind != "secret.released" {
 			continue
 		}
 		count++
-		var body map[string]any
-		if err := json.Unmarshal(event.Payload, &body); err != nil || body["name"] != "KEY" || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
-			t.Fatalf("audit: %+v %v", event, err)
+		body := event.Attrs
+		if body["name_digest"] != digestAudit("KEY").String() || !strings.HasPrefix(event.Actor, string(a.Principal.Capability.Subject.Kind)+":") || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
+			t.Fatalf("audit: %+v", event)
 		}
 	}
 	if count != 1 {
 		t.Fatalf("release audits: %d", count)
 	}
-	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_release BEFORE INSERT ON events WHEN NEW.kind='secret_released' BEGIN SELECT RAISE(ABORT,'refused'); END`)
+	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_release BEFORE INSERT ON audit_events WHEN NEW.kind='secret.released' BEGIN SELECT RAISE(ABORT,'refused'); END`)
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("unaudited read: %+v %v", row, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_release`)
-	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER cancel_on_release AFTER INSERT ON events WHEN NEW.kind='secret_released' BEGIN UPDATE runs SET cancel_requested_at=1 WHERE id=NEW.run_id; END`)
+	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER cancel_on_release AFTER INSERT ON audit_events WHEN NEW.kind='secret.released' BEGIN UPDATE runs SET cancel_requested_at=1 WHERE id=NEW.run_id; END`)
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("read outlived authorization: %+v %v", row, err)
 	}
@@ -162,7 +161,7 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 				t.Fatalf("invalid read %d: %+v %v", i, row, err)
 			}
 			var count int
-			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&count); err != nil || count != 0 {
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='secret.released'`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("refused release audit: %d %v", count, err)
 			}
 		})
@@ -250,6 +249,20 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	}
 }
 
+func TestSecretReadRunnerNameCannotImpersonateAccount(t *testing.T) {
+	tenant, a := secretReadStoreFixture(t)
+	name := a.Principal.Capability.Subject.ID
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, 'other@example.test',1,1)`, name)
+	if _, err := tenant.ReadSecret(t.Context(), a); err != nil {
+		t.Fatal(err)
+	}
+	var actor string
+	var account int
+	if err := tenant.s.db.QueryRow(`SELECT actor,actor_is_account FROM audit_events WHERE kind='secret.released'`).Scan(&actor, &account); err != nil || actor == name || actor == "" || account != 0 {
+		t.Fatalf("runner named account attributed as account: actor=%q account=%d err=%v", actor, account, err)
+	}
+}
+
 func TestSecretReadRefusesLeaseExpiredWhileWaitingForLock(t *testing.T) {
 	tenant, authorized := secretReadStoreFixture(t)
 	s := tenant.s
@@ -303,7 +316,7 @@ func TestSecretReadRefusesLeaseExpiredWhileWaitingForLock(t *testing.T) {
 		t.Fatalf("expired claim released secret after lock wait: %+v, %v", got.secret, got.err)
 	}
 	var releases int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&releases); err != nil || releases != 0 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='secret.released'`).Scan(&releases); err != nil || releases != 0 {
 		t.Fatalf("expired release audit count = %d, error = %v", releases, err)
 	}
 }
@@ -316,7 +329,7 @@ func TestSecretReadClockFailureCommitsNothing(t *testing.T) {
 	clockErr := errors.New("clock unavailable during secret release")
 	audited, failed := false, false
 	connection.beforeExec = func(query string) {
-		if strings.HasPrefix(strings.TrimSpace(query), "INSERT INTO events ") {
+		if strings.HasPrefix(strings.TrimSpace(query), "INSERT INTO audit_events ") {
 			// safety: fail the final authority check after the audit has been written.
 			audited = true
 			s.pinnedClock = nil
@@ -334,7 +347,7 @@ func TestSecretReadClockFailureCommitsNothing(t *testing.T) {
 		t.Fatalf("audited=%v failed=%v secret=%+v error=%v", audited, failed, secret, err)
 	}
 	var releases int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&releases); err != nil || releases != 0 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='secret.released'`).Scan(&releases); err != nil || releases != 0 {
 		t.Fatalf("committed releases = %d, error = %v", releases, err)
 	}
 }

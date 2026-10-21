@@ -74,39 +74,17 @@ func unitBillingPriceTx(ctx context.Context, tx *storeTx, selectors []string, pr
 	return table.ClassForLabels(selectors, profile)
 }
 
-func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud, lock bool) (bool, error) {
-	var err error
+func checkUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud bool) error {
 	view := ledgerView{tx: tx, team: team}
-	if lock {
-		l, err := lockLedgerTx(ctx, tx, team)
-		if err != nil {
-			return false, err
-		}
-		view = l.view()
-	}
 	if cloud {
-		err = checkOverflowTx(ctx, tx, team, string(unit.RunID))
-		var overflow *apierr.Error
-		if errors.As(err, &overflow) && overflow.Code == apierr.LockHeld {
-			return false, nil
+		if err := checkOverflowTx(ctx, tx, team, string(unit.RunID)); err != nil {
+			return err
 		}
-		if err != nil {
-			return false, err
-		}
-		err = checkCloudCapacityTx(ctx, view, price.Cores)
-		var refused *apierr.Error
-		if errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) || errors.Is(err, ErrInsufficientCredits) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
+		if err := checkCloudCapacityTx(ctx, view, price.Cores); err != nil {
+			return err
 		}
 	}
-	err = unitCreditRefusalViewTx(ctx, view, unit, price)
-	if errors.Is(err, ErrInsufficientCredits) {
-		return false, nil
-	}
-	return err == nil, err
+	return unitCreditRefusalViewTx(ctx, view, unit, price)
 }
 
 func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate) error {
@@ -123,7 +101,6 @@ func unitCreditRefusalViewTx(ctx context.Context, view ledgerView, unit UnitRef,
 		return err
 	}
 	return refuseUnfundedTx(ctx, view, amount, string(unit.RunID), string(unit.NodeID))
-
 }
 
 func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64) (*billingAward, error) {

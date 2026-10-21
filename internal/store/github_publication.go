@@ -84,7 +84,7 @@ func (t *Tenant) PrepareGitHubAppPublication(ctx context.Context, installation, 
 }
 
 func ensureGitHubPublicationTx(ctx context.Context, tx *storeTx, team Team, repository int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO github_app_publications(team,repository_id,generation) VALUES (?,?,0) ON CONFLICT DO NOTHING`, team, repository)
+	_, err := tx.ExecContext(ctx, `INSERT INTO github_app_publications(team,repository_id,generation) VALUES (?,?,0) ON CONFLICT(team,repository_id) DO NOTHING`, team, repository)
 	return err
 }
 

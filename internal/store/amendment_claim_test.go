@@ -51,7 +51,7 @@ func TestMixedClaimSelectionUsesOneRankedQueue(t *testing.T) {
 			demand.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
 			maintenanceRun(t, s, "other", 2, RunRunning)
 			rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'other',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
-			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done' WHERE id='other'`)
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=? WHERE id='other'`, s.now().UnixNano())
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET run_id='other'`)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=2 WHERE id='run'`)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=3 WHERE run_id='other'`)

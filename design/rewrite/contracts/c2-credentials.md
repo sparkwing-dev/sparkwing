@@ -2964,13 +2964,16 @@ The existing reversePaymentTx owns prior reversals and the paid-total bound.
 Its reference is `refund:<mode>:<refund_id>`, shared with verified provider
 settlement, so later delivery cannot debit the same refund twice.
 
-The existing business_events table retains operator.refund_recorded with the
-operator, reason, normalized request digest and result. Its subject hashes the
-operator and request key, scoped by path team. Exact replay returns the receipt.
-Changed request or mode conflicts. Authority is rechecked even on replay.
-The ledger reversal, its existing audit and the request receipt commit together.
+`console_refund_receipts` retains the normalized request digest and original
+result independently of audit retention. Its key hashes the operator and request
+key, scoped by path team. Exact replay returns that receipt, including its
+original balances and `created` value. Changed request or mode conflicts.
+Authority is rechecked even on replay. The ledger reversal, its audit projection
+and the durable request receipt commit together. The expiring
+`operator.refund_recorded` audit contains the operator identifier, receipt ID,
+payment and refund digests and financial result. It contains no reason.
 OperatorRefundRecorded returns team, optional grant_id, paid_micro,
-reversed_micro, balance_micro and created. No schema change is needed.
+reversed_micro, balance_micro and created.
 
 <!-- design:end -->
 
