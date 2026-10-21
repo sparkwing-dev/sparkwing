@@ -53,7 +53,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil {
 		return err
 	}
-	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: identity.RunID, Spec: raw, SpecHash: string(accepted.Hash), PlanHash: string(accepted.PlanHash)}, NodeID: attempt.NodeID, Attempt: attempt.Attempt, Generation: attempt.Generation, Authority: nodehost.ClaimAuthority{Holder: "logger", CapabilityPrefix: identity.CapabilityRef}, Storage: nodehost.StorageBinding{Bytes: data.Bytes, Records: data.Records, Authority: authority}}
+	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: identity.RunID, Spec: raw, SpecHash: string(accepted.Hash), PlanHash: string(accepted.PlanHash)}, NodeID: attempt.NodeID, Attempt: runspec.AttemptOrdinal(attempt.Attempt), Generation: runspec.ClaimGeneration(attempt.Generation), Authority: nodehost.ClaimAuthority{Holder: "logger", CapabilityPrefix: identity.CapabilityRef}, Storage: nodehost.StorageBinding{Bytes: data.Bytes, Records: data.Records, Authority: authority}}
 	body := seed[:]
 	if seed[0]%2 == 0 {
 		body = nil
@@ -243,7 +243,7 @@ func seedStorageJobClaim(t testing.TB, ctx context.Context, s *store.Store, comm
 	c.Digest = sha256.Sum256([]byte(c.Prefix))
 	c.Grants = []capability.Grant{capability.DataRead, capability.DataWrite}
 	c.Issuance, c.Unit, c.Purpose, c.Delivery = capability.Award, capability.UnitNode, capability.PurposeWork, capability.DeliveryDirect
-	unit, err := json.Marshal(store.UnitRef{Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+	unit, err := json.Marshal(store.UnitRef{Kind: c.Unit, RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}

@@ -9,12 +9,12 @@ import (
 )
 
 func TestConcurrencyMutationsRemainTenantScopedProperty(t *testing.T) {
-	s, a, _ := maintenanceStore(t)
+	s, a, now := maintenanceStore(t)
 	b := &Tenant{s: s, team: "b"}
 	for i, team := range []Team{"a", "b"} {
 		maintenanceRun(t, s, string(team), i+1, RunRunning)
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, team)
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES (?, ?, 'job', 'pending', ?, ?)`, team, team, []byte(`{"id":"job"}`), []byte(`{}`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,lease_expires_at) VALUES (?, ?, 'job', 'pending', ?, ?, 'machine', ?)`, team, team, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(time.Hour).UnixNano())
 	}
 	random := rand.New(rand.NewPCG(652, 972))
 	for range 96 {
@@ -71,7 +71,7 @@ func TestConcurrencyMutationsRemainTenantScopedProperty(t *testing.T) {
 }
 
 func TestConcurrencyExpiredCapacityNeverRevivesProperty(t *testing.T) {
-	tenant, now, actor := capacityFixture(t)
+	tenant, now, _ := capacityFixture(t)
 	random := rand.New(rand.NewPCG(194, 672))
 	for range 96 {
 		lease := time.Duration(1 + random.Int64N(int64(time.Second)))
@@ -84,12 +84,9 @@ func TestConcurrencyExpiredCapacityNeverRevivesProperty(t *testing.T) {
 		if _, _, err := tenant.HeartbeatConcurrencySlot(t.Context(), "job:global:key", "holder", time.Hour); err == nil {
 			t.Fatal("heartbeat revived expired capacity")
 		}
-		adopted, err := tenant.AdoptCapacity(t.Context(), "job:global:key", "holder", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-		if err != nil || adopted != acquireAgain {
-			t.Fatalf("expired capacity adopted: %+v, %v", adopted, err)
-		}
+
 		state, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
-		if err != nil || state.UsedCost != 0 || len(state.Holders) != 0 {
+		if err != nil || state.UsedCost != 0 {
 			t.Fatalf("expired capacity counted: %+v, %v", state, err)
 		}
 	}

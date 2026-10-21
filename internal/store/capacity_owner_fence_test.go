@@ -16,11 +16,7 @@ func FuzzCapacityMutationsRejectReplacedOwnerAndCapturedBinding(f *testing.F) {
 		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','holder','run','job',?,?,3)`, now.UnixNano(), now.Add(time.Hour).UnixNano())
 		if replaceWork {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET generation=generation+? WHERE team='a' AND run_id='run' AND node_id='job'`, int64(delta)+1)
-			current := binding
-			current.Generation += int64(delta) + 1
-			if _, err := tenant.AdoptCapacity(t.Context(), "job:global:key", "holder", current, actor); err != nil {
-				t.Fatal(err)
-			}
+
 		} else {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET generation=generation+? WHERE name='controller.owner'`, int64(delta)+1)
 		}
@@ -28,13 +24,11 @@ func FuzzCapacityMutationsRejectReplacedOwnerAndCapturedBinding(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		switch operation % 3 {
+		switch operation % 2 {
 		case 0:
 			_, err = tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "job:global:key", HolderID: "holder", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1}, binding, actor)
 		case 1:
 			_, err = tenant.ResolveCapacityWaiter(t.Context(), "job:global:key", binding, actor)
-		case 2:
-			_, err = tenant.AdoptCapacity(t.Context(), "job:global:key", "holder", binding, actor)
 		}
 		if err == nil {
 			t.Fatal("stale authority or binding mutated capacity")
@@ -62,8 +56,9 @@ func TestCapacityExpiredWaiterCannotBePromotedByRelease(t *testing.T) {
 	}
 }
 
-func TestCapacityMaintenanceCannotPromoteStaleWaiterBinding(t *testing.T) {
+func TestCapacityMaintenanceCannotPromotePartOfAdmissionSet(t *testing.T) {
 	tenant, now, _ := capacityFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO admission_work(team,run_id,node_id,arrived_at,lease_expires_at,generation,holder) VALUES ('a','run','job',?,?,2,'waiter')`, now.UnixNano(), now.Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run','job',?,?,2,'queue')`, now.UnixNano(), now.Add(time.Hour).UnixNano())
 	result, err := tenant.s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, tenant.s), ConcurrencyMaintenanceOptions{})
 	if err != nil || result.Promoted != 0 {
@@ -72,19 +67,6 @@ func TestCapacityMaintenanceCannotPromoteStaleWaiterBinding(t *testing.T) {
 	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
 	if err != nil || len(state.Holders) != 0 {
 		t.Fatalf("stale waiter became successor holder: %+v, %v", state, err)
-	}
-}
-
-func TestCapacityAdoptionCannotRetainReplacedJobWaiter(t *testing.T) {
-	tenant, now, actor := capacityFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run','job',?,?,2,'queue')`, now.UnixNano(), now.Add(time.Hour).UnixNano())
-	got, err := tenant.AdoptCapacity(t.Context(), "job:global:key", "waiter", CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}, actor)
-	if err != nil || got != acquireAgain {
-		t.Fatalf("replacement execution retained its predecessor's arrival: %s, %v", got, err)
-	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
-	if err != nil || len(state.Waiters) != 0 {
-		t.Fatalf("stale waiter survived adoption: %+v, %v", state, err)
 	}
 }
 

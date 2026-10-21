@@ -29,6 +29,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 		return err
 	}
 	now := time.Unix(1700000000, 83).UTC()
+	s.SetTestClock(t, func() time.Time { return now })
 	repo := filepath.Join(root, "repo")
 	for i, team := range []store.Team{store.DefaultTeam, "other"} {
 		tenant, err := s.ForTeam(ctx, team)
@@ -36,12 +37,12 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 			return err
 		}
 		row := store.CronSchedule{ID: fmt.Sprintf("schedule-%d", i), RepoPath: repo, Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC"}
-		stored, created, err := tenant.ArmCronSchedule(ctx, row, now)
+		stored, created, err := tenant.ArmCronSchedule(ctx, row)
 		if err != nil || !created || stored.Team != team || !stored.ArmedAt.Equal(now) {
 			return fmt.Errorf("tenant schedule: %+v, %v, %v", stored, created, err)
 		}
 		fire := &store.CronFire{Outcome: store.CronOutcomeMissed, DueAt: now, DecidedAt: now, Detail: "past catch-up"}
-		if err := tenant.ResolveCronDue(ctx, row.ID, now, nil, fire, now); err != nil {
+		if err := tenant.ResolveCronDue(ctx, row.ID, now, nil, fire); err != nil {
 			return err
 		}
 	}
@@ -52,7 +53,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 	if _, err := local.GetCronSchedule(ctx, "schedule-1"); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("foreign schedule read: %v", err)
 	}
-	if err := local.SetCronSchedulePaused(ctx, "schedule-1", true, now); !errors.Is(err, store.ErrNotFound) {
+	if err := local.SetCronSchedulePaused(ctx, "schedule-1", true); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("foreign schedule write: %v", err)
 	}
 	if fires, err := local.ListCronFires(ctx, "schedule-1", 10); err != nil || len(fires) != 0 {
@@ -66,7 +67,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 		return err
 	}
 	later := now.Add(time.Minute)
-	if err := local.ResolveCronDue(ctx, before.ID, later, &later, &store.CronFire{Outcome: store.CronOutcomeMissed, DueAt: later, DecidedAt: later}, later); err == nil {
+	if err := local.ResolveCronDue(ctx, before.ID, later, &later, &store.CronFire{Outcome: store.CronOutcomeMissed, DueAt: later, DecidedAt: later}); err == nil {
 		return errors.New("failed history write advanced the schedule")
 	}
 	if _, err := s.DB().ExecContext(ctx, `DROP TRIGGER refuse_schedule_history`); err != nil {

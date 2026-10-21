@@ -41,7 +41,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := original.Host.execute(ctx, original.Input, original.Accepted, entry, store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: original.Input.RunID, NodeID: "setup"}, Actor: original.Actor, Policy: store.SourceNone}); err != nil {
+				if err := original.Host.execute(ctx, original.Input, original.Accepted, entry, store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: runspec.RunID(original.Input.RunID), NodeID: "setup"}, Actor: original.Actor, Policy: store.SourceNone}); err != nil {
 					t.Fatal(err)
 				}
 			} else if result, err := original.Host.Run(ctx, original.Input); err != nil || result.Outcome != "failed" {
@@ -97,7 +97,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			if !slices.Equal(got, want) {
 				t.Fatalf("%s executed %v, want %v", mode, got, want)
 			}
-			setup, err := retry.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: retry.Input.RunID, NodeID: "setup"})
+			setup, err := retry.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(retry.Input.RunID), NodeID: "setup"})
 			if err != nil || mode == "failed" && setup.Attempt != 0 || mode == "all" && setup.Attempt != 1 {
 				t.Fatalf("retry execution/materialization attempts=%d error=%v", setup.Attempt, err)
 			}

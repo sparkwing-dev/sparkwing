@@ -1375,7 +1375,8 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
-`NodeTransition.SourceAttempt` is a required nonnegative ordinal pointer for
+`StartNode`, `RetryNode`, `ReportNode` and `ReleaseNode` carry a
+`SourceAttempt` field. It is a required nonnegative ordinal pointer for
 holder start, retry, report and unstarted release. It names the persisted ordinal
 before the edge. Initial start supplies an explicit zero. A resumed claim supplies
 the last ordinal it retained through disruption. Start and retry return the new
@@ -1414,7 +1415,7 @@ one transaction. The fence is checked before work and before commit. Any failure
 returns zero counters and rolls back the whole pass. Expired waiter leases never
 retain arrival order. Waiters bound to terminal or missing jobs cannot promote.
 Live blocked waiters retain their arrival and lease across owner generations.
-Queue precedence, promotion and adoption share the same continuity rule. A job
+Queue precedence, grouped grants and renewal share claim-or-owner liveness. A job
 generation still fences replacement executions. Options retain the existing
 promotion lease and abandoned-waiter age defaults.
 
@@ -2893,7 +2894,7 @@ schema version is added.
 | Create | `internal/storage/state_contract.go` |
 | Create | `internal/store/claim_contract.go` |
 | Create | `internal/store/completion.go` |
-| Create | `internal/store/capacity_adoption.go` |
+| Delete | `internal/store/capacity_adoption.go` |
 | Create | `internal/store/maintenance_contract.go` |
 | Create | `internal/store/node_state.go` |
 | Implement | `internal/store/result_metadata.go` |
@@ -3106,17 +3107,11 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AcknowledgeRunEffect` | AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev. |
 | `Tenant.RetryRunEffect` | RetryRunEffect records a failed delivery without overwriting a later desired state or its due work. |
 
-### internal/store/capacity_adoption.go
-
-| Export | Purpose |
-|---|---|
-| `CapacityBinding` | Captures the run, job and generation whose capacity follows work across owner loss. |
-
 ### internal/store/capacity_admission.go
 
 | Export | Purpose |
 |---|---|
-| `Tenant.AdmitCapacity` | Reads all accepted groups and the award's persisted host identity, then adopts, resolves or acquires under one transaction. |
+| `Tenant.MayStart` | Derives the complete accepted job group set and award host, then commits a grant and start permit, wait or terminal policy outcome. |
 
 ### internal/store/maintenance_contract.go
 
@@ -3223,10 +3218,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `NodeTransitions` | NodeTransitions returns fresh data so callers cannot mutate the store's legal transition table. Insertions start at pending with state_seq=0 through AcceptPlan or AcceptExpansion and are not edges. |
 | `NodeResult` | NodeResult references authorized records; raw digests alone never authorize output attachment. |
 | `MaterializeSource` | MaterializeSource preserves the read edge that permits copying another result. |
-| `TransitionExtra` | TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused. |
 | `ApprovalResolution` | ApprovalResolution records the resolver and policy result in the same transaction as the node edge. |
 | `ClaimAward` | ClaimAward identifies an award already derived by the store; callers cannot choose its team or grants. |
-| `NodeTransition` | NodeTransition has no caller-selected event kind or clock; the edge determines both. |
+| `NodeCommand` | A closed set of named operations fixes each edge and its payload before normalization. |
 | `Applied` | Applied distinguishes an identical replay from a state change or a cooperative cancellation request. |
 | `IllegalTransitionReason` | IllegalTransitionReason maps stale authority to lock_held and invalid edges to illegal_transition. |
 | `ErrIllegalTransition` | ErrIllegalTransition refuses a failed write loudly; a zero-row mutation is never success. |
@@ -4050,9 +4044,10 @@ Replacing the armer cannot admit a second run for an already committed instant.
 The tick reloads the tenant's stored row before passing it to the writer, so
 caller-supplied schedule fields cannot replace persisted intent.
 
-`Tenant.AdmitCapacity` owns logical admission for every execution placement.
-It reads sealed declarations and award bindings, acquires plan capacity before
-job capacity and preserves generation, lease and recovery adoption fencing.
+`Tenant.MayStart` owns logical admission for every execution placement.
+It reads sealed declarations and actual job awards, grants complete job sets,
+and preserves reservation identity and queue arrival independently of owners.
+Store release transitions commit plan admission with release permission.
 The public queue API retains group reads and member priority control. Single-group
 mutation and resolution routes are deleted. `ConcurrencyStore` is a tenant read
 port. Claim group reads preserve contention accounting while removing memo keys
@@ -4133,8 +4128,8 @@ inheritance surface tests. Weighted admission, backfill, cancellation, promotion
 owner-loss continuity and real result materialization retain their tests. The
 native harness still owns PostgreSQL and socket verification.
 
-The implemented capacity-adoption types and transaction now live in
-`internal/store/capacity_adoption.go`. The completed contract scaffold is removed.
+`internal/store/capacity_adoption.go` and reservation-generation adoption are
+removed. `capacity_admission.go` owns work identity, durable arrivals and permits.
 
 
 ## W1b committed output reporting and retired readers, 2026-10-17
@@ -4195,50 +4190,33 @@ provenance that differs from the parent fails with `spec_drift`. Retry retains
 the original seal. Invocation origin never selects environment storage.
 
 
-## Native admission composition
+## Durable admission
 
-`ComposeNativeAdmission` accepts the placement's capacity store and optional machine
-compute service and required-compute policy. `NativeConfig` and `NativeHostConfig`
-carry that value whole. Owner and claimed hosts share its compute service. Store
-concurrency is independent of machine compute. Each execution admits its sealed
-plan and job groups under its award, even when compute admission is disabled.
-Machine requests carry CPU and memory without semaphore groups.
+`Tenant.MayStart` owns job admission in the controller or local store. It accepts
+only the work binding and authenticated job award. Owners propose releases through
+ready transitions and `ReleaseEvaluation`. The store commits plan admission with
+permission to release. Each complete group set grants atomically with one arrival.
+A wait holds none of that set, and a policy refusal settles through the existing
+node and run verdict owner. A job never reacquires its parent plan.
 
-The direct-store scheduling regression runs two jobs with run-scoped and box-scoped
-capacity-one queue groups, with machine compute enabled and disabled. The store
-derives box identity from the award's sealed `ExecutionHost`. It checks
-that each executing job holds the store slot and that terminal completion releases
-it. Machine admission sees resource requests only when enabled.
+Schema baseline 17 adds `admission_work`. Run/job identity and arrival survive
+owner handoff. Its generation and holder bind a start permit to the actual award.
+Every start requires a permit, including jobs without groups. Process delegation
+reads the same permit with its running attempt in one authentication snapshot.
+Logical reservation generations do not need adoption or rewriting. Claim or
+owner liveness preserves continuously retained arrival. Expired leases never revive.
 
-Remote dispatch tests cover fresh, ready and claimed jobs with run and box
-groups, with compute admission enabled and disabled. Store capacity lasts until
-the job's terminal transition. Remote work reserves no local compute resources.
+`StartGate` is a decision client followed by optional machine compute. It derives
+no groups or policies. The store alone derives accepted keys and the award's box
+identity. Plan/job namespaces and the prohibition on plan box scope remain.
+Burst awards are provisional until compute starts. Unavailable compute relinquishes
+the award and job reservations without resetting readiness ranking.
 
-
-Unit capacity admission takes only `CapacityBinding` and the authenticated actor.
-Its transaction reads every accepted group, derives its complete key and lease
-bound, and locks admission keys, authority, owner, sorted work and group rows in
-that order. It admits plan capacity before job capacity, retaining live holders
-and resolving waiters within each stage in key order. A node or eval award may
-admit the parent plan only as a prerequisite of its exact authenticated binding.
-Terminal expansion sources admit plan capacity without reviving job holders.
-Controller settlement uses this same transaction before readiness; contended
-PostgreSQL locks defer settlement to its next pass. Persisted keys prefix the
-scoped key with `plan:` or `job:`, so equal names across levels cannot contend.
-The schema baseline is 16. Pipeline acceptance refuses box-scoped plan groups
-and points at job-level box scope. Controller scheduling admits all accepted
-plan groups without a host. Recovery drops retained job capacity when plan
-reacquisition must wait. A queued group retains earlier holds until its
-work ends or their leases expire. Repeated admission preserves queue arrival
-and holder continuity. Owner and claim renewal keep capacity live; terminal
-transitions release it. A caller cannot select another machine's namespace,
-replace a policy or omit an accepted group.
-
-The private controller regression covers both queue and accepted
-`cancel_others` declarations. Forged box keys and missing machine identity are
-refused; another machine's holder and work remain unchanged. A binding-only
-request also exercises all global, run and box groups of one accepted job.
-
+Approval-only predicates and expansion callbacks receive store-issued evaluation
+permission. They hold no job groups. Approval callbacks hold no compute. Their
+typed outcomes commit under the exact source and live owner/evaluation fence.
+A predicate skip remains skipped. Controller-owned approval predicates use the
+same evaluation-unit lifecycle as generated work.
 
 ## Launcher execution host sealing
 
@@ -4260,7 +4238,7 @@ machine regressions retain their placement identity coverage.
 
 ## Plan continuity after release
 
-`Tenant.AdmitCapacity` derives plan reacquisition policy from committed release
+The admission module derives plan reacquisition policy from committed release
 events. Once work has been released, plan groups queue without a timeout under
 every original on-limit policy. Initial admission still applies the accepted
 policy. Controller settlement processes terminal work while plan capacity is
@@ -4269,3 +4247,61 @@ unavailable and withholds further release. Read-only group and queue views show
 regression covers running-job completion, contention and subsequent release for
 queue, skip, fail and cancel-others. The native-owner regression covers the same
 release boundary with compute enabled and disabled.
+
+## Fenced completion and transaction clocks
+
+Successful transaction construction captures database time. Failure to read that
+clock aborts construction before any transaction body runs. Read transactions
+keep that instant and one database snapshot. Mutation authority and lease checks
+read fresh database time after lock waits or policy work through `storeTx.now`.
+A failed clock read poisons the transaction: later SQL returns that error,
+commit rolls back, and transaction callbacks cannot hide it behind success
+or a different refusal. Mutation transactions expose no stored snapshot
+timestamp, and lifecycle guards accept no caller-supplied time.
+Transaction cursors must close or reach exhaustion before another statement or
+clock read. The transaction owner enforces this for both database dialects;
+a violation poisons the transaction and rolls back its writes. Pending single-row
+queries also retain their cursor until scanned. Retained-storage sampling reads
+its database clock before opening the inventory cursor.
+Lifecycle, identity, billing and schedule mutations
+use store time instead of a caller clock. Schedule due times and provider event
+timestamps remain domain facts.
+Capacity decisions read time after waiting for locks, before counting holders
+or promoting waiters.
+Blob lookup budgets read elapsed database time through one budget check. They
+do not reuse the authorization snapshot. Cache lookup exhaustion remains a miss.
+Browser flow expiry and recent sign-in checks use the same snapshot as the
+session authority read.
+
+Runs, nodes and triggers store a generated `drain_deadline_at` from their first
+`cancel_requested_at` plus five minutes. The database derives it in the same
+write, including concurrency supersession. Cancellation clamps existing work and
+slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
+bounds. The schema baseline is version 16.
+The shared capacity writer applies the bound to each holder and waiter,
+including controller reconciliation.
+Node capacity follows the later live claim or owner lease; plan capacity follows
+the latest owner or claimed-job lease because jobs can outlive their owner during
+recovery. Cancellation still bounds the whole run, and a live owner cannot extend
+a metered node's funded horizon. The holder's own lease must remain continuous;
+renewal never revives expired capacity.
+
+`Tenant.TransitionNode` accepts the closed `NodeCommand` interface. `StartNode`,
+`RetryNode`, `ReportNode` and `ReleaseNode` carry the captured attempt. Start,
+retry, ready, release and cancel commands fix their destination. Approval timeout
+reads its verdict from the persisted policy. Each command exposes only its own
+payload. `BindNodeCommand` supplies authenticated transport authority without
+changing the operation. The private normalizer retains the transition table as
+the single state owner. Controller and local transports decode through
+`NodeCommandPayload`, which rejects fields that the selected command cannot
+carry. Materialization and publication command types remain private to the store.
+Node rows and execution inputs keep claim generations and
+attempt ordinals distinct. Actor generations and command source attempts use
+those same types. Lifecycle commands retain typed run and node identifiers.
+Holder actors carry complete `NodeFence` values, and owner references carry
+`EvalFence` values. Guards compare the captured target and generations together.
+Run completion carries no requested outcome. Admission refusal first persists
+its job outcomes and resolves expansions, then derives the run verdict through
+the shared scheduler. Existing required-job failures retain their effect.
+Completion returns the committed outcome and reason, which the host reports
+and the foreground CLI uses for its exit status.

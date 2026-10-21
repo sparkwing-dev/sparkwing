@@ -37,7 +37,7 @@ func TestAddNodeMetricSample_Validation(t *testing.T) {
 			if (err == nil) != tc.valid {
 				t.Errorf("AddNodeMetricSample error = %v; valid = %v", err, tc.valid)
 			}
-			rows, err := f.tenant.ListNodeMetrics(ctx, f.ref.RunID, f.ref.NodeID)
+			rows, err := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -56,7 +56,7 @@ func (b BootstrapRuntime) run(ctx context.Context, command string, options Boots
 	if err != nil {
 		return err
 	}
-	if award.Binding.RunID != options.RunID || award.Binding.NodeID != options.JobID || award.Binding.Generation != options.Generation {
+	if string(award.Binding.RunID) != options.RunID || string(award.Binding.NodeID) != options.JobID || int64(award.Binding.Generation) != options.Generation {
 		return errors.New("Cloud bootstrap arguments differ from the private award")
 	}
 	if command == "fetch-source" {

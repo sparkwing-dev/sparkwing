@@ -22,7 +22,7 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		_, err = tx.ExecContext(ctx, `INSERT INTO payment_refunds (payment_mode, kind, refund_id, payment_intent, amount_micro,
-		    status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, e.Mode, kind, e.ObjectID, e.PaymentID, amount, e.Status, tx.now().UnixNano())
+		    status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, e.Mode, kind, e.ObjectID, e.PaymentID, amount, e.Status, tx.now(ctx).UnixNano())
 		return err
 	case err != nil:
 		return err
@@ -37,7 +37,7 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 		return nil
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE payment_refunds SET status = ?, updated_at = ? WHERE payment_mode = ? AND kind = ? AND refund_id = ?`,
-		e.Status, tx.now().UnixNano(), e.Mode, kind, e.ObjectID)
+		e.Status, tx.now(ctx).UnixNano(), e.Mode, kind, e.ObjectID)
 	return err
 }
 
@@ -99,7 +99,7 @@ func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, pay
 			return err
 		}
 		if r.kind == "warning" {
-			if err := queueCardRefundTx(ctx, tx, reversed.Team, paymentIntent, reversed.PaidMicro/MicroCreditsPerCent, CardRefusedWarning, tx.now()); err != nil {
+			if err := queueCardRefundTx(ctx, tx, reversed.Team, paymentIntent, reversed.PaidMicro/MicroCreditsPerCent, CardRefusedWarning, tx.now(ctx)); err != nil {
 				return err
 			}
 		}
@@ -167,17 +167,17 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 	for _, item := range states {
 		switch item.kind {
 		case "dispute":
-			if _, err := holdCreditFreezeTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), payment, "disputed", "", tx.now()); err != nil {
+			if _, err := holdCreditFreezeTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), payment, "disputed", "", tx.now(ctx)); err != nil {
 				return err
 			}
 			if item.status == "canceled" {
-				if _, err := releaseCreditFreezesTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), false, false, "", "", tx.now()); err != nil {
+				if _, err := releaseCreditFreezesTx(ctx, tx, team, paymentConsequenceReference(mode, item.kind, item.id), false, false, "", "", tx.now(ctx)); err != nil {
 					return err
 				}
 			}
 		case "refund":
 			if item.status == CardRefundSucceeded || item.status == "failed" || item.status == "canceled" {
-				if _, err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status, `refund_id = ? AND status = 'pending'`, []any{item.id}, tx.now()); err != nil {
+				if _, err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status, `refund_id = ? AND status = 'pending'`, []any{item.id}, tx.now(ctx)); err != nil {
 					return err
 				}
 			}
@@ -202,7 +202,7 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 		if id == refusalWarning {
 			refusalWarning = ""
 		}
-		if err := holdForWarningTx(ctx, tx, team, id, payment, tx.now()); err != nil {
+		if err := holdForWarningTx(ctx, tx, team, id, payment, tx.now(ctx)); err != nil {
 			return err
 		}
 		if err := recordPaymentConsequenceTx(ctx, tx, capability.PaymentEvent{Mode: mode, ObjectID: id, PaymentID: payment, AmountMinor: amount, Status: CardRefundSucceeded}, "warning"); err != nil {
@@ -210,7 +210,7 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 		}
 	}
 	if refusalWarning != "" {
-		if err := holdForWarningTx(ctx, tx, team, refusalWarning, payment, tx.now()); err != nil {
+		if err := holdForWarningTx(ctx, tx, team, refusalWarning, payment, tx.now(ctx)); err != nil {
 			return err
 		}
 	}

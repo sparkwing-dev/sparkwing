@@ -96,6 +96,13 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			}
 		}
 	}
+	if c.Unit == capability.UnitNode {
+		// Logical admission alone cannot revive an expired or completed execution award.
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM admission_work a JOIN nodes n ON n.team=a.team AND n.run_id=a.run_id AND n.node_id=a.node_id JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE a.team=? AND a.run_id=? AND a.node_id=? AND a.generation=? AND a.holder=? AND a.granted=1 AND a.lease_expires_at>? AND n.generation=a.generation AND n.claimed_by=a.holder AND n.status='running' AND n.lease_expires_at>? AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.finished_at IS NULL)`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation, c.Binding.Holder, tx.now(ctx).UnixNano(), tx.now(ctx).UnixNano()).Scan(&out.StartPermitted)
+		if err != nil {
+			return err
+		}
+	}
 	var sealed int
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='job_attempt' AND node_id=? AND generation=? AND attempt=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Binding.NodeID, out.Current.Generation, out.Current.Attempt).Scan(&sealed)
 	out.LogSealed = sealed > 0

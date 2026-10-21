@@ -83,7 +83,7 @@ type ClosureSpec struct {
 	Generate  []string `json:"generate,omitempty"`
 }
 
-// ConcurrencySpec declares membership at plan or job scope; the host computes scoped keys.
+// ConcurrencySpec declares membership at plan or job scope; the store derives scoped keys.
 type ConcurrencySpec struct {
 	Group          string  `json:"group"`
 	Scope          *string `json:"scope,omitempty"`

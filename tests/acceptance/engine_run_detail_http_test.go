@@ -366,7 +366,7 @@ func FuzzEngineRunDetailScope(f *testing.F) {
 			case "spec seal":
 				facts.Snapshot.Run.Spec.Request.Hash = runspec.Hash(foreign)
 			case "job":
-				facts.Snapshot.Nodes[0].Ref.RunID = foreign
+				facts.Snapshot.Nodes[0].Ref.RunID = runspec.RunID(foreign)
 			case "duplicate job":
 				facts.Snapshot.Nodes = append(facts.Snapshot.Nodes, facts.Snapshot.Nodes[0])
 			case "attempt team":

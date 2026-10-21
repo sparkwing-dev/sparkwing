@@ -163,7 +163,7 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
 				ID: "app-schedule", RepoPath: "https://github.com/acme/repo.git", GitHubInstallationID: 7, GitHubRepositoryID: 1,
 				Pipeline: run.Pipeline, Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
-			}, tenant.s.clock())
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

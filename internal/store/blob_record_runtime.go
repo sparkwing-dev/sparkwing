@@ -123,78 +123,72 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 	if !request.ManifestDigest.Set {
 		request.ManifestDigest.Value = ""
 	}
-	tx, err := r.tenant.s.beginTx(ctx)
-	if err != nil {
-		return blob.Record{}, err
-	}
-	defer rollbackOrLog(tx)
-	tx.blobIO = reads
-	a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataWrite)
-	if err != nil {
-		return blob.Record{}, err
-	}
-	if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a.source, request.Key.Kind) {
-		return blob.Record{}, authorityError(apierr.Forbidden, "record is outside the uploader's authority")
-	}
-	if request.Key.Kind == blob.KindManifest && request.ManifestDigest.Set && request.ManifestDigest.Value != request.Digest {
-		return blob.Record{}, authorityError(apierr.BadRequest, "manifest record identifies two manifests")
-	}
-	if err := checkBlobWriteKey(a, request.Key); err != nil {
-		return blob.Record{}, err
-	}
-	if request.Key.Kind == blob.KindMemo {
-		if err := requireBlobMemoTx(ctx, tx, a); err != nil {
-			return blob.Record{}, err
-		}
-	}
-	if err := r.authorizeDigestTx(ctx, tx, a, request.Key.Kind, request.Digest); err != nil {
-		return blob.Record{}, err
-	}
-	if request.ManifestDigest.Set {
-		if err := r.authorizeDigestTx(ctx, tx, a, request.Key.Kind, request.ManifestDigest.Value); err != nil {
-			return blob.Record{}, err
-		}
-	}
-	members, err := r.manifestMembers(tx, request)
-	if err != nil {
-		return blob.Record{}, err
-	}
-	scope, err := blob.RecordNamespace(request.Key)
-	if err != nil {
-		return blob.Record{}, err
-	}
-	if request.ExpiresAt.Set && !request.ExpiresAt.Value.After(tx.now()) {
-		return blob.Record{}, authorityError(apierr.BadRequest, "record expiry is not in the future")
-	}
-	if request.Key.Kind == blob.KindOutput || (request.Key.Kind == blob.KindMemo && request.Key.Name == "output") {
-		size, err := requireBlobTx(ctx, tx, r.tenant.team, request.Digest)
+	return inTxResult(ctx, r.tenant.s, func(tx *storeTx) (blob.Record, error) {
+		tx.blobIO = reads
+		a, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataWrite)
 		if err != nil {
 			return blob.Record{}, err
 		}
-		if size > limits.NodeOutputBytes {
-			return blob.Record{}, authorityError(apierr.PayloadTooLarge, "output exceeds the byte limit")
+		if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a.source, request.Key.Kind) {
+			return blob.Record{}, authorityError(apierr.Forbidden, "record is outside the uploader's authority")
 		}
-	}
-	if request.Key.Kind == blob.KindMemo {
-		if !request.ExpiresAt.Set {
-			request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: tx.now().Add(limits.MemoDefaultTTL)}
+		if request.Key.Kind == blob.KindManifest && request.ManifestDigest.Set && request.ManifestDigest.Value != request.Digest {
+			return blob.Record{}, authorityError(apierr.BadRequest, "manifest record identifies two manifests")
 		}
-		if request.ExpiresAt.Value.After(tx.now().Add(limits.MemoMaxTTL)) {
-			return blob.Record{}, authorityError(apierr.BadRequest, "memo expiry exceeds the maximum TTL")
+		if err := checkBlobWriteKey(a, request.Key); err != nil {
+			return blob.Record{}, err
 		}
-		if request.Key.Name == "manifest" && (!request.ManifestDigest.Set || request.ManifestDigest.Value != request.Digest) {
-			return blob.Record{}, authorityError(apierr.BadRequest, "manifest-only memo must identify its manifest")
+		if request.Key.Kind == blob.KindMemo {
+			if err := requireBlobMemoTx(ctx, tx, a); err != nil {
+				return blob.Record{}, err
+			}
 		}
-	}
-	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.now(), ExpiresAt: request.ExpiresAt}
-	batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false, nil)
-	if err != nil {
-		return blob.Record{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return blob.Record{}, err
-	}
-	return batch[0], nil
+		if err := r.authorizeDigestTx(ctx, tx, a, request.Key.Kind, request.Digest); err != nil {
+			return blob.Record{}, err
+		}
+		if request.ManifestDigest.Set {
+			if err := r.authorizeDigestTx(ctx, tx, a, request.Key.Kind, request.ManifestDigest.Value); err != nil {
+				return blob.Record{}, err
+			}
+		}
+		members, err := r.manifestMembers(tx, request)
+		if err != nil {
+			return blob.Record{}, err
+		}
+		scope, err := blob.RecordNamespace(request.Key)
+		if err != nil {
+			return blob.Record{}, err
+		}
+		if request.ExpiresAt.Set && !request.ExpiresAt.Value.After(tx.now(ctx)) {
+			return blob.Record{}, authorityError(apierr.BadRequest, "record expiry is not in the future")
+		}
+		if request.Key.Kind == blob.KindOutput || (request.Key.Kind == blob.KindMemo && request.Key.Name == "output") {
+			size, err := requireBlobTx(ctx, tx, r.tenant.team, request.Digest)
+			if err != nil {
+				return blob.Record{}, err
+			}
+			if size > limits.NodeOutputBytes {
+				return blob.Record{}, authorityError(apierr.PayloadTooLarge, "output exceeds the byte limit")
+			}
+		}
+		if request.Key.Kind == blob.KindMemo {
+			if !request.ExpiresAt.Set {
+				request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: tx.now(ctx).Add(limits.MemoDefaultTTL)}
+			}
+			if request.ExpiresAt.Value.After(tx.now(ctx).Add(limits.MemoMaxTTL)) {
+				return blob.Record{}, authorityError(apierr.BadRequest, "memo expiry exceeds the maximum TTL")
+			}
+			if request.Key.Name == "manifest" && (!request.ManifestDigest.Set || request.ManifestDigest.Value != request.Digest) {
+				return blob.Record{}, authorityError(apierr.BadRequest, "manifest-only memo must identify its manifest")
+			}
+		}
+		record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.now(ctx), ExpiresAt: request.ExpiresAt}
+		batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false, nil)
+		if err != nil {
+			return blob.Record{}, err
+		}
+		return batch[0], nil
+	})
 }
 
 func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
@@ -250,6 +244,16 @@ func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, s
 		a := record.Source.Attempt.Value
 		sourceNode, sourceAttempt, sourceGeneration = a.NodeID, a.Attempt, a.Generation
 	}
+	if record.Key.Kind == blob.KindMemo {
+		// A pending memo belongs to its producer until successful settlement.
+		var successful int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND outcome='success'`, record.Key.Team, record.Source.RunID, sourceNode, sourceAttempt, sourceGeneration).Scan(&successful); err != nil {
+			return err
+		}
+		if successful == 0 {
+			run = record.Source.RunID
+		}
+	}
 	if record.Key.Kind == blob.KindOutput || record.Key.Kind == blob.KindManifest {
 		run = destination.RunID
 		a := destination.Attempt.Value
@@ -291,7 +295,7 @@ func readBlobRecordTx(ctx context.Context, tx *storeTx, key blob.RecordKey, scop
 	var created int64
 	var expiry sql.NullInt64
 	var source, facts []byte
-	err := tx.QueryRowContext(ctx, `SELECT digest,manifest_digest,uploader_principal,provenance,source_identity_json,ref_facts_json,created_at,expires_at,EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id) FROM blob_records b WHERE b.team=? AND b.kind=? AND b.scope=? AND b.name=?`, key.Team, key.Kind, scope, key.Name).Scan(&record.Digest, &manifest, &record.Uploader, &record.Provenance, &source, &facts, &created, &expiry, &record.Pinned)
+	err := tx.QueryRowContext(ctx, `SELECT digest,manifest_digest,uploader_principal,provenance,source_identity_json,ref_facts_json,created_at,expires_at,EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id) FROM blob_records b WHERE b.team=? AND b.kind=? AND b.scope=? AND b.name=? AND (b.kind<>'memo' OR b.run_id IS NULL)`, key.Team, key.Kind, scope, key.Name).Scan(&record.Digest, &manifest, &record.Uploader, &record.Provenance, &source, &facts, &created, &expiry, &record.Pinned)
 	if errors.Is(err, sql.ErrNoRows) {
 		return record, false, nil
 	}

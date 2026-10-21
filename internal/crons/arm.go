@@ -151,7 +151,7 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 			continue
 		}
 		hadPin := s.pinnedBefore(ctx, d.ID())
-		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row, now)
+		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row)
 		if aerr != nil {
 			return report, aerr
 		}
@@ -262,7 +262,7 @@ func (s *Service) rebaseOverride(
 	override := *stored.Override
 	was := override.Base
 	override.Base = stored.Declaration()
-	if err := s.Schedules.SetCronOverride(ctx, stored.ID, override, now); err != nil {
+	if err := s.Schedules.SetCronOverride(ctx, stored.ID, override); err != nil {
 		return nil, fmt.Errorf("%s: rebase the override onto the new declaration: %w", DisplayName(stored), err)
 	}
 	stored.Override = &override
@@ -289,7 +289,7 @@ func (s *Service) withdrawUndeclared(
 		if sched.RepoPath != root || keep[sched.ID] || !sched.Declared {
 			continue
 		}
-		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
+		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false); err != nil {
 			return err
 		}
 		report.Withdrawn++
@@ -487,7 +487,7 @@ func (s *Service) Lock(ctx context.Context, id string, prove Prover) (_ store.Cr
 	if err != nil {
 		return store.CronSchedule{}, fmt.Errorf("%s: %w", DisplayName(sched), err)
 	}
-	if err := s.Schedules.SetCronScheduleLock(ctx, sched.ID, lock, s.now()); err != nil {
+	if err := s.Schedules.SetCronScheduleLock(ctx, sched.ID, lock); err != nil {
 		return store.CronSchedule{}, err
 	}
 	return s.Schedules.GetCronSchedule(ctx, sched.ID)
@@ -500,7 +500,7 @@ func (s *Service) Unlock(ctx context.Context, id string) (store.CronSchedule, er
 	if err != nil {
 		return store.CronSchedule{}, err
 	}
-	if err := s.Schedules.SetCronScheduleLock(ctx, sched.ID, store.CronLock{}, s.now()); err != nil {
+	if err := s.Schedules.SetCronScheduleLock(ctx, sched.ID, store.CronLock{}); err != nil {
 		return store.CronSchedule{}, err
 	}
 	if err := s.removePin(sched.ID); err != nil {
@@ -628,7 +628,7 @@ func (s *Service) refreshOne(
 		if !sched.Declared {
 			return
 		}
-		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
+		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false); err != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 			return
 		}
@@ -646,7 +646,7 @@ func (s *Service) refreshOne(
 	if republished(sched, row) {
 		return
 	}
-	if _, _, err := s.Schedules.ArmCronSchedule(ctx, row, now); err != nil {
+	if _, _, err := s.Schedules.ArmCronSchedule(ctx, row); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 		return
 	}

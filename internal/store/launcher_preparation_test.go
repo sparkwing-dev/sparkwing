@@ -16,7 +16,7 @@ func TestLauncherPreparationKeepsBootstrapUntilExchange(t *testing.T) {
 			if err != nil || len(awards) != 1 {
 				t.Fatalf("initial award: %+v %v", awards, err)
 			}
-			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 			previous := claim.Award.LeaseExpiresAt
 			for range 4 {
 				*now = now.Add(SliceSeconds * time.Second * 2 / 3)
@@ -64,7 +64,7 @@ func FuzzLauncherPreparationKeepsExactUnexchangedFence(f *testing.F) {
 		if err != nil || len(awards) != 1 {
 			t.Fatal(err)
 		}
-		fence := capability.LeaseRef{Kind: capability.UnitNode, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+		fence := capability.LeaseRef{Kind: capability.UnitNode, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 		before := awards[0].Claim.Award.LeaseExpiresAt
 		switch change % 4 {
 		case 0:
@@ -110,7 +110,7 @@ func TestLauncherPreparationSkipsEndedOwnAwards(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				fences = append(fences, capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation})
+				fences = append(fences, capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)})
 			}
 			*now = now.Add(30 * time.Second)
 			switch ended {
@@ -141,7 +141,7 @@ func FuzzLauncherPreparationBillingAndGrace(f *testing.F) {
 		if err != nil || len(awards) != 1 {
 			t.Fatal(err)
 		}
-		fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+		fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 		if _, err = s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 			t.Fatal(err)
 		}
@@ -186,7 +186,7 @@ func TestLauncherPreparationReturnsCapabilityBound(t *testing.T) {
 			if err != nil || len(awards) != 1 {
 				t.Fatalf("initial award: %+v %v", awards, err)
 			}
-			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+			fence := capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 			prepared, err := s.renewLauncherPreparation(t.Context(), root, []capability.LeaseRef{fence})
 			if err != nil || len(prepared) != 1 || prepared[0].Fence != fence || !prepared[0].ExpiresAt.Equal(expires) {
 				t.Fatalf("preparation deadline: %+v %v; want %v", prepared, err, expires)

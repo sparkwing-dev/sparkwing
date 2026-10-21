@@ -22,9 +22,6 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 }
 
 func (r *blobRecords) lookupRecord(ctx context.Context, request blob.RecordLookup, reads *blobIO) (blob.RecordLookupResult, error) {
-	if !request.Budget.Deadline.IsZero() && !r.tenant.s.now().Before(request.Budget.Deadline) {
-		return blob.RecordLookupResult{}, blob.ErrBudget
-	}
 	tx, err := r.tenant.s.beginTx(ctx)
 	if err != nil {
 		return blob.RecordLookupResult{}, err
@@ -39,8 +36,8 @@ func (r *blobRecords) lookupRecord(ctx context.Context, request blob.RecordLooku
 	if err != nil {
 		return hit, err
 	}
-	if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-		return blob.RecordLookupResult{}, blob.ErrBudget
+	if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+		return blob.RecordLookupResult{}, err
 	}
 	return hit, tx.Commit()
 }
@@ -84,7 +81,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if err != nil {
 		return result, err
 	}
-	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now())) {
+	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now(ctx))) {
 		return result, nil
 	}
 	if request.VerifiedDefaultOnly {
@@ -207,10 +204,6 @@ func (r *blobRecords) readMembers(ctx context.Context, tx *storeTx, record blob.
 	return members, nil
 }
 
-func cacheMissError(err error) bool {
-	return errors.Is(err, blob.ErrNotFound) || errors.Is(err, blob.ErrIntegrity) || errors.Is(err, blob.ErrBudget)
-}
-
 func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (hit blob.MemoHit, err error) {
 	err = withBlobIO(ctx, func(reads *blobIO) error {
 		hit, err = r.lookupMemo(ctx, request, reads)
@@ -231,7 +224,7 @@ func (r *blobRecords) lookupMemo(ctx context.Context, request blob.MemoLookup, r
 		return blob.MemoHit{}, err
 	}
 	hit, err := r.lookupMemoTx(ctx, tx, a, request, nil)
-	if cacheMissError(err) {
+	if blob.IsCacheMiss(err) {
 		return blob.MemoHit{}, nil
 	}
 	if err != nil {
@@ -269,8 +262,8 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 			continue
 		}
 		for _, name := range []string{"output", "manifest"} {
-			if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-				return result, blob.ErrBudget
+			if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+				return result, err
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
 			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope})
@@ -278,7 +271,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				pending = err
 				continue
 			}
-			if cacheMissError(err) {
+			if blob.IsCacheMiss(err) {
 				continue
 			}
 			if err != nil {
@@ -304,8 +297,8 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				result.Manifest = runspec.Optional[blob.Digest]{Set: true, Value: hit.Record.Digest}
 			}
 			result.Members, result.ReadSet = hit.Members, hit.ReadSet
-			if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-				return blob.MemoHit{}, blob.ErrBudget
+			if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+				return blob.MemoHit{}, err
 			}
 			return result, nil
 		}
@@ -318,6 +311,9 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 		hit, err = r.lookupDepcache(ctx, request, reads)
 		return err
 	})
+	if blob.IsCacheMiss(err) {
+		return blob.DepcacheHit{}, nil
+	}
 	return hit, err
 }
 
@@ -358,8 +354,8 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 		if !slices.Contains(a.capability.Data.ReadRefs, fallback.ref.CapabilityScope()) {
 			continue
 		}
-		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-			return result, nil
+		if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+			return result, err
 		}
 		key := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindDepcache, Scope: blob.Scope{Repo: a.authority.Repo, Ref: fallback.ref, Key: request.Key.Key}, Name: request.Key.Name}
 		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch})
@@ -367,7 +363,7 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 			pending = err
 			continue
 		}
-		if cacheMissError(err) {
+		if blob.IsCacheMiss(err) {
 			continue
 		}
 		if err != nil {
@@ -382,8 +378,8 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 		if pending != nil {
 			return result, pending
 		}
-		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
-			return blob.DepcacheHit{}, nil
+		if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+			return blob.DepcacheHit{}, err
 		}
 		result = blob.DepcacheHit{Found: true, Record: hit.Record, Source: fallback.source, ReadSet: hit.ReadSet}
 		return result, tx.Commit()
@@ -399,6 +395,9 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 		hit, err = r.copyMemo(ctx, request, reads)
 		return err
 	})
+	if blob.IsCacheMiss(err) {
+		return blob.MemoHit{}, nil
+	}
 	return hit, err
 }
 
@@ -418,7 +417,7 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 	}
 	var original blob.Record
 	hit, err := r.lookupMemoTx(ctx, tx, a, request.Lookup, &original)
-	if cacheMissError(err) {
+	if blob.IsCacheMiss(err) {
 		return blob.MemoHit{}, nil
 	}
 	if err != nil || !hit.Found {
@@ -438,7 +437,7 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 			return blob.MemoHit{}, err
 		}
 		record := original
-		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, tx.now()
+		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, tx.now(ctx)
 		record.ExpiresAt = runspec.Optional[time.Time]{}
 		record.ManifestDigest = runspec.Optional[blob.Digest]{}
 		record.Pinned = false
@@ -450,17 +449,17 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 		edge := blob.ReadEdge{Kind: blob.EdgeMemoHit, Reader: request.Destination, Record: key, Digest: part.digest.Value}
 		hit.ReadSet.Edges = append(hit.ReadSet.Edges, edge)
 	}
-	if !request.Lookup.Budget.Deadline.IsZero() && !tx.now().Before(request.Lookup.Budget.Deadline) {
-		return blob.MemoHit{}, nil
+	if err := tx.checkBlobBudget(ctx, request.Lookup.Budget); err != nil {
+		return blob.MemoHit{}, err
 	}
 	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true, nil); err != nil {
-		if cacheMissError(err) {
+		if blob.IsCacheMiss(err) {
 			return blob.MemoHit{}, nil
 		}
 		return blob.MemoHit{}, err
 	}
-	if !request.Lookup.Budget.Deadline.IsZero() && !tx.now().Before(request.Lookup.Budget.Deadline) {
-		return blob.MemoHit{}, nil
+	if err := tx.checkBlobBudget(ctx, request.Lookup.Budget); err != nil {
+		return blob.MemoHit{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return blob.MemoHit{}, err

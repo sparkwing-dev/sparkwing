@@ -31,10 +31,10 @@ func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input
 	if cause := context.Cause(ctx); cause != nil {
 		return "", nil, cause
 	}
-	if err != nil {
+	if blob.IsCacheMiss(err) {
 		return hash, nil, nil
 	}
-	return hash, result, nil
+	return hash, result, err
 }
 
 func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec) (string, error) {

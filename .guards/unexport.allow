@@ -13,7 +13,7 @@ internal/apiroutes	7
 internal/artifacts	2
 internal/authwire	2
 internal/backend	1
-internal/bincache	17
+internal/bincache	16
 internal/blob	20
 internal/capability	28
 internal/capacity	9
@@ -26,7 +26,7 @@ internal/controller/client	2
 internal/crons	35
 internal/discovery	4
 internal/diskspace	1
-internal/egress	22
+internal/egress	21
 internal/engine	5
 internal/envredact	1
 internal/executionpolicy	45
@@ -47,9 +47,9 @@ internal/limits	1
 internal/localsecrets	8
 internal/logpretty	6
 internal/logutil	2
-internal/nodehost	49
+internal/nodehost	42
 internal/nodeproto	43
-internal/objectguard	50
+internal/objectguard	48
 internal/oidcissuer	8
 internal/opsview	20
 internal/orchestrator	2
@@ -64,7 +64,7 @@ internal/profile	23
 internal/ratelimit	3
 internal/releaseasset	1
 internal/releaseauth	1
-internal/repos	23
+internal/repos	22
 internal/runflags	11
 internal/runners	3
 internal/runners/launcher	4
@@ -77,10 +77,10 @@ internal/sessionledger	8
 internal/settings	42
 internal/sourceurl	7
 internal/sparks	5
-internal/sparkwingruntime	5
+internal/sparkwingruntime	4
 internal/storage/logseg	24
 internal/storage/s3	1
-internal/store	263
+internal/store	253
 internal/store/internal/storetest	1
 internal/store/teststore	5
 internal/tokenpark	3

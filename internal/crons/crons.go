@@ -219,18 +219,18 @@ type Launcher interface {
 
 // ScheduleStore confines schedule operations to one tenant.
 type ScheduleStore interface {
-	ArmCronSchedule(ctx context.Context, sched store.CronSchedule, now time.Time) (store.CronSchedule, bool, error)
+	ArmCronSchedule(ctx context.Context, sched store.CronSchedule) (store.CronSchedule, bool, error)
 	ListCronSchedules(ctx context.Context) ([]store.CronSchedule, error)
 	GetCronSchedule(ctx context.Context, id string) (store.CronSchedule, error)
-	SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
-	SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
-	SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
-	SetCronScheduleLock(ctx context.Context, id string, lock store.CronLock, now time.Time) error
-	SetCronOverride(ctx context.Context, id string, o store.CronOverride, now time.Time) error
-	ClearCronOverride(ctx context.Context, id string, now time.Time) error
+	SetCronSchedulePaused(ctx context.Context, id string, paused bool) error
+	SetCronScheduleDeclared(ctx context.Context, id string, declared bool) error
+	SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time) error
+	SetCronScheduleLock(ctx context.Context, id string, lock store.CronLock) error
+	SetCronOverride(ctx context.Context, id string, o store.CronOverride) error
+	ClearCronOverride(ctx context.Context, id string) error
 	DeleteCronSchedule(ctx context.Context, id string) error
 	DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
-	ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *store.CronFire, now time.Time) error
+	ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *store.CronFire) error
 	ListCronFires(ctx context.Context, scheduleID string, limit int) ([]store.CronFire, error)
 }
 
@@ -626,7 +626,7 @@ func (s *Service) Show(ctx context.Context, id string, fires int) (Row, []store.
 // Pause stops a schedule firing. Its cursor still advances on each tick, so
 // resuming does not replay the instants that passed while it was paused.
 func (s *Service) Pause(ctx context.Context, id string) error {
-	return s.Schedules.SetCronSchedulePaused(ctx, id, true, s.now())
+	return s.Schedules.SetCronSchedulePaused(ctx, id, true)
 }
 
 // Resume lets a paused schedule fire again from its next due instant. The
@@ -642,10 +642,10 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 	if eval, perr := prepare(sched); perr == nil {
 		next = eval.nextAfter(now)
 	}
-	if err := s.Schedules.ResolveCronDue(ctx, id, now, next, nil, now); err != nil {
+	if err := s.Schedules.ResolveCronDue(ctx, id, now, next, nil); err != nil {
 		return err
 	}
-	return s.Schedules.SetCronSchedulePaused(ctx, id, false, now)
+	return s.Schedules.SetCronSchedulePaused(ctx, id, false)
 }
 
 // Upcoming returns the next n instants a schedule matches after now, in the

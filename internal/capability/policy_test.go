@@ -202,23 +202,15 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 }
 
 func TestPrivateCapacityRoutesRequireLiveExecutionAward(t *testing.T) {
-	for _, operation := range []string{"acquire"} {
-		path := "/api/v1/runs/{run}/local-host/capacity/" + operation
+	for _, operation := range []string{"may-start", "relinquish-start"} {
+		path := "/api/v1/runs/{run}/local-host/" + operation
 		route, ok := capability.LookupRoute("POST", path)
-		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 3 {
-			t.Fatalf("missing private capacity policy: %s %+v", path, route)
+		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 1 {
+			t.Fatalf("missing start policy: %s %+v", path, route)
 		}
-		access := route.Access[0]
-		if access.Credential != capability.CredentialClaim || access.Binding != capability.BindRunOfTrigger || access.Liveness != capability.LiveSensitive || !slices.Equal(access.Grants, []capability.Grant{capability.TriggerHost}) {
-			t.Fatalf("capacity authority exceeds owner award: %s %+v", path, access)
-		}
-		node := route.Access[1]
-		if node.Credential != capability.CredentialClaim || node.Binding != capability.BindRun || node.Liveness != capability.LiveSensitive || !slices.Equal(node.Grants, []capability.Grant{capability.NodeReport}) {
-			t.Fatalf("capacity authority exceeds node award: %s %+v", path, node)
-		}
-		eval := route.Access[2]
-		if eval.Credential != capability.CredentialEval || eval.Binding != capability.BindRun || eval.Liveness != capability.LiveExpansion || !slices.Equal(eval.Grants, []capability.Grant{capability.ExpansionSubmit}) {
-			t.Fatalf("capacity authority exceeds evaluation award: %s %+v", path, eval)
+		award := route.Access[0]
+		if award.Credential != capability.CredentialClaim || award.Binding != capability.BindRun || award.Liveness != capability.LiveSensitive || !slices.Equal(award.Grants, []capability.Grant{capability.NodeReport}) {
+			t.Fatalf("start exceeds job award: %s %+v", path, award)
 		}
 	}
 }

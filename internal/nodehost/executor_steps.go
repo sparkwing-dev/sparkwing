@@ -107,7 +107,7 @@ func (h *nodeExecutor) recordStep(ctx context.Context, input NodeInput, spec run
 		return err
 	}
 	report := store.StepReport{
-		Attempt: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt},
+		Attempt: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation), Attempt: int64(input.Attempt)},
 		Actor:   executorActor(input), StepID: id, State: state, StartedAt: started,
 	}
 	if failure != nil {

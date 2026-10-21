@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -42,7 +44,7 @@ func (c *localController) FinalizeCancelledRuns(runIDs []string, reason string) 
 		return errors.New("wingd: admission cancellation requires a reconciled open controller")
 	}
 	actor := store.Actor{Kind: store.ActorReaper, Owner: store.OwnerLeaseRef{
-		Kind: store.OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation,
+		Kind: store.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 	}}
 	var result error
 	for _, runID := range runIDs {
@@ -63,7 +65,7 @@ func (c *localController) cancelRun(runID, reason string, actor store.Actor) err
 		return err
 	}
 	_, err = c.tenant.TransitionRun(ctx, store.RunTransition{
-		RunID: runID, To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: reason,
+		RunID: runspec.RunID(runID), To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: reason,
 	})
 	if err != nil {
 		var transition *store.ErrIllegalTransition

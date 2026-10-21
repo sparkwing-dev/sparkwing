@@ -37,7 +37,7 @@ type ClaimedNodeHost struct {
 	Executor  NodeHost
 	Mask      func(string) string
 	Masks     *MaskRegistry
-	Admission NativeAdmission
+	Admission StartGate
 }
 
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
@@ -66,8 +66,8 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if err := h.Masks.initializeAccepted(parent, h.Store, input.Accepted); err != nil {
 		return err
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
-	ref := controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}
+	actor := executorActor(input)
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
 	ctx, stop := keepNode(parent, h.Lease, h.Store, ref, actor)
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
@@ -144,7 +144,7 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 	if input.Engine.Identity != snapshot.Run.Spec.Resolved.Engine {
 		return source.Spec{}, executorError(apierr.SpecDrift, "job award differs from the accepted engine")
 	}
-	ref := controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
 	row, err := h.Store.ReadNode(ctx, ref)
 	if err != nil {
 		return source.Spec{}, err
@@ -166,7 +166,15 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 	return claimSetupFailure(ctx, input, failure, h.Mask, h.Store.TransitionNode)
 }
 
-func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeTransition) (store.Applied, error)) error {
+func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (store.Applied, error)) error {
+	var decision *AdmissionFailure
+	if errors.As(failure, &decision) && decision.committed {
+		if decision.Outcome == store.NodeSkipped {
+			return nil
+		}
+		return failure
+	}
+
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
@@ -189,7 +197,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	result = recordNodeFailure(input.NodeID, result, mask)
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := transition(reportCtx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: executorActor(input), To: result.Outcome, Cause: store.CauseReport, SourceAttempt: &input.Attempt, Extra: store.TransitionExtra{Result: &result}})
+	_, err := transition(reportCtx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Result: &result, Outcome: result.Outcome})
 	if refused != nil && waitFailure(failure, refused) == nil && ctx.Err() == nil {
 		if result.Outcome == store.NodeSkipped {
 			return err
@@ -221,7 +229,7 @@ func keepNode(parent context.Context, keeper lease.Keeper, state interface {
 	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
 }, ref controllerwire.NodeRef, actor store.Actor,
 ) (context.Context, func()) {
-	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: actor.Generation}, func() bool { return true }) {
+	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: string(ref.RunID), NodeID: string(ref.NodeID), Holder: actor.Holder, Generation: int64(actor.Generation)}, func() bool { return true }) {
 		return parent, func() {}
 	}
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {

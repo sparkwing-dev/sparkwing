@@ -31,6 +31,7 @@ func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
 			if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 				t.Fatal(err)
 			}
+			activateMemoFixture(t, s)
 			depcache := memo
 			depcache.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Ref: assertedRef("main"), Key: "v1"}, Name: "modules"}
 			if _, err := records.CommitRecord(t.Context(), depcache); err != nil {

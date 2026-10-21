@@ -53,10 +53,10 @@ func processAuthorityFixture(t *testing.T) (*ProcessAuthorities, *processParent,
 	expires := now.Add(time.Hour)
 	binding := capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 4, Attempt: 2, Holder: "holder"}
 	principal := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "parent"}, Capability: capability.Capability{
-		Prefix: "parent", Digest: sha256.Sum256([]byte("parent-token")), Audience: capability.Controller, Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "machine"},
+		Unit: capability.UnitNode, Prefix: "parent", Digest: sha256.Sum256([]byte("parent-token")), Audience: capability.Controller, Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "machine"},
 		Binding: binding, Grants: []capability.Grant{capability.NodeReport, capability.SecretsRelease}, ExpiresAt: &expires, ReservedPools: []string{"pool"}, Repositories: []string{"repo"},
 	}}
-	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: principal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
+	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: principal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires, StartPermitted: true}}}
 	registry, err := NewProcessAuthorities(ProcessAuthorityDependencies{
 		Parent: parent,
 		Bindings: processBindingFunc(func(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
@@ -476,4 +476,25 @@ func FuzzProcessAuthorityFenceAndRevocation(f *testing.F) {
 			t.Fatal("lookup audience reclassified process identity")
 		}
 	})
+}
+
+func TestProcessDelegationRequiresCommittedJobAdmission(t *testing.T) {
+	registry, parent, lookup, spec, services := processAuthorityFixture(t)
+	t.Cleanup(func() {
+		if err := registry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	parent.snapshot.Binding.StartPermitted = false
+	if issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, services); err == nil || issued.Raw != "" || revoke != nil {
+		t.Fatalf("job process bypassed admission: issued=%+v revoke=%v error=%v", issued, revoke != nil, err)
+	}
+	parent.snapshot.Binding.StartPermitted = true
+	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, services)
+	if err != nil || issued.Raw == "" || revoke == nil {
+		t.Fatalf("admitted process failed: issued=%+v error=%v", issued, err)
+	}
+	if err := revoke(); err != nil {
+		t.Fatal(err)
+	}
 }

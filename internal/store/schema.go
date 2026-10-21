@@ -147,6 +147,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "card_refunds", Owner: SchemaTenant},
 	{Name: "concurrency_entries", Owner: SchemaTenant},
 	{Name: "concurrency_holders", Owner: SchemaTenant},
+	{Name: "admission_work", Owner: SchemaTenant},
 	{Name: "concurrency_waiters", Owner: SchemaTenant},
 	{Name: "credit_charges", Owner: SchemaTenant},
 	{Name: "credit_checkouts", Owner: SchemaTenant},

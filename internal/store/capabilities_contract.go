@@ -206,7 +206,7 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 		sha = c.Binding.Push.SHA
 	}
 	var generation any
-	if c.Binding.Generation != 0 {
+	if c.Binding.Generation != 0 || c.Unit == capability.UnitEval {
 		generation = c.Binding.Generation
 	}
 	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil
@@ -373,7 +373,7 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 	}
 
 	c := node.principal.Capability
-	if !capability.CredentialAlive(c, tx.now()) {
+	if !capability.CredentialAlive(c, tx.now(ctx)) {
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if node.requirement != nil {
@@ -452,7 +452,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 		}
 		ref = *parent
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	for _, node := range chain {
 		c := node.principal.Capability
 		if !capability.CredentialAlive(c, now) {
@@ -627,7 +627,7 @@ func (op *Operator) revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capa
 	}); err != nil {
 		return err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	if ref.Kind == capability.AuthorityCapability {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {

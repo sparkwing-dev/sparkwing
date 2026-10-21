@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -111,15 +112,15 @@ func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryP
 		return CloudJobBinding{}, err
 	}
 	fence := unit.Binding
-	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: deadlineValue(unit.ParentCapabilityExpiry)}
+	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation), Attempt: runspec.AttemptOrdinal(fence.Attempt), OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: deadlineValue(unit.ParentCapabilityExpiry)}
 	switch unit.Unit {
 	case capability.UnitPlan:
 		binding.Kind = CloudPlan
 	case capability.UnitNode:
 		binding.Kind = CloudWork
 	case capability.UnitEval:
-		binding.Kind, binding.SourceNodeID, binding.SourceGeneration = CloudEval, unit.JobID, unit.SourceGeneration
-		binding.Generation, binding.Holder = fence.Expansion.Generation, fence.Expansion.Holder
+		binding.Kind, binding.SourceNodeID, binding.SourceGeneration = CloudEval, runspec.NodeID(unit.JobID), runspec.ClaimGeneration(unit.SourceGeneration)
+		binding.Generation, binding.Holder = runspec.ClaimGeneration(fence.Expansion.Generation), fence.Expansion.Holder
 	default:
 		return CloudJobBinding{}, errors.New("controller returned a non-Cloud unit")
 	}

@@ -164,7 +164,7 @@ func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 			t.Fatal(err)
 		}
 		award, err := control.Claim(t.Context())
-		if err != nil || award == nil || award.Binding.RunID != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
+		if err != nil || award == nil || string(award.Binding.RunID) != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
 			t.Fatalf("retry lost its execution fence or original source: award=%+v error=%v", award, err)
 		}
 		mutation %= 5
@@ -249,7 +249,7 @@ func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				want := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: binding.Generation}}
+				want := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}}
 				if !slices.Equal(request.Observed, []controllerwire.LauncherObservation{want}) {
 					t.Fatalf("observation=%+v", request.Observed)
 				}
@@ -366,7 +366,7 @@ func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
 				unit.Binding.Expansion.ID = "another-eval"
 			}
 			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				want := capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+				want := capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}
 				if len(request.Observed) != 1 || request.Observed[0].Award != want {
 					t.Fatalf("eval observation lost its live award: %+v", request.Observed)
 				}

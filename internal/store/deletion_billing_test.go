@@ -35,7 +35,8 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	if !errors.Is(err, store.ErrOpenCheckout) || !strings.Contains(err.Error(), "wait for the checkout to expire or complete") {
 		t.Fatalf("deleting a team with an open checkout = %v, want ErrOpenCheckout naming the remedy", err)
 	}
-	if _, _, err := st.AsOperator().RequestTeamDeletion(ctx, "acme", now); !errors.Is(err, store.ErrOpenCheckout) {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, _, err := st.AsOperator().RequestTeamDeletion(ctx, "acme"); !errors.Is(err, store.ErrOpenCheckout) {
 		t.Fatalf("the operator deleting it = %v, want ErrOpenCheckout", err)
 	}
 	if _, err := st.ForTeam(ctx, "acme"); err != nil {
@@ -53,7 +54,8 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	if !errors.Is(err, store.ErrTeamFrozen) || !strings.Contains(err.Error(), "contact support") {
 		t.Fatalf("deleting a held team = %v, want ErrTeamFrozen naming the remedy", err)
 	}
-	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "", "", now); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := held.DeleteTeamForTest(t, ctx, owner.Account.ID, now); err != nil {

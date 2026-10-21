@@ -20,7 +20,7 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: claim.RunID}
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(claim.RunID)}
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 	if err != nil || fresh.ReadyAt == nil || fresh.Status != StatusPending {
 		t.Fatalf("fresh release: %+v, %v", fresh, err)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	if _, err := tenant.RenewNodeClaim(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"}, actor); err != nil {
 		t.Fatalf("live claim expired by queue wait: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,created_at=?,claim_wait_ns=?,status='pending',lineage_json=? WHERE id='run'`, raw, now.UnixNano(), int64(time.Minute), []byte(`{"retry_of":"earlier"}`))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunQueueTimeout, Actor: actor}); err == nil {
 		t.Fatal("old seal expired the new queue")
 	}

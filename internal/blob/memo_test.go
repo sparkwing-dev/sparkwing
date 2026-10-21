@@ -87,3 +87,20 @@ func TestReadMemoReturnsVerifiedManifestAndEmptyOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheMissPreservesJoinedRefusals(t *testing.T) {
+	refusal := errors.New("claim fence refused")
+	for _, absent := range []error{blob.ErrNotFound, blob.ErrIntegrity, blob.ErrBudget} {
+		if !blob.IsCacheMiss(fmt.Errorf("cache read: %w", absent)) {
+			t.Fatalf("miss rejected: %v", absent)
+		}
+		for _, err := range []error{errors.Join(absent, refusal), errors.Join(absent, blob.ErrDigestNotReadable), fmt.Errorf("cache read: %w", errors.Join(absent, refusal))} {
+			if blob.IsCacheMiss(err) {
+				t.Fatalf("refusal became a miss: %v", err)
+			}
+		}
+	}
+	if blob.IsCacheMiss(nil) {
+		t.Fatal("nil became a miss")
+	}
+}

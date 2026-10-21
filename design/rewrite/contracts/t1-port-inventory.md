@@ -1106,7 +1106,7 @@ their behavior requirements without retaining the removed claimed-mode runtime:
 | `TestLaunchedNode_PlainRetryRunsInThePod` | `CheckExecutorEnvelope/retry` advances ordinals within one claim. |
 | `TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim` | Replace executor-owned admission with owner admission and claim-renewed holders. Native store/admission integration remains open. |
 | `TestLaunchedNode_PlanKeepsThePipelinesRequires` | Checkout declarations and accepted settings must retain YAML placement. Native configuration/acceptance wiring remains open. |
-| `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo is an owner decision committed by reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
+| `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo runs on the executing host under its job permit and materializes through fenced reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
 | `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. `TestOnlyRunsTheMatchedNodesAndWhatTheyNeed`, `TestNodeExecutorUsesSealedStepWindow` and `TestNativeExecutorSteps/window` cover sealed selections through the owner, executor and real Go SDK process. Native launcher placement remains open. |
 | `TestLaunchedNode_NoCacheMissesTheMemo` | NoMemo bypasses executor memo reads while preserving key evaluation for later writes. `TestExecutorMemoNoMemoStillEvaluatesKey` covers that behavior under the awarded execution input. |
 | `TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards` | `environment-origin-head-and-guards/hermetic-checkout-planning` covers shared YAML argument precedence and guard evaluation through owner acceptance. `TestOwnerHostReadsAcquiredProjectForSharedPlanning` reads real acquired checkout files. Native placement execution remains open. |
@@ -1894,7 +1894,7 @@ cell or production C1 identity projection is claimed complete by this port.
 authority. Foreign group selectors fail binding before the read adapter runs.
 `TestConcurrencyHTTPRetiredRoutes` checks the removed single-group endpoints in
 both URL namespaces. `TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes`
-uses the real store and controller: it acquires through `AdmitCapacity`, reads the
+uses the real store and controller: it acquires through `MayStart`, reads the
 persisted group and proves that removed endpoints return 404.
 
 Private unit admission tests cover sealed declarations, award binding, execution

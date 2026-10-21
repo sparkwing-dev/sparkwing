@@ -43,7 +43,7 @@ type NativeConfig struct {
 	SubmitAccept   procenv.SubmitAccept
 	Local          func(store.NodeRow) bool
 	Home           string
-	Admission      NativeAdmission
+	Admission      StartGate
 	Store          NativeHostStore
 	Parent         capability.AuthenticationReader
 	Bindings       capability.BindingChecker
@@ -177,7 +177,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		upload.Key.Kind = blob.KindManifest
 		return upload, err
 	}, Producer: func(ctx context.Context, input NodeInput, producer string) (blob.RecordKey, error) {
-		row, err := cfg.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: producer})
+		row, err := cfg.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(producer)})
 		if err != nil {
 			return blob.RecordKey{}, err
 		}
@@ -204,13 +204,13 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		},
 		Executor: ExecutionOperations{PublishOutput: outputs.PublishOutput, Annotate: claims.annotate, PrepareArtifacts: artifacts.Prepare, PrepareCaches: caches.Prepare, BindStorage: func(ctx context.Context, input NodeInput) (StorageBinding, error) {
-			principal, err := claims.principal(ctx, input.NodeID, input.Generation, input.Attempt)
+			principal, err := claims.principal(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 			if err != nil {
 				return StorageBinding{}, err
 			}
 			return cfg.Storage(ctx, principal)
 		}, Bind: func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
-			return delegate(ctx, input.NodeID, input.Generation, input.Attempt)
+			return delegate(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 		}},
 		Evaluation: EvaluationOperations{
 			Bind: func(ctx context.Context, input EvaluationInput) (ProcessGrant, error) {

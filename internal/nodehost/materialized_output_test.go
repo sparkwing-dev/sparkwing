@@ -33,7 +33,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 		t.Run(map[bool]string{false: "recorded", true: "missing"}[missing], func(t *testing.T) {
 			input, state, deps, process := evaluationFixture(t)
 			input.Generation, state.row.Generation, state.row.Attempt, state.row.Outcome = 0, 0, 0, store.NodeMemoized
-			key := blob.MaterializedRecordKey("a", state.row.Ref.RunID, state.row.Ref.NodeID, 4, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
+			key := blob.MaterializedRecordKey("a", string(state.row.Ref.RunID), string(state.row.Ref.NodeID), 4, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
 			state.row.OutputRecord = &key
 			if missing {
 				state.row.OutputRecord = nil

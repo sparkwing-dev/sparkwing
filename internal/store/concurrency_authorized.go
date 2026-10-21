@@ -42,7 +42,8 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 	if err != nil {
 		return capability.Authorized{}, time.Time{}, err
 	}
-	snapshot := capability.AuthenticationSnapshot{Now: tx.now()}
+	now := tx.now(ctx)
+	snapshot := capability.AuthenticationSnapshot{Now: now}
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
@@ -84,7 +85,7 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 		if deadline.Valid && (until.IsZero() || time.Unix(0, deadline.Int64).Before(until)) {
 			until = time.Unix(0, deadline.Int64)
 		}
-		if !until.After(tx.now()) {
+		if !until.After(tx.now(ctx)) {
 			return capability.Authorized{}, time.Time{}, holderRefusal()
 		}
 	}
@@ -112,7 +113,7 @@ func slotReadEdgeTx(ctx context.Context, tx *storeTx, a capability.Authorized, r
 		if err := bindingRunExistsTx(ctx, tx, a.Target.Team, run); err != nil {
 			return err
 		}
-		_, err := readNodeTx(ctx, tx, Team(a.Target.Team), controllerwire.NodeRef{RunID: run, NodeID: job})
+		_, err := readNodeTx(ctx, tx, Team(a.Target.Team), controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)})
 		if errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
 			return bindingRefusal()
 		}

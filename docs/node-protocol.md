@@ -186,8 +186,8 @@ job-declared environment. Proxy credentials are masked before either process sta
 
 Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
 `on_limit` and `queue_timeout_ms`. Omitted values resolve to
-`global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. The host
-computes scoped keys and checks consistent group definitions. Scopes are
+`global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. Acceptance checks consistent group definitions. The store derives scoped keys
+from accepted declarations and the authenticated execution award. Scopes are
 `global`, `run` and `box`. Policies are `queue`, `fail`, `skip` and `cancel_others`.
 
 `resources` carries optional `cores` and `memory_bytes`. `source` carries

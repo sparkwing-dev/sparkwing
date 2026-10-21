@@ -13,8 +13,8 @@ func TestCapacityLevelsKeepIndependentPolicies(t *testing.T) {
 		doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "shared", Scope: new("global"), Capacity: new(3), OnLimit: new("fail")}}
 		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "shared", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
 	})
-	binding := store.CapacityBinding{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Generation: f.holder.Generation}
-	result, err := f.tenant.AdmitCapacity(t.Context(), binding, f.holder)
+	binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+	result, err := f.tenant.MayStart(t.Context(), binding, f.holder)
 	if err != nil || result.Kind != store.AcquireGranted {
 		t.Fatalf("same name with independent policies: %+v, %v", result, err)
 	}

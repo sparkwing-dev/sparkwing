@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput, spec runspec.Spec, evaluate func(*executorSession, NodeInput) error) (err error) {
+func (h *OwnerEvaluator) evaluateProcess(ctx context.Context, input EvaluationInput, spec runspec.Spec, evaluate func(*executorSession, NodeInput) error) (err error) {
 	var grant ProcessGrant
 	var process ExecutorProcess
 	defer func() {

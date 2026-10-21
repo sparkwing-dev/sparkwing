@@ -24,7 +24,7 @@ func TestAcceptPlanRefusesRunBoxBeforePersistence(t *testing.T) {
 			if err != nil || run.Spec != nil {
 				t.Fatalf("rejected plan was sealed: %+v, %v", run.Spec, err)
 			}
-			if _, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}); !errors.Is(err, ErrNotFound) {
+			if _, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("rejected plan persisted job: %v", err)
 			}
 		})

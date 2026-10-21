@@ -235,7 +235,7 @@ func TestInitialTriggerFailuresPropagate(t *testing.T) {
 	for _, stage := range []string{"intake", "follow", "output"} {
 		t.Run(stage, func(t *testing.T) {
 			request := initialTriggerRequest(false)
-			out := io.Writer(io.Discard)
+			out := io.Discard
 			if stage == "output" {
 				out = daemonEventsBrokenWriter{failed}
 			}

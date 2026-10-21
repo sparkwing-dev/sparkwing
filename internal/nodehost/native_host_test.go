@@ -31,7 +31,7 @@ func (s nativeHostState) ReadSnapshot(ctx context.Context, runID string) (store.
 	return s.ClaimStore.ReadSnapshot(ctx, runID)
 }
 
-func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	return s.ClaimStore.TransitionNode(ctx, change)
 }
 
@@ -44,7 +44,7 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 	}
 	authorities, _, _, _, _ := processAuthorityFixture(t)
 	t.Cleanup(func() { _ = authorities.Close() })
-	config := NativeHostConfig{
+	config := NativeHostConfig{Admission: ComposeStartGate(state, nil, false),
 		Store: nativeHostState{ClaimStore: state}, Lease: claimed.Lease, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source:    source.Options{Engines: claimEngine{resolved: input.Engine}},
 		Masks:     NewMaskRegistry(secrets.NewMasker()),
@@ -135,7 +135,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			persistNativeAcceptance(t, state, input.Accepted)
 			if mode == "local" {
 				config.Owner.Local = func(store.NodeRow) bool { return true }
-				config.Admission = ComposeNativeAdmission(nil, nil, true)
+				config.Admission = ComposeStartGate(nil, nil, true)
 			}
 			if mode == "concurrency" {
 				state.row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Capacity: 1, Cost: 1, Scope: "global", OnLimit: "queue"}}

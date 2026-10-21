@@ -21,7 +21,7 @@ func gh(sub, email string) store.SignInProfile {
 
 func resolve(t *testing.T, st *store.Store, p store.SignInProfile) store.SignInResult {
 	t.Helper()
-	res, err := st.AsOperator().ResolveSignIn(context.Background(), p, store.SignUpConditions{}, time.Now())
+	res, err := st.AsOperator().ResolveSignIn(context.Background(), p, store.SignUpConditions{})
 	if err != nil {
 		t.Fatalf("ResolveSignIn(%s %s): %v", p.Provider, p.Subject, err)
 	}
@@ -46,7 +46,7 @@ func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 	owner := signIn(t, st, "g-owner", "owner@example.com")
 	holder := signIn(t, st, "g-holder", "elsewhere@example.org")
 
-	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-stranger", "elsewhere@example.org"), store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
+	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-stranger", "elsewhere@example.org"), store.SignUpConditions{}); !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("an unlinked GitHub sign-in on holder's address = %v, want ErrAccountExists", err)
 	}
 
@@ -356,7 +356,7 @@ func TestSignInAndUnlinkUseTheSameLockOrderPostgres(t *testing.T) {
 	}
 	resolveDone := make(chan error, 1)
 	go func() {
-		_, err := st.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
+		_, err := st.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{})
 		resolveDone <- err
 	}()
 	for {
@@ -432,7 +432,7 @@ func TestSignInRetriesWhenIdentityWasUnlinkedWhileWaitingPostgres(t *testing.T) 
 	}
 	done := make(chan result, 1)
 	go func() {
-		resolved, err := st.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
+		resolved, err := st.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{})
 		done <- result{resolved.Account.ID, err}
 	}()
 	for {
@@ -556,7 +556,8 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 		store.Run{ID: "run-h", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := st.DeleteAccount(ctx, leaver.Account.ID); err != nil {
 		t.Fatalf("DeleteAccount: %v", err)
 	}
 	if n := countWhere(t, st, "runs", "id = 'run-h' AND created_principal = 'holder@example.com'"); n != 1 {
@@ -565,7 +566,8 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	if n := countWhere(t, st, "identity_unlinks", "account_id = '"+leaver.Account.ID+"'"); n != 0 {
 		t.Fatal("the deleted account's unlink records survived it")
 	}
-	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{}, now); !errors.Is(err, store.ErrAccountExists) {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{}); !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("GitHub sign-in after the deletion = %v, want holder's account to refuse it until holder links it", err)
 	}
 }
@@ -577,7 +579,7 @@ func TestSignInRefusesANewProviderOnAnExistingAccountsAddress(t *testing.T) {
 	ctx := context.Background()
 	alice := signIn(t, st, "g-alice", "alice@corp.example")
 
-	_, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-reassigned", "alice@corp.example"), store.SignUpConditions{}, time.Now())
+	_, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-reassigned", "alice@corp.example"), store.SignUpConditions{})
 	if !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("GitHub sign-in on Alice's address = %v, want ErrAccountExists", err)
 	}

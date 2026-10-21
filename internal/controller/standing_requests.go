@@ -88,7 +88,7 @@ func (s *Server) handleOperatorStandingRequests(w http.ResponseWriter, r *http.R
 			return err
 		}
 		info, err := t.Info(ctx)
-		standing, serr := t.BillingStanding(ctx, time.Now())
+		standing, serr := t.BillingStanding(ctx)
 		credit, cerr := t.CreditState(ctx, creditsBurnWindow)
 		if err := errors.Join(err, serr, cerr); err != nil {
 			return err

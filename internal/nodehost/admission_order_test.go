@@ -50,9 +50,9 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
 	config.Owner.Local = func(row store.NodeRow) bool { return row.Ref.NodeID == "b" }
-	config.Admission = ComposeNativeAdmission(fixture.Tenant, &LocalAdmission{Daemon: admitter}, false)
+	config.Admission = ComposeStartGate(fixture.Tenant, &LocalAdmission{Daemon: admitter}, false)
 	ownerQueued := make(chan struct{}, 1)
-	config.Admission.capacity.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
+	config.Admission.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
 		if ref.NodeID == "b" {
 			ownerQueued <- struct{}{}
 		}

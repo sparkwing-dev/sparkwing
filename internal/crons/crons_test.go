@@ -114,7 +114,8 @@ type harness struct {
 func newHarness(t *testing.T, now time.Time) *harness {
 	t.Helper()
 	home := t.TempDir()
-	st, err := teststore.OpenExisting(filepath.Join(home, "state.db"))
+	c := &clock{at: now}
+	st, err := teststore.OpenExisting(filepath.Join(home, "state.db"), teststore.WithClock(c.now))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -123,7 +124,6 @@ func newHarness(t *testing.T, now time.Time) *harness {
 			t.Errorf("close store: %v", cerr)
 		}
 	})
-	c := &clock{at: now}
 	launcher := newFakeLauncher()
 	launcher.now = c.now
 	launcher.store = st
@@ -317,7 +317,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 	}
 	h.clock.set(at(t, "2026-01-01T02:00:30Z"))
 	cursor := at(t, "2026-01-01T01:59:00Z")
-	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).ResolveCronDue(ctx, id, cursor, nil, nil, h.clock.now()); err != nil {
+	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).ResolveCronDue(ctx, id, cursor, nil, nil); err != nil {
 		t.Fatalf("ResolveCronDue: %v", err)
 	}
 

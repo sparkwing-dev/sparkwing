@@ -199,11 +199,13 @@ type JobTransitionRequest struct {
 }
 
 type Applied struct {
-	Replayed        bool  `json:"replayed"`
-	CancelRequested bool  `json:"cancel_requested"`
-	StateSeq        int64 `json:"state_seq"`
-	Generation      int64 `json:"generation"`
-	Attempt         int64 `json:"attempt"`
+	Outcome         string `json:"outcome,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	Replayed        bool   `json:"replayed"`
+	CancelRequested bool   `json:"cancel_requested"`
+	StateSeq        int64  `json:"state_seq"`
+	Generation      int64  `json:"generation"`
+	Attempt         int64  `json:"attempt"`
 }
 
 // ExpansionSubmission carries one expansion body or failure under its source generation.
@@ -284,9 +286,8 @@ type AcceptedExpansion struct {
 }
 
 type FinishRequest struct {
-	Outcome string        `json:"outcome"`
-	Reason  string        `json:"reason,omitempty"`
-	Error   *apierr.Error `json:"error,omitempty"`
+	Reason string        `json:"reason,omitempty"`
+	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 type CancelRequest struct {

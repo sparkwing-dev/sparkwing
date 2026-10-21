@@ -48,8 +48,8 @@ func TestNativeExecutorMemoHitUsesClaimAndReleasesAdmission(t *testing.T) {
 			}
 			return &outputReader{Reader: bytes.NewReader(body)}, nil
 		}}
-		ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: job.ID}
-		if _, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
+		ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(job.ID)}
+		if _, err := f.State.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 			t.Fatal(err)
 		}
 		award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
@@ -104,7 +104,7 @@ func TestNativeExecutorMemoHitUsesClaimAndReleasesAdmission(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		admission := ComposeNativeAdmission(f.Tenant, &LocalAdmission{Daemon: daemon}, false)
+		admission := ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: daemon}, false)
 		if err := admission.claimedNode(ctx, input, func(ctx context.Context) error { return host.Execute(ctx, input) }); err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +116,7 @@ func TestNativeExecutorMemoHitUsesClaimAndReleasesAdmission(t *testing.T) {
 		if err != nil || row.Status != store.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != 1 {
 			t.Fatalf("run=%d row=%+v bodies=%d error=%v", run, row, bodies, err)
 		}
-		attempt := runspec.AttemptIdentity{Team: request.Team, RunID: f.Input.RunID, NodeID: job.ID, Attempt: row.Attempt, Generation: row.Generation}
+		attempt := runspec.AttemptIdentity{Team: request.Team, RunID: f.Input.RunID, NodeID: job.ID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}
 		for _, record := range []*blob.RecordKey{row.OutputRecord, row.ManifestRecord} {
 			if *record != blob.ResultRecordKey(attempt, request.Git.Repository.Key, blob.ScopeFor(spec.Request.Provenance), request.Pipeline, record.Kind) {
 				t.Fatalf("memo attached another attempt's record: %+v", record)

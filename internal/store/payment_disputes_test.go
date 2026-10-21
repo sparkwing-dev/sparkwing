@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -35,7 +36,8 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 			} else if err != nil || claim.Award.CapabilityPrefix == "" {
 				t.Fatalf("frozen unmetered award=%+v: %v", claim, err)
 			}
-			if count, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "console", "resolved", *now); err != nil || count != 1 {
+			s.SetTestClock(t, func() time.Time { return *now })
+			if count, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "console", "resolved"); err != nil || count != 1 {
 				t.Fatalf("release=%d: %v", count, err)
 			}
 			if metered {
@@ -76,17 +78,20 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 		if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), foreignPayment, dispute, "console", 0); !errors.Is(err, ErrDisputeConflict) {
 			return false
 		}
-		if count, err := stranger.ReleaseCreditFreezes(t.Context(), dispute, "console", "forged", now); err != nil || count != 0 {
+		s.SetTestClock(t, func() time.Time { return now })
+		if count, err := stranger.ReleaseCreditFreezes(t.Context(), dispute, "console", "forged"); err != nil || count != 0 {
 			return false
 		}
-		if count, err := stranger.ReleaseOperatorHolds(t.Context(), "console", "forged", now); err != nil || count != 0 {
+		s.SetTestClock(t, func() time.Time { return now })
+		if count, err := stranger.ReleaseOperatorHolds(t.Context(), "console", "forged"); err != nil || count != 0 {
 			return false
 		}
 		freeze, err := owner.CreditFreeze(t.Context())
 		if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 || freeze.Disputes[0] != dispute {
 			return false
 		}
-		if count, err := owner.ReleaseCreditFreezes(t.Context(), dispute, "console", "resolved", now); err != nil || count != 1 {
+		s.SetTestClock(t, func() time.Time { return now })
+		if count, err := owner.ReleaseCreditFreezes(t.Context(), dispute, "console", "resolved"); err != nil || count != 1 {
 			return false
 		}
 		if replay, err := owner.TestOnlyHoldForDispute(t.Context(), dispute, payment, "replayed", now); err != nil || replay {

@@ -28,7 +28,7 @@ func localAdmissionSeal(t *testing.T, options runspec.Options) AcceptedRun {
 }
 
 func localAdmissionRow(id string) store.NodeRow {
-	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: id}}
+	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: runspec.NodeID(id)}}
 }
 
 func localAdmissionOptions() runspec.Options {
@@ -72,7 +72,7 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 	for _, req := range d.requests() {
-		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != "" || req.OwnerLeaseToken != "" || req.SubLease || req.SemaphoresOnly || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{Cores: 2, MemoryBytes: 1 << 30}) {
+		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != testRunID || req.OwnerLeaseToken != "lease-"+testRunID || !req.SubLease || req.SemaphoresOnly || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{Cores: 2, MemoryBytes: 1 << 30}) {
 			t.Fatalf("request=%+v", req)
 		}
 	}
@@ -94,7 +94,7 @@ func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
 			t.Fatalf("sealed winners lost: %+v", req)
 		}
 	}
-	if reqs := d.requests(); len(reqs) != 1 || string(reqs[0].RunID) != want {
+	if reqs := d.requests(); len(reqs) != 2 || string(reqs[1].RunID) != want {
 		t.Fatalf("requests=%+v", reqs)
 	}
 }

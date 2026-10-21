@@ -58,6 +58,7 @@ type BindingState struct {
 	HereClaimed    bool
 	LogSealed      bool
 	ProcessAlive   bool
+	StartPermitted bool
 	Result         *RecordedResult
 	Expansion      *ExpansionState
 }

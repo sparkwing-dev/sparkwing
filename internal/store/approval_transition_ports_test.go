@@ -16,7 +16,7 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 	for _, decision := range []string{"approved", "denied"} {
 		t.Run(decision, func(t *testing.T) {
 			tenant, ref, _, _, change := approvalReaperFixture(t, "fail")
-			before, err := tenant.GetApproval(t.Context(), ref.RunID, ref.NodeID)
+			before, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
 			if err != nil || before.ResolvedAt != nil {
 				t.Fatalf("pending gate: %+v, %v", before, err)
 			}
@@ -31,7 +31,7 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 			if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 				t.Fatal(err)
 			}
-			got, err := tenant.GetApproval(t.Context(), ref.RunID, ref.NodeID)
+			got, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
 			if err != nil || got.Resolution != decision || got.Comment != "decision comment" || got.Approver != "approver" || got.ResolvedAt == nil {
 				t.Fatalf("resolved gate: %+v, %v", got, err)
 			}
@@ -39,7 +39,7 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 			if err != nil || len(pending) != 0 {
 				t.Fatalf("pending after resolution: %+v, %v", pending, err)
 			}
-			all, err := tenant.ListApprovalsForRun(t.Context(), ref.RunID)
+			all, err := tenant.ListApprovalsForRun(t.Context(), string(ref.RunID))
 			if err != nil || len(all) != 1 || !reflect.DeepEqual(got, all[0]) {
 				t.Fatalf("approval history: %+v, %v", all, err)
 			}
@@ -52,11 +52,11 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 			if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 				t.Fatal("changed decision overwrote approval")
 			}
-			after, err := tenant.GetApproval(t.Context(), ref.RunID, ref.NodeID)
+			after, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
 			if err != nil || !reflect.DeepEqual(got, after) {
 				t.Fatal("refused decision changed approval")
 			}
-			if _, err := foreign.GetApproval(t.Context(), ref.RunID, ref.NodeID); err == nil {
+			if _, err := foreign.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID)); err == nil {
 				t.Fatal("foreign tenant read approval")
 			}
 			change.Ref.NodeID = "missing"
@@ -88,7 +88,7 @@ func TestApprovalTransitionsKeepPendingRequestOrder(t *testing.T) {
 	}
 	for _, id := range []string{"a", "b", "c"} {
 		*now = now.Add(time.Second)
-		if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: id}, Actor: request.Actor, To: NodeApprovalPending, Cause: CauseApprovalOpen}); err != nil {
+		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}, Actor: request.Actor, To: NodeApprovalPending, Cause: CauseApprovalOpen}); err != nil {
 			t.Fatal(err)
 		}
 	}

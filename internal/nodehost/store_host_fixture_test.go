@@ -69,7 +69,7 @@ func (s *hostState) subscribe(context.Context, string) (StateSubscription, error
 	}}, nil
 }
 
-func (s *hostState) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (s *hostState) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	applied, err := s.Tenant.TransitionNode(ctx, change)
 	if err == nil {
 		s.notify()
@@ -130,7 +130,7 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Input.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
 	spec, _ := json.Marshal(accepted.Spec)
@@ -192,7 +192,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	if admitted.HereCapabilityPrefix != "" {
 		root = admitted.HereCapabilityPrefix
 	}
-	claim, err := database.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Capacity: match.Resources{Cores: 64, MemoryBytes: 64 << 30}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := database.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Capacity: match.Resources{Cores: 64, MemoryBytes: 64 << 30}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
 
 	f.State = &hostState{Tenant: tenant}
-	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+	f.Host = OwnerHost{executionAdmission: ComposeStartGate(tenant, nil, false), Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
 		return database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
 	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }}
 	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {

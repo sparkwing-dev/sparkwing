@@ -1,50 +1,37 @@
 # C3 protocol and SDK contract
 
-## Burst release and machine admission
+## Release and start admission
 
-`NativeAdmission` is the admission owner for owner execution, independent claims,
-burst self-claims, here, local peers, Actions, launcher jobs and evaluations.
-It acquires accepted plan groups, then accepted job groups, then machine CPU
-and memory. `Tenant.AdmitCapacity` owns both logical stages in one transaction;
-the controller scheduler calls that same operation before releasing ready jobs.
-Controller box groups wait for an execution award to supply a sealed host.
+The store is the durable admission owner in every placement. Owners propose ready,
+approval and expansion releases. Store transactions grant the complete plan group
+set with permission to release. `MayStart` accepts a job binding and actual award,
+derives all accepted groups and their host scope, and commits a complete job grant
+and award-bound start permit. Every job requires a permit. Skip and fail commit the
+terminal state through the common verdict owner. A wait holds no group from its set.
 
-Scheduling holds no machine compute. Run resource settings flow into each job's
-sealed settings. A burst self-claim acquires logical capacity before its
-job-specific compute lease and fenced reconciliation. Reentrant execution
-reuses that lease. Waiting for compute leaves the job unclaimed, and another
-claimant's state change cancels and joins the wait. Independently awarded jobs
-admit logical capacity before source preparation and compute.
+A job's SkipIf and memo run on its executing host after job admission and compute.
+Job starts never reacquire parent plan groups. Recovery processes settlement while
+new releases wait for lapsed plan capacity. Retained reservation identity and one
+arrival sequence belong to run/job, independent of owner generation. Claim or owner
+liveness preserves a retained arrival. An expired reservation cannot revive.
 
-Store admission reuses live holders and waiter arrival order after ownership
-handoff. Recovery revalidates the plan stage before the job stage; when plan
-capacity must wait, later job reservations are removed. An expired reservation
-cannot be revived. No compute is held while logical admission waits. Compute
-releases after joined cleanup; job terminal transitions release job capacity,
-and run completion releases plan capacity after workers drain.
+Approval predicates have no execution host, groups or compute. Store admission
+releases their SDK evaluation under an owner or evaluation-unit fence. The store
+commits typed skip, failure or approval opening through that exact source boundary.
+Controller-owned predicates use evaluation units. Expansions use the same release
+permission and retain their own source fence. Completion follows the existing
+state machine, `Decide` and `runVerdictTx`.
 
-Executable-job SkipIf and memo checks run first on the executing host, under the
-actual job award, after plan groups, job groups and machine admission. The
-coordinator acquires no job groups for evaluation. A skip ends the job and releases
-its groups without invoking its body. An independent expansion evaluation admits
-plan capacity under its exact expansion lease, then compute;
-its terminal source job's groups remain released. An admission failure before
-execution reports the fenced setup result without starting an attempt. Runner
-compute is optional; logical admission is always on.
+`StartGate` asks for a decision and then optional machine compute. It owns no
+logical semaphore. Burst uses a provisional award, logical admission, then a
+nonblocking compute request. Unavailable compute returns placement and reservations
+without resetting readiness ranking. Cleanup joins before compute releases. Job
+and run terminal transitions remove their durable logical reservations.
 
-An unclaimed burst job waits for placement without acquiring job concurrency. The owner follows the existing state subscription and retries the
-fenced reconciliation after persisted state or its execution eligibility
-changes. `StateFollower.Wait` includes the private owner's execution projection
-in its change comparison. A capacity observation only wakes reconciliation.
-It never grants an execution award. `WaitNode` retains its state-sequence rule.
-
-The internal machine `Lease` exposes its actual granted `Resources`. Every
-production adapter and test lease implements this method. The owner carries that amount in `ReconcileRequest.Reserved`. The store adds
-it to observed free resources within that reconciliation transaction, bounded
-by the authenticated machine's physical capacity. This input does not update
-stored availability. Execution and ordinary heartbeats report only free
-resources. A concurrent heartbeat cannot erase a job's reservation. The additive
-`reserved` wire field adds no persistent reservation or claim-release route.
+Memo absence is a miss. Authorization and fence refusals remain errors, including
+when joined with missing or corrupt cache data. A memo record remains producer-owned
+until successful settlement makes it reusable in the same transaction. Failure,
+cancellation or a rolled-back report cannot publish a reusable result.
 
 ## Declared requester secrets in composed execution
 
@@ -94,8 +81,7 @@ Owner admission refusals use typed store policy results under the live owner and
 captured work generation. Job skip, failure and queue timeout finish the unreleased
 job. Plan refusal preserves completed work, finishes every remaining unreleased
 job, disposes unresolved expansions, and finishes the run and its owner unit in
-one transaction. An approval's true SkipIf persists success without an attempt
-and releases its dependents.
+one transaction. An approval's true SkipIf persists skip without an attempt.
 
 Hosting keeps one exact-unit keeper through preparation and execution, keyed by
 unit kind, run, job, holder and generation. OwnerHost and ClaimedNodeHost adopt
@@ -357,10 +343,10 @@ are part of this contract.
 | `nodehost.OwnerDelegator`, `OwnerHost.Delegator` | Resolve live owner ceilings and delegate expansion submission to the exact source generation under that owner lease. |
 | `nodehost.NewNativeHost`, `NativeHostConfig` | Assemble owner and claimed execution with one native executor and register their delegated process services. |
 | `nodehost.LocalAdmission` | Supply the optional machine compute client. The shared admission owner holds CPU and memory for each execution or evaluation through joined cleanup. |
-| `nodehost.CapacityStore`, `NativeAdmission`, `ComposeNativeAdmission` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The private store adapter binds the current run owner on each invocation. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
+| `nodehost.CapacityStore`, `StartGate`, `ComposeStartGate` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The thin client presents only its current job award. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
 | `nodehost.NativeHostConfig.Admission`, `NativeConfig.Admission` | Carry one composed admission value. Required requester compute is independent of placement eligibility. Runners may omit compute while retaining the supplied capacity store. |
-| `nodehost.AdmissionFailure` | Preserve admission outcome and reason through cancellation and fenced executor reports. |
-| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Enter reconciliation immediately and gate new ready, approval and expansion releases on plan capacity without holding compute. Store-owned groups retain capacity through persisted completion. Supersession requests holder cancellation before replacement. |
+| `nodehost.AdmissionFailure` | Preserve the store decision while terminal settlement remains store-owned. |
+| `Tenant.ReleaseEvaluation`, ready transitions | Commit plan admission with release permission. Reconciliation starts immediately and settles released work while new releases wait. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
@@ -815,14 +801,13 @@ non-boolean results, drift, SDK failures and cleanup errors prevent body executi
 `NewNativeHost` installs executable-job predicates in the shared executor after
 admission under the actual award. The owner evaluator retains approval
 conditions before the human wait. Approval opening uses the store transition and
-state follower. Decision 42 leaves approval placement unresolved because these
+state follower. Approval evaluation uses store-owned release permission because these
 jobs have no execution award. Its caller-supplied `OwnerOperations` supplies
 active debug policy. Requester adapters
 require machine CPU/memory admission. Runner adapters enable compute admission
 only with `runner.local_admission`; placement eligibility does not decide this
-requirement. `ComposeNativeAdmission` always supplies controller-backed logical
-concurrency to remote owners through `RemoteHostStore`. Its capacity store uses
-the private owner transport for plan admission. Executable-job admission uses the
+requirement. `ComposeStartGate` supplies the store decision client and optional compute.
+Remote owners propose releases through `RemoteHostStore`. Executable-job admission uses the
 actual job award before predicate and memo evaluation.
 Plan and job groups have separate persisted key namespaces. Pipeline acceptance
 refuses box-scoped plan groups because a run can span machines, naming the group
@@ -846,7 +831,7 @@ Selection uses the scheduler's dependency closure, including present
 optional dependencies and generator sources. The
 executor logs timeout indices and reports a skipped result only after evaluation,
 revocation and cleanup join. Approval SkipIf success uses the fenced
-PolicyApprovalBypass owner transition, which releases dependents without
+PolicyApprovalBypass fenced transition, which records skip without
 creating an execution attempt.
 
 Both session implementations use one platform process launcher. The duplicate
@@ -1065,7 +1050,7 @@ tests for implementations, not claims that the declaration stubs execute.
 | Expansion replay and cancellation race | §3.6 | Same body replays, changed body conflicts, stale/cancelled authority writes nothing. |
 | Lease cancellation, rejection, silence and shedding | §2.4 | Exact cause, no liveness extension on 429/503, joined cleanup, watched jobs delivered. |
 | Direct source across placements and owner loss | §2.5, A15 | Exact SHA, retained default-branch trust, SSH/App/HTTPS, authorized submodules and bundle seed. |
-| Run and node admission adoption | §3.7 | Only continuously counted holders/waiters retain capacity or arrival order. |
+| Run and node reservation continuity | §3.7 | Only continuously counted holders/waiters retain capacity or arrival order. |
 | Artifacts, memo and directory-cache parity | §8.1 | Integrity, existence and reference-edge checks; unrelated-job digest refused. |
 | Author SDK and fake-host fixture | §6.6-6.8 | Every retained/new API compiles without runtime plumbing and Go/TS plans agree. |
 | Windows and cleanup | §5.6, §6.2 | Handles travel in argv, child tools inherit none, private files use fssecure. |

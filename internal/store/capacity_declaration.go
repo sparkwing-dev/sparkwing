@@ -10,7 +10,7 @@ import (
 
 func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) ([]runspec.Concurrency, error) {
 	if nodeID != "" {
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runID, NodeID: nodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)})
 		return row.Execution.Concurrency, err
 	}
 	run, err := readRunTx(ctx, tx, team, runID)
@@ -33,7 +33,7 @@ func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 
 func planWorkReleasedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
 	var released bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE team=? AND run_id=? AND kind IN ('job_ready','job_approval_pending'))`, team, runID).Scan(&released)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE team=? AND run_id=? AND kind IN ('job_ready','job_approval_pending','job_expansion_ready','job_approval_ready'))`, team, runID).Scan(&released)
 	return released, err
 }
 

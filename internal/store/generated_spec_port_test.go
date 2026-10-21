@@ -27,7 +27,7 @@ func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *t
 		if err != nil || len(accepted.Nodes) != 1 {
 			t.Fatalf("expansion: %+v, %v", accepted, err)
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: id})
+		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}

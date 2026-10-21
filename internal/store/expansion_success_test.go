@@ -172,7 +172,7 @@ func TestExpansionReplayRechecksLeaseAfterSecretDecryption(t *testing.T) {
 	}
 
 	var run RunRow
-	run, err := tenant.ReadRun(t.Context(), request.Source.RunID)
+	run, err := tenant.ReadRun(t.Context(), string(request.Source.RunID))
 	if err != nil {
 		t.Fatal(err)
 	}

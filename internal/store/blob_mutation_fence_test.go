@@ -27,6 +27,7 @@ func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 						if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 							t.Fatal(err)
 						}
+						activateMemoFixture(t, s)
 					}
 					if fence == "lease" {
 						rewriteSchemaExec(t, s.db, "UPDATE nodes SET lease_expires_at=? WHERE team='a' AND run_id='run' AND node_id='job'", expiry.UnixNano())

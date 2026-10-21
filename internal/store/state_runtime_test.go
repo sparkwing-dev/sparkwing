@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -19,14 +21,14 @@ func stateFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at,expansion) VALUES ('a','run','job','running',?,?,'runner','claim',2,3,?,?,'expected')`, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(-time.Second).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','job',3,2,'runner','claim','runner','runner','remote',?)`, now.Add(-time.Minute).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.reaper','replica',?,1)`, now.Add(time.Minute).UnixNano())
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.reaper", Holder: "replica", Generation: 1}}
+	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.reaper", EvalFence: runspec.EvalFence{Holder: "replica", Generation: 1}}}
 	return &Tenant{s: s, team: "a"}, &now, actor
 }
 
 func TestTransitionLapseRequeuesInSameRun(t *testing.T) {
 	tenant, _, actor := stateFixture(t)
 	ctx := context.Background()
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: nodePending, Actor: actor, Cause: CauseLeaseLapse}
 	applied, err := tenant.TransitionNode(ctx, change)
 	if err != nil {
 		t.Fatal(err)
@@ -55,10 +57,10 @@ func TestTransitionCancelWinsOverLoss(t *testing.T) {
 	tenant, now, actor := stateFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET cancel_requested_at=? WHERE team='a' AND run_id='run'`, now.UnixNano())
 	ctx := context.Background()
-	if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
+	if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: nodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
 		t.Fatal("cancelled work was requeued")
 	}
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}
 	if _, err := tenant.TransitionNode(ctx, change); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestTransitionTenantAndExpiredReaperFence(t *testing.T) {
 		t.Fatalf("cross-team read = %v", err)
 	}
 	*now = now.Add(time.Minute)
-	if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
+	if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: nodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
 		t.Fatal("expired reaper changed work")
 	}
 	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: "run", NodeID: "job"})
@@ -109,7 +111,7 @@ func TestRunCancellationDrainsBeforeTerminal(t *testing.T) {
 	if _, err = tenant.TransitionRun(ctx, finish); err == nil {
 		t.Fatal("run finished with undrained job")
 	}
-	if _, err = tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}); err != nil {
+	if _, err = tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tenant.TransitionRun(ctx, finish); err != nil {
@@ -130,7 +132,7 @@ func TestRunOwnerLossPreservesCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 	if _, err := tenant.TransitionRun(context.Background(), RunTransition{RunID: "run", To: RunFailed, Actor: actor, Cause: RunOwnerLost}); err == nil {
 		t.Fatal("owner loss overrode requested cancellation with failure")
 	}
@@ -145,7 +147,7 @@ func TestRunQueueTimeoutPreservesLiveOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 	if _, err := tenant.TransitionRun(context.Background(), RunTransition{RunID: "run", To: RunFailed, Actor: actor, Cause: RunQueueTimeout}); err == nil {
 		t.Fatal("queue timeout failed a live claimed owner")
 	}
@@ -160,7 +162,7 @@ func liveHolderFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	c.ExpiresAt = &expiry
 	authorityPersist(t, tenant.s, c)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=?,execution_json=?,expansion='' WHERE team='a' AND run_id='run'`, expiry.UnixNano(), []byte(`{"retry":{"set":true,"value":1}}`))
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 	return tenant, now, actor
 }
 
@@ -168,7 +170,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	tenant, _, actor := liveHolderFixture(t)
 	ctx := context.Background()
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-	applied, err := tenant.TransitionNode(ctx, NodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
+	applied, err := tenant.TransitionNode(ctx, nodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +184,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	if row.ClaimedBy != "runner" || row.ApplicationRetries != 1 || row.Disruptions != 0 {
 		t.Fatalf("retry row = %+v", row)
 	}
-	result := NodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(4), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	result := nodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(4), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 	if _, err = tenant.TransitionNode(ctx, result); err != nil {
 		t.Fatal(err)
 	}
@@ -209,8 +211,8 @@ func TestTransitionHolderRights(t *testing.T) {
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, tenant.s, owner)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'host','owner',1,?,?,?)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}}
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Actor: actor, Cause: CauseReport}
+	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Actor: actor, Cause: CauseReport}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("owner finished another holder's job")
 	}
@@ -223,5 +225,31 @@ func TestTransitionHolderRights(t *testing.T) {
 	row, err := tenant.ReadNode(t.Context(), change.Ref)
 	if err != nil || row.Status != StatusRunning || row.StateSeq != 0 {
 		t.Fatalf("refused writes changed row: %+v, %v", row, err)
+	}
+}
+
+func TestHolderFenceCannotBeReboundToAnotherTarget(t *testing.T) {
+	for _, target := range []string{"run", "job"} {
+		t.Run(target, func(t *testing.T) {
+			tenant, _, actor := liveHolderFixture(t)
+			ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+			before, err := tenant.ReadNode(t.Context(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if target == "run" {
+				actor.RunID = "other-run"
+			} else {
+				actor.NodeID = "other-job"
+			}
+			_, err = tenant.TransitionNode(t.Context(), ReportNode{Ref: ref, Actor: actor, SourceAttempt: sourceAttempt(3), Outcome: NodeSuccess, Result: &NodeResult{Outcome: NodeSuccess}})
+			if err == nil {
+				t.Fatal("holder fence was rebound to the command target")
+			}
+			after, err := tenant.ReadNode(t.Context(), ref)
+			if err != nil || after.StateSeq != before.StateSeq || after.Status != before.Status {
+				t.Fatalf("refused fence changed state: %+v, %v", after, err)
+			}
+		})
 	}
 }

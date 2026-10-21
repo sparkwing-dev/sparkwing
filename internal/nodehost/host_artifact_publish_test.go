@@ -34,7 +34,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 			}
 			input, state, host := executionHostFixture(t, executionMode, &trace, &processes, func(deps *ExecutorDependencies) {
 				deps.BindStorage = func(_ context.Context, in NodeInput) (StorageBinding, error) {
-					backend.upload.Identity.Attempt.Value = runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: in.Generation, Attempt: in.Attempt}
+					backend.upload.Identity.Attempt.Value = runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: int64(in.Generation), Attempt: int64(in.Attempt)}
 					backend.upload.Authority.Attempt = backend.upload.Identity.Attempt
 					backend.upload.Key = blob.ResultRecordKey(backend.upload.Identity.Attempt.Value, backend.upload.Authority.Repo, backend.upload.Authority.Ref.Scope, "build", blob.KindManifest)
 					return StorageBinding{Bytes: backend, Records: backend, Authority: backend.upload.Authority}, nil

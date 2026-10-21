@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -142,7 +143,7 @@ func TestPostgresLauncherPreparationLocksExchangedAuthorityBeforeRun(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 	exchanged, err := st.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +174,7 @@ func TestPostgresLauncherPreparationRestartsDiscoveryAfterConcurrentExchange(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	fence := capability.LeaseRef{Kind: bootstrap.Capability.Unit, ID: bootstrap.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 	b := blockRun(t, ctx, st)
 	b.start(func() error {
 		_, err := st.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
@@ -220,7 +221,7 @@ func TestPostgresConcurrentEvaluationReleasesRequestTheRunForWriting(t *testing.
 	st.TestOnlyEvaluations(t, "job", "second")
 	var claims []store.UnitClaim
 	for _, job := range []string{"job", "second"} {
-		demand.Target = &store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: job, SourceGeneration: 7}
+		demand.Target = &store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: runspec.NodeID(job), SourceGeneration: 7}
 		claim, err := st.AsOperator().ClaimUnit(ctx, demand)
 		if err != nil {
 			t.Fatal(err)

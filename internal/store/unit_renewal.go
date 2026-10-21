@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (LeaseBeat, error) {
@@ -60,7 +61,7 @@ func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (L
 		if beat.CancelRequested {
 			return nil
 		}
-		return computeUnitBillingTx(ctx, tx, tenant.team, unit, actor.Generation, 0, executing || c.Billing != nil && c.Billing.ExecutorClass == TierCloud)
+		return computeUnitBillingTx(ctx, tx, tenant.team, unit, int64(actor.Generation), 0, executing || c.Billing != nil && c.Billing.ExecutorClass == TierCloud)
 	})
 	if err != nil {
 		return LeaseBeat{}, err
@@ -76,15 +77,15 @@ func renewalActor(c capability.Capability) (UnitRef, Actor, error) {
 	if err != nil {
 		return UnitRef{}, Actor{}, err
 	}
-	if unit.RunID != c.Binding.RunID || unit.NodeID != c.Binding.NodeID {
+	if string(unit.RunID) != c.Binding.RunID || string(unit.NodeID) != c.Binding.NodeID {
 		return UnitRef{}, Actor{}, holderRefusal()
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 	grant, binding := capability.NodeReport, capability.BindingNode
 	switch c.Unit {
 	case capability.UnitTrigger, capability.UnitPlan:
 		actor.Kind = ActorRunHost
-		actor.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+		actor.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 		binding = capability.BindingRun
 		if c.Unit == capability.UnitTrigger {
 			grant, binding = capability.TriggerHost, capability.BindingTrigger
@@ -95,8 +96,8 @@ func renewalActor(c capability.Capability) (UnitRef, Actor, error) {
 			return UnitRef{}, Actor{}, holderRefusal()
 		}
 		grant = capability.ExpansionSubmit
-		actor.Generation = lease.Generation
-		actor.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Holder: lease.Holder, Generation: lease.Generation}
+		actor.Generation = runspec.ClaimGeneration(lease.Generation)
+		actor.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}
 	case capability.UnitNode:
 		if c.Binding.Expansion != nil {
 			return UnitRef{}, Actor{}, holderRefusal()
@@ -111,14 +112,14 @@ func renewalActor(c capability.Capability) (UnitRef, Actor, error) {
 }
 
 func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, actor Actor, beat *LeaseBeat) error {
-	request := ExpansionSubmission{Source: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, SourceGeneration: unit.SourceGeneration, Actor: actor}
-	if err := expansionAuthorityTx(ctx, tx, team, request, tx.now()); err != nil {
+	request := ExpansionSubmission{Source: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Actor: actor}
+	if err := expansionAuthorityTx(ctx, tx, team, request); err != nil {
 		return err
 	}
-	if err := lockStateRunTx(ctx, tx, team, unit.RunID); err != nil {
+	if err := lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
 		return err
 	}
-	run, err := readRunTx(ctx, tx, team, unit.RunID)
+	run, err := readRunTx(ctx, tx, team, string(unit.RunID))
 	if err != nil {
 		return err
 	}
@@ -129,18 +130,18 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err != nil {
 		return err
 	}
-	if source.Generation != unit.SourceGeneration || source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Expansion != ExpansionExpected && run.CancelRequestedAt == nil {
+	if source.Generation != runspec.ClaimGeneration(unit.SourceGeneration) || !evaluationSourceCurrent(source) && (run.CancelRequestedAt == nil || source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome))) {
 		return holderRefusal()
 	}
-	if err := expansionAuthorityTx(ctx, tx, team, request, tx.now()); err != nil {
-		return err
-	}
 	*beat = LeaseBeat{CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
-	funded, err := renewUnitBillingTx(ctx, tx, team, unit, actor.Generation, beat)
+	funded, err := renewUnitBillingTx(ctx, tx, team, unit, int64(actor.Generation), beat)
 	if err != nil {
 		return err
 	}
-	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, tx.now(), funded)
+	if err := expansionAuthorityTx(ctx, tx, team, request); err != nil {
+		return err
+	}
+	expiry, err := leaseBoundTx(ctx, tx, actor.CapabilityPrefix, tx.now(ctx), funded)
 	if err != nil {
 		return err
 	}
@@ -149,7 +150,7 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 		return err
 	}
 	beat.ExpiresAt = expiry
-	if err := renewCapacityTx(ctx, tx, team, unit.RunID, unit.NodeID, tx.now(), expiry); err != nil {
+	if err := renewCapacityTx(ctx, tx, team, string(unit.RunID), string(unit.NodeID), expiry); err != nil {
 		return err
 	}
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)

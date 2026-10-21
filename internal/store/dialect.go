@@ -104,18 +104,15 @@ func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
 	return s.exec(context.Background(), q, args...)
 }
 
-func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+func (s *Store) query(ctx context.Context, q string, args ...any) (rowCursor, error) {
 	if err := refuseLedgerWrite(q); err != nil {
 		return nil, err
 	}
 	return s.sqlRunner().QueryContext(ctx, rewritePh(s.dialect, q), args...)
 }
 
-func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
-	if err := refuseLedgerWrite(q); err != nil {
-		return nil, err
-	}
-	return s.sqlRunner().QueryContext(context.Background(), rewritePh(s.dialect, q), args...)
+func (s *Store) queryNoCtx(q string, args ...any) (rowCursor, error) {
+	return s.query(context.Background(), q, args...)
 }
 
 func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner {
@@ -126,10 +123,7 @@ func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner 
 }
 
 func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
-	if err := refuseLedgerWrite(q); err != nil {
-		return refusedLedgerRow{err}
-	}
-	return s.sqlRunner().QueryRowContext(context.Background(), rewritePh(s.dialect, q), args...)
+	return s.queryRow(context.Background(), q, args...)
 }
 
 type storeTx struct {
@@ -140,13 +134,14 @@ type storeTx struct {
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
-	clockErr             error
-	ctx                  context.Context
+	clock                func(context.Context) (time.Time, error)
+	err                  error
 	cancelingTeam        Team
 	tx                   *sql.Tx
 	dialect              Dialect
 	store                *Store
 	snapshotRead         bool
+	rowsOpen             bool
 	rotatingRoot         *capability.Capability
 	createdTeam          *TeamInfo
 	blobIO               *blobIO
@@ -160,22 +155,51 @@ func (s *Store) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (t *storeTx) now() time.Time {
-	if t.store.pinnedClock != nil {
-		return t.store.pinnedClock().UTC()
+// Read-only decisions may never commit, so clock failure must refuse construction.
+func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeTx, error) {
+	t := &storeTx{operator: &Operator{s: s}, tx: raw, dialect: s.dialect, store: s, snapshotRead: read}
+	if read && s.dialect == DialectSQLite {
+		// SQLite establishes its snapshot on the first table read.
+		var version int
+		if err := t.QueryRowContext(ctx, `SELECT COUNT(*) FROM sparkwing_schema_version`).Scan(&version); err != nil {
+			return nil, errors.Join(err, t.Rollback())
+		}
 	}
-	if t.dialect == DialectSQLite && t.store.clock != nil {
-		return t.store.now()
+	now, err := t.readClock(ctx)
+	if err != nil {
+		return nil, errors.Join(err, t.Rollback())
 	}
-	if t.clockErr != nil {
+	t.clock = t.readClock
+	if read {
+		t.clock = func(context.Context) (time.Time, error) { return now, nil }
+	}
+	return t, nil
+}
+
+// safety: read snapshots stay fixed while write fences use fresh time; clock
+// failure poisons SQL access and commit even if the caller ignores the time.
+func (t *storeTx) now(ctx context.Context) time.Time {
+	if t.checkCursor() != nil {
 		return time.Time{}
+	}
+	now, err := t.clock(ctx)
+	t.err = err
+	return now
+}
+
+func (t *storeTx) readClock(ctx context.Context) (time.Time, error) {
+	s := t.store
+	if s.pinnedClock != nil {
+		return s.pinnedClock().UTC(), nil
+	}
+	if s.dialect == DialectSQLite && s.clock != nil {
+		return s.now(), nil
 	}
 	var ns int64
-	t.clockErr = t.QueryRowContext(t.ctx, databaseTimeSQL(t.dialect)).Scan(&ns)
-	if t.clockErr != nil {
-		return time.Time{}
+	if err := t.QueryRowContext(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+		return time.Time{}, err
 	}
-	return time.Unix(0, ns).UTC()
+	return time.Unix(0, ns).UTC(), nil
 }
 
 func databaseTimeSQL(d Dialect) string {
@@ -186,17 +210,12 @@ func databaseTimeSQL(d Dialect) string {
 }
 
 func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
-	if s.pinnedClock != nil {
-		return s.pinnedClock().UTC(), nil
-	}
-	if s.dialect == DialectSQLite && s.clock != nil {
-		return s.now(), nil
-	}
-	var ns int64
-	if err := s.queryRow(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+	tx, err := s.beginSnapshotReadTx(ctx)
+	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Unix(0, ns).UTC(), nil
+	defer rollbackOrLog(tx)
+	return tx.now(ctx), tx.err
 }
 
 // safety: Postgres takes a fresh snapshot per statement unless the isolation
@@ -205,11 +224,7 @@ func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
 // refuses the level, so it keeps the default.
 func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if s.dialect != DialectPostgres {
-		tx, err := s.beginTx(ctx)
-		if err == nil {
-			tx.snapshotRead = true
-		}
-		return tx, err
+		return s.beginStoreTx(ctx, true)
 	}
 	tx, err := s.sqlRunner().BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
@@ -218,12 +233,16 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{operator: &Operator{s: s}, tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
+	return s.snapshotTx(ctx, tx, true)
 }
 
 var errControllerFenced = errors.New("controller superseded by promotion")
 
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
+	return s.beginStoreTx(ctx, false)
+}
+
+func (s *Store) beginStoreTx(ctx context.Context, read bool) (*storeTx, error) {
 	tx, err := s.sqlRunner().BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -233,7 +252,7 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 		err := tx.QueryRowContext(ctx, controllerEpochLockSQL).Scan(&epoch)
 		if err != nil || epoch != s.controllerEpoch {
 			fenced := err == nil || errors.Is(err, sql.ErrNoRows)
-			err = errors.Join(err, tx.Rollback())
+			err = errors.Join(err, rollbackTx(tx))
 			if fenced {
 				err = errors.Join(fmt.Errorf("controller epoch lost (promoted=%d, current=%d): %w", s.controllerEpoch, epoch, errControllerFenced), err)
 				s.controllerFailStop(err)
@@ -241,13 +260,12 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 			return nil, err
 		}
 	}
-	return &storeTx{operator: &Operator{s: s}, tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
+	return s.snapshotTx(ctx, tx, read)
 }
 
 func (t *storeTx) Commit() error {
-	if t.clockErr != nil {
-		_ = t.tx.Rollback()
-		return t.clockErr
+	if t.checkCursor() != nil {
+		return errors.Join(t.err, t.Rollback())
 	}
 	if err := t.tx.Commit(); err != nil {
 		return err
@@ -257,48 +275,72 @@ func (t *storeTx) Commit() error {
 	}
 	return nil
 }
-func (t *storeTx) Rollback() error { return t.tx.Rollback() }
+func (t *storeTx) Rollback() error { return rollbackTx(t.tx) }
+
+// Cancellation may have already rolled back the transaction in database/sql.
+func rollbackTx(tx *sql.Tx) error {
+	err := tx.Rollback()
+	if errors.Is(err, sql.ErrTxDone) {
+		return nil
+	}
+	return err
+}
+
+var errOpenCursor = errors.New("store: SQL or clock read while a row cursor is open")
+
+// pgx cannot multiplex statements on a transaction's connection; enforce this on SQLite too.
+func (t *storeTx) checkCursor() error {
+	if t.err == nil && t.rowsOpen {
+		t.err = errOpenCursor
+	}
+	return t.err
+}
+
+func (t *storeTx) checkSQL(q string) error {
+	if t.checkCursor() != nil {
+		return t.err
+	}
+	return refuseLedgerWrite(q)
+}
 
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {
-	if err := refuseLedgerWrite(q); err != nil {
-		return nil, err
-	}
-	return t.tx.Exec(rewritePh(t.dialect, q), args...)
+	return t.ExecContext(context.Background(), q, args...)
 }
 
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	if err := refuseLedgerWrite(q); err != nil {
+	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
-func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error) {
-	if err := refuseLedgerWrite(q); err != nil {
-		return nil, err
-	}
-	return t.tx.Query(rewritePh(t.dialect, q), args...)
+func (t *storeTx) Query(q string, args ...any) (rowCursor, error) {
+	return t.QueryContext(context.Background(), q, args...)
 }
 
-func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if err := refuseLedgerWrite(q); err != nil {
+func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (rowCursor, error) {
+	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
-	return t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
+	rows, err := t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
+	if err != nil {
+		return nil, err
+	}
+	t.rowsOpen = true
+	return &storeRows{Rows: rows, tx: t}, nil
 }
 
 func (t *storeTx) QueryRow(q string, args ...any) rowScanner {
-	if err := refuseLedgerWrite(q); err != nil {
-		return refusedLedgerRow{err}
-	}
-	return t.tx.QueryRow(rewritePh(t.dialect, q), args...)
+	return t.QueryRowContext(context.Background(), q, args...)
 }
 
 func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) rowScanner {
-	if err := refuseLedgerWrite(q); err != nil {
+	if err := t.checkSQL(q); err != nil {
 		return refusedLedgerRow{err}
 	}
-	return t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
+	row := t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
+	t.rowsOpen = true
+	return &storeRow{Row: row, tx: t}
 }
 
 func itoa(n int) string {
@@ -313,4 +355,50 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+type rowCursor interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+	Close() error
+}
+
+type storeRows struct {
+	*sql.Rows
+	tx *storeTx
+}
+
+func (r *storeRows) Next() bool {
+	more := r.Rows.Next()
+	if !more {
+		_ = r.Close()
+	}
+	return more
+}
+
+func (r *storeRows) Close() error {
+	err := r.Rows.Close()
+	if r.tx != nil {
+		r.tx.rowsOpen = false
+		r.tx = nil
+	}
+	return err
+}
+
+type storeRow struct {
+	*sql.Row
+	tx *storeTx
+}
+
+func (r *storeRow) Scan(dest ...any) error {
+	err := r.Row.Scan(dest...)
+	if r.tx != nil {
+		r.tx.rowsOpen = false
+		if r.tx.err != nil {
+			err = r.tx.err
+		}
+		r.tx = nil
+	}
+	return err
 }

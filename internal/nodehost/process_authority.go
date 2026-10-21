@@ -82,6 +82,9 @@ func (a *ProcessAuthorities) Delegate(ctx context.Context, parent capability.Cre
 	if err != nil {
 		return capability.Issued{}, nil, err
 	}
+	if principal.Capability.Unit == capability.UnitNode && !snapshot.Binding.StartPermitted {
+		return capability.Issued{}, nil, executorError(apierr.Forbidden, "job process requires committed admission under its execution award")
+	}
 	if (principal.Capability.Unit == capability.UnitTrigger || principal.Capability.Unit == capability.UnitEval) && services.SourceBindings == nil {
 		return capability.Issued{}, nil, executorError(apierr.Forbidden, "evaluation delegation requires its source relations")
 	}

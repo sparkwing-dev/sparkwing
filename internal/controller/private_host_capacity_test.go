@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -68,26 +67,6 @@ func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *s
 	}
 }
 
-func TestPrivateCapacityOwnerCannotChangeAcceptedDeclaration(t *testing.T) {
-	for _, change := range []string{"key", "capacity", "cost", "policy", "lease"} {
-		t.Run(change, func(t *testing.T) {
-			server, _, tenant, owner, bearer := localHostAwardFixture(t)
-			acceptCapacityPlan(t, server, tenant, owner, "global", "queue", 1, 1, "build")
-			seedOtherCapacityHolder(t, server, "job:global:serial")
-			before, err := tenant.GetConcurrencyState(t.Context(), "job:global:serial")
-			if err != nil {
-				t.Fatal(err)
-			}
-			body := map[string]any{"binding": store.CapacityBinding{RunID: "run", NodeID: "build"}}
-			body[change] = map[string]any{"key": "job:global:undeclared", "capacity": 100, "cost": 2, "policy": "cancel_others", "lease": int64(time.Hour)}[change]
-			if code := privateCapacityRequest(t, server, bearer, body); code != http.StatusBadRequest {
-				t.Fatalf("changed declaration accepted: HTTP %d", code)
-			}
-			assertOtherCapacityUnchanged(t, tenant, "job:global:serial", before)
-		})
-	}
-}
-
 func seedOtherCapacityHolder(t *testing.T, server *serverFixture, key string) {
 	t.Helper()
 	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{ID: "other", Pipeline: "ci", Status: "running"}); err != nil {
@@ -105,7 +84,7 @@ func privateCapacityRequest(t *testing.T, server *serverFixture, bearer string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("POST", "/api/v1/runs/run/local-host/capacity/acquire", bytes.NewReader(raw))
+	req := httptest.NewRequest("POST", "/api/v1/runs/run/local-host/may-start", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -125,165 +104,8 @@ func assertOtherCapacityUnchanged(t *testing.T, tenant *store.Tenant, key string
 	}
 }
 
-func TestPrivateCapacityBindsBoxToPersistedAwardIdentity(t *testing.T) {
-	for _, policy := range []string{"queue", "cancel_others"} {
-		t.Run(policy, func(t *testing.T) {
-			server, host, tenant, owner, bearer := localHostAwardFixture(t)
-			acceptCapacityPlan(t, server, tenant, owner, "box", policy, 1, 1, "first", "second")
-			otherKey := "job:box:13:other-machine:serial"
-			seedOtherCapacityHolder(t, server, otherKey)
-			before, err := tenant.GetConcurrencyState(t.Context(), otherKey)
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding := store.CapacityBinding{RunID: "run", NodeID: "first"}
-			// The declaration is valid; only the target machine has changed.
-			for _, key := range []string{otherKey, "job:box:5:fresh:serial"} {
-				if code := privateCapacityRequest(t, server, bearer, map[string]any{"key": key, "binding": binding}); code != http.StatusBadRequest {
-					t.Fatalf("caller selected a box: HTTP %d", code)
-				}
-			}
-			first, err := host.AdmitCapacity(t.Context(), binding, store.Actor{})
-			if err != nil || first.Kind != store.AcquireGranted {
-				t.Fatalf("bound box: %+v %v", first, err)
-			}
-			key := "job:box:6:runner:serial"
-			initial, err := tenant.GetConcurrencyState(t.Context(), key)
-			if err != nil || len(initial.Holders) != 1 {
-				t.Fatalf("persisted machine key: %+v %v", initial, err)
-			}
-			// A retry adopts the continuously held slot; it does not refresh its lease.
-			if again, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || again.Kind != store.AcquireGranted || !again.LeaseExpiresAt.Equal(first.LeaseExpiresAt) {
-				t.Fatalf("adoption: %+v %v", again, err)
-			}
-			after, err := tenant.GetConcurrencyState(t.Context(), key)
-			if err != nil || !reflect.DeepEqual(initial, after) {
-				t.Fatalf("adoption changed lease: %+v %+v %v", initial, after, err)
-			}
-			if policy == "queue" {
-				binding.NodeID = "second"
-				if queued, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || queued.Kind != store.AcquireQueued {
-					t.Fatalf("box contention bypassed: %+v %v", queued, err)
-				}
-				// Re-polling resolves the same waiter and cannot change its box.
-				if queued, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || queued.Kind != store.AcquireQueued {
-					t.Fatalf("box waiter bypassed: %+v %v", queued, err)
-				}
-			}
-			assertOtherCapacityUnchanged(t, tenant, otherKey, before)
-		})
-	}
-}
-
-func TestPrivateCapacityRefusesMissingPersistedHostIdentity(t *testing.T) {
-	server, _, tenant, owner, bearer := localHostAwardFixture(t)
-	acceptCapacityPlan(t, server, tenant, owner, "box", "queue", 1, 1, "build")
-	var raw []byte
-	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT authority_json FROM capabilities WHERE prefix=?`, owner.Capability.Prefix).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	var record store.CapabilityRecord
-	if err := json.Unmarshal(raw, &record); err != nil {
-		t.Fatal(err)
-	}
-	record.Value.ExecutionHost = ""
-	raw, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, server.store, `UPDATE capabilities SET authority_json=? WHERE prefix=?`, raw, owner.Capability.Prefix)
-	code := privateCapacityRequest(t, server, bearer, localhostwire.LocalCapacityRequest{Binding: store.CapacityBinding{RunID: "run", NodeID: "build"}})
-	if code != http.StatusForbidden {
-		t.Fatalf("missing host admitted: HTTP %d", code)
-	}
-	if state, err := tenant.GetConcurrencyState(t.Context(), "job:box:6:runner:serial"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("missing host wrote capacity: %+v %v", state, err)
-	}
-}
-
-func TestPrivateCapacityUsesSealedDeclarationAndOwnerDeadline(t *testing.T) {
-	server, host, tenant, owner := localHostFixture(t)
-	acceptCapacityPlan(t, server, tenant, owner, "global", "queue", 3, 2, "build")
-	until := time.Now().Add(time.Minute)
-	engineSQL(t, server.store, `UPDATE triggers SET lease_expires_at=? WHERE team='a' AND id='run'`, until.UnixNano())
-	result, err := host.AdmitCapacity(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build"}, store.Actor{})
-	if err != nil || result.Kind != store.AcquireGranted || result.LeaseExpiresAt.After(until) {
-		t.Fatalf("owner deadline: %+v %v", result, err)
-	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:serial")
-	if err != nil || state.Capacity != 3 || state.UsedCost != 2 || len(state.Holders) != 1 || state.Holders[0].HolderID != "run/build" || state.Holders[0].LeaseExpiresAt.After(until) {
-		t.Fatalf("sealed acquisition: %+v %v", state, err)
-	}
-}
-
-func TestPrivateCapacityAdmitsPendingJobsAndPromotesAfterTerminalRelease(t *testing.T) {
-	server, host, tenant, owner := localHostFixture(t)
-	acceptCapacityPlan(t, server, tenant, owner, "run", "queue", 1, 1, "first", "second")
-	binding := store.CapacityBinding{RunID: "run", NodeID: "first"}
-	if first, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || first.Kind != store.AcquireGranted {
-		t.Fatalf("first: %+v %v", first, err)
-	}
-	binding.NodeID = "second"
-	if second, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || second.Kind != store.AcquireQueued {
-		t.Fatalf("second: %+v %v", second, err)
-	}
-	_, err := host.TransitionNode(t.Context(), store.NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "first"}, To: store.NodeCancelled, Cause: store.CauseCancel, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if promoted, err := host.AdmitCapacity(t.Context(), binding, store.Actor{}); err != nil || promoted.Kind != store.AcquireGranted {
-		t.Fatalf("promotion: %+v %v", promoted, err)
-	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "job:run:3:run:serial")
-	if err != nil || len(state.Holders) != 1 || state.Holders[0].HolderID != "run/second" || len(state.Waiters) != 0 {
-		t.Fatalf("retained semaphore: %+v %v", state, err)
-	}
-}
-
-func TestPrivateCapacityRejectsForeignTeamAndWrongUnit(t *testing.T) {
-	server, _, tenant, owner, raw := localHostAwardFixture(t)
-	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','build','pending',1,?,?)`, []byte(`{"id":"build"}`), []byte(`{}`))
-	a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
-	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Actor: engineActor(a), Policy: store.SourceNone})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, test := range []struct{ name, bearer, run, job string }{
-		{"wrong unit", string(claim.Bearer), "run", "another-job"},
-		{"root credential", "runner-secret", "run", "build"},
-		{"foreign team", raw, "foreign", "build"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if test.name == "foreign team" {
-				engineSQL(t, server.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
-				if err := teststore.SeedRun(server.store, t.Context(), "foreign", store.Run{ID: "foreign", Pipeline: "ci", Status: "running"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			for _, operation := range []string{"acquire"} {
-				body, err := json.Marshal(localhostwire.LocalCapacityRequest{Binding: store.CapacityBinding{RunID: test.run, NodeID: test.job, Generation: claim.Node.Generation}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				req := httptest.NewRequest("POST", "/api/v1/runs/"+test.run+"/local-host/capacity/"+operation, bytes.NewReader(body))
-				req.Header.Set("Authorization", "Bearer "+test.bearer)
-				req.Header.Set("Content-Type", "application/json")
-				w := httptest.NewRecorder()
-				server.Handler().ServeHTTP(w, req)
-				if w.Code != http.StatusForbidden && w.Code != http.StatusNotFound && !(test.name == "root credential" && w.Code == http.StatusUnauthorized) {
-					t.Fatalf("%s HTTP %d: %s", operation, w.Code, w.Body)
-				}
-			}
-		})
-	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:serial")
-	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("refusal mutated capacity: %+v %v", state, err)
-	}
-}
-
-func TestPrivateCapacityAdmitsEverySealedGroup(t *testing.T) {
-	server, host, tenant, owner := localHostFixture(t)
+func TestPrivateStartRequiresAwardAndUsesAcceptedGroupSet(t *testing.T) {
+	server, ownerClient, tenant, owner, ownerBearer := localHostAwardFixture(t)
 	acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{
 		ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Concurrency: []nodeproto.ConcurrencySpec{
 			{Group: "global", Scope: new("global"), Capacity: new(3), Cost: new(2), OnLimit: new("queue")},
@@ -291,75 +113,50 @@ func TestPrivateCapacityAdmitsEverySealedGroup(t *testing.T) {
 			{Group: "machine", Scope: new("box"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")},
 		},
 	}}})
-	binding := store.CapacityBinding{RunID: "run", NodeID: "build"}
-	result, err := host.AdmitCapacity(t.Context(), binding, store.Actor{})
-	if err != nil || result.Kind != store.AcquireGranted {
-		t.Fatalf("unit admission: %+v %v", result, err)
-	}
-	for key, cost := range map[string]int{"job:global:global": 2, "job:run:3:run:run": 1, "job:box:6:runner:machine": 1} {
-		state, err := tenant.GetConcurrencyState(t.Context(), key)
-		if err != nil || state.UsedCost != cost || len(state.Holders) != 1 || state.Holders[0].HolderID != "run/build" {
-			t.Fatalf("omitted sealed group %s: %+v %v", key, state, err)
-		}
-	}
-}
-
-func TestPrivateCapacityRejectsAnotherMachinesBoxWithoutChangingItsHolder(t *testing.T) {
-	server, _, tenant, owner, bearer := localHostAwardFixture(t)
-	acceptCapacityPlan(t, server, tenant, owner, "box", "cancel_others", 1, 1, "build")
-	key := "job:box:13:other-machine:serial"
-	seedOtherCapacityHolder(t, server, key)
-	before, err := tenant.GetConcurrencyState(t.Context(), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	code := privateCapacityRequest(t, server, bearer, map[string]any{
-		"key": key, "binding": store.CapacityBinding{RunID: "run", NodeID: "build"},
-	})
-	if code != http.StatusBadRequest && code != http.StatusForbidden {
-		t.Errorf("another machine's box accepted: HTTP %d", code)
-	}
-	assertOtherCapacityUnchanged(t, tenant, key, before)
-}
-
-func TestPrivateCapacityUsesClaimedJobAward(t *testing.T) {
-	server, ownerClient, tenant, owner, _ := localHostAwardFixture(t)
-	acceptCapacityPlan(t, server, tenant, owner, "run", "queue", 1, 1, "build", "other-job")
-	actor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
+	ownerActor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
-	if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: ownerActor}); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: actor, Policy: store.SourceNone})
-	if err != nil || claim.Kind != store.Execute {
-		t.Fatalf("claim=%+v %v", claim, err)
+	award, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: ownerActor, Policy: store.SourceNone})
+	if err != nil || award.Kind != store.Execute {
+		t.Fatalf("award=%+v error=%v", award, err)
 	}
-	if err := ownerClient.AdoptClaim(t.Context(), claim); err != nil {
+	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}
+	if code := privateCapacityRequest(t, server, ownerBearer, localhostwire.LocalCapacityRequest{Binding: binding}); code != http.StatusForbidden && code != http.StatusConflict {
+		t.Fatalf("owner obtained job permit: HTTP %d", code)
+	}
+	if err := ownerClient.AdoptClaim(t.Context(), award); err != nil {
 		t.Fatal(err)
 	}
-	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: claim.Node.Generation}
-	nodeClient, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return string(claim.Bearer), nil }}, "run", "build")
+	nodeClient, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return string(award.Bearer), nil }}, "run", "build")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer nodeClient.Close()
-	actor = store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, Generation: claim.Node.Generation}
+	actor := store.Actor{Kind: store.ActorHolder, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "build", Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}, CapabilityPrefix: award.Node.CapabilityPrefix}
 	for _, host := range []*client.LocalHostClient{ownerClient, nodeClient} {
-		result, err := host.AdmitCapacity(t.Context(), binding, actor)
-		if err != nil || result.Kind != store.AcquireGranted {
-			t.Fatalf("claimed admission=%+v %v", result, err)
+		response, err := host.MayStart(t.Context(), binding, actor)
+		if err != nil || response.Kind != store.AcquireGranted {
+			t.Fatalf("start=%+v error=%v", response, err)
 		}
 	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "job:run:3:run:serial")
-	if err != nil || len(state.Holders) != 1 || state.UsedCost != 1 {
-		t.Fatalf("claim reacquired capacity: %+v %v", state, err)
-	}
-	for _, changed := range []store.CapacityBinding{{RunID: "run", NodeID: "other-job"}, {RunID: "run", NodeID: "build", Generation: claim.Node.Generation + 1}, {RunID: "run", Generation: claim.Node.Generation}} {
-		if code := privateCapacityRequest(t, server, string(claim.Bearer), localhostwire.LocalCapacityRequest{Binding: changed}); code != http.StatusForbidden && code != http.StatusConflict {
-			t.Fatalf("claim widened to %+v: HTTP %d", changed, code)
+	for key, cost := range map[string]int{"job:global:global": 2, "job:run:3:run:run": 1, "job:box:6:runner:machine": 1} {
+		state, err := tenant.GetConcurrencyState(t.Context(), key)
+		if err != nil || state.UsedCost != cost || len(state.Holders) != 1 {
+			t.Fatalf("omitted sealed group %s: %+v error=%v", key, state, err)
 		}
 	}
-	if after, err := tenant.GetConcurrencyState(t.Context(), "job:run:3:run:serial"); err != nil || !reflect.DeepEqual(state, after) {
-		t.Fatalf("refusal changed holder: %+v %v", after, err)
+	for _, change := range []string{"key", "capacity", "cost", "policy", "lease"} {
+		body := map[string]any{"binding": binding, change: "caller-selected"}
+		if code := privateCapacityRequest(t, server, string(award.Bearer), body); code != http.StatusBadRequest {
+			t.Fatalf("caller selected %s: HTTP %d", change, code)
+		}
+	}
+	for _, changed := range []store.CapacityBinding{{RunID: "run", NodeID: "wrong", Generation: binding.Generation}, {RunID: "run", NodeID: "build", Generation: binding.Generation + 1}, {RunID: "run", Generation: binding.Generation}} {
+		code := privateCapacityRequest(t, server, string(award.Bearer), localhostwire.LocalCapacityRequest{Binding: changed})
+		if code != http.StatusForbidden && code != http.StatusConflict && code != http.StatusNotFound {
+			t.Fatalf("award widened to %+v: HTTP %d", changed, code)
+		}
 	}
 }

@@ -6,13 +6,14 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
@@ -22,10 +23,10 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	}
 	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
 	owner := input.Owner.Owner
-	if owner.Kind != store.OwnerTrigger || owner.RunID != input.RunID || owner.Holder == "" || owner.Generation <= 0 {
+	if owner.Kind != store.OwnerTrigger || owner.RunID != runspec.RunID(input.RunID) || owner.Holder == "" || owner.Generation <= 0 {
 		return accepted, errors.New("plan unit requires its planning lease")
 	}
-	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitPlan, RunID: input.RunID, Holder: owner.Holder, Generation: owner.Generation}, input.Owner, func() bool { return true })
+	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitPlan, RunID: input.RunID, Holder: owner.Holder, Generation: int64(owner.Generation)}, input.Owner, func() bool { return true })
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return accepted, err
@@ -57,13 +58,10 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID string, generation int64, fence capability.LeaseRef) (err error) {
 	bound := *h
 	h = &bound
-	if h.bindAdmission != nil {
-		h.bindAdmission(h, input.Owner)
-	}
 	if err := h.unitReady(input); err != nil {
 		return err
 	}
-	if input.Accepted == nil || sourceID == "" || generation < 0 || fence.Kind != capability.UnitEval || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 || h.Expand == nil {
+	if input.Accepted == nil || sourceID == "" || generation < 0 || fence.Kind != capability.UnitEval || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 {
 		return errors.New("eval unit requires accepted source, expansion lease and evaluator")
 	}
 	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
@@ -88,15 +86,28 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	}
 	var row store.NodeRow
 	for _, current := range snapshot.Nodes {
-		if current.Ref == (controllerwire.NodeRef{RunID: input.RunID, NodeID: sourceID}) {
+		if current.Ref == (controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: runspec.NodeID(sourceID)}) {
 			row = current
 			break
 		}
 	}
-	if row.Ref.NodeID == "" || row.Generation != generation || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+	var job nodeproto.JobSpec
+	if json.Unmarshal(row.Spec, &job) != nil {
+		return errors.New("evaluation requires accepted declaration")
+	}
+	if job.Approval != nil {
+		if row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" || row.Outcome != "" {
+			return errors.New("approval evaluation requires its unreleased source")
+		}
+		return h.evaluateApproval(ctx, input, accepted, row, snapshot.Run)
+	}
+	if h.Expand == nil {
+		return errors.New("source expansion requires evaluator")
+	}
+	if row.Ref.NodeID == "" || row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 		return errors.New("eval source is outside the awarded expansion")
 	}
-	return h.executionAdmission.withNode(ctx, accepted, row, input.Owner, func(ctx context.Context, _ wingwire.HostResources) (err error) {
+	work := func(ctx context.Context) (err error) {
 		entry, err := h.acquire(ctx, input, snapshot.Run)
 		if entry != nil {
 			defer func() { err = errors.Join(err, entry.Close()) }()
@@ -112,7 +123,11 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 			return err
 		}
 		return h.commitExpansion(ctx, row, input.Owner, body, failure)
-	})
+	}
+	if h.executionAdmission.compute != nil {
+		return h.executionAdmission.compute.node(ctx, accepted, row, work)
+	}
+	return work(ctx)
 }
 
 func (h *OwnerHost) unitReady(input RunInput) error {
@@ -138,4 +153,32 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, acto
 		return h.Masks.Accept(plan, commit)
 	}
 	return commit()
+}
+
+func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow, run store.RunRow) (err error) {
+	if h.SkipPolicy == nil {
+		return errors.New("approval evaluation requires predicate policy")
+	}
+	entry, err := h.acquire(ctx, input, run)
+	if entry != nil {
+		defer func() { err = errors.Join(err, entry.Close()) }()
+	}
+	var result OwnerLayerResult
+	if err != nil || entry == nil {
+		if context.Cause(ctx) != nil {
+			return errors.Join(err, context.Cause(ctx))
+		}
+		result.Transition = store.OwnerPolicyNode{Outcome: store.NodeFailed, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalFail, Generation: row.Generation}, Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: string(apierr.PlanFailed), MaskedError: "approval evaluation source acquisition failed"}}
+	} else {
+		result, err = h.SkipPolicy(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+		if err != nil {
+			return err
+		}
+	}
+	var command store.NodeCommand = store.OpenApprovalNode{Ref: row.Ref, Actor: input.Owner}
+	if result.Transition != nil {
+		command = store.BindNodeCommand(result.Transition, row.Ref, input.Owner)
+	}
+	_, err = h.Store.TransitionNode(ctx, command)
+	return err
 }

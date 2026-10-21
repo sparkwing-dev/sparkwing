@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -40,7 +41,10 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 			}
 			actor := engineActor(capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "first"}})
 			ref := controllerwire.NodeRef{RunID: "run", NodeID: "first"}
-			started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64(0))})
+			if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "first", Generation: int64(claim.Award.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+				t.Fatalf("admission: %+v %v", result, err)
+			}
+			started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +71,7 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 			if err != nil || row.Status != store.StatusRunning || row.CancelRequestedAt != nil {
 				t.Fatalf("lapse stopped released work: %+v %v", row, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &started.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: store.NodeSuccess, SourceAttempt: &started.Attempt, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 				t.Fatalf("released work could not finish: %v", err)
 			}
 			next := controllerwire.NodeRef{RunID: "run", NodeID: "next"}

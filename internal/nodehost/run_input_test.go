@@ -17,7 +17,7 @@ func TestAwardedRunInputReachesNativeOwner(t *testing.T) {
 				row.Request.RunID, row.Request.Request.Team = original, "team"
 				unit := controllerwire.ClaimedUnit{
 					RunID: row.ID, Request: row.Request, Runner: prepared.GrantedRunner,
-					Binding: capability.Binding{RunID: row.ID, Holder: row.Owner.Holder, Generation: row.Owner.Generation},
+					Binding: capability.Binding{RunID: row.ID, Holder: row.Owner.Holder, Generation: int64(row.Owner.Generation)},
 				}
 				if resumed {
 					row.Spec.Request = row.Request

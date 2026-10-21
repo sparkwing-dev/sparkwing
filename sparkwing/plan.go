@@ -398,7 +398,7 @@ func (n *JobNode) OnFailure(id string, x any) *JobNode {
 type SkipOption func(*JobNode)
 
 // SkipBudget sets the timeout applied to each predicate on the node.
-// The last registration wins; zero uses the orchestrator’s timeout.
+// The last registration wins. The duration must be positive; the default is 30 seconds.
 func SkipBudget(d time.Duration) SkipOption {
 	return func(n *JobNode) {
 		n.skipIfTimeout = d

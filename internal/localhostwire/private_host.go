@@ -1,8 +1,6 @@
 package localhostwire
 
 import (
-	"time"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -28,21 +26,12 @@ type LocalRunTransition struct {
 	OwnerPolicy *store.OwnerPolicyResult `json:"owner_policy,omitempty"`
 }
 
-// LocalNodeTransition carries an edge and its captured source attempt.
-type LocalNodeTransition struct {
-	To            store.NodeState       `json:"to"`
-	Cause         store.TransitionCause `json:"cause"`
-	SourceAttempt *int64                `json:"source_attempt,omitempty"`
-	Extra         LocalTransitionExtra  `json:"extra"`
-}
-
-// LocalTransitionExtra omits award and execution authority.
-type LocalTransitionExtra struct {
-	OwnerPolicy *store.OwnerPolicyResult  `json:"owner_policy,omitempty"`
-	Result      *store.NodeResult         `json:"result,omitempty"`
-	Materialize *store.MaterializeSource  `json:"materialize,omitempty"`
-	Approval    *store.ApprovalResolution `json:"approval,omitempty"`
-	RetryAt     *time.Time                `json:"retry_at,omitempty"`
+// LocalRunCompletion requests the store-derived verdict without choosing an outcome.
+type LocalRunCompletion struct {
+	Cause       store.RunCause           `json:"cause"`
+	Reason      string                   `json:"reason"`
+	MaskedError string                   `json:"masked_error"`
+	OwnerPolicy *store.OwnerPolicyResult `json:"owner_policy,omitempty"`
 }
 
 // LocalAuthenticationRequest selects an authority within the host's awarded run.
@@ -69,7 +58,12 @@ type LocalBindingChecked struct {
 	Checked bool `json:"checked"`
 }
 
-// LocalCapacityRequest selects work under the authenticated owner's fence.
+// LocalCapacityRequest names a job under its authenticated award.
 type LocalCapacityRequest struct {
 	Binding store.CapacityBinding `json:"binding"`
+}
+
+// LocalEvaluationRelease proposes expansion work under the current run owner.
+type LocalEvaluationRelease struct {
+	NodeID string `json:"job_id"`
 }

@@ -90,3 +90,25 @@ func copyMemoBlob(ctx context.Context, get func(context.Context, Digest) (Verifi
 	}
 	return size, err
 }
+
+// IsCacheMiss accepts only absence, corrupt data and exhausted cache budgets.
+// Joined refusals must remain errors even when another cause permits a miss.
+func IsCacheMiss(err error) bool {
+	switch cause := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := cause.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, nested := range causes {
+			if !IsCacheMiss(nested) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return IsCacheMiss(cause.Unwrap())
+	default:
+		return err != nil && (errors.Is(err, ErrNotFound) || errors.Is(err, ErrIntegrity) || errors.Is(err, ErrBudget))
+	}
+}

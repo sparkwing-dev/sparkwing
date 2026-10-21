@@ -45,7 +45,7 @@ func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
 		called := false
 		failure := errors.New("node authority unavailable")
 		nodes := nodeControllerState{PrivateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
-			if ref != (controllerwire.NodeRef{RunID: run, NodeID: node}) {
+			if ref != (controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}) {
 				t.Fatal("step selected another node's authority")
 			}
 			if refuse {
@@ -108,7 +108,7 @@ func TestCLIHostStatePreservesStepAttemptProperty(t *testing.T) {
 
 func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 	request := store.PlanAcceptance{
-		RunID: "current-run", Actor: store.Actor{Owner: store.OwnerLeaseRef{RunID: "current-run", Holder: "owner", Generation: 7}},
+		RunID: "current-run", Actor: store.Actor{Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "current-run", Holder: "owner", Generation: 7}}},
 		Seal: runspec.SealInput{Plan: json.RawMessage(`{"jobs":[]}`)},
 	}
 	want := controllerwire.PlanAccepted{Plan: request.Seal.Plan, PlanHash: "plan-hash", Replayed: true}
@@ -170,7 +170,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		attempt := int64(ordinal) + 1
 		actor := store.Actor{
 			Kind: store.ActorRunHost, CapabilityPrefix: secret,
-			Owner: store.OwnerLeaseRef{RunID: "run", Holder: secret, Generation: int64(generation) + 1},
+			Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: secret, Generation: runspec.ClaimGeneration(int64(generation) + 1)}},
 		}
 		calls := 0
 		wire, err := client.NewEngineClient(client.EngineOptions{
@@ -194,7 +194,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 					want = map[string]any{"step_id": "test", "state": "passed", "source_attempt": float64(attempt)}
 					response = controllerwire.StepRecorded{Recorded: true}
 				case "/api/v1/runs/run/finish":
-					want = map[string]any{"outcome": "success"}
+					want = map[string]any{}
 					response = controllerwire.Applied{Replayed: true, StateSeq: 12, Generation: int64(generation) + 1, Attempt: attempt}
 				case "/api/v1/claims/awarded-unit/heartbeat":
 					want = map[string]any{"executing": executing}
@@ -228,9 +228,9 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 			return false
 		}
 		applied, err := state.FinishRunAndUnit(t.Context(), store.FinishRunRequest{
-			Unit: actor.Owner, Transition: store.RunTransition{RunID: "run", Actor: actor, Cause: store.RunFinish, To: store.RunSuccess},
+			Unit: actor.Owner, Transition: store.RunCompletion{RunID: "run", Actor: actor, Cause: store.RunFinish},
 		})
-		if err != nil || !applied.Replayed || applied.StateSeq != 12 || applied.Generation != int64(generation)+1 || applied.Attempt != attempt {
+		if err != nil || !applied.Replayed || applied.StateSeq != 12 || int64(applied.Generation) != int64(generation)+1 || int64(applied.Attempt) != attempt {
 			return false
 		}
 		_, err = state.RenewOwner(t.Context(), actor, executing)
@@ -242,12 +242,12 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 }
 
 func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
-	owner := store.OwnerLeaseRef{RunID: "run", Holder: "host", Generation: 1}
+	owner := store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	want := errors.New("completion not committed")
 	calls := 0
 	wire := hostStateController{finish: func(_ context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
 		calls++
-		if run != "run" || body.Outcome != "failed" || body.Reason != "plan_failed" || body.Error == nil || body.Error.Message != "safe failure" {
+		if run != "run" || body.Reason != "plan_failed" || body.Error == nil || body.Error.Message != "safe failure" {
 			t.Fatalf("finish = %s %+v", run, body)
 		}
 		return controllerwire.Applied{StateSeq: 10}, want
@@ -256,13 +256,12 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	valid := store.FinishRunRequest{Unit: owner, Transition: store.RunTransition{
-		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunFinish, To: store.RunFailed, Reason: "plan_failed", MaskedError: "safe failure",
+	valid := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
+		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunFinish, Reason: "plan_failed", MaskedError: "safe failure",
 	}}
 	for _, mutate := range []func(*store.FinishRunRequest){
 		func(r *store.FinishRunRequest) { r.Unit.Generation++ },
 		func(r *store.FinishRunRequest) { r.Transition.Cause = store.RunPublish },
-		func(r *store.FinishRunRequest) { r.Transition.To = store.RunRunning },
 	} {
 		request := valid
 		mutate(&request)
@@ -280,10 +279,9 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}
-	request := store.FinishRunRequest{Unit: owner, Transition: store.RunTransition{
-		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, To: store.RunFailed,
-		OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
+	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
+	request := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
+		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
 	}}
 	state.Finish = func(_ context.Context, got store.FinishRunRequest) (store.Applied, error) {
 		if !reflect.DeepEqual(got, request) {
@@ -295,4 +293,11 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 	if err != nil || applied.StateSeq != 3 {
 		t.Fatalf("admission completion = %+v, %v", applied, err)
 	}
+}
+
+func (*cliOwnerStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
+}
+func (*cliOwnerStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, errors.New("unexpected evaluation release")
 }

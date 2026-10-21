@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -56,7 +58,7 @@ func (f StateFollower) WaitNode(ctx context.Context, ref controllerwire.NodeRef,
 	if ref.RunID == "" || ref.NodeID == "" || after < 0 {
 		return errors.New("state follower requires a node and nonnegative sequence")
 	}
-	return f.follow(ctx, ref.RunID, func(ctx context.Context) (bool, error) {
+	return f.follow(ctx, string(ref.RunID), func(ctx context.Context) (bool, error) {
 		row, err := f.Store.ReadNode(ctx, ref)
 		if err != nil {
 			return false, err
@@ -138,14 +140,14 @@ func snapshotVersion(snapshot store.RunSnapshot) (stateVersion, error) {
 		return v, errors.New("state follower received an invalid run sequence")
 	}
 	for _, row := range snapshot.Nodes {
-		if _, duplicate := v.nodes[row.Ref]; duplicate || row.Ref.RunID != v.run || row.Ref.NodeID == "" || row.StateSeq < 0 {
+		if _, duplicate := v.nodes[row.Ref]; duplicate || row.Ref.RunID != runspec.RunID(v.run) || row.Ref.NodeID == "" || row.StateSeq < 0 {
 			return v, errors.New("state follower received an invalid job sequence")
 		}
 		v.nodes[row.Ref] = nodeVersion{row.StateSeq, row.Expansion, row.OwnerExecution != nil && row.OwnerExecution.Allowed}
 	}
 	for _, row := range snapshot.Expansions {
 		key := expansionVersion{row.Source, row.SourceGeneration}
-		if _, duplicate := v.expansions[key]; duplicate || row.Source.RunID != v.run || row.Source.NodeID == "" || row.SourceGeneration < 0 || row.BodyHash == "" {
+		if _, duplicate := v.expansions[key]; duplicate || row.Source.RunID != runspec.RunID(v.run) || row.Source.NodeID == "" || row.SourceGeneration < 0 || row.BodyHash == "" {
 			return v, errors.New("state follower received an invalid expansion identity")
 		}
 		v.expansions[key] = row.BodyHash

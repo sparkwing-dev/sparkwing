@@ -23,10 +23,10 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if err != nil {
 		return nil, err
 	}
-	if err := lockStateRunTx(ctx, tx, target.team, target.ref.RunID); err != nil {
+	if err := lockStateRunTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
 		return nil, err
 	}
-	run, err := readRunTx(ctx, tx, target.team, target.ref.RunID)
+	run, err := readRunTx(ctx, tx, target.team, string(target.ref.RunID))
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			return nil, nil
 		}
 	}
-	now = tx.now()
+	now = tx.now(ctx)
 	if owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}
@@ -66,7 +66,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 		owner.disruptions++
 	}
 	failed := stopped || owner.status == "failed" || expired || queuedOut || owner.disruptions >= limits.MaxDisruptions || lapsed && owner.started.Valid && run.Request.Request.Origin == runspec.OriginLocal
-	result := &ReapedUnit{Team: target.team, RunID: target.ref.RunID, Kind: string(target.kind), Generation: owner.generation, Disruptions: owner.disruptions, Requeued: !cancelled && !failed, Cancelled: cancelled, Failed: failed && !cancelled}
+	result := &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), Kind: string(target.kind), Generation: owner.generation, Disruptions: owner.disruptions, Requeued: !cancelled && !failed, Cancelled: cancelled, Failed: failed && !cancelled}
 	if result.Requeued {
 		return result, writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", actor, now)
 	}
@@ -78,7 +78,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 		return nil, err
 	}
 	if cancelled && run.CancelRequestedAt == nil {
-		if _, err := transitionRunTx(ctx, tx, target.team, RunTransition{RunID: run.ID, To: RunCancelled, Cause: RunCancel, Actor: actor}, now); err != nil {
+		if _, err := transitionRunTx(ctx, tx, target.team, RunTransition{RunID: runspec.RunID(run.ID), To: RunCancelled, Cause: RunCancel, Actor: actor}); err != nil {
 			return nil, err
 		}
 	}
@@ -109,7 +109,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			cause = RunQueueTimeout
 		}
 	}
-	_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: run.ID, To: to, Actor: actor, Cause: cause, Reason: reason, MaskedError: message}, now)
+	_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: runspec.RunID(run.ID), To: to, Actor: actor, Cause: cause, Reason: reason, MaskedError: message})
 	return result, err
 }
 
@@ -122,14 +122,14 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if unit.status != "pending" && unit.status != "claimed" && unit.status != "running" {
 		return nil, nil
 	}
-	if err := lockStateRunTx(ctx, tx, target.team, target.ref.RunID); err != nil {
+	if err := lockStateRunTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
 		return nil, err
 	}
-	run, err := readRunTx(ctx, tx, target.team, target.ref.RunID)
+	run, err := readRunTx(ctx, tx, target.team, string(target.ref.RunID))
 	if err != nil {
 		return nil, err
 	}
-	now = tx.now()
+	now = tx.now(ctx)
 	if unit.lease.Valid && unit.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}
@@ -137,10 +137,10 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err != nil {
 		return nil, err
 	}
-	if source.Generation != target.sourceGeneration {
+	if source.Generation != runspec.ClaimGeneration(target.sourceGeneration) {
 		return nil, holderRefusal()
 	}
-	if source.Expansion != ExpansionExpected {
+	if !evaluationSourceCurrent(source) {
 		status := "done"
 		if source.Expansion == ExpansionFailed {
 			status = "failed"
@@ -151,7 +151,7 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 		if err := writeEvalRecoveryTx(ctx, tx, target, unit, status, now); err != nil {
 			return nil, err
 		}
-		return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: "eval", Generation: unit.generation, Disruptions: unit.disruptions, Cancelled: status == "cancelled", Failed: status == "failed"}, settleControllerTx(ctx, tx, target.team, target.ref.RunID, now)
+		return &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), NodeID: string(target.ref.NodeID), Kind: "eval", Generation: unit.generation, Disruptions: unit.disruptions, Cancelled: status == "cancelled", Failed: status == "failed"}, settleControllerTx(ctx, tx, target.team, string(target.ref.RunID), now)
 	}
 	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}, unit.generation)
 	if err != nil {
@@ -182,5 +182,5 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 			return nil, err
 		}
 	}
-	return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: "eval", Generation: unit.generation, Disruptions: unit.disruptions, Requeued: status == "pending", Cancelled: status == "cancelled", Failed: status == "failed"}, nil
+	return &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), NodeID: string(target.ref.NodeID), Kind: "eval", Generation: unit.generation, Disruptions: unit.disruptions, Requeued: status == "pending", Cancelled: status == "cancelled", Failed: status == "failed"}, nil
 }

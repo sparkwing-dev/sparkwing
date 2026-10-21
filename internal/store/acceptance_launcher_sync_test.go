@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -33,7 +34,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		return err
 	}
 	runID := plan.RunID
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return err
 	}
 	operator, err := s.AsOperator().ProvisionCapability(ctx, storeNativeBootstrapSpec())
@@ -60,7 +61,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		return err
 	}
 	a := capability.Authorized{Principal: capability.Principal{Authority: ref}}
-	demand := store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "alpha"}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "alpha"}, Available: match.Resources{Cores: 8}}
 	first, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		return fmt.Errorf("initial launcher claim: %w", err)
@@ -69,7 +70,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	old := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: first.Award.Generation}}
+	old := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: int64(first.Award.Generation)}}
 	for exchange := range 2 {
 		if err := reopen(); err != nil {
 			return err
@@ -78,7 +79,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		if err != nil {
 			return err
 		}
-		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != old.Award.ID || response.Awards[0].Binding.Generation != first.Award.Generation || response.Awards[0].Delivery != capability.DeliveryBootstrap {
+		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != old.Award.ID || response.Awards[0].Binding.Generation != int64(first.Award.Generation) || response.Awards[0].Delivery != capability.DeliveryBootstrap {
 			return errors.New("reopening or exchange lost the immutable launcher award")
 		}
 		if exchange == 0 {
@@ -92,7 +93,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err := s.ReleaseUnit(ctx, first, first.Award.CapabilityPrefix); err != nil {
 		return fmt.Errorf("release exchanged claim: %w", err)
 	}
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return fmt.Errorf("owner redispatch: %w", err)
 	}
 	second, err := s.AsOperator().ClaimUnit(ctx, demand)
@@ -100,7 +101,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		return fmt.Errorf("claim replacement: %w", err)
 	}
 	current := old
-	current.Award.Generation = second.Award.Generation
+	current.Award.Generation = int64(second.Award.Generation)
 
 	if err := reopen(); err != nil {
 		return err
@@ -109,10 +110,10 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if len(response.Awards) != 1 || response.Awards[0].Capability != "" || response.Awards[0].Binding.Generation != second.Award.Generation || len(response.Retired) != 1 || response.Retired[0] != old.Award {
+	if len(response.Awards) != 1 || response.Awards[0].Capability != "" || response.Awards[0].Binding.Generation != int64(second.Award.Generation) || len(response.Retired) != 1 || response.Retired[0] != old.Award {
 		return errors.New("stale Job cleanup selected the replacement award")
 	}
-	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runID, NodeID: "alpha"})
+	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"})
 	if err != nil {
 		return err
 	}

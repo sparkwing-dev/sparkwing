@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -181,7 +182,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		if err := checkCapacityFenceTx(ctx, tx, t.team, req.Key, *fence); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		expires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, tx.now().Add(defaultConcurrencyLease).UnixNano())
+		expires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, tx.now(ctx).Add(defaultConcurrencyLease).UnixNano())
 		if err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -231,7 +232,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	// safety: read the clock only after the tx holds the write lock; a
 	// pre-BEGIN timestamp goes stale while waiting and revives expired
 	// holders whose budget was already reassigned.
-	now := tx.now()
+	now := tx.now(ctx)
 	if !deadline.IsZero() {
 		req.Lease = slotLease(now, deadline, req.Lease)
 	}
@@ -243,7 +244,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	if reaped, err := txReapTerminalConcurrencyHolders(ctx, tx, t.team, req.Key); err != nil {
 		return AcquireSlotResponse{}, err
 	} else if len(reaped) > 0 {
-		if _, err := txPromoteWaitersLocked(ctx, tx, t.team, req.Key, nowNS, now.Add(req.Lease).UnixNano(), livePollingWaiter{}); err != nil {
+		if _, err := txPromoteWaitersLocked(ctx, tx, t.team, req.Key, nowNS, now.Add(req.Lease).UnixNano()); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 	}
@@ -316,7 +317,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		string(t.team), req.Key, req.HolderID,
 	).Scan(&existingLeaseNS, &existingSuperInt)
 	if err == nil && holderCountsForBudget(existingSuperInt == 1, existingLeaseNS, nowNS) {
-		newExpires := now.Add(req.Lease).UnixNano()
+		newExpires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, now.Add(req.Lease).UnixNano())
+		if err != nil {
+			return AcquireSlotResponse{}, err
+		}
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE concurrency_holders SET lease_expires_at = ? WHERE team = ? AND key = ? AND holder_id = ?`,
@@ -552,15 +556,6 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 		return false, err
 	}
 
-	ids := make([]string, 0, len(waiters))
-	for _, w := range waiters {
-		ids = append(ids, w.RunID)
-	}
-	live, err := txLiveCapacityRunIDs(ctx, tx, team, ids, nowNS)
-	if err != nil {
-		return false, err
-	}
-
 	used := acct.used
 	holderMin := acct.floor
 	for _, w := range waiters {
@@ -575,18 +570,13 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 		if err != nil {
 			return false, err
 		}
-		if !deadline.IsZero() && !deadline.After(tx.now()) {
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
 			continue
 		}
 		if currentQueued && w.ArrivedAt.UnixNano() >= currentArrivedNS {
 			continue
 		}
-		if !live[w.RunID] {
-			if _, derr := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); derr != nil {
-				return false, derr
-			}
-			continue
-		}
+
 		cost, capacity := waiterBudget(w, acct.entryCap, holderMin)
 		if fitsBudget(used, cost, capacity) {
 			return true, nil
@@ -623,7 +613,7 @@ func txQueueWaiterArrivedAt(ctx context.Context, tx *storeTx, team Team, key, ru
 		ctx,
 		`SELECT arrived_at FROM concurrency_waiters
 		  WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND policy = ? AND lease_expires_at > ?`,
-		string(team), key, runID, nodeID, OnLimitQueue, tx.now().UnixNano(),
+		string(team), key, runID, nodeID, OnLimitQueue, tx.now(ctx).UnixNano(),
 	).Scan(&arrivedNS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
@@ -673,10 +663,10 @@ func txLockEntry(ctx context.Context, tx *storeTx, forUpdate string, team Team, 
 		ctx,
 		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+forUpdate, string(team), key,
 	).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
-	return err
+	return nil
 }
 
 func txEntryCapacity(ctx context.Context, tx *storeTx, team Team, key string) (int, error) {
@@ -700,26 +690,10 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, team Team, key string, n
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, team, key); err != nil {
 		return nil, err
 	}
-	return txPromoteWaitersLocked(ctx, tx, team, key, nowNS, expiresNS, livePollingWaiter{})
+	return txPromoteWaitersLocked(ctx, tx, team, key, nowNS, expiresNS)
 }
 
-func txPromotePollingWaiter(ctx context.Context, tx *storeTx, team Team, key, runID, nodeID string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
-	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, team, key); err != nil {
-		return nil, err
-	}
-	return txPromoteWaitersLocked(ctx, tx, team, key, nowNS, expiresNS, livePollingWaiter{runID: runID, nodeID: nodeID})
-}
-
-type livePollingWaiter struct {
-	runID  string
-	nodeID string
-}
-
-func (p livePollingWaiter) matches(waiter ConcurrencyWaiter) bool {
-	return p.runID != "" && waiter.RunID == p.runID && waiter.NodeID == p.nodeID
-}
-
-func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key string, nowNS, expiresNS int64, polling livePollingWaiter) ([]ConcurrencyWaiter, error) {
+func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
 	acct, err := txConcurrencyAccounting(ctx, tx, team, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -751,17 +725,15 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key str
 		return nil, err
 	}
 
-	ids := make([]string, 0, len(candidates))
-	for _, w := range candidates {
-		ids = append(ids, w.RunID)
-	}
-	live, err := txLiveCapacityRunIDs(ctx, tx, team, ids, nowNS)
-	if err != nil {
-		return nil, err
-	}
-
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
+		var owned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM admission_work WHERE team=? AND run_id=? AND node_id=?)`, team, w.RunID, w.NodeID).Scan(&owned); err != nil {
+			return nil, err
+		}
+		if owned {
+			continue
+		}
 		current, err := capacityWaiterCurrentTx(ctx, tx, team, w)
 		if err != nil {
 			return nil, err
@@ -773,15 +745,10 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key str
 		if err != nil {
 			return nil, err
 		}
-		if !deadline.IsZero() && !deadline.After(tx.now()) {
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
 			continue
 		}
-		if !live[w.RunID] && !polling.matches(w) {
-			if _, derr := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); derr != nil {
-				return nil, derr
-			}
-			continue
-		}
+
 		c, candCap := waiterBudget(w, entryCap, holderMin)
 		if !fitsBudget(used, c, candCap) {
 			if blockedByYoungerHolders(acct.holders, w.ArrivedAt.UnixNano(), c, candCap) {
@@ -821,46 +788,6 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key str
 		promoted[i].HolderID = newHolder
 	}
 	return promoted, nil
-}
-
-func txLiveCapacityRunIDs(ctx context.Context, tx *storeTx, team Team, ids []string, nowNS int64) (map[string]bool, error) {
-	seen := make(map[string]bool, len(ids))
-	args := make([]any, 0, len(ids)+3)
-	for _, id := range ids {
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		args = append(args, id)
-	}
-	if len(args) == 0 {
-		return nil, nil
-	}
-	placeholders := make([]string, len(args))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
-	args = append(args, team, nowNS, nowNS, nowNS)
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT r.id FROM runs r
-		  WHERE r.id IN (`+strings.Join(placeholders, ",")+`)
-		    AND r.team = ? AND `+capacityRunLiveSQL,
-		args...,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	live := make(map[string]bool)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		live[id] = true
-	}
-	return live, rows.Err()
 }
 
 func txCommitChecked(ctx context.Context, tx *storeTx, nowNS int64, keys ...concurrencyKey) error {
@@ -942,22 +869,35 @@ type holderRow struct {
 
 func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, job string, expires int64) (int64, error) {
 	var lease sql.NullInt64
-	var err error
-	if job != "" {
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
-	} else {
-		err = tx.QueryRowContext(ctx, `SELECT MAX(until) FROM (
- SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END AS until FROM runs r WHERE team=? AND id=?
- UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL
- UNION ALL SELECT lease_expires_at FROM eval_units WHERE team=? AND run_id=? AND status IN ('claimed','running')) AS live_execution`, team, run, team, run, team, run).Scan(&lease)
-	}
+	err := tx.QueryRowContext(ctx, `SELECT MAX(deadline) FROM (
+ SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner' AND holder<>'') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id AND status='claimed') END AS deadline FROM runs r WHERE team=? AND id=?
+ UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL AND (?='' OR node_id=?)
+) live`, team, run, team, run, job, job).Scan(&lease)
 	if err != nil {
 		return 0, err
 	}
-	if lease.Valid && lease.Int64 < expires {
-		return lease.Int64, nil
+	if !lease.Valid {
+		return 0, holderRefusal()
 	}
-	return expires, nil
+	drain, err := cancelDrainTx(ctx, tx, team, run, job)
+	if err != nil {
+		return 0, err
+	}
+	now := tx.now(ctx)
+	bounds := []time.Time{time.Unix(0, expires), drain, time.Unix(0, lease.Int64)}
+	if job != "" {
+		generation, err := capacityGenerationTx(ctx, tx, team, run, job)
+		if err != nil {
+			return 0, err
+		}
+		funded, err := fundedBoundTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, generation, now)
+		if err != nil {
+			return 0, err
+		}
+		bounds = append(bounds, funded)
+	}
+	bound, err := leaseBound(now, bounds...)
+	return bound.UnixNano(), err
 }
 
 func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expiresNS int64) error {
@@ -1018,7 +958,7 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID 
 		return false, "", "", err
 	}
 
-	now := tx.now()
+	now := tx.now(ctx)
 
 	if nodeID == "" && queueArrivedNS > 0 {
 		if err := txSupersede(ctx, tx, team, key, holderID); err != nil {
@@ -1060,6 +1000,10 @@ func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, ar
 	if err != nil {
 		return err
 	}
+	expiresNS, err = capacityLeaseCeilingTx(ctx, tx, team, w.RunID, w.NodeID, expiresNS)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO concurrency_waiters
@@ -1083,11 +1027,22 @@ func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, ar
 }
 
 func txSupersede(ctx context.Context, tx *storeTx, team Team, key, holderID string) error {
-	_, err := tx.ExecContext(
-		ctx,
-		`UPDATE concurrency_holders SET superseded = 1 WHERE team = ? AND key = ? AND holder_id = ?`,
-		string(team), key, holderID,
-	)
+	var run, node string
+	if err := tx.QueryRowContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key=? AND holder_id=?`, team, key, holderID).Scan(&run, &node); err != nil {
+		return err
+	}
+	var owned bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM admission_work WHERE team=? AND run_id=? AND node_id=?)`, team, run, node).Scan(&owned); err != nil {
+		return err
+	}
+	if owned {
+		if _, err := tx.ExecContext(ctx, `UPDATE admission_work SET granted=0 WHERE team=? AND run_id=? AND node_id=?`, team, run, node); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET superseded=1 WHERE team=? AND run_id=? AND node_id=?`, team, run, node)
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET superseded=1 WHERE team=? AND key=? AND holder_id=?`, team, key, holderID)
 	return err
 }
 
@@ -1156,16 +1111,13 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		}
 	}
 
-	// safety: clock read after BEGIN so liveness answers match what the
-	// serialized writers committed, not a pre-wait snapshot.
-	nowNS := tx.now().UnixNano()
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
 		return waiterResolution{}, err
 	}
 	if err := checkCapacityMutationTx(ctx, tx, t.team, key, "", fence); err != nil {
 		return waiterResolution{}, err
 	}
-	nowNS = tx.now().UnixNano()
+	nowNS := tx.now(ctx).UnixNano()
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, t.team, key); err != nil {
 		return waiterResolution{}, err
 	}
@@ -1201,7 +1153,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		if err != nil {
 			return waiterResolution{}, err
 		}
-		if !deadline.IsZero() && !deadline.After(tx.now()) {
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
 				return waiterResolution{}, err
 			}
@@ -1221,8 +1173,8 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			shouldPromote = holderCount == 0
 		}
 		if shouldPromote {
-			now := tx.now()
-			promoted, err := txPromotePollingWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(lease).UnixNano())
+			now := tx.now(ctx)
+			promoted, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(lease).UnixNano())
 			if err != nil {
 				return waiterResolution{}, err
 			}
@@ -1311,7 +1263,7 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 
 	state := &ConcurrencyState{Key: key, Capacity: capacity, EffectiveCapacity: capacity}
 
-	nowNS := tx.now().UnixNano()
+	nowNS := tx.now(ctx).UnixNano()
 	hrows, err := tx.QueryContext(
 		ctx,
 		`SELECT `+holderColumns+`
@@ -1418,7 +1370,7 @@ func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, team Tea
 }
 
 func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, key string) ([]ConcurrencyHolder, error) {
-	now := tx.now().UnixNano()
+	now := tx.now(ctx).UnixNano()
 
 	rows, err := tx.QueryContext(
 		ctx,
@@ -1448,15 +1400,14 @@ func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, 
 }
 
 func reapStaleConcurrencyWaitersTx(ctx context.Context, tx *storeTx, team Team, key string, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
-	now := tx.now()
+	now := tx.now(ctx)
 	ns := now.UnixNano()
 	rows, err := tx.QueryContext(ctx, `SELECT `+prefixColumns(waiterColumns, "w.")+`
 FROM concurrency_waiters w WHERE w.team=? AND w.key=? AND (w.lease_expires_at<=?
-OR (w.arrived_at<? AND NOT EXISTS (
- SELECT 1 FROM runs r WHERE r.team=w.team AND r.id=w.run_id AND `+capacityRunLiveSQL+`))
+OR w.arrived_at<?
 OR EXISTS (SELECT 1 FROM runs r WHERE r.team=w.team AND r.id=w.run_id AND r.finished_at IS NOT NULL)
 OR (w.node_id<>'' AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=w.team AND n.run_id=w.run_id AND n.node_id=w.node_id AND n.status<>'done')))`,
-		team, key, ns, now.Add(-maxAge).UnixNano(), ns, ns, ns)
+		team, key, ns, now.Add(-maxAge).UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -1471,12 +1422,21 @@ OR (w.node_id<>'' AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=w.team AND 
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
+	var stale []ConcurrencyWaiter
 	for _, w := range dropped {
+		live, err := capacityWaiterCurrentTx(ctx, tx, team, w)
+		if err != nil {
+			return nil, err
+		}
+		if live {
+			continue
+		}
+		stale = append(stale, w)
 		if _, err := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); err != nil {
 			return nil, err
 		}
 	}
-	return dropped, nil
+	return stale, nil
 }
 
 func prefixColumns(cols, alias string) string {

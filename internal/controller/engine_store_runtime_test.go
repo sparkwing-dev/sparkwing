@@ -240,7 +240,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatalf("adoption: %+v, %v", terminal, err)
 	}
 	engineSQL(t, server.Store, `CREATE TRIGGER refuse_owner_finish BEFORE UPDATE OF status ON triggers BEGIN SELECT RAISE(ABORT,'owner unavailable'); END`)
-	if _, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{Outcome: "success"}); err == nil {
+	if _, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{}); err == nil {
 		t.Fatal("finish ignored the owner write failure")
 	}
 	run, err = tenant.ReadRun(t.Context(), "run")
@@ -249,7 +249,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	}
 	engineSQL(t, server.Store, `DROP TRIGGER refuse_owner_finish`)
 	for i := range 2 {
-		result, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{Outcome: "success"})
+		result, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{})
 		if err != nil || result.Replayed != (i == 1) {
 			t.Fatalf("finish %d: %+v, %v", i, result, err)
 		}

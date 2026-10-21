@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // CheckBinding checks committed resource relations against current authority in one snapshot.
@@ -84,7 +85,7 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 	case capability.BindRunOfTrigger:
 		allowed = b.Kind == capability.BindingTrigger && c.Unit == capability.UnitTrigger && b.RunID != "" && b.RunID == target.RunID
 		if allowed && target.NodeID != "" {
-			_, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: target.RunID, NodeID: target.NodeID})
+			_, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 			if errors.Is(err, ErrNotFound) {
 				return bindingRefusal()
 			}
@@ -188,7 +189,7 @@ func bindingSelectionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 		} else if slices.Contains(target.ClaimKinds, capability.UnitPlan) && !slices.Contains(target.ClaimKinds, capability.UnitTrigger) {
 			kind = capability.UnitPlan
 		}
-		demand.Target = &UnitRef{Kind: kind, RunID: target.RunID, NodeID: target.NodeID}
+		demand.Target = &UnitRef{Kind: kind, RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)}
 	}
 	if _, err := claimKinds(c, demand); err != nil {
 		return err

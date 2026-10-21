@@ -18,7 +18,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			}
 			billingModelJob(t, s, "customer")
 			customer, customerActor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(10 * time.Second)
@@ -34,7 +34,8 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 				t.Fatalf("funding stop = %+v, %v", beat, err)
 			}
 			if refusal == "hold" {
-				if _, err := tenant.ReleaseCreditFreezes(t.Context(), "funding-stop", "operator", "resolved", *now); err != nil {
+				s.SetTestClock(t, func() time.Time { return *now })
+				if _, err := tenant.ReleaseCreditFreezes(t.Context(), "funding-stop", "operator", "resolved"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -55,7 +56,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			if renewed, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || renewed.CancelRequested {
 				t.Fatalf("independent job stopped = %+v, %v", renewed, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
@@ -86,7 +87,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				}
 				billingModelJob(t, s, "customer")
 				customer, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
-				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)
 				}
 				*now = now.Add(10 * time.Second)
@@ -113,7 +114,8 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 					t.Fatalf("owner stop spared customer job = %+v, %v", beat, err)
 				}
 				if refusal == "hold" {
-					if _, err := tenant.ReleaseCreditFreezes(t.Context(), "owner-stop", "operator", "resolved", *now); err != nil {
+					s.SetTestClock(t, func() time.Time { return *now })
+					if _, err := tenant.ReleaseCreditFreezes(t.Context(), "owner-stop", "operator", "resolved"); err != nil {
 						t.Fatal(err)
 					}
 				}

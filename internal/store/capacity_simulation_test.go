@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,8 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// Recovery starts with released claims: plan reacquisition must queue even for
-// an original skip/fail policy, while their terminal reports remain admissible.
 func TestAdmissionDeterministicSimulation(t *testing.T) {
 	count := 12
 	if raw := os.Getenv("SPARKWING_ADMISSION_SIM_SEEDS"); raw != "" {
@@ -28,60 +27,69 @@ func TestAdmissionDeterministicSimulation(t *testing.T) {
 			t.Fatalf("SPARKWING_ADMISSION_SIM_SEEDS must be a positive integer: %q", raw)
 		}
 	}
-	for seed := range count {
-		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) { simulateAdmission(t, uint64(seed)) })
+	for _, dialect := range []struct {
+		name string
+		open func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			for seed := range count {
+				t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) { simulateAdmission(t, uint64(seed), dialect.open(t)) })
+			}
+		})
 	}
 }
 
 type admissionSimRun struct {
-	id, host       string
-	owner, holder  store.Actor
-	admitted, done bool
+	id, host                          string
+	owner, holder                     store.Actor
+	released, admitted, started, done bool
 }
 
 type admissionSimulation struct {
-	t        *testing.T
-	f        *storeRecoveryFixture
-	now      time.Time
-	random   *rand.Rand
-	runs     []admissionSimRun
-	previous map[string]*store.ConcurrencyState
-	lapsed   map[string]time.Time
-	peak     map[string]int
+	t                *testing.T
+	f                *storeRecoveryFixture
+	now              time.Time
+	random           *rand.Rand
+	machines         [2]string
+	runs             []admissionSimRun
+	previous         map[string]*store.ConcurrencyState
+	lapsed           map[string]time.Time
+	peak             map[string]int
+	lapseJobRun      int
+	jobLapsed        bool
+	computeBusyRun   int
+	computeWithdrawn bool
 }
 
-func simulateAdmission(t *testing.T, seed uint64) {
-	planCapacity := 1 + int(seed%2)
-	jobCapacity := 1 + int(seed/2%2)
-	policy := []string{"queue", "skip", "fail"}[seed%3]
-	group := func(name, scope string, capacity int, policy string) nodeproto.ConcurrencySpec {
-		return nodeproto.ConcurrencySpec{Group: name, Scope: new(scope), Capacity: new(capacity), Cost: new(1), OnLimit: new(policy), QueueTimeoutMS: new(int64(1))}
+func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
+	group := func(name, scope string, capacity int) nodeproto.ConcurrencySpec {
+		return nodeproto.ConcurrencySpec{Group: name, Scope: new(scope), Capacity: new(capacity), Cost: new(1), OnLimit: new("queue")}
 	}
-	f := newStoreRecoveryFixtureAt(t, true, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {
-		doc.Concurrency = []nodeproto.ConcurrencySpec{group("shared", "global", planCapacity, policy), group("local", "run", 1, "queue")}
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group("shared", "box", jobCapacity, "queue"), group("local", "run", 1, "queue")}
-		for i := range doc.Jobs[0].Concurrency {
-			doc.Jobs[0].Concurrency[i].QueueTimeoutMS = nil
-		}
+	planCapacity := 1 + int(seed%2)
+	f := newStoreRecoveryFixtureAt(t, false, target, func(doc *nodeproto.PlanDoc) {
+		doc.Concurrency = []nodeproto.ConcurrencySpec{group("shared", "global", planCapacity), group("local", "run", 1)}
+		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group("box-shared", "box", 1), group("shared", "global", 1), group("local", "run", 1)}
 	})
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	sim := &admissionSimulation{t: t, f: f, now: now, random: rand.New(rand.NewPCG(seed, seed+17)), previous: map[string]*store.ConcurrencyState{}, lapsed: map[string]time.Time{}, peak: map[string]int{}}
-	f.s.SetTestClock(t, func() time.Time { return sim.now })
-	sim.runs = append(sim.runs, admissionSimRun{id: f.ref.RunID, host: "runner", owner: f.owner, holder: f.holder})
+	s := &admissionSimulation{t: t, f: f, now: now, random: rand.New(rand.NewPCG(seed, seed+17)), previous: map[string]*store.ConcurrencyState{}, lapsed: map[string]time.Time{}, peak: map[string]int{}}
+	s.lapseJobRun = s.random.IntN(6)
+	s.computeBusyRun = 1 + s.random.IntN(5)
+	f.s.SetTestClock(t, func() time.Time { return s.now })
+	s.runs = append(s.runs, admissionSimRun{id: string(f.ref.RunID), host: "runner", owner: f.owner, holder: f.holder, released: true})
 	principal, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.holder.Authority)
 	if err != nil || principal.Capability.Parent == nil {
-		t.Fatalf("fixture execution machine: %+v, %v", principal, err)
+		t.Fatalf("fixture machine: %+v, %v", principal, err)
 	}
-	machines := []string{principal.Capability.Parent.ID, ""}
+	s.machines[0] = principal.Capability.Parent.ID
 	authority := f.plan.Seal.Request.AuthorityRef
 	issued, err := f.s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:simulation", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "simulation"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	machines[1] = issued.Capability.Prefix
+	s.machines[1] = issued.Capability.Prefix
 	for i := 1; i < 6; i++ {
 		intake, err := f.tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
 		if err != nil {
@@ -96,116 +104,97 @@ func simulateAdmission(t *testing.T, seed uint64) {
 		if _, err := f.tenant.AcceptPlan(t.Context(), plan); err != nil {
 			t.Fatal(err)
 		}
-		ref := controllerwire.NodeRef{RunID: intake.RunID, NodeID: "job"}
-		if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: owner, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
-			t.Fatal(err)
-		}
-		claim, err := f.s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: machines[i/3], Target: &store.UnitRef{Kind: capability.UnitNode, RunID: intake.RunID, NodeID: "job"}, Available: match.Resources{Cores: 8}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-		if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}); err != nil {
-			t.Fatal(err)
-		}
-		host := []string{"runner", "simulation"}[i/3]
-		sim.runs = append(sim.runs, admissionSimRun{id: intake.RunID, host: host, owner: owner, holder: holder})
+		host := []string{"runner", "simulation"}[s.random.IntN(2)]
+		s.runs = append(s.runs, admissionSimRun{id: intake.RunID, host: host, owner: owner})
 	}
-	// The oldest waiter loses its owner while its independent claim keeps its
-	// queue lease live. A younger request races recovery before adoption.
-	for i := range planCapacity + 1 {
-		result := sim.admit(i, false)
-		want := store.AcquireQueued
-		if i < planCapacity {
-			want = store.AcquireGranted
-		}
-		if result != want {
-			t.Fatalf("initial plan run=%d: %s, want %s", i, result, want)
+	// Every seed changes the coupled arrival, handoff and completion order.
+	for _, i := range s.random.Perm(len(s.runs)) {
+		s.release(i)
+	}
+	s.start(0)
+	if !s.runs[0].started {
+		t.Fatal("first released job did not execute")
+	}
+	// Losing plan capacity gates future releases, while released work still
+	// acquires job capacity and reports under its original execution award.
+	s.lapse(0, "plan")
+	for _, i := range s.random.Perm(len(s.runs)) {
+		if i != 0 {
+			s.release(i)
 		}
 	}
-	for i := range planCapacity {
-		want := store.AcquireGranted
-		if i >= jobCapacity {
-			want = store.AcquireQueued
-		}
-		if got := sim.admit(i, true); got != want {
-			t.Fatalf("shared box run=%d: %s, want %s", i, got, want)
-		}
+	if got := s.admit(0, false); got != store.AcquireQueued {
+		t.Fatalf("lapsed plan did not queue: %s", got)
 	}
-	oldest := planCapacity
-	sim.handoff(oldest)
-	sim.settle(0)
-	if got := sim.admit(len(sim.runs)-1, true); got != store.AcquireQueued {
-		t.Fatalf("new arrival bypassed recovered waiter: %s", got)
+	s.handoff(0)
+	if got := s.admit(0, true); got != store.AcquireGranted {
+		t.Fatalf("released job gated by parent plan: %s", got)
 	}
-	sim.admit(oldest, true)
-	found := false
-	for _, holder := range sim.previous["plan:global:shared"].Holders {
-		found = found || holder.RunID == sim.runs[oldest].id
-	}
-	if !found {
-		t.Fatal("oldest continuous plan waiter did not progress")
-	}
-	sim.lapse(oldest)
-	sim.admit(len(sim.runs)-1, true)
-	if got := sim.admit(oldest, false); got != store.AcquireQueued {
-		t.Fatalf("elapsed plan lease bypassed continuous waiters: %s", got)
-	}
-	sim.admit(oldest, true)
-	if sim.runs[oldest].admitted {
-		t.Fatal("elapsed lease revived ahead of continuous waiters")
-	}
-	// A released claim may finish while its parent queues again.
-	sim.settle(oldest)
-	sim.check()
+	s.settle(0)
 
-	sim.recoverHost(len(sim.runs)-1, machines[1])
-
-	// A bounded fair scheduler mixes retries, owner crashes and lease lapse.
-	// Every round visits every unfinished run, so failure to drain is a cycle.
-	for round := 0; round < 12; round++ {
-		for _, i := range sim.random.Perm(len(sim.runs)) {
-			run := &sim.runs[i]
+	// A fair drain mixes both hosts with real claim loss and owner handoff.
+	crashed, handed := false, false
+	for round := 0; round < 30; round++ {
+		for _, i := range s.random.Perm(len(s.runs)) {
+			run := &s.runs[i]
 			if run.done {
 				continue
 			}
-			if round == 0 && i == oldest+1 {
-				sim.handoff(i)
+			if !run.released {
+				s.release(i)
 			}
-			if !run.admitted {
-				sim.admit(i, true)
+			if !run.released {
+				s.check()
+				continue
+			}
+			if !run.started {
+				s.start(i)
+				if run.holder.Kind != "" && !crashed && (round > 0 || s.random.IntN(3) == 0) {
+					s.crashClaim(i)
+					crashed = true
+				}
+			} else if !handed && s.random.IntN(3) == 0 {
+				s.handoff(i)
+				handed = true
 			} else {
-				sim.settle(i)
+				s.settle(i)
 			}
-			sim.check()
+			s.check()
 		}
 	}
-	for _, run := range sim.runs {
+	if !crashed || !s.jobLapsed || !s.computeWithdrawn {
+		t.Fatalf("simulation missed a crash, lease lapse or compute withdrawal: crashed=%t lapsed=%t compute=%t", crashed, s.jobLapsed, s.computeWithdrawn)
+	}
+	for _, run := range s.runs {
 		if !run.done {
-			t.Fatalf("fair drain stalled run %s", run.id)
+			t.Fatalf("fair scheduler deadlocked: %+v", run)
 		}
 	}
-	sim.check()
-	if sim.peak["plan:global:shared"] != planCapacity || sim.peak[runspec.ConcurrencyKey("job", "box", "runner", "shared")] != min(planCapacity, jobCapacity) {
-		t.Fatalf("simulation missed capacity saturation: peaks=%v", sim.peak)
-	}
-	for key, state := range sim.previous {
+	s.check()
+	for key, state := range s.previous {
 		if len(state.Holders)+len(state.Waiters) != 0 {
-			t.Fatalf("released work retained %s: %+v", key, state)
+			t.Fatalf("settled work retained %s: %+v", key, state)
 		}
 	}
+	if s.peak["job:global:shared"] != 1 {
+		t.Fatalf("job contention was not exercised: peaks=%v", s.peak)
+	}
+}
+
+func (s *admissionSimulation) ref(i int) controllerwire.NodeRef {
+	return controllerwire.NodeRef{RunID: runspec.RunID(s.runs[i].id), NodeID: "job"}
 }
 
 func (s *admissionSimulation) admit(i int, job bool) store.AcquireKind {
 	s.t.Helper()
 	s.now = s.now.Add(time.Nanosecond)
 	run := &s.runs[i]
-	binding := store.CapacityBinding{RunID: run.id, Generation: run.owner.Owner.Generation}
+	binding := store.CapacityBinding{RunID: run.id, Generation: int64(run.owner.Owner.Generation)}
 	actor := run.owner
 	if job {
-		binding.NodeID, binding.Generation, actor = "job", run.holder.Generation, run.holder
+		binding.NodeID, binding.Generation, actor = "job", int64(run.holder.Generation), run.holder
 	}
-	result, err := s.f.tenant.AdmitCapacity(s.t.Context(), binding, actor)
+	result, err := s.f.tenant.MayStart(s.t.Context(), binding, actor)
 	if err != nil || result.Kind != store.AcquireGranted && result.Kind != store.AcquireQueued {
 		s.t.Fatalf("admit run=%d job=%t: %+v, %v", i, job, result, err)
 	}
@@ -216,108 +205,150 @@ func (s *admissionSimulation) admit(i int, job bool) store.AcquireKind {
 	return result.Kind
 }
 
+func (s *admissionSimulation) release(i int) {
+	s.t.Helper()
+	run := &s.runs[i]
+	if run.released {
+		return
+	}
+	result, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReadyNode{Ref: s.ref(i), Actor: run.owner})
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	run.released = !result.Waiting
+	s.check()
+}
+
+func (s *admissionSimulation) start(i int) {
+	s.t.Helper()
+	run := &s.runs[i]
+	if run.holder.Kind == "" {
+		machine := s.machines[0]
+		if run.host == "simulation" {
+			machine = s.machines[1]
+		}
+		claim, err := s.f.s.AsOperator().ClaimUnit(s.t.Context(), store.UnitDemand{CapabilityPrefix: machine, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run.id), NodeID: "job"}, Available: match.Resources{Cores: 8}})
+		if err != nil {
+			s.t.Fatalf("claim run=%d: %v", i, err)
+		}
+		run.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(run.id), NodeID: "job", Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	}
+	if s.admit(i, true) != store.AcquireGranted {
+		return
+	}
+	if !s.jobLapsed && i == s.lapseJobRun {
+		s.jobLapsed = true
+		s.lapse(i, "job")
+		if s.admit(i, true) != store.AcquireGranted {
+			return
+		}
+	}
+	row, err := s.f.tenant.ReadNode(s.t.Context(), s.ref(i))
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	if !s.computeWithdrawn && i == s.computeBusyRun {
+		s.computeWithdrawn = true
+		stale := run.holder
+		if err := s.f.tenant.RelinquishStart(s.t.Context(), store.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err != nil {
+			s.t.Fatal(err)
+		}
+		after, err := s.f.tenant.ReadNode(s.t.Context(), s.ref(i))
+		if err != nil || after.ClaimedBy != "" || after.ReadyAt == nil || row.ReadyAt == nil || !after.ReadyAt.Equal(*row.ReadyAt) || after.Attempt != row.Attempt {
+			s.t.Fatalf("compute contention changed readiness ranking: before=%+v after=%+v error=%v", row, after, err)
+		}
+		if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.StartNode{Ref: s.ref(i), Actor: stale, SourceAttempt: acceptanceAttempt(row.Attempt)}); err == nil {
+			s.t.Fatal("relinquished provisional award retained its permit")
+		}
+		run.holder, run.admitted = store.Actor{}, false
+		if run.host == "runner" {
+			run.host = "simulation"
+		} else {
+			run.host = "runner"
+		}
+		s.lapsed[run.id] = s.now
+		s.check()
+		return
+	}
+	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.StartNode{Ref: s.ref(i), Actor: run.holder, SourceAttempt: acceptanceAttempt(row.Attempt)}); err != nil {
+		s.t.Fatal(err)
+	}
+	run.started = true
+	s.check()
+}
+
 func (s *admissionSimulation) handoff(i int) {
 	s.t.Helper()
 	run := &s.runs[i]
-	if _, err := s.f.s.DB().ExecContext(s.t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, s.now.UnixNano(), s.f.tenant.Team(), run.id); err != nil {
+	if _, err := s.f.s.DB().ExecContext(s.t.Context(), storetest.Rebind(s.f.s, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`), s.now.UnixNano(), s.f.tenant.Team(), run.id); err != nil {
 		s.t.Fatal(err)
 	}
-	if _, err := s.f.tenant.RenewNodeClaim(s.t.Context(), controllerwire.NodeRef{RunID: run.id, NodeID: "job"}, run.holder); err != nil {
+	if _, err := s.f.tenant.RenewNodeClaim(s.t.Context(), s.ref(i), run.holder); err != nil {
 		s.t.Fatal(err)
 	}
 	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), s.f.lease, 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued {
-		s.t.Fatalf("crash/recovery run=%d: %+v, %v", i, units, err)
+		s.t.Fatalf("owner crash run=%d: %+v, %v", i, units, err)
 	}
 	owner, err := s.f.claimOwner(s.t.Context(), run.id, fmt.Sprintf("recovered-%d-%d", i, run.owner.Owner.Generation))
 	if err != nil {
 		s.t.Fatal(err)
 	}
 	if owner.Owner.Generation <= run.owner.Owner.Generation {
-		s.t.Fatalf("owner handoff retained generation %d", owner.Owner.Generation)
+		s.t.Fatal("handoff retained owner fence")
 	}
 	run.owner = owner
 	s.check()
 }
 
-func (s *admissionSimulation) recoverHost(i int, machine string) {
+func (s *admissionSimulation) crashClaim(i int) {
 	s.t.Helper()
 	run := &s.runs[i]
-	ref := controllerwire.NodeRef{RunID: run.id, NodeID: "job"}
-	// A crashed host stops renewing both its claim and its job capacity.
-	for _, table := range []string{"nodes", "concurrency_holders", "concurrency_waiters"} {
-		if _, err := s.f.s.DB().ExecContext(s.t.Context(), `UPDATE `+table+` SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id='job'`, s.now.UnixNano(), s.f.tenant.Team(), run.id); err != nil {
-			s.t.Fatal(err)
-		}
+	stale := run.holder
+	// The owner and logical queue lease remain live when the claim expires.
+	if _, err := s.f.s.DB().ExecContext(s.t.Context(), storetest.Rebind(s.f.s, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id='job'`), s.now.UnixNano(), s.f.tenant.Team(), run.id); err != nil {
+		s.t.Fatal(err)
+	}
+	s.check()
+	if _, err := s.f.tenant.MayStart(s.t.Context(), store.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err == nil {
+		s.t.Fatal("expired claim obtained execution permit")
 	}
 	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), s.f.lease, 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued || units[0].NodeID != "job" {
-		s.t.Fatalf("host crash run=%d: %+v, %v", i, units, err)
+		s.t.Fatalf("claim crash: %+v, %v", units, err)
 	}
-	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.NodeTransition{Ref: ref, Actor: run.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}); err == nil {
-		s.t.Fatal("crashed host reported after expiry")
-	}
-	s.check()
-	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.NodeTransition{Ref: ref, Actor: run.owner, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
-		s.t.Fatalf("rerelease recovered job: %v", err)
-	}
-	claim, err := s.f.s.AsOperator().ClaimUnit(s.t.Context(), store.UnitDemand{CapabilityPrefix: machine, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run.id, NodeID: "job"}, Available: match.Resources{Cores: 8}})
-	if err != nil {
-		s.t.Fatalf("reaward recovered job: %v", err)
-	}
-	if claim.Award.Generation <= run.holder.Generation {
-		s.t.Fatal("host recovery retained the crashed award generation")
-	}
-	run.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	row, err := s.f.tenant.ReadNode(s.t.Context(), ref)
-	if err != nil {
+	s.lapsed[run.id] = s.now
+	run.holder, run.admitted, run.started = store.Actor{}, false, false
+	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReadyNode{Ref: s.ref(i), Actor: run.owner}); err != nil {
 		s.t.Fatal(err)
 	}
-	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.NodeTransition{Ref: ref, Actor: run.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(row.Attempt)}); err != nil {
-		s.t.Fatal(err)
-	}
-	run.admitted = false
 	s.check()
 }
 
-func (s *admissionSimulation) lapse(i int) {
+func (s *admissionSimulation) lapse(i int, level string) {
 	s.t.Helper()
-	// Shorten a live capacity lease, then cross its deadline using store time.
-	// Renewal must retain the elapsed row's deadline, forcing fresh admission.
 	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		if _, err := s.f.s.DB().ExecContext(s.t.Context(), `UPDATE `+table+` SET lease_expires_at=? WHERE team=? AND run_id=?`, s.now.Add(time.Millisecond).UnixNano(), s.f.tenant.Team(), s.runs[i].id); err != nil {
+		if _, err := s.f.s.DB().ExecContext(s.t.Context(), storetest.Rebind(s.f.s, `UPDATE `+table+` SET lease_expires_at=? WHERE team=? AND run_id=? AND key LIKE ?`), s.now.UnixNano(), s.f.tenant.Team(), s.runs[i].id, level+":%"); err != nil {
 			s.t.Fatal(err)
 		}
 	}
-	s.now = s.now.Add(2 * time.Millisecond)
-	if _, err := s.f.tenant.RenewNodeClaim(s.t.Context(), controllerwire.NodeRef{RunID: s.runs[i].id, NodeID: "job"}, s.runs[i].holder); err != nil {
-		s.t.Fatal(err)
-	}
-	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		var revived int
-		if err := s.f.s.DB().QueryRowContext(s.t.Context(), `SELECT COUNT(*) FROM `+table+` WHERE team=? AND run_id=? AND lease_expires_at>?`, s.f.tenant.Team(), s.runs[i].id, s.now.UnixNano()).Scan(&revived); err != nil {
-			s.t.Fatal(err)
-		}
-		if revived != 0 {
-			s.t.Fatalf("renewal revived elapsed %s lease", table)
-		}
-	}
-	s.runs[i].admitted = false
 	s.lapsed[s.runs[i].id] = s.now
 }
 
 func (s *admissionSimulation) settle(i int) {
 	s.t.Helper()
 	run := &s.runs[i]
-	ref := controllerwire.NodeRef{RunID: run.id, NodeID: "job"}
-	row, err := s.f.tenant.ReadNode(s.t.Context(), ref)
+	row, err := s.f.tenant.ReadNode(s.t.Context(), s.ref(i))
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.NodeTransition{Ref: ref, Actor: run.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(row.Attempt)}); err != nil {
+	if !run.admitted || !run.started {
+		s.t.Fatalf("predicate/body without permit: %+v", run)
+	}
+	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReportNode{Ref: s.ref(i), Actor: run.holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(row.Attempt)}); err != nil {
 		s.t.Fatal(err)
 	}
-	if _, err := s.f.tenant.FinishRunAndUnit(s.t.Context(), store.FinishRunRequest{Transition: store.RunTransition{RunID: run.id, Actor: run.owner, To: store.RunSuccess, Cause: store.RunFinish}, Unit: run.owner.Owner}); err != nil {
+	if _, err := s.f.tenant.FinishRunAndUnit(s.t.Context(), store.FinishRunRequest{Transition: store.RunCompletion{RunID: runspec.RunID(run.id), Actor: run.owner, Cause: store.RunFinish}, Unit: run.owner.Owner}); err != nil {
 		s.t.Fatal(err)
 	}
 	run.done = true
@@ -326,7 +357,7 @@ func (s *admissionSimulation) settle(i int) {
 
 func (s *admissionSimulation) check() {
 	s.t.Helper()
-	rows, err := s.f.s.DB().QueryContext(s.t.Context(), `SELECT key FROM concurrency_entries WHERE team=? ORDER BY key`, s.f.tenant.Team())
+	rows, err := s.f.s.DB().QueryContext(s.t.Context(), storetest.Rebind(s.f.s, `SELECT key FROM concurrency_entries WHERE team=? ORDER BY key`), s.f.tenant.Team())
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -341,6 +372,8 @@ func (s *admissionSimulation) check() {
 	if err := rows.Close(); err != nil {
 		s.t.Fatal(err)
 	}
+	sets := map[string]map[string]int{}
+	arrivals := map[string]time.Time{}
 	for _, key := range keys {
 		state, err := s.f.tenant.GetConcurrencyState(s.t.Context(), key)
 		if err != nil {
@@ -352,27 +385,41 @@ func (s *admissionSimulation) check() {
 		}
 		level, scope, identity, _, ok := runspec.ParseConcurrencyKey(key)
 		if !ok {
-			s.t.Fatalf("invalid capacity key %s", key)
+			s.t.Fatalf("invalid key %s", key)
 		}
-		checkBinding := func(runID, nodeID string) {
+		checkBinding := func(runID, nodeID, kind string) {
 			for _, run := range s.runs {
-				if run.id == runID {
-					if run.done || (level == "plan") != (nodeID == "") || scope == "run" && identity != run.id || scope == "box" && identity != run.host {
-						s.t.Fatalf("capacity bound to wrong work/host: key=%s run=%+v node=%s", key, run, nodeID)
-					}
-					return
+				if run.id != runID {
+					continue
 				}
+				if run.done || (level == "plan") != (nodeID == "") || scope == "run" && identity != run.id || scope == "box" && identity != run.host {
+					s.t.Fatalf("wrong work/host: key=%s run=%+v node=%s", key, run, nodeID)
+				}
+				set := runID + ":" + level
+				if sets[set] == nil {
+					sets[set] = map[string]int{}
+				}
+				sets[set][kind]++
+				return
 			}
-			s.t.Fatalf("unknown capacity owner %s in %s", runID, key)
+			s.t.Fatalf("unknown owner %s in %s", runID, key)
+		}
+		checkArrival := func(runID string, arrival time.Time) {
+			set := runID + ":" + level
+			if previous, ok := arrivals[set]; ok && !previous.Equal(arrival) {
+				s.t.Fatalf("group set has multiple arrival sequences: %s %s/%s", set, previous, arrival)
+			}
+			arrivals[set] = arrival
 		}
 		for _, holder := range state.Holders {
-			checkBinding(holder.RunID, holder.NodeID)
+			checkBinding(holder.RunID, holder.NodeID, "holder")
+			checkArrival(holder.RunID, holder.QueueArrivedAt)
 		}
 		for _, waiter := range state.Waiters {
-			checkBinding(waiter.RunID, waiter.NodeID)
+			checkBinding(waiter.RunID, waiter.NodeID, "waiter")
+			checkArrival(waiter.RunID, waiter.ArrivedAt)
 		}
-		previous := s.previous[key]
-		if previous != nil {
+		if previous := s.previous[key]; previous != nil {
 			for _, old := range previous.Waiters {
 				if !s.lapsed[old.RunID].Before(old.ArrivedAt) {
 					continue
@@ -382,44 +429,59 @@ func (s *admissionSimulation) check() {
 					if old.RunID == waiter.RunID && old.NodeID == waiter.NodeID {
 						retained = true
 						if !old.ArrivedAt.Equal(waiter.ArrivedAt) {
-							s.t.Fatalf("continuous waiter lost arrival in %s: %+v -> %+v", key, old, waiter)
+							s.t.Fatalf("live waiter lost arrival: %s %+v -> %+v", key, old, waiter)
 						}
 					}
 				}
 				for _, holder := range state.Holders {
-					if old.RunID == holder.RunID && old.NodeID == holder.NodeID {
-						retained = true
-					}
+					retained = retained || old.RunID == holder.RunID && old.NodeID == holder.NodeID
 				}
 				for _, run := range s.runs {
-					if run.id == old.RunID && run.done {
-						retained = true
-					}
+					retained = retained || run.id == old.RunID && run.done
 				}
 				if !retained {
-					s.t.Fatalf("continuous waiter disappeared from %s: %+v", key, old)
+					s.t.Fatalf("live waiter disappeared: %s %+v", key, old)
 				}
 			}
 			for _, holder := range state.Holders {
 				alreadyHeld := false
 				for _, old := range previous.Holders {
-					if old.HolderID == holder.HolderID && old.ClaimedAt.Equal(holder.ClaimedAt) && old.LeaseExpiresAt.After(s.now) {
-						alreadyHeld = true
-					}
+					alreadyHeld = alreadyHeld || old.HolderID == holder.HolderID && old.ClaimedAt.Equal(holder.ClaimedAt) && old.LeaseExpiresAt.After(s.now)
 				}
 				if alreadyHeld {
 					continue
 				}
 				for _, waiter := range state.Waiters {
-					if !s.lapsed[waiter.RunID].Before(waiter.ArrivedAt) || !holder.LeaseExpiresAt.After(s.now) {
-						continue
-					}
-					if waiter.ArrivedAt.Before(holder.QueueArrivedAt) || holder.QueueArrivedAt.IsZero() {
-						s.t.Fatalf("FIFO bypass in %s: granted %s before live waiter %s", key, holder.RunID, waiter.RunID)
+					if s.lapsed[waiter.RunID].Before(waiter.ArrivedAt) && holder.LeaseExpiresAt.After(s.now) && (waiter.ArrivedAt.Before(holder.QueueArrivedAt) || holder.QueueArrivedAt.IsZero()) {
+						s.t.Fatalf("FIFO bypass: %s granted %s before %s", key, holder.RunID, waiter.RunID)
 					}
 				}
 			}
 		}
 		s.previous[key] = state
+	}
+	for set, kinds := range sets {
+		if kinds["holder"] != 0 && kinds["waiter"] != 0 {
+			s.t.Fatalf("partial group grant: %s %v", set, kinds)
+		}
+		want := 3
+		if strings.HasSuffix(set, ":plan") {
+			want = 2
+		}
+		if kinds["holder"]+kinds["waiter"] != want {
+			s.t.Fatalf("incomplete group set: %s %v want=%d", set, kinds, want)
+		}
+	}
+	for _, run := range s.runs {
+		if !run.started || run.done {
+			continue
+		}
+		var permitted int
+		if err := s.f.s.DB().QueryRowContext(s.t.Context(), storetest.Rebind(s.f.s, `SELECT COUNT(*) FROM admission_work WHERE team=? AND run_id=? AND node_id='job' AND granted=1 AND generation=? AND holder=?`), s.f.tenant.Team(), run.id, run.holder.Generation, run.holder.Holder).Scan(&permitted); err != nil {
+			s.t.Fatal(err)
+		}
+		if permitted != 1 {
+			s.t.Fatalf("running work escaped award permit: %+v", run)
+		}
 	}
 }

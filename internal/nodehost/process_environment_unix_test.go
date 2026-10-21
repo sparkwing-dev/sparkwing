@@ -67,7 +67,7 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 				case procenv.Attempt:
 					process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 				case procenv.Eval:
-					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
+					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 				}
 				if !built {
 					t.Fatal("native startup bypassed environment policy")
@@ -148,7 +148,7 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 			case "attempt":
 				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 			case "eval":
-				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash})
+				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -298,7 +298,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 			if kind == procenv.Attempt {
 				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 			} else {
-				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash})
+				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash})
 			}
 			if err != nil {
 				t.Fatal(err)

@@ -112,7 +112,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 		}{
 			{"/plan", body},
 			{"/heartbeat", controllerwire.RenewalRequest{}},
-			{"/finish", controllerwire.FinishRequest{Outcome: "success"}},
+			{"/finish", controllerwire.FinishRequest{}},
 		} {
 			if code, response := f.do("POST", path+step.suffix, auth, step.body); code != http.StatusOK {
 				t.Fatalf("claim %s = %d: %s", step.suffix, code, response)

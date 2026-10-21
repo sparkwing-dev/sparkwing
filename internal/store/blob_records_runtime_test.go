@@ -92,7 +92,7 @@ func addBlobJob(t *testing.T, s *Store, original blob.UploadIntent, id string) b
 	c.Binding.NodeID = id
 	c.Data.NodeID = id
 	var err error
-	c.UnitID, err = encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: id})
+	c.UnitID, err = encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: runspec.NodeID(id)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,6 +215,7 @@ func TestBlobRecordsMemoCopyAndDepcachePointers(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
 	hit, err := records.LookupMemo(t.Context(), lookup)
 	if err != nil || !hit.Found || hit.Output.Value != intent.Digest {
@@ -258,6 +259,7 @@ func TestBlobRecordsMemoCopyRollsBackBothDestinations(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_manifest_copy BEFORE INSERT ON blob_records WHEN NEW.kind='manifest' BEGIN SELECT RAISE(ABORT,'manifest insert unavailable'); END`)
 	request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}, Destination: intent.Identity.Attempt.Value}
 	if _, err := records.CopyMemo(t.Context(), request); err == nil {
@@ -280,6 +282,7 @@ func TestBlobRecordsCacheSurvivesSourceRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
 	rewriteSchemaCount(t, s.db, "blob_receipts", 0)
 	rewriteSchemaCount(t, s.db, "blob_records", 1)
@@ -347,9 +350,15 @@ func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadI
 	}
 	id := intent.Identity.Attempt.Value
 	key := blobOutputRequest(intent).Key
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: id.Generation}
-	_, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: id.RunID, NodeID: id.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(id.RunID), NodeID: runspec.NodeID(id.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(id.Generation)}}
+	_, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(id.RunID), NodeID: runspec.NodeID(id.NodeID)}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// safety: cache fixtures represent producers whose success already committed.
+func activateMemoFixture(t *testing.T, s *Store) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, "UPDATE blob_records SET run_id=NULL WHERE kind='memo'")
 }

@@ -82,7 +82,7 @@ func TestAwardBoxIdentityForAccountHere(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAwardBox(t, tenant.s, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admitted.HereCapabilityPrefix}, admitted.RunID, "laptop")
-	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: admitted.HereCapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: admitted.HereCapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func testLauncherSealedBox(t *testing.T, kind capability.UnitKind) {
 		t.Fatal(err)
 	}
 	observation := controllerwire.LauncherObservation{
-		Award: capability.LeaseRef{Kind: claim.Kind, ID: unitID, Generation: claim.Award.Generation, Holder: claim.Award.Holder},
+		Award: capability.LeaseRef{Kind: claim.Kind, ID: unitID, Generation: int64(claim.Award.Generation), Holder: claim.Award.Holder},
 	}
 	activation := controllerwire.LauncherActivation{Award: observation.Award, NodeUID: "node-uid", ReservationID: "reservation"}
 	for _, reservation := range []bool{false, true} {
@@ -177,7 +177,7 @@ func TestLauncherExpiredUnplacedAwardCanReleaseReservation(t *testing.T) {
 						t.Fatal(err)
 					}
 					observation := controllerwire.LauncherObservation{
-						Award:       capability.LeaseRef{Kind: kind, ID: unitID, Generation: claim.Award.Generation, Holder: claim.Award.Holder},
+						Award:       capability.LeaseRef{Kind: kind, ID: unitID, Generation: int64(claim.Award.Generation), Holder: claim.Award.Holder},
 						Reservation: true,
 					}
 					*now = claim.Award.LeaseExpiresAt

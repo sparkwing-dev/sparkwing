@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -40,15 +42,15 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 		if err != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Ref.NodeID != "build" {
 			t.Fatalf("node snapshot disclosed siblings: %+v %v", snapshot.Nodes, err)
 		}
-		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: award.Node.CapabilityPrefix, Generation: award.Node.Generation}
-		if _, err := host.RenewNode(t.Context(), controllerwire.NodeRef{RunID: run, NodeID: node}, actor, false); (err == nil) != (run == "run" && node == "build") {
+		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: award.Node.Generation}}
+		if _, err := host.RenewNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, actor, false); (err == nil) != (run == "run" && node == "build") {
 			t.Fatalf("renewed outside node award: %v", err)
 		}
 		actor.Generation++
 		if _, err := host.RenewNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "build"}, actor, true); err == nil {
 			t.Fatal("stale node actor renewed")
 		}
-		_, err = host.ReadNode(t.Context(), controllerwire.NodeRef{RunID: run, NodeID: node})
+		_, err = host.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
 		if (err == nil) != (run == "run" && node == "build") {
 			t.Fatalf("node scope run=%q node=%q: %v", run, node, err)
 		}
@@ -60,10 +62,9 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 			t.Fatal("node selected the owner's authority")
 		}
 		actor.Generation = award.Node.Generation
-		_, err = host.TransitionNode(t.Context(), store.NodeTransition{Ref: controllerwire.NodeRef{RunID: run, NodeID: node}, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &sourceAttempt})
+		_, err = host.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&sourceAttempt)})
 		if (err == nil) != (run == "run" && node == "build" && sourceAttempt == 0) {
 			t.Fatalf("node transition escaped exact run/node/attempt fence: %v", err)
 		}
-
 	})
 }

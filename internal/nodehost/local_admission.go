@@ -34,24 +34,30 @@ type LocalAdmission struct {
 	Queued     func(context.Context, controllerwire.NodeRef, wingwire.Queued)
 }
 
+var errComputeBusy = errors.New("machine compute is busy")
+
 func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+	return a.machine(ctx, accepted, row, false, body)
+}
+func (a *LocalAdmission) tryNode(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+	return a.machine(ctx, accepted, row, true, body)
+}
+func (a *LocalAdmission) machine(ctx context.Context, accepted AcceptedRun, row store.NodeRow, nonblocking bool, body func(context.Context) error) error {
 	spec, err := admissionSpec(accepted)
 	if err != nil {
 		return err
 	}
-	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" {
+	if row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID == "" {
 		return errors.New("claimed job admission requires its accepted run and job")
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
-		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID),
-		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
+		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID)),
+		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
 		Resources: localResources(row.Execution.Resources.Value),
-		Priority:  options.Priority.Value, Class: options.AdmissionClass.Value,
+		Priority:  options.Priority.Value, Class: options.AdmissionClass.Value, NonBlocking: nonblocking,
 	}
-	return a.hold(ctx, row.Ref, request, func(ctx context.Context, held Lease) error {
-		return body(context.WithValue(ctx, computeReservation{}, computeReservation{ref: row.Ref, resources: held.Resources()}))
-	})
+	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }
 
 func admissionSpec(accepted AcceptedRun) (runspec.Spec, error) {
@@ -90,6 +96,12 @@ func (a *LocalAdmission) hold(parent context.Context, ref controllerwire.NodeRef
 	if held == nil {
 		if err == nil {
 			err = errors.New("local admission returned no lease")
+		}
+		if request.NonBlocking {
+			var refused *wingdclient.AdmissionError
+			if errors.As(err, &refused) && refused.Key == "capacity" {
+				return errComputeBusy
+			}
 		}
 		return localAdmissionFailure(errors.Join(context.Cause(ctx), err))
 	}

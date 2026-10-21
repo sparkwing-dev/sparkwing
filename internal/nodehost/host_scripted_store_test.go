@@ -18,7 +18,7 @@ import (
 type scriptedHostStore struct {
 	readSnapshot     func(context.Context, string) (store.RunSnapshot, error)
 	readNode         func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
-	transitionNode   func(context.Context, store.NodeTransition) (store.Applied, error)
+	transitionNode   func(context.Context, store.NodeCommand) (store.Applied, error)
 	transitionRun    func(context.Context, store.RunTransition) (store.Applied, error)
 	recordStep       func(context.Context, store.StepReport) error
 	renewOwner       func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
@@ -42,7 +42,7 @@ func (s *scriptedHostStore) ReadNode(ctx context.Context, ref controllerwire.Nod
 	return s.readNode(ctx, ref)
 }
 
-func (s *scriptedHostStore) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (s *scriptedHostStore) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	if s.transitionNode == nil {
 		return store.Applied{}, errors.New("unexpected node transition")
 	}
@@ -116,7 +116,7 @@ type claimedHostFixture struct {
 	snapshot store.RunSnapshot
 	beats    atomic.Int64
 	mode     string
-	reports  []store.NodeTransition
+	reports  []capturedNodeCommand
 }
 type executionHostFixtureState struct {
 	*claimedHostFixture
@@ -167,10 +167,24 @@ func newOwnerSealStore(row store.RunRow) *ownerSealFixture {
 		s.row.State = input.To
 		return store.Applied{}, nil
 	}
-	s.finishRunAndUnit = func(_ context.Context, input store.FinishRunRequest) (store.Applied, error) {
+	s.finishRunAndUnit = func(ctx context.Context, input store.FinishRunRequest) (store.Applied, error) {
 		s.trace = append(s.trace, "finish")
 		s.finished = input
-		return store.Applied{}, nil
+		if s.row.Spec == nil {
+			s.row.State = store.RunFailed
+			return store.Applied{Outcome: s.row.State, Reason: input.Transition.Reason}, nil
+		}
+		snapshot, err := s.ReadSnapshot(ctx, s.row.ID)
+		if err != nil {
+			return store.Applied{}, err
+		}
+		graph, err := snapshot.Scheduling()
+		if err != nil {
+			return store.Applied{}, err
+		}
+		decision := store.Decide(graph)
+		s.row.State = store.RunState(decision.Outcome)
+		return store.Applied{Outcome: s.row.State, Reason: decision.Reason}, nil
 	}
 	return s
 }
@@ -183,8 +197,8 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 	s.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 		return s.snapshot.Nodes[0], nil
 	}
-	s.transitionNode = func(_ context.Context, transition store.NodeTransition) (store.Applied, error) {
-		s.reports = append(s.reports, transition)
+	s.transitionNode = func(_ context.Context, transition store.NodeCommand) (store.Applied, error) {
+		s.reports = append(s.reports, captureNodeCommand(transition))
 		return store.Applied{}, nil
 	}
 	s.renewNodeClaim = func(_ context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
@@ -210,7 +224,8 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 func newExecutionHostStore(snapshot store.RunSnapshot) *executionHostFixtureState {
 	s := &executionHostFixtureState{claimedHostFixture: newClaimedHostStore(snapshot, "")}
 	s.recordStep = func(context.Context, store.StepReport) error { return nil }
-	s.transitionNode = func(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+	s.transitionNode = func(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+		change := captureNodeCommand(command)
 		row := s.snapshot.Nodes[0]
 		if change.Ref != row.Ref || change.Actor.Kind != store.ActorHolder || change.Actor.Holder != row.ClaimedBy || change.Actor.CapabilityPrefix != row.CapabilityPrefix || change.Actor.Generation != row.Generation || change.Actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) {
 			return store.Applied{}, errors.New("transition changed claim authority")
@@ -222,7 +237,7 @@ func newExecutionHostStore(snapshot store.RunSnapshot) *executionHostFixtureStat
 		if change.Cause == store.CauseRetry || change.Cause == store.CauseStart {
 			s.attempt++
 		}
-		return store.Applied{Generation: row.Generation, Attempt: s.attempt}, nil
+		return store.Applied{Generation: row.Generation, Attempt: runspec.AttemptOrdinal(s.attempt)}, nil
 	}
 	return s
 }
@@ -256,7 +271,7 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 			if err != nil {
 				return store.AcceptedExpansion{}, err
 			}
-			s.expansions = []store.AcceptedExpansionRow{{Source: in.Source, SourceGeneration: in.SourceGeneration, Body: in.Body, BodyHash: string(hash)}}
+			s.expansions = []store.AcceptedExpansionRow{{Source: in.Source, SourceGeneration: int64(in.SourceGeneration), Body: in.Body, BodyHash: string(hash)}}
 			for _, job := range plan.Jobs {
 				spec, err := json.Marshal(job)
 				if err != nil {
@@ -266,12 +281,13 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 				if err != nil {
 					return store.AcceptedExpansion{}, err
 				}
-				s.nodes = append(s.nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: in.Source.RunID, NodeID: job.ID}, Spec: spec, SpecHash: string(hash), Status: store.StatusDone, Outcome: store.NodeSuccess})
+				s.nodes = append(s.nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: in.Source.RunID, NodeID: runspec.NodeID(job.ID)}, Spec: spec, SpecHash: string(hash), Status: store.StatusDone, Outcome: store.NodeSuccess})
 			}
 		}
 		return store.AcceptedExpansion{Source: in.Source, SourceGeneration: in.SourceGeneration, State: s.node.Expansion}, nil
 	}
-	s.transitionNode = func(_ context.Context, in store.NodeTransition) (store.Applied, error) {
+	s.transitionNode = func(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+		in := captureNodeCommand(command)
 		for i := range s.nodes {
 			if s.nodes[i].Ref == in.Ref && in.Extra.Result != nil {
 				s.nodes[i].Status, s.nodes[i].Outcome = store.StatusDone, in.To
@@ -282,3 +298,9 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 	}
 	return s
 }
+
+func (s *scriptedHostStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied,error) { return store.Applied{}, nil }
+
+func (*scriptedHostStore) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse,error) { return store.AcquireSlotResponse{Kind:store.AcquireGranted},nil }
+
+func (*scriptedHostStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error { return errors.New("unexpected provisional award relinquishment") }

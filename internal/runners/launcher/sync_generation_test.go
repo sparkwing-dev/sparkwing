@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestLauncherRetiresStaleGenerationAfterRestart(t *testing.T) {
@@ -47,7 +48,7 @@ func TestLauncherRetiresStaleGenerationAfterRestart(t *testing.T) {
 		}
 		response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}
 		for _, observation := range request.Observed {
-			if observation.Award.Generation == stale.Generation {
+			if observation.Award.Generation == int64(stale.Generation) {
 				response.Retired = append(response.Retired, observation.Award)
 			}
 		}
@@ -96,7 +97,7 @@ func FuzzControllerSyncSeparatesClaimGenerations(f *testing.F) {
 			t.Fatal(err)
 		}
 		stale := current
-		stale.Generation = int64(generation) + 1
+		stale.Generation = runspec.ClaimGeneration(int64(generation) + 1)
 		observations := []CloudJobObservation{
 			{Binding: current, JobNamespace: "cloud", JobName: jobName(current), JobUID: "current-job", NodeUID: "current-node"},
 			{Binding: stale, JobNamespace: "cloud", JobName: jobName(stale), JobUID: "stale-job", NodeUID: "stale-node"},
@@ -112,10 +113,10 @@ func FuzzControllerSyncSeparatesClaimGenerations(f *testing.F) {
 			}
 			var remove capability.LeaseRef
 			for i, observation := range request.Observed {
-				if observation.Award.Generation != observations[i].Binding.Generation || observation.Award.Holder != observations[i].Binding.Holder || observation.Award.ID != unit.UnitID || observation.Award.Kind != unit.Unit {
+				if observation.Award.Generation != int64(observations[i].Binding.Generation) || observation.Award.Holder != observations[i].Binding.Holder || observation.Award.ID != unit.UnitID || observation.Award.Kind != unit.Unit {
 					t.Fatal("sync changed a persisted award")
 				}
-				if observation.Award.Generation == stale.Generation {
+				if observation.Award.Generation == int64(stale.Generation) {
 					remove = observation.Award
 				}
 			}

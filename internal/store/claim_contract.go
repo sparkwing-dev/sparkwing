@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -12,8 +13,8 @@ import (
 // Eval includes its immutable source generation. Trigger and plan need only RunID.
 type UnitRef struct {
 	Kind             capability.UnitKind
-	RunID            string
-	NodeID           string
+	RunID            runspec.RunID
+	NodeID           runspec.NodeID
 	SourceGeneration int64
 }
 

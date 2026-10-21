@@ -103,7 +103,7 @@ func TestJobWaitingOnChildKeepsItsReservation(t *testing.T) {
 		}
 	})
 	persisted.row.Execution = input.Execution
-	host.Admission = ComposeNativeAdmission(nil, admission, false)
+	host.Admission = ComposeStartGate(nil, admission, false)
 	if err := host.Execute(ctx, input); err != nil {
 		t.Fatal(err)
 	}

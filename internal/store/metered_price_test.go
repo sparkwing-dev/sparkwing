@@ -51,7 +51,7 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 		}
 		tenant := &Tenant{s: s, team: "a"}
 		actor := Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}
-		change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Cause: CauseUnpriced, Actor: actor, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass}}}
+		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Cause: CauseUnpriced, Actor: actor, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass}}}
 		switch variant % 4 {
 		case 0:
 			change.Actor.Authority.ID = fmt.Sprintf("missing-%x", seed)

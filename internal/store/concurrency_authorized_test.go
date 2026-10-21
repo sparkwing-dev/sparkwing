@@ -43,7 +43,7 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture) capability.Authori
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "job:global:deploy", SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: row.Generation}
+	target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), SlotKey: "job:global:deploy", SlotRunID: string(f.ref.RunID), SlotNodeID: string(f.ref.NodeID), SlotGeneration: int64(row.Generation)}
 	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestAuthorizedConcurrencyGroupDoesNotDiscloseUndeclaredReadEdgesProperty(t 
 
 func TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes(t *testing.T) {
 	f := slotFixture(t)
-	admitted, err := f.tenant.AdmitCapacity(t.Context(), store.CapacityBinding{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Generation: f.holder.Generation}, f.holder)
+	admitted, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
 	if err != nil || admitted.Kind != store.AcquireGranted {
 		t.Fatalf("admission: %+v %v", admitted, err)
 	}

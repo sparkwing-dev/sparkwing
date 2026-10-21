@@ -41,7 +41,7 @@ func TestMetricTimestampConflicts(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "conflicting node metric") {
 				t.Fatalf("conflicting sample was not rejected: %v", err)
 			}
-			got, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+			got, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 			if err != nil || len(got) != 1 {
 				t.Fatalf("stored samples = %v, %v", got, err)
 			}
@@ -101,7 +101,7 @@ func TestMetricTimestampConcurrentWriters(t *testing.T) {
 			if failures != wantFailures {
 				t.Fatalf("write failures = %d; want %d", failures, wantFailures)
 			}
-			got, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+			got, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 			if err != nil || len(got) != 1 {
 				t.Fatalf("stored samples = %v, %v", got, err)
 			}

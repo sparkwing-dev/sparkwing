@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -58,7 +57,7 @@ func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request, a
 	if err != nil {
 		return engineLookupError(err)
 	}
-	invites, err := t.Invitations(r.Context(), time.Now())
+	invites, err := t.Invitations(r.Context())
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -125,7 +124,7 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 		}
 		return false
 	}
-	ok, err := s.operator.ClaimInvitationEmail(ctx, inv.ID, time.Now())
+	ok, err := s.operator.ClaimInvitationEmail(ctx, inv.ID)
 	if err != nil {
 		s.logger.Warn("invitation email: claim", "invitation", inv.ID, "err", err)
 		return false

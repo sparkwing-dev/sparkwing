@@ -14,17 +14,11 @@ func (t *Tenant) ResolveBlobAuthority(ctx context.Context, selector blob.Authori
 	if grant != capability.DataRead && grant != capability.DataWrite && grant != capability.SourceRead {
 		return blob.Authority{}, authorityError(apierr.Forbidden, "data grant is required")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return blob.Authority{}, err
-	}
-	defer rollbackOrLog(tx)
-	actor, err := resolveBlobAuthorityTx(ctx, tx, t.team, selector, grant)
-	if err != nil {
-		return blob.Authority{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return blob.Authority{}, err
-	}
-	return actor.authority, nil
+	return inTxResult(ctx, t.s, func(tx *storeTx) (blob.Authority, error) {
+		actor, err := resolveBlobAuthorityTx(ctx, tx, t.team, selector, grant)
+		if err != nil {
+			return blob.Authority{}, err
+		}
+		return actor.authority, nil
+	})
 }

@@ -39,7 +39,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 		binding = capability.BindingRun
 	}
 	owner := request.Actor.Owner
-	if request.Actor.Kind != ActorRunHost || owner.Kind != OwnerTrigger || owner.RunID != request.RunID || owner.Generation <= 0 || owner.Holder == "" || c.Unit != expected || c.UnitID != request.RunID || c.Binding.Kind != binding || !slices.Contains(c.Grants, capability.NodeResult) || c.Binding.Generation != owner.Generation || c.Binding.Holder != owner.Holder {
+	if request.Actor.Kind != ActorRunHost || owner.Kind != OwnerTrigger || owner.RunID != runspec.RunID(request.RunID) || owner.Generation <= 0 || owner.Holder == "" || c.Unit != expected || c.UnitID != request.RunID || c.Binding.Kind != binding || !slices.Contains(c.Grants, capability.NodeResult) || runspec.ClaimGeneration(c.Binding.Generation) != owner.Generation || c.Binding.Holder != owner.Holder {
 		return holderRefusal()
 	}
 	var holder, prefix, status string
@@ -48,7 +48,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, request.RunID, expected).Scan(&status, &holder, &prefix, &generation, &lease, &cancelled); err != nil {
 		return err
 	}
-	if generation != owner.Generation {
+	if runspec.ClaimGeneration(generation) != owner.Generation {
 		return holderRefusal()
 	}
 	if accepted == generation {
@@ -61,7 +61,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 				if digest != proof.Digest {
 					return authorityError(apierr.IllegalTransition, "accepted plan payload differs")
 				}
-				return validateResultProofTx(ctx, tx, team, request.Actor, controllerwire.NodeRef{RunID: request.RunID}, 0)
+				return validateResultProofTx(ctx, tx, team, request.Actor, controllerwire.NodeRef{RunID: runspec.RunID(request.RunID)}, 0)
 			}
 		}
 	}
@@ -71,7 +71,8 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if status == "done" && expected == capability.UnitPlan && accepted == generation && request.Actor.Result == nil {
 		return nil
 	}
-	if status != "claimed" || holder != owner.Holder || prefix != c.Prefix || !lease.Valid || lease.Int64 <= tx.now().UnixNano() {
+	now := tx.now(ctx)
+	if status != "claimed" || holder != owner.Holder || prefix != c.Prefix || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
 	return nil
@@ -91,7 +92,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 		return runspec.Spec{}, nil, authorityError(apierr.SpecDrift, "request seal cannot change")
 	}
 	input.Request = run.Request
-	input.Now = tx.now()
+	input.Now = tx.now(ctx)
 	if err = validateResolvedIntake(&input); err != nil {
 		return runspec.Spec{}, nil, err
 	}

@@ -75,12 +75,12 @@ func newKeyRotationFixture(t *testing.T, open func(*testing.T, ...store.Option) 
 		if err := teststore.SeedSecret(st, team, store.Secret{Name: "TOKEN", Pipeline: "build", Masked: true, Principal: "seed", Value: seal(t, f.old, secrets.PurposeSecret, team, "TOKEN", "build", "secret-"+string(team))}, now); err != nil {
 			t.Fatal(err)
 		}
-		repository, scope := "", "git-credential:host:git.example"
+		repository, scope, hostWide := "", "git-credential:host:git.example", 1
 		if i == 1 {
-			repository, scope = "git:git.example/acme/tools", "git-credential:repo:git:git.example/acme/tools"
+			repository, scope, hostWide = "git:git.example/acme/tools", "git-credential:repo:git:git.example/acme/tools", 0
 		}
 		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO git_credentials(host_wide,repository_key,id,team,host,kind,secret,created_at,updated_at) VALUES ($1,$2,$3,$4,'git.example','https',$5,1,1)`,
-			repository == "", repository, "gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", scope, "git-"+string(team))); err != nil {
+			hostWide, repository, "gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", scope, "git-"+string(team))); err != nil {
 			t.Fatal(err)
 		}
 		seedRun(t, st, forTeam(t, st, team), "run-"+string(team), "build")

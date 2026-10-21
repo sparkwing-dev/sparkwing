@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -32,7 +34,7 @@ func checkMaskedNativeFailure(t *testing.T, f *storeHostFixture, input NodeInput
 	if err == nil {
 		t.Fatal("failure was lost")
 	}
-	row, readErr := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, readErr := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if readErr != nil {
 		t.Fatal(readErr)
 	}

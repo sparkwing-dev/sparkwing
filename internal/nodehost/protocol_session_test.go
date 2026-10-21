@@ -831,7 +831,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				case "attempt":
 					process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 				case "evaluation":
-					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
+					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 				case "planning":
 					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci"}, Debug: debug}, log)
 				}

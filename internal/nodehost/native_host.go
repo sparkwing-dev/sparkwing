@@ -37,7 +37,7 @@ type NativeHostConfig struct {
 	Evaluation  EvaluationOperations
 	ReadOutput  func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
 	PlanningLog func(context.Context, nodeproto.FrameLog) error
-	Admission   NativeAdmission
+	Admission   StartGate
 }
 
 // NewNativeHost configures its owned transport and returns shared hosts and an evaluator for owner policies.
@@ -88,12 +88,13 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		return nil, nil, nil, err
 	}
 	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.StartPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker}
-	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, AdmissionPolicy: config.Owner.AdmissionPolicy, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
+	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
-	configureNativeAdmission(&owner, config.Admission.compute, config.Admission.capacity, config.Admission.required)
+	owner.executionAdmission = config.Admission
+
 	owner.Planning.Validation = validation
 	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		var spec runspec.Spec
@@ -131,20 +132,19 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 
 // OwnerOperations supplies placement callbacks without shared host state.
 type OwnerOperations struct {
-	Renew           func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
-	Acquire         func(context.Context, RunInput) (*source.Entry, error)
-	Prepare         func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
-	Project         func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	Decide          func(store.ScheduleSnapshot) store.ScheduleDecision
-	Wait            func(context.Context, store.RunSnapshot) error
-	WaitNode        WaitNodeChange
-	Debug           DebugBoundaryWaiter
-	AdmissionPolicy OwnerPolicy
-	Local           func(store.NodeRow) bool
-	AdoptClaim      func(context.Context, store.ReconciledNode) error
-	Delegator       OwnerDelegator
-	ExpansionActor  func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
-	Expand          func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
+	Renew          func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Acquire        func(context.Context, RunInput) (*source.Entry, error)
+	Prepare        func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Project        func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide         func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait           func(context.Context, store.RunSnapshot) error
+	WaitNode       WaitNodeChange
+	Debug          DebugBoundaryWaiter
+	Local          func(store.NodeRow) bool
+	AdoptClaim     func(context.Context, store.ReconciledNode) error
+	Delegator      OwnerDelegator
+	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
+	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
 }
 
 // ExecutionOperations supplies placement callbacks without shared host state.

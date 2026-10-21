@@ -226,19 +226,19 @@ func TestCommittedDashboardLogUsesFinalStore(t *testing.T) {
 	actor := engineActor(authorized)
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 	ordinal := int64(0)
-	started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &ordinal})
+	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject := jobLogSubject(started.Attempt, started.Generation)
+	subject := jobLogSubject(int64(started.Attempt), int64(started.Generation))
 	objects := newScriptedSegmentLogs()
 	objects.add(t, subject, "persisted log\n", true)
 	commit := store.SegmentCommit{Subject: subject, Actor: actor, Segments: objects.views[logSubjectID(subject)].Segments, Final: true, RetentionClass: "r30"}
 	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
-	ordinal = started.Attempt
-	if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &ordinal, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	ordinal = int64(started.Attempt)
+	if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	reader := segmentLogs{records: tenant, actor: actor, objs: objects}

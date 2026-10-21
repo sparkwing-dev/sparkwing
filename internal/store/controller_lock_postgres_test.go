@@ -113,7 +113,7 @@ func TestPostgresControllerPromotionFencesWrites(t *testing.T) {
 	if _, err := first.AsOperator().SeedRunRetention(ctx, 14); err == nil {
 		t.Fatal("former controller committed a standalone write after promotion")
 	}
-	if _, err := tenant.HoldByOperator(ctx, "stale", "after promotion", time.Now()); err == nil {
+	if _, err := tenant.HoldByOperator(ctx, "stale", "after promotion"); err == nil {
 		t.Fatal("former controller committed a transaction after promotion")
 	}
 	if len(fenced) != 2 {

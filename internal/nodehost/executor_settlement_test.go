@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -56,7 +58,7 @@ func TestNodeExecutorSendsCurrentAttemptSettlement(t *testing.T) {
 						step = "second"
 					}
 					want := map[string][]string{"first": {}, "second": {"first"}, "last": {"first", "second"}}[step]
-					if !reflect.DeepEqual(r.Settled, want) || int64(r.Attempt) != in.Attempt {
+					if !reflect.DeepEqual(r.Settled, want) || runspec.AttemptOrdinal(int64(r.Attempt)) != in.Attempt {
 						t.Errorf("%s attempt=%d settled=%v, want attempt=%d settled=%v", step, r.Attempt, r.Settled, in.Attempt, want)
 					}
 					if r.Op == nodeproto.OpEval {

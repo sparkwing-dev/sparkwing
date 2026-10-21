@@ -24,7 +24,7 @@ func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, 
 	}
 	spec.Request.Request.Team = "team"
 	input.Accepted.Spec, _ = json.Marshal(spec)
-	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}
+	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(input.Attempt), Generation: int64(input.Generation)}
 	input.Storage.Authority = blob.Authority{CapabilityRef: "attempt-storage", Principal: "executor", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}, Repo: "repo", Ref: blob.RefFacts{Scope: blob.RefScope{Writer: "executor"}}}
 	backend := newMemoBackend(blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: outputDigest(value)}}, map[blob.Digest][]byte{outputDigest(value): value})
 	input.Storage.Bytes, input.Storage.Records = backend, backend
@@ -60,7 +60,7 @@ func TestExecutorMemoCopiesVerifiedHitToAwardedAttempt(t *testing.T) {
 }
 
 func TestExecutorMemoUnavailableDataReruns(t *testing.T) {
-	for _, mode := range []string{"lookup", "missing", "corrupt", "unverified", "close", "denied", "nil_reader", "reader_error", "commit"} {
+	for _, mode := range []string{"missing", "corrupt", "unverified", "nil_reader"} {
 		t.Run(mode, func(t *testing.T) {
 			host, input, spec, job, session, backend := executorMemoFixture(t, []byte(`{"value":3}`))
 			backend.mode, backend.broken = mode, backend.hit.Output.Value
@@ -220,5 +220,50 @@ func TestExecutorMemoPublishesOnlyCurrentResultReferences(t *testing.T) {
 	output.Scope.Key = "another-attempt"
 	if err := host.saveMemo(t.Context(), input, hash, result); !errors.Is(err, blob.ErrDigestNotReadable) || committed != nil {
 		t.Fatalf("foreign result was published: %+v error=%v", committed, err)
+	}
+}
+
+func TestExecutorMemoRefusalsRemainErrors(t *testing.T) {
+	for _, mode := range []string{"lookup", "close", "denied", "reader_error", "commit"} {
+		t.Run(mode, func(t *testing.T) {
+			host, input, spec, job, session, backend := executorMemoFixture(t, []byte(`{"value":3}`))
+			backend.mode, backend.broken = mode, backend.hit.Output.Value
+			_, result, err := host.memo(t.Context(), session, input, job, spec)
+			if err == nil || result != nil {
+				t.Fatalf("refusal became a miss: result=%+v error=%v", result, err)
+			}
+			if mode == "denied" && !errors.Is(err, blob.ErrDigestNotReadable) {
+				t.Fatalf("authorization refusal changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestExecutorMemoPropagatesLookupAndCopyFenceRefusals(t *testing.T) {
+	for _, stage := range []string{"lookup", "copy", "remote", "joined"} {
+		t.Run(stage, func(t *testing.T) {
+			host, input, spec, job, session, backend := executorMemoFixture(t, []byte(`{"value":3}`))
+			refusal := errors.New("award fence refused")
+			fail := func(context.Context, blob.MemoLookup) (blob.MemoHit, error) { return blob.MemoHit{}, refusal }
+			switch stage {
+			case "lookup":
+				backend.onLookupMemo = fail
+			case "joined":
+				backend.onLookupMemo = func(ctx context.Context, lookup blob.MemoLookup) (blob.MemoHit, error) {
+					return blob.MemoHit{}, errors.Join(blob.ErrIntegrity, refusal)
+				}
+			case "copy":
+				backend.onCopyMemo = func(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) { return blob.MemoHit{}, refusal }
+			case "remote":
+				backend.hit = blob.MemoHit{}
+				remote := newRemoteMemoCache(newMemoBackend(blob.MemoHit{}, nil))
+				remote.onMemo = func(context.Context, blob.MemoKey, blob.Budget) (blob.MemoHit, error) { return blob.MemoHit{}, refusal }
+				input.Storage.RemoteCache = remote
+			}
+			_, result, err := host.memo(t.Context(), session, input, job, spec)
+			if !errors.Is(err, refusal) || result != nil {
+				t.Fatalf("%s refusal became fresh execution: result=%+v error=%v", stage, result, err)
+			}
+		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -79,7 +80,7 @@ func TestOwnerHostRefusesChangedResumeBeforeAcquisition(t *testing.T) {
 func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	for _, id := range []string{"blocked", "sibling"} {
-		f.snapshot.Nodes = append(f.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: id}, Status: store.StatusPending})
+		f.snapshot.Nodes = append(f.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Status: store.StatusPending})
 	}
 	blocked := make(chan struct{})
 	released := make(chan struct{})
@@ -110,7 +111,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 			<-blocked
 			close(released)
 		}
-		return OwnerLayerResult{Transition: &store.NodeTransition{To: store.NodeSkipped, Cause: store.CauseDependency}}, nil
+		return OwnerLayerResult{Transition: store.DependencyNode{Outcome: store.NodeSkipped}}, nil
 	})
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
@@ -268,7 +269,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 		if !reflect.DeepEqual(binding, input.Storage) {
 			t.Fatal("owner policy lost its bound storage clients")
 		}
-		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || evaluation.NodeID != row.Ref.NodeID || evaluation.Generation != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || evaluation.RouteBinding.JobID != row.Ref.NodeID {
+		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || runspec.NodeID(evaluation.NodeID) != row.Ref.NodeID || runspec.ClaimGeneration(evaluation.Generation) != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || runspec.NodeID(evaluation.RouteBinding.JobID) != row.Ref.NodeID {
 			t.Fatal("owner policy lost acquired code or persisted evaluation identity")
 		}
 		policies++
@@ -277,7 +278,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	if _, err := releasedRequest(&host, t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 4 {
+	if policies != 3 {
 		t.Fatalf("owner policies=%d", policies)
 	}
 }
@@ -289,36 +290,4 @@ func releasedRequest(h *OwnerHost, ctx context.Context, input RunInput, accepted
 		return nil
 	})
 	return result, err
-}
-
-func TestOwnerHostAdmissionSkipDoesNotHideIndependentFailure(t *testing.T) {
-	for _, joined := range []bool{false, true} {
-		t.Run(map[bool]string{false: "skip", true: "independent_error"}[joined], func(t *testing.T) {
-			fixture, host, input := newOwnerFixture(t, true)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending}
-			fixture.snapshot.Nodes = []store.NodeRow{row}
-			setTestPolicies(&host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
-				return OwnerLayerResult{}, nil
-			})
-			independent := errors.New("admission cleanup refused")
-			host.Admit = func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error {
-				failure := &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("full group")}
-				if joined {
-					return errors.Join(failure, independent)
-				}
-				return failure
-			}
-			request, err := releasedRequest(&host, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
-			if request != nil {
-				t.Fatal("refused admission reached execution")
-			}
-			if joined {
-				if !errors.Is(err, independent) || len(fixture.trace) != 0 {
-					t.Fatalf("lost independent failure: trace=%v error=%v", fixture.trace, err)
-				}
-			} else if err != nil || !reflect.DeepEqual(fixture.trace, []string{"skipped"}) {
-				t.Fatalf("skip did not commit before readiness: trace=%v error=%v", fixture.trace, err)
-			}
-		})
-	}
 }

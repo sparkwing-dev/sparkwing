@@ -928,21 +928,26 @@ available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
 
-The private `capacity/acquire` POST endpoint admits the unit named by its award.
-A trigger owner uses `trigger.host` and the live `runOfTrigger` binding. A node
-award uses `node.report` and its bound run, job and generation. The store
-rechecks that exact job award in the admission transaction. Plan, root and
-foreign-team credentials cannot use it. The body contains only the captured work binding: run, job and
-generation. Group keys, capacity, cost, policy, cancellation timeout and lease
-are absent.
+The private `may-start` POST admits only the job named by an authenticated
+`node.report` award. It accepts run, job and generation. The store derives all
+groups, policies, host scope and lease bounds. Plan, trigger, evaluation, root
+and foreign-team credentials cannot admit jobs. Every job requires a durable
+award-bound start permit, including jobs without groups. Queued sets hold no
+partial grant. Skip/fail commits the terminal node and derived verdict.
 
-`Tenant.AdmitCapacity` reads every accepted concurrency declaration and its lease
-bound inside one transaction. Box keys use only the persisted execution host on the authenticated award.
-A launcher award waits for authenticated activation to seal that identity.
-Other awards with missing host identity are refused. The same transaction
-adopts live holders, resolves existing waiters and acquires remaining groups
-through the existing semaphore operations. Repeated requests preserve holder
-continuity and queue arrival. Terminal transitions release capacity atomically.
+The private `release-evaluation` POST accepts a trigger owner and exact source.
+It commits plan admission with permission to evaluate an approval or expansion.
+Controller-owned approvals and expansions use the same store release boundary
+and durable evaluation units. `relinquish-start` returns an unstarted provisional
+award and job reservations while preserving readiness ranking. The old private
+`capacity/acquire` surface is deleted.
+
+`Tenant.MayStart` reads accepted concurrency declarations and the award's persisted
+execution host in its transaction. A launcher award waits for activation to seal
+that host. Missing host identity on another award refuses box scope. Handoff
+changes authority fences and permits, while reservations retain their work identity
+and one arrival. Terminal transitions release capacity atomically. Job starts do
+not reacquire parent plan capacity.
 
 Private reconciliation also preserves `owner_capability_prefix` beside the node
 claim prefix. The local host checks the persisted owner relation before adopting
@@ -1244,14 +1249,17 @@ producer rows into the persisted job namespace used by mask initialization.
 
 ## Owner cancellation drain
 
-Once scheduling starts, owner renewal keeps its lease live after a run
-cancellation request. The persisted scheduling graph cancels each executor and
-waits for terminal results before owner completion. Cancellation during source
-preparation still stops preparation. Lost authority, renewal silence, the parent
-deadline and an explicit host stop still terminate the owner context. Claimed
-executor renewal continues to cancel its execution context on a cancellation beat.
-An owner waits for a holder with persisted cancellation intent instead of
-submitting the same cancellation again on each scheduling pass.
+Cancellation records a stored drain deadline five minutes after the first
+request. Node, owner, eval and concurrency-slot leases use the same lease bound,
+which is the earliest authority, cancellation and funded deadline. Renewing an
+owner for scheduling may clear the cancellation flag sent to its keeper, but
+never extends this deadline. A holder that ignores cancellation is reaped when
+its lease expires. Funding refusal retains its shorter one-slice deadline.
+
+The finish request carries a reason and masked error, with no outcome. The store
+derives the terminal verdict from the accepted plan and persisted job results.
+Preparation without an accepted plan finishes failed, or cancelled when the run
+has cancellation intent. Terminal outcomes absorb replay.
 
 ## Detached request trace
 

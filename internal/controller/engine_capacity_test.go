@@ -131,20 +131,20 @@ func TestPrivateCapacityEvalUsesOnlyItsAwardedSource(t *testing.T) {
 	}
 	actor := engineActor(capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "build"}})
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
-	if result, err := tenant.AdmitCapacity(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build", Generation: source.Award.Generation}, actor); err != nil || result.Kind != store.AcquireGranted {
+	if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(source.Award.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
 		t.Fatalf("source admission: %+v %v", result, err)
 	}
-	started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64(0))})
+	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &started.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: store.NodeSuccess, SourceAttempt: &started.Attempt, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
-	eval := claim(store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "build", SourceGeneration: source.Award.Generation})
-	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: source.Award.Generation}
-	if code := privateCapacityRequest(t, server, string(eval.Bearer), localhostwire.LocalCapacityRequest{Binding: binding}); code != http.StatusOK {
-		t.Fatalf("live eval admission: HTTP %d", code)
+	eval := claim(store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "build", SourceGeneration: int64(source.Award.Generation)})
+	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(source.Award.Generation)}
+	if code := privateCapacityRequest(t, server, string(eval.Bearer), localhostwire.LocalCapacityRequest{Binding: binding}); code != http.StatusForbidden && code != http.StatusConflict {
+		t.Fatalf("eval award admitted source capacity: HTTP %d", code)
 	}
 	for _, wrong := range []store.CapacityBinding{
 		{RunID: "run", NodeID: "another-source", Generation: binding.Generation},
@@ -222,7 +222,7 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT generation FROM concurrency_holders WHERE team='a' AND key='plan:global:serial' AND run_id='run' AND node_id=''`).Scan(&generation); err != nil {
 				t.Fatal(err)
 			}
-			if err != nil || runErr != nil || run.Owner == nil || len(state.Holders) != 1 || state.UsedCost != 1 || !state.Holders[0].ClaimedAt.Equal(before.ClaimedAt) || generation != run.Owner.Generation || generation == previousGeneration {
+			if err != nil || runErr != nil || run.Owner == nil || len(state.Holders) != 1 || state.UsedCost != 1 || !state.Holders[0].ClaimedAt.Equal(before.ClaimedAt) || generation != previousGeneration || !state.Holders[0].QueueArrivedAt.Equal(before.QueueArrivedAt) {
 				t.Fatalf("controller recovery reacquired capacity: before=%+v state=%+v owner=%+v errors=%v/%v", before, state, run.Owner, err, runErr)
 			}
 		})

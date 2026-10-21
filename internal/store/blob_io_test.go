@@ -81,6 +81,7 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memoManifestRequest(intent, manifest.Digest, members)); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	if got, err := records.LookupRecord(t.Context(), blob.RecordLookup{Authority: intent.Authority, Key: artifacts.Key}); err != nil || len(got.Members) != 1 {
 		t.Fatalf("lookup=%+v,%v", got, err)
 	}
@@ -88,9 +89,9 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 		t.Fatalf("memo=%+v,%v", hit, err)
 	}
 	a := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: a.Generation}
-	ref := controllerwire.NodeRef{RunID: a.RunID, NodeID: a.NodeID}
-	report := NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &artifacts.Key}}}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}
+	report := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &artifacts.Key}}}
 	if _, err := records.tenant.TransitionNode(t.Context(), report); err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +129,7 @@ func TestBlobLookupRereadsARepointedManifest(t *testing.T) {
 			if _, err := records.CommitRecord(t.Context(), memoManifestRequest(intent, digest, fake[digest])); err != nil {
 				t.Fatal(err)
 			}
+			activateMemoFixture(t, s)
 		}
 		records.manifests = probingManifests{fake, func(_ string, read blob.Digest) {
 			if i := slices.Index(digests, read); i+1 < len(digests) && (flapping || i == 0) {

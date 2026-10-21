@@ -4,12 +4,17 @@ Sparkwing's admission daemon decides when work may consume CPU and memory on one
 machine. It does not assess job risk. Risk declarations and approvals remain
 deterministic pipeline contracts and are unaffected by admission mode.
 
-Logical capacity follows one order: plan groups, job groups, then machine
-CPU and memory. An executable job evaluates `SkipIf` and memo checks on its
-executing host after acquiring those resources, under its actual award. The
-coordinator acquires no job groups for evaluation. A job that skips still waits
-for its concurrency slot and briefly occupies a machine, then releases its
-job groups without running its body.
+The store owns logical concurrency capacity in every execution mode. It commits
+plan admission with permission to release work. An executing host requests its
+complete job group set under its actual award, then acquires machine CPU and
+memory. A queued set holds no partial grant. Every job needs a committed start
+permit, including jobs without concurrency groups.
+
+An executable job evaluates `SkipIf` and memo first on its executing host, under
+that permit. The coordinator acquires no job groups for evaluation. A job that
+skips still waits for its slot and briefly occupies a machine, then settles skip
+and releases its groups. Approval-only predicates use fenced evaluation permission
+without job groups or compute. Their typed skip or failure settles in the store.
 
 Recovery reconciles released work immediately. If plan capacity has lapsed,
 running jobs finish and their results settle while the run waits to reacquire.
@@ -47,7 +52,7 @@ The modes are:
   backfill past a blocked head, then protects that head. It is the default so
   upgrading Sparkwing does not change admission behavior.
 - `off` does not gate CPU or memory. The daemon still owns run lifecycle,
-  measurement, queue visibility, and deterministic concurrency groups.
+  measurement and machine queue visibility. Store-owned concurrency groups still apply.
 - `auto` uses measured duration and resource profiles, weighted workload
   classes, bounded short-job backfill, and aging.
 - `custom` runs the deterministic scheduler with operator-selected weights,

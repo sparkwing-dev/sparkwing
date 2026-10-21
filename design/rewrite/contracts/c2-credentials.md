@@ -2527,8 +2527,9 @@ native credential matrix cells. Closed invitations use canonical conflict.
 
 ### Concurrency admission and queue views
 
-`NativeAdmission` and `Tenant.AdmitCapacity` own logical admission for all
-execution placements. The private awarded-unit capacity endpoint names only the
+`Tenant.MayStart` owns logical job admission for all execution placements.
+Store release transitions own plan admission. Every executable award requires a
+committed permit, even without groups. Start and process delegation enforce it. The private awarded-unit capacity endpoint names only the
 unit through its authenticated award. The store derives every group, scope,
 capacity, cost, policy and lease bound from sealed acceptance. Box keys use only
 the award's sealed `ExecutionHost`. Launcher awards wait for authenticated

@@ -15,7 +15,7 @@ func launcherMeteredFence(t *testing.T, s *Store, demand UnitDemand, claim UnitC
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("launcher awards: %+v %v", awards, err)
 	}
-	return root, capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	return root, capability.LeaseRef{Kind: kind, ID: awards[0].Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 }
 
 func chargedMicro(t *testing.T, s *Store) int64 {

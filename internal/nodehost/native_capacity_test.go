@@ -22,7 +22,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
-	config.Admission = ComposeNativeAdmission(fixture.Tenant, nil, true)
+	config.Admission = ComposeStartGate(fixture.Tenant, nil, true)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -35,12 +35,12 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	completion, err := owner.Run(ctx, fixture.Input)
-	if err == nil || executed || completion.Outcome != "" {
+	if err != nil || executed || completion.Outcome != "failed" {
 		t.Fatalf("completion=%+v executed=%v error=%v", completion, executed, err)
 	}
-	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "job"})
-	if err != nil || row.Status != store.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" {
-		t.Fatalf("released without machine admission: row=%+v error=%v", row, err)
+	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"})
+	if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeFailed || row.ClaimedBy != "" {
+		t.Fatalf("failed machine requirement did not settle: row=%+v error=%v", row, err)
 	}
 }
 
@@ -49,7 +49,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("queue", 0, "a"), runspec.Options{})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = first.Tenant, ownerOperationsFixture(first.Host)
-	config.Admission = ComposeNativeAdmission(first.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false)
+	config.Admission = ComposeStartGate(first.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false)
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -75,23 +75,11 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 	}
 }
 
-func TestNativeHostRejectsGroupsWithoutCapacityStore(t *testing.T) {
-	config, _, _, _ := nativeHostFixture(t)
-	owner, _, _, err := NewNativeHost(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestNativeHostRejectsStartsWithoutStore(t *testing.T) {
 	_, _, accepted, row := capacityFixture(t)
-	if err := owner.Admit(t.Context(), accepted, row, func(context.Context) error { t.Error("executed without store"); return nil }); err == nil {
-		t.Fatal("missing store admitted job group")
-	}
-	accepted.Plan = planGrouped("global", "queue", "a")
-	fixture := newStoreHostFixture(t, accepted.Plan)
-	if _, err := owner.Around(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) {
-		t.Error("started plan without store")
-		return RunCompletion{}, nil
-	}); err == nil {
-		t.Fatal("missing store admitted plan group")
+	gate := ComposeStartGate(nil, nil, false)
+	if err := gate.claimedNode(t.Context(), NodeInput{Accepted: accepted, NodeID: string(row.Ref.NodeID), Generation: row.Generation}, func(context.Context) error { t.Fatal("executed without start boundary"); return nil }); err == nil {
+		t.Fatal("missing store admitted work")
 	}
 }
 
@@ -115,9 +103,9 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			if compute {
 				machine = &LocalAdmission{Daemon: daemon}
 			}
-			config.Admission = ComposeNativeAdmission(fixture.Tenant, machine, false)
+			config.Admission = ComposeStartGate(fixture.Tenant, machine, false)
 			queued := make(chan struct{}, 1)
-			config.Admission.capacity.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
+			config.Admission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
 				queued <- struct{}{}
 				return nil
 			}
@@ -217,12 +205,12 @@ func TestNativeClaimedAdmissionAcquiresConcurrencyOnce(t *testing.T) {
 	_, probe, accepted, row := capacityFixture(t)
 	daemon := newFakeDaemon()
 	config, _, _, _ := nativeHostFixture(t)
-	config.Admission = ComposeNativeAdmission(probe, &LocalAdmission{Daemon: daemon}, false)
+	config.Admission = ComposeStartGate(probe, &LocalAdmission{Daemon: daemon}, false)
 	_, claimed, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := claimed.Admission.claimedNode(t.Context(), NodeInput{Accepted: accepted, NodeID: row.Ref.NodeID, Generation: row.Generation, Execution: row.Execution}, func(context.Context) error { return nil }); err != nil {
+	if err := claimed.Admission.claimedNode(t.Context(), NodeInput{Accepted: accepted, NodeID: string(row.Ref.NodeID), Generation: row.Generation, Execution: row.Execution}, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	requests := daemon.requests()
@@ -247,9 +235,9 @@ func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
 			if compute {
 				machine = &LocalAdmission{Daemon: daemon}
 			}
-			config.Admission = ComposeNativeAdmission(fixture.Tenant, machine, false)
+			config.Admission = ComposeStartGate(fixture.Tenant, machine, false)
 			queued := make(chan struct{}, 1)
-			config.Admission.capacity.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
+			config.Admission.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
 				if ref.NodeID == "b" {
 					queued <- struct{}{}
 				}

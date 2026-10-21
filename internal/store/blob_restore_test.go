@@ -66,6 +66,9 @@ func plantBlobRestore(t *testing.T, s *Store, records *blobRecords, intent blob.
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if kind == blob.KindMemo {
+		activateMemoFixture(t, s)
+	}
 	return key
 }
 

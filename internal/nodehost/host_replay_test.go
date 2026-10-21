@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -69,7 +70,7 @@ func TestGeneratorReplay(t *testing.T) {
 			s.nodes = map[string]store.NodeRow{"peer": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "peer"}, Spec: peerBody, SpecHash: string(peerHash)}}
 			read := s.readNode
 			s.readNode = func(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
-				if row, ok := s.nodes[ref.NodeID]; ok && row.Ref == ref {
+				if row, ok := s.nodes[string(ref.NodeID)]; ok && row.Ref == ref {
 					return row, nil
 				}
 				return read(ctx, ref)
@@ -160,7 +161,7 @@ func TestGeneratorReplay(t *testing.T) {
 				},
 				Mask: func(text string) string { return text },
 				ReadFailure: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
-					if recovery == nil || ref != s.nodes["peer"].Ref || generation != s.nodes["peer"].Generation {
+					if recovery == nil || ref != s.nodes["peer"].Ref || runspec.ClaimGeneration(generation) != s.nodes["peer"].Generation {
 						return nil, errors.New("undeclared recovery read")
 					}
 					return recovery, nil

@@ -60,29 +60,23 @@ func (o *Operator) mintCSRFKey(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer rollbackOrLog(tx)
-	result, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value,sealed) VALUES (?,?,1) ON CONFLICT(key) DO NOTHING`, metaKeySessionCSRFKey, []byte(envelope))
-	if err != nil {
-		return "", err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return "", err
-	}
-	if n > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+	return inTxResult(ctx, o.s, func(tx *storeTx) (string, error) {
+		result, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value,sealed) VALUES (?,?,1) ON CONFLICT(key) DO NOTHING`, metaKeySessionCSRFKey, []byte(envelope))
+		if err != nil {
 			return "", err
 		}
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=? AND sealed=1`, metaKeySessionCSRFKey).Scan(&envelope); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	return envelope, nil
+		n, err := result.RowsAffected()
+		if err != nil {
+			return "", err
+		}
+		if n > 0 {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+				return "", err
+			}
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=? AND sealed=1`, metaKeySessionCSRFKey).Scan(&envelope); err != nil {
+			return "", err
+		}
+		return envelope, nil
+	})
 }

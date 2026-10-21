@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -109,7 +111,7 @@ func TestEngineJobsHTTP(t *testing.T) {
 					}
 				} else {
 					var got controllerwire.DebugJob
-					if json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got.Job, want) || got.RunID != "run" || got.Number != f.snapshot.Run.Number || got.Execution != nil || f.reads != 0 || f.nodeReads != 1 || f.nodeRun != f.node.Ref.RunID {
+					if json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got.Job, want) || got.RunID != "run" || got.Number != f.snapshot.Run.Number || got.Execution != nil || f.reads != 0 || f.nodeReads != 1 || runspec.RunID(f.nodeRun) != f.node.Ref.RunID {
 						t.Fatalf("detail=%s reads=%d nodeReads=%d ref=%+v", w.Body.String(), f.reads, f.nodeReads, f.nodeRun)
 					}
 				}

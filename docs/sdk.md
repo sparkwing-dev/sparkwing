@@ -353,8 +353,14 @@ validation. Omitted scope, membership cost and policy resolve to global scope,
 cost one and queueing. An explicit zero cost also fails validation.
 Reused group definitions at the same level must agree on scope, capacity and
 policy. Plan and job groups have separate namespaces. The same name at both
-levels identifies two budgets. The host computes the scoped key. `QueueTimeout`
-bounds waiting.
+levels identifies two budgets. The store derives keys from accepted declarations
+and the actual execution award. Each complete group set grants atomically. A
+queued job holds none of its groups. `QueueTimeout` bounds initial waiting.
+
+After released work loses plan capacity, it keeps running. New releases queue
+without a timeout until the plan reacquires capacity. `CancelOthers` replaces
+logical capacity immediately and requests cooperative cancellation. Disconnected
+work can overlap until cleanup or the five-minute drain deadline.
 
 `plan.Concurrency(group, cost...)` holds a budget for the whole run. Plan groups
 accept global or run scope. Pipeline acceptance refuses a box-scoped plan group
