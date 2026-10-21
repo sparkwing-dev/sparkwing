@@ -972,3 +972,8 @@ separate operations; no database transaction stays open across a provider call.
 
 - Audit rows are append-only and name people only by account id and invitations only by invitation id, never by email or other personal data. Personal data lives on the account record; deleting the account leaves its audit entries naming a deleted account with no route back to the person. This replaces the old business_events scrub on account deletion. Matches GitHub's audit log, which keeps entries for deleted users under a placeholder.
 - The append-only guard itself permits deleting rows older than the retention horizon (decision 15: 400 days, operator-set); a retention job prunes them. Rows inside the horizon cannot be updated or deleted by any code path.
+
+## 2026-10-21 Korey decision 40: audit append-only is a guard against application code, not credential theft
+
+- PostgreSQL keeps one database role that owns the tables and runs the app. The append-only trigger stops application code from changing audit history; it does not stop a holder of the app's database credentials, who could disable it (and could already read every secret). Docs say "append-only against application code", not "tamper-proof". The no-op REVOKE is removed rather than kept as an implied control.
+- Separate owner and runtime roles (migrations as owner, controller as a restricted role) are post-launch hardening.
