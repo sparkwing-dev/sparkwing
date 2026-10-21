@@ -13,7 +13,7 @@ import (
 func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.T) {
 	s := storetest.OpenSQLite(t)
 	tenant, finish := runCompletionFixture(t, s)
-	row, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+	row, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 	if err != nil {
 		t.Fatal(err)
 	}

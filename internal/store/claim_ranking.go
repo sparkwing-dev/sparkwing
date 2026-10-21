@@ -149,7 +149,11 @@ func rankingHoldTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, re
 	if err != nil || !ready {
 		return false, err
 	}
-	now, end := tx.time, since.Add(limits.RankingWindow)
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return false, clockErr1
+	}
+	now, end := clockTime1, since.Add(limits.RankingWindow)
 	if !now.Before(end) {
 		if !now.Before(end.Add(limits.RankingAward)) {
 			return false, nil

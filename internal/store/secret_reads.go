@@ -56,7 +56,11 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		}
 		if claim {
 			b := p.Capability.Binding
-			if _, err := appendEventTx(ctx, tx, t.team, b.RunID, b.NodeID, "secret_released", map[string]any{"name": out.Name, "generation": b.Generation}, tx.time); err != nil {
+			clockTime1, clockErr1 := tx.now(ctx)
+			if clockErr1 != nil {
+				return clockErr1
+			}
+			if _, err := appendEventTx(ctx, tx, t.team, b.RunID, b.NodeID, "secret_released", map[string]any{"name": out.Name, "generation": b.Generation}, clockTime1); err != nil {
 				return err
 			}
 		}
@@ -78,7 +82,11 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 	for i, node := range chain {
 		states[i] = capability.AuthorityState{Principal: node.principal}
 	}
-	p, err := capability.ValidateAuthority(states, tx.time)
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return capability.Principal{}, clockErr2
+	}
+	p, err := capability.ValidateAuthority(states, clockTime2)
 	if err != nil {
 		return capability.Principal{}, err
 	}
@@ -129,14 +137,22 @@ func (t *Tenant) secretClaimFenceTx(ctx context.Context, tx *storeTx, c capabili
 	if err != nil {
 		return err
 	}
-	if state.RunCancelled || state.RunFinished || state.FinishedAt != nil || b.Generation <= 0 || b.Holder == "" || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || b.Attempt > 0 && state.Current.Attempt != b.Attempt || !state.LeaseExpiresAt.After(tx.time) {
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return clockErr3
+	}
+	if state.RunCancelled || state.RunFinished || state.FinishedAt != nil || b.Generation <= 0 || b.Holder == "" || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || b.Attempt > 0 && state.Current.Attempt != b.Attempt || !state.LeaseExpiresAt.After(clockTime3) {
 		return bindingRefusal()
 	}
 	var deadline sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM triggers WHERE team=? AND id=?`, t.team, b.RunID).Scan(&deadline); err != nil {
 		return err
 	}
-	if deadline.Valid && deadline.Int64 <= tx.time.UnixNano() {
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return clockErr4
+	}
+	if deadline.Valid && deadline.Int64 <= clockTime4.UnixNano() {
 		return bindingRefusal()
 	}
 	return nil

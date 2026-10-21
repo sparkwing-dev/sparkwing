@@ -50,7 +50,7 @@ func debugBoundary(input RunInput, accepted AcceptedRun, row store.NodeRow, befo
 	if len(pause.Before.Value) == 0 && len(pause.After.Value) == 0 && !pause.OnFailure.Value {
 		return nil, nil
 	}
-	if json.Unmarshal(row.Spec, &job) != nil || row.Ref.RunID != accepted.RunID || row.Ref.NodeID != job.ID {
+	if json.Unmarshal(row.Spec, &job) != nil || row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID != runspec.NodeID(job.ID) {
 		return nil, errors.New("debug boundary requires accepted run and job declarations")
 	}
 	if job.OnFailureOf != "" {

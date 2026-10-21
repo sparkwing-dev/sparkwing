@@ -89,7 +89,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 		if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "job"}, Actor: plan.Actor}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}

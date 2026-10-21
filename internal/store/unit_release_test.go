@@ -219,7 +219,7 @@ func TestReleaseUnitCannotRequeueCancelledOwnerWork(t *testing.T) {
 			operator.Grants = []capability.Grant{capability.RunsControl}
 			authorityPersist(t, s, operator)
 			tenant := &Tenant{s: s, team: "a"}
-			_, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: claim.RunID, To: RunCancelled, Cause: RunCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}, CapabilityPrefix: operator.Prefix}})
+			_, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(claim.RunID), To: RunCancelled, Cause: RunCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}, CapabilityPrefix: operator.Prefix}})
 			if err != nil {
 				t.Fatal(err)
 			}

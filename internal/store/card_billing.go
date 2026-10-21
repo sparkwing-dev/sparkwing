@@ -47,7 +47,11 @@ func (t *Tenant) SpendStanding(ctx context.Context) (out SpendStanding, err erro
 	}
 	defer rollbackOrLog(tx)
 
-	return spendStandingTx(ctx, tx, t.team, tx.time)
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return SpendStanding{}, clockErr1
+	}
+	return spendStandingTx(ctx, tx, t.team, clockTime1)
 }
 
 func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (SpendStanding, error) {

@@ -17,7 +17,7 @@ func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if b.Kind != capability.BindingNode || b.Expansion == nil || b.RunID == "" || b.RunID != target.RunID || b.NodeID == "" || b.NodeID != target.NodeID || b.Generation != target.SourceGeneration {
 		return bindingRefusal()
 	}
-	row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: b.RunID, NodeID: b.NodeID})
+	row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if err != nil {
 			return err
 		}
-		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: target.RunID, NodeID: target.NodeID})
+		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 	}
 	var source *NodeRow
 	for i := range snapshot.Nodes {
-		if snapshot.Nodes[i].Ref.NodeID == target.NodeID {
+		if snapshot.Nodes[i].Ref.NodeID == runspec.NodeID(target.NodeID) {
 			source = &snapshot.Nodes[i]
 		}
 	}
@@ -69,7 +69,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		return bindingRefusal()
 	}
 	for _, row := range snapshot.Nodes {
-		if b.Kind != capability.BindingTrigger && (b.Kind != capability.BindingNode || row.Ref.NodeID != b.NodeID) {
+		if b.Kind != capability.BindingTrigger && (b.Kind != capability.BindingNode || row.Ref.NodeID != runspec.NodeID(b.NodeID)) {
 			continue
 		}
 		var job nodeproto.JobSpec
@@ -116,7 +116,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 		return bindingRefusal()
 	}
 	for _, row := range snapshot.Nodes {
-		if node && (row.Ref.NodeID != b.NodeID || row.CapabilityPrefix != c.Prefix) {
+		if node && (row.Ref.NodeID != runspec.NodeID(b.NodeID) || row.CapabilityPrefix != c.Prefix) {
 			continue
 		}
 		var spec nodeproto.JobSpec
@@ -163,7 +163,7 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return bindingRefusal()
 	}
 	if b.Kind == capability.BindingNode {
-		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: b.RunID, NodeID: b.NodeID})
+		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 		if err != nil {
 			return err
 		}

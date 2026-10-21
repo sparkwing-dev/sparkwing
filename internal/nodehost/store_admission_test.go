@@ -73,7 +73,7 @@ func capacityFixture(t *testing.T) (*StoreAdmission, *capacityProbe, AcceptedRun
 	row := localAdmissionRow("job")
 	row.Generation = 4
 	row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "global", Capacity: 2, Cost: 1, OnLimit: "queue"}}
-	admission := &StoreAdmission{Store: probe, Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: accepted.RunID, Holder: "owner", Generation: 3}}}
+	admission := &StoreAdmission{Store: probe, Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(accepted.RunID), Holder: "owner", Generation: 3}}}}
 	return admission, probe, accepted, row
 }
 
@@ -221,7 +221,7 @@ func FuzzStoreAdmissionFencesAdoptedCapacity(f *testing.F) {
 	f.Add("owner", uint8(7))
 	f.Fuzz(func(t *testing.T, value string, field uint8) {
 		admission, probe, accepted, row := capacityFixture(t)
-		expected := store.CapacityHolder{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: row.Ref.NodeID, Generation: int64(row.Generation)}, Cost: 1}
+		expected := store.CapacityHolder{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: string(row.Ref.NodeID), Generation: int64(row.Generation)}, Cost: 1}
 		changed := expected
 		switch field % 8 {
 		case 0:
@@ -239,7 +239,7 @@ func FuzzStoreAdmissionFencesAdoptedCapacity(f *testing.F) {
 		case 6:
 			changed.Binding.Generation++
 		case 7:
-			admission.Owner.Owner.RunID += value + "x"
+			admission.Owner.Owner.RunID += runspec.RunID(value + "x")
 		}
 		probe.adopt = func(store.CapacityAdoption) store.CapacityAdoption {
 			return store.CapacityAdoption{Kind: store.AdoptHolder, Holder: &changed}

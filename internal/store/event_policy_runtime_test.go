@@ -20,7 +20,7 @@ func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), tx.time)
+		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), transactionTime(t, tx))
 		return err
 	}); err != nil {
 		t.Fatal(err)

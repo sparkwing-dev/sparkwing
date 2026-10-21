@@ -57,7 +57,11 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 	if _, err := sourceUploaderTx(ctx, tx, t.team, authority, u.Scope); err != nil {
 		return u, err
 	}
-	if !u.ExpiresAt.After(tx.time) {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return SourceUpload{}, clockErr1
+	}
+	if !u.ExpiresAt.After(clockTime1) {
 		return u, ErrInvalidInput
 	}
 	if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(u.Blob.Digest)); err != nil {
@@ -72,13 +76,21 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 	}
 	reserved := u.Blob.Size
 	var own int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND digest=? AND size=? AND committed_at>0 AND expires_at>?`, t.team, authority.Kind, authority.ID, u.Scope.Repository, u.Blob.Digest, u.Blob.Size, tx.time.UnixNano()).Scan(&own); err != nil {
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return SourceUpload{}, clockErr2
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND digest=? AND size=? AND committed_at>0 AND expires_at>?`, t.team, authority.Kind, authority.ID, u.Scope.Repository, u.Blob.Digest, u.Blob.Size, clockTime2.UnixNano()).Scan(&own); err != nil {
 		return u, err
 	}
 	if own > 0 {
 		reserved = 0
 	}
-	d := uploadQuotaDimension{id: blobUploadQuotaID(u.ID), quota: "storage", period: tx.time.Format("2006-01"), amount: reserved, ceiling: policy.MaxBytesPerMonth, limitName: StorageLimitBytesPerMonth, unit: "bytes"}
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return SourceUpload{}, clockErr3
+	}
+	d := uploadQuotaDimension{id: blobUploadQuotaID(u.ID), quota: "storage", period: clockTime3.Format("2006-01"), amount: reserved, ceiling: policy.MaxBytesPerMonth, limitName: StorageLimitBytesPerMonth, unit: "bytes"}
 	if err := reserveUploadQuotaDimensionTx(ctx, tx, t.team, d, u.ExpiresAt); err != nil {
 		return u, err
 	}
@@ -104,7 +116,11 @@ func readSourceUploadTx(ctx context.Context, tx *storeTx, team Team, authority c
 	if _, err := sourceUploaderTx(ctx, tx, team, authority, u.Scope); err != nil {
 		return u, err
 	}
-	if !u.ExpiresAt.After(tx.time) {
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return SourceUpload{}, clockErr4
+	}
+	if !u.ExpiresAt.After(clockTime4) {
 		return u, authorityError(apierr.Conflict, "source upload expired; upload again")
 	}
 	return u, nil
@@ -159,8 +175,16 @@ func (t *Tenant) CommitSourceUpload(ctx context.Context, authority capability.Au
 	if err := recordStorageUsageTx(ctx, tx, t.team, "", replica, q.period, u.Blob.Size*n, n); err != nil {
 		return u, err
 	}
-	u.CommittedAt = tx.time.UnixNano()
-	u.ExpiresAt = tx.time.Add(sourceBundleRetention)
+	clockTime5, clockErr5 := tx.now(ctx)
+	if clockErr5 != nil {
+		return SourceUpload{}, clockErr5
+	}
+	u.CommittedAt = clockTime5.UnixNano()
+	clockTime6, clockErr6 := tx.now(ctx)
+	if clockErr6 != nil {
+		return SourceUpload{}, clockErr6
+	}
+	u.ExpiresAt = clockTime6.Add(sourceBundleRetention)
 	_, err = tx.ExecContext(ctx, "UPDATE source_uploads SET committed_at=?,expires_at=?,replica_id=?,period=?,charged_objects=? WHERE team=? AND id=?", u.CommittedAt, u.ExpiresAt.UnixNano(), replica, q.period, n, t.team, id)
 	if err != nil {
 		return u, err
@@ -177,7 +201,11 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 		return copyRetrySourceRecordTx(ctx, tx, team, request.Request.Lineage.RetryOf, result.RunID)
 	}
 	var id string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND execution_sha=? AND pipeline_sha=? AND digest=? AND committed_at>0 AND expires_at>? AND bound_run_id IS NULL ORDER BY id LIMIT 1`+tx.forUpdate(), team, request.Authority.Kind, request.Authority.ID, input.Git.Repository.Key, input.Git.SHA, input.Source.Ref, input.Source.BundleDigest.Value, tx.time.UnixNano()).Scan(&id)
+	clockTime7, clockErr7 := tx.now(ctx)
+	if clockErr7 != nil {
+		return clockErr7
+	}
+	err := tx.QueryRowContext(ctx, `SELECT id FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND execution_sha=? AND pipeline_sha=? AND digest=? AND committed_at>0 AND expires_at>? AND bound_run_id IS NULL ORDER BY id LIMIT 1`+tx.forUpdate(), team, request.Authority.Kind, request.Authority.ID, input.Git.Repository.Key, input.Git.SHA, input.Source.Ref, input.Source.BundleDigest.Value, clockTime7.UnixNano()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return authorityError(apierr.Forbidden, "source bundle is not committed by this submitter for these revisions")
 	}
@@ -218,7 +246,11 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'source_bundle',?,'source',?,?,?, ?,?,'local',?,'submission',?,?,0,?,?,?,?)`, team, result.RunID, u.Blob.Digest, result.RunID, input.Git.Repository.Key, scope.CapabilityScope(), identity.Principal, source, result.RunID, boolInt(scope.Verified), input.Git.SHA, facts, input.Pipeline, tx.time.UnixNano())
+	clockTime8, clockErr8 := tx.now(ctx)
+	if clockErr8 != nil {
+		return clockErr8
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'source_bundle',?,'source',?,?,?, ?,?,'local',?,'submission',?,?,0,?,?,?,?)`, team, result.RunID, u.Blob.Digest, result.RunID, input.Git.Repository.Key, scope.CapabilityScope(), identity.Principal, source, result.RunID, boolInt(scope.Verified), input.Git.SHA, facts, input.Pipeline, clockTime8.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -227,7 +259,11 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 }
 
 func copyRetrySourceRecordTx(ctx context.Context, tx *storeTx, team Team, previous, run string) error {
-	result, err := tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission'`, run, run, tx.time.UnixNano(), team, previous)
+	clockTime9, clockErr9 := tx.now(ctx)
+	if clockErr9 != nil {
+		return clockErr9
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission'`, run, run, clockTime9.UnixNano(), team, previous)
 	if err != nil {
 		return err
 	}
@@ -241,10 +277,15 @@ func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease
 	}
 	var expired []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
+
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
-		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM source_uploads WHERE expires_at<=? ORDER BY team,expires_at,id LIMIT ?", tx.time.UnixNano(), limit)
+		clockTime11, clockErr11 := tx.now(ctx)
+		if clockErr11 != nil {
+			return clockErr11
+		}
+		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM source_uploads WHERE expires_at<=? ORDER BY team,expires_at,id LIMIT ?", clockTime11.UnixNano(), limit)
 		return err
 	})
 	for _, e := range expired {
@@ -253,7 +294,8 @@ func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease
 		}
 		if err = objects.DeleteObject(ctx, "teams/"+e.team+"/pending/"+e.key); err == nil {
 			err = o.s.inTx(ctx, func(tx *storeTx) error {
-				if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
+
+				if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 					return err
 				}
 				return expireSourceUploadTx(ctx, tx, Team(e.team), e.key)
@@ -265,7 +307,11 @@ func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease
 
 func expireSourceUploadTx(ctx context.Context, tx *storeTx, team Team, id string) error {
 	var committed int64
-	err := tx.QueryRowContext(ctx, "SELECT committed_at FROM source_uploads WHERE team=? AND id=? AND expires_at<=?"+tx.forUpdate(), team, id, tx.time.UnixNano()).Scan(&committed)
+	clockTime13, clockErr13 := tx.now(ctx)
+	if clockErr13 != nil {
+		return clockErr13
+	}
+	err := tx.QueryRowContext(ctx, "SELECT committed_at FROM source_uploads WHERE team=? AND id=? AND expires_at<=?"+tx.forUpdate(), team, id, clockTime13.UnixNano()).Scan(&committed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

@@ -81,7 +81,7 @@ func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepRepor
 		NodeController(context.Context, controllerwire.NodeRef) (controllerwire.Controller, error)
 	}); ok {
 		var err error
-		controller, err = nodes.NodeController(ctx, controllerwire.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID})
+		controller, err = nodes.NodeController(ctx, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -107,11 +107,12 @@ func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request store.Fi
 	if change.MaskedError != "" {
 		body.Error = &apierr.Error{Code: apierr.Internal, Message: change.MaskedError}
 	}
-	response, err := s.controller.Finish(ctx, change.RunID, body)
+	response, err := s.controller.Finish(ctx, string(change.RunID), body)
 	if err != nil {
 		return store.Applied{}, err
 	}
 	return store.Applied{
+		Outcome: store.RunState(response.Outcome), Reason: response.Reason,
 		Replayed: response.Replayed, CancelRequested: response.CancelRequested, StateSeq: response.StateSeq,
 		Generation: runspec.ClaimGeneration(response.Generation), Attempt: runspec.AttemptOrdinal(response.Attempt),
 	}, nil

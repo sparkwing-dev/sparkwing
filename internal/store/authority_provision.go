@@ -77,7 +77,11 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 }
 
 func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
-	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.time) {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
+	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(clockTime1) {
 		return authorityError(apierr.Forbidden, "root expiry has passed")
 	}
 	var p capability.Principal

@@ -16,7 +16,7 @@ func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.Aut
 
 // ReadOwnerNode reads one node of the owner's run with its private placement decision.
 func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref controllerwire.NodeRef) (NodeRow, error) {
-	snapshot, err := t.readOwnerSnapshot(ctx, authority, ref.RunID, func(node controllerwire.NodeRef) bool { return node == ref })
+	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), func(node controllerwire.NodeRef) bool { return node == ref })
 	if err != nil {
 		return NodeRow{}, err
 	}
@@ -63,7 +63,11 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.time)) {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return RunSnapshot{}, clockErr1
+	}
+	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(clockTime1)) {
 		return RunSnapshot{}, bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, t.team, runID)

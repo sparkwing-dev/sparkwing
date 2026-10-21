@@ -40,9 +40,13 @@ func setStorageQuotaTx(ctx context.Context, tx *storeTx, team Team, q StorageQuo
 	if q.Tier != "" && q.Unlimited() {
 		q, _ = TierQuota(q.Tier)
 	}
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,updated_at)
 VALUES (?,?,?,?,?,?) ON CONFLICT(team) DO UPDATE SET tier=excluded.tier,max_bytes_per_run=excluded.max_bytes_per_run,max_bytes_per_month=excluded.max_bytes_per_month,max_objects_per_run=excluded.max_objects_per_run,updated_at=excluded.updated_at`,
-		team, q.Tier, q.MaxBytesPerRun, q.MaxBytesPerMonth, q.MaxObjectsPerRun, tx.time.UnixNano())
+		team, q.Tier, q.MaxBytesPerRun, q.MaxBytesPerMonth, q.MaxObjectsPerRun, clockTime1.UnixNano())
 	return err
 }
 
@@ -103,8 +107,12 @@ func setStorageAllowanceTx(ctx context.Context, tx *storeTx, team Team, bytes in
 	if err != nil {
 		return StorageQuota{}, err
 	}
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return StorageQuota{}, clockErr2
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,storage_allowance_bytes,updated_at) VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowance_bytes,updated_at=excluded.updated_at`, team, prior.Tier, prior.MaxBytesPerRun, prior.MaxBytesPerMonth, prior.MaxObjectsPerRun, bytes, tx.time.UnixNano())
+ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowance_bytes,updated_at=excluded.updated_at`, team, prior.Tier, prior.MaxBytesPerRun, prior.MaxBytesPerMonth, prior.MaxObjectsPerRun, bytes, clockTime2.UnixNano())
 	if err != nil {
 		return StorageQuota{}, err
 	}

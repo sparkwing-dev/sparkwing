@@ -165,13 +165,13 @@ func TestLocalAdoptedClaimDelegatesMatchingSDKProcess(t *testing.T) {
 	processes := &nodehost.NativeProcesses{Authorities: authorities, Masks: nodehost.NewMaskRegistry(claims.masker), URL: "http://host"}
 	row := award.Node
 	row.Attempt = 1
-	row.Spec, err = json.Marshal(nodeproto.JobSpec{ID: row.Ref.NodeID})
+	row.Spec, err = json.Marshal(nodeproto.JobSpec{ID: string(row.Ref.NodeID)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	claims.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) { return row, nil }
 	claims.processes = processes
-	grant, err := claims.delegate(t.Context(), row.Ref.NodeID, int64(row.Generation), int64(row.Attempt))
+	grant, err := claims.delegate(t.Context(), string(row.Ref.NodeID), int64(row.Generation), int64(row.Attempt))
 	if err != nil {
 		t.Fatal(err)
 	}

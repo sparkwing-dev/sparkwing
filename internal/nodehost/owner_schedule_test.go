@@ -80,7 +80,7 @@ func TestOwnerHostRefusesChangedResumeBeforeAcquisition(t *testing.T) {
 func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	for _, id := range []string{"blocked", "sibling"} {
-		f.snapshot.Nodes = append(f.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: id}, Status: store.StatusPending})
+		f.snapshot.Nodes = append(f.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Status: store.StatusPending})
 	}
 	blocked := make(chan struct{})
 	released := make(chan struct{})
@@ -304,7 +304,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 		if !reflect.DeepEqual(binding, input.Storage) {
 			t.Fatal("owner policy lost its bound storage clients")
 		}
-		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || evaluation.NodeID != row.Ref.NodeID || runspec.ClaimGeneration(evaluation.Generation) != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || evaluation.RouteBinding.JobID != row.Ref.NodeID {
+		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || runspec.NodeID(evaluation.NodeID) != row.Ref.NodeID || runspec.ClaimGeneration(evaluation.Generation) != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || runspec.NodeID(evaluation.RouteBinding.JobID) != row.Ref.NodeID {
 			t.Fatal("owner policy lost acquired code or persisted evaluation identity")
 		}
 		policies++
@@ -331,7 +331,7 @@ func TestOwnerHostAdmissionSkipDoesNotHideIndependentFailure(t *testing.T) {
 	for _, joined := range []bool{false, true} {
 		t.Run(map[bool]string{false: "skip", true: "independent_error"}[joined], func(t *testing.T) {
 			fixture, host, input := newOwnerFixture(t, true)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending}
+			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "job"}, Status: store.StatusPending}
 			fixture.snapshot.Nodes = []store.NodeRow{row}
 			host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 				return OwnerLayerResult{}, nil

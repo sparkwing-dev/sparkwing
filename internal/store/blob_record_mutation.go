@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -81,7 +83,11 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 		if replayed[i] {
 			continue
 		}
-		result[i].CreatedAt = tx.time
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return nil, clockErr1
+		}
+		result[i].CreatedAt = clockTime1
 		if err := persistBlobRecordTx(ctx, tx, result[i], change.scope, current.source, target); err != nil {
 			return nil, err
 		}
@@ -101,7 +107,7 @@ func checkRecordMutationKey(a blobActor, key blob.RecordKey, target *NodeRow) er
 	if target == nil {
 		return checkBlobWriteKey(a, key)
 	}
-	if a.source.Kind != blob.UploadOwnerUnit || a.source.RunID != target.Ref.RunID || (key.Kind != blob.KindOutput && key.Kind != blob.KindManifest) || key != materializedKey(Team(a.capability.Team), a, *target, key.Kind) || a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
+	if a.source.Kind != blob.UploadOwnerUnit || runspec.RunID(a.source.RunID) != target.Ref.RunID || (key.Kind != blob.KindOutput && key.Kind != blob.KindManifest) || key != materializedKey(Team(a.capability.Team), a, *target, key.Kind) || a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
 		return blob.ErrDigestNotReadable
 	}
 	return nil

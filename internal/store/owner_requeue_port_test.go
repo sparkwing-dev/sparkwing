@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
@@ -95,7 +97,7 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 	t.Helper()
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: claim.Team}
-	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: claim.RunID, Cause: RunFinish, Actor: actor}}
+	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: RunFinish, Actor: actor}}
 
 	for replay := range 2 {
 		applied, err := tenant.FinishRunAndUnit(t.Context(), finish)

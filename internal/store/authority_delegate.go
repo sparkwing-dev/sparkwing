@@ -23,7 +23,11 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 	if spec.ExpiresAt == nil {
 		spec.ExpiresAt = parent.Capability.ExpiresAt
 	}
-	if err := capability.ValidateDelegation(parent, spec, tx.time); err != nil {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return capability.Capability{}, clockErr1
+	}
+	if err := capability.ValidateDelegation(parent, spec, clockTime1); err != nil {
 		return capability.Capability{}, err
 	}
 	if parent.Capability.Data == nil && spec.Data != nil && spec.Data.Use == capability.DataPublish {
@@ -38,7 +42,11 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 		}
 	}
 	if tx.store.delegation != nil {
-		if err := tx.store.delegation.ValidateDelegation(parent, spec, tx.time); err != nil {
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return capability.Capability{}, clockErr2
+		}
+		if err := tx.store.delegation.ValidateDelegation(parent, spec, clockTime2); err != nil {
 			return capability.Capability{}, err
 		}
 	}

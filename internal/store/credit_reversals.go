@@ -82,7 +82,11 @@ func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string) (stri
 
 func (t *Tenant) hold(ctx context.Context, disputeID, paymentID, reason, actor string) (created bool, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, clockTime1)
 		return err
 	})
 	if err != nil {
@@ -130,7 +134,11 @@ func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string)
 
 func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorOnly bool, actor, reason string) (count int64, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, tx.time)
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, clockTime2)
 		return err
 	})
 	if err != nil {

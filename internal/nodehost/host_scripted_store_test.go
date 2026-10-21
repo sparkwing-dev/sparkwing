@@ -253,7 +253,7 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 			if err != nil {
 				return store.AcceptedExpansion{}, err
 			}
-			s.expansions = []store.AcceptedExpansionRow{{Source: in.Source, SourceGeneration: in.SourceGeneration, Body: in.Body, BodyHash: string(hash)}}
+			s.expansions = []store.AcceptedExpansionRow{{Source: in.Source, SourceGeneration: int64(in.SourceGeneration), Body: in.Body, BodyHash: string(hash)}}
 			for _, job := range plan.Jobs {
 				spec, err := json.Marshal(job)
 				if err != nil {
@@ -263,7 +263,7 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 				if err != nil {
 					return store.AcceptedExpansion{}, err
 				}
-				s.nodes = append(s.nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: in.Source.RunID, NodeID: job.ID}, Spec: spec, SpecHash: string(hash), Status: store.StatusDone, Outcome: store.NodeSuccess})
+				s.nodes = append(s.nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: in.Source.RunID, NodeID: runspec.NodeID(job.ID)}, Spec: spec, SpecHash: string(hash), Status: store.StatusDone, Outcome: store.NodeSuccess})
 			}
 		}
 		return store.AcceptedExpansion{Source: in.Source, SourceGeneration: in.SourceGeneration, State: s.node.Expansion}, nil

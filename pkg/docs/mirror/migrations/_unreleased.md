@@ -1077,8 +1077,8 @@ status consumers. API binding faults still use `api_ready` and `api_error`.
 
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
 The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
-Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
-`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies a
+`RevokeNode` command with the node reference and current run owner's authority.
 Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
 returns an error without changing state or events. An identical committed
 transition replays.

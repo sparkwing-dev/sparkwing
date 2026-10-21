@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -39,7 +41,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			*now = now.Add(5 * time.Second)
 			startedAt := *now
 			tenant := &Tenant{s: s, team: claim.Team}
-			ref := controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}
+			ref := controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -20,7 +22,7 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "job"}
+			ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "job"}
 			before, err := f.Tenant.ReadNode(t.Context(), ref)
 			if err != nil {
 				t.Fatal(err)

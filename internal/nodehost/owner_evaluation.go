@@ -158,11 +158,11 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "evaluation plan does not match its accepted hash")
 	}
-	row, err = h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, err = h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return spec, row, job, err
 	}
-	if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != input.NodeID || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
+	if row.Ref.RunID != runspec.RunID(input.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(input.NodeID) || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
 		return spec, row, job, executorError(apierr.SpecDrift, "evaluation source differs from persisted identity")
 	}
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {
@@ -203,7 +203,7 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	validation.ExistingJobs = make([]nodeproto.JobSpec, 0, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
 		var existing nodeproto.JobSpec
-		if err := json.Unmarshal(row.Spec, &existing); err != nil || row.Ref.RunID != code.Accepted.RunID || row.Ref.NodeID != existing.ID {
+		if err := json.Unmarshal(row.Spec, &existing); err != nil || row.Ref.RunID != runspec.RunID(code.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(existing.ID) {
 			return nil, executorError(apierr.PlanDrift, "expansion snapshot has invalid declarations")
 		}
 		validation.ExistingJobs = append(validation.ExistingJobs, existing)

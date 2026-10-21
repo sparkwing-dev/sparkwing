@@ -222,14 +222,22 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 		if err != nil {
 			return err
 		}
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-			WHERE team = ? AND installation_id = ?`, flag, tx.time.UTC().UnixNano(), team, installation); err != nil {
+			WHERE team = ? AND installation_id = ?`, flag, clockTime1.UTC().UnixNano(), team, installation); err != nil {
 			return err
 		}
 		if suspended {
+			clockTime2, clockErr2 := tx.now(ctx)
+			if clockErr2 != nil {
+				return clockErr2
+			}
 			if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-				tx.time.UnixNano(), team, installation); err != nil {
+				clockTime2.UnixNano(), team, installation); err != nil {
 				return err
 			}
 		}
@@ -452,8 +460,12 @@ func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event
 		return false, err
 	}
 	key := "event:" + digest
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return false, clockErr3
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, key, delivery, tx.time.Unix(), event); err != nil {
+		ON CONFLICT (digest) DO NOTHING`, key, delivery, clockTime3.Unix(), event); err != nil {
 		return false, err
 	}
 	var bound string
@@ -479,15 +491,23 @@ func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery
 		if err := forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
 			return err
 		}
+		clockTime4, clockErr4 := tx.now(ctx)
+		if clockErr4 != nil {
+			return clockErr4
+		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, digest, delivery, tx.time.Unix())
+		ON CONFLICT (digest) DO NOTHING`, digest, delivery, clockTime4.Unix())
 		return err
 	})
 }
 
 func forgetExpiredGitHubAppDeliveriesTx(ctx context.Context, tx *storeTx) error {
+	clockTime5, clockErr5 := tx.now(ctx)
+	if clockErr5 != nil {
+		return clockErr5
+	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		tx.time.Add(-GitHubAppDeliveryRetention).Unix())
+		clockTime5.Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
 
@@ -622,9 +642,13 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 		string(t.team), installation); err != nil {
 		return err
 	}
+	clockTime6, clockErr6 := tx.now(ctx)
+	if clockErr6 != nil {
+		return clockErr6
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		tx.time.UnixNano(), string(t.team), installation); err != nil {
+		clockTime6.UnixNano(), string(t.team), installation); err != nil {
 		return err
 	}
 	return nil

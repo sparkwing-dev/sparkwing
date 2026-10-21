@@ -18,9 +18,9 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s, demand, owner, now := renewalFixture(t, capability.UnitTrigger)
 			tenant := &Tenant{s: s, team: owner.Team}
-			ref := controllerwire.NodeRef{RunID: owner.RunID, NodeID: "job"}
+			ref := controllerwire.NodeRef{RunID: runspec.RunID(owner.RunID), NodeID: "job"}
 			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Award.CapabilityPrefix}, CapabilityPrefix: owner.Award.CapabilityPrefix, Owner: owner.Owner}
-			change := nodeTransition{Ref: ref, Actor: actor, To: NodePending, Cause: CauseRevoke}
+			change := nodeTransition{Ref: ref, Actor: actor, To: nodePending, Cause: CauseRevoke}
 			for range random.IntN(4) + 1 {
 				applied, err := tenant.TransitionNode(t.Context(), change)
 				if err != nil || applied.Replayed || applied.Attempt != 0 || applied.Generation != 0 {
@@ -30,7 +30,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 				if err != nil || !replay.Replayed || replay.StateSeq != applied.StateSeq {
 					t.Fatalf("withdrawal replay: %+v, %v", replay, err)
 				}
-				demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}
+				demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
 				if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 					t.Fatal("withdrawn job remained claimable")
 				}
@@ -42,7 +42,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 			bad := change
 			switch i % 8 {
 			case 0:
-				bad.Actor.Owner.Generation += int64(random.IntN(100) + 1)
+				bad.Actor.Owner.Generation += runspec.ClaimGeneration(random.IntN(100) + 1)
 			case 1:
 				bad.Actor.Owner.Holder = fmt.Sprintf("other-%d", random.Uint64())
 			case 2:
@@ -56,7 +56,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 					t.Fatal(err)
 				}
 				if i%8 >= 5 {
-					holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+					holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 					start, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 					if err != nil {
 						t.Fatal(err)
@@ -71,22 +71,22 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 				tenant = &Tenant{s: s, team: "b"}
 			}
 			actual := &Tenant{s: s, team: owner.Team}
-			before, err := actual.ReadSnapshot(t.Context(), ref.RunID)
+			before, err := actual.ReadSnapshot(t.Context(), string(ref.RunID))
 			if err != nil {
 				t.Fatal(err)
 			}
-			events, err := actual.ReadStateEvents(t.Context(), ref.RunID, 0, 100)
+			events, err := actual.ReadStateEvents(t.Context(), string(ref.RunID), 0, 100)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.TransitionNode(t.Context(), bad); err == nil {
 				t.Fatal("invalid owner withdrew work")
 			}
-			after, err := actual.ReadSnapshot(t.Context(), ref.RunID)
+			after, err := actual.ReadSnapshot(t.Context(), string(ref.RunID))
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("refused withdrawal changed state: %v", err)
 			}
-			afterEvents, err := actual.ReadStateEvents(t.Context(), ref.RunID, 0, 100)
+			afterEvents, err := actual.ReadStateEvents(t.Context(), string(ref.RunID), 0, 100)
 			if err != nil || !reflect.DeepEqual(events, afterEvents) {
 				t.Fatalf("refused withdrawal changed events: %v", err)
 			}

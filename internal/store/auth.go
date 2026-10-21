@@ -97,7 +97,10 @@ func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, t
 		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {
 			return err
 		}
-		now := tx.time
+		now, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
 		expires := now.Add(ttl)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
  VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
@@ -192,7 +195,10 @@ func (op *Operator) lookupSessionTx(ctx context.Context, tx *storeTx, rawSession
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	now := tx.time
+	now, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, clockErr2)
+	}
 	sess.Now = now
 	sess.ID, sess.CSRFToken = rawSession, csrfToken
 	sess.CreatedAt, sess.ExpiresAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC()

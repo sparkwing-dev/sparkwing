@@ -92,7 +92,11 @@ func lockCapacityEntryTx(ctx context.Context, tx *storeTx, team Team, key string
 }
 
 func adoptCapacityTx(ctx context.Context, tx *storeTx, team Team, key, id string, binding CapacityBinding) (CapacityAdoption, error) {
-	now := tx.time.UnixNano()
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return CapacityAdoption{}, clockErr1
+	}
+	now := clockTime1.UnixNano()
 	var holder CapacityHolder
 	var acquired, expires int64
 	err := tx.QueryRowContext(ctx, `SELECT run_id,node_id,generation,cost,claimed_at,lease_expires_at,superseded FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`, team, key, id).Scan(&holder.Binding.RunID, &holder.Binding.NodeID, &holder.Binding.Generation, &holder.Cost, &acquired, &expires, &holder.Superseded)

@@ -235,7 +235,8 @@ func launcherClaimant(c capability.Capability) bool {
 }
 
 func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef, reserved *match.Resources) (UnitClaim, error) {
-	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.time); err != nil {
+
+	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return UnitClaim{}, err
 	}
 	p, err := tx.ResolveAuthority(ctx, actor.Authority)
@@ -246,7 +247,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, r
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)})
+	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
 	if err != nil {
 		return UnitClaim{}, err
 	}

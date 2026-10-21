@@ -122,7 +122,7 @@ func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSub
 		return store.ExpansionSubmission{}, err
 	}
 	request := store.ExpansionSubmission{
-		Source: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, SourceGeneration: body.SourceGeneration, Actor: actor,
+		Source: controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, SourceGeneration: runspec.ClaimGeneration(body.SourceGeneration), Actor: actor,
 	}
 	if body.Failure != nil {
 		if strings.TrimSpace(string(body.Failure.Code)) == "" || int64(len(body.Failure.Message)) > limits.ErrorBytes {
@@ -181,17 +181,16 @@ func expansionActor(a capability.Authorized) (store.Actor, error) {
 	}
 	return store.Actor{
 		Authority: a.Principal.Authority, Kind: store.ActorRunHost, CapabilityPrefix: a.Principal.Capability.Prefix,
-		Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation),
+
 		Owner: store.OwnerLeaseRef{
-			Kind: kind, Name: lease.ID, RunID: a.Target.RunID,
-			SourceNodeID: a.Target.NodeID, SourceGeneration: a.Target.UnitSourceGeneration, Holder: lease.Holder, Generation: lease.Generation,
-		},
+			Kind: kind, Name: lease.ID, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), SourceNodeID: runspec.NodeID(a.Target.NodeID), SourceGeneration: runspec.ClaimGeneration(a.Target.UnitSourceGeneration), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
+		}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 	}, nil
 }
 
 func expansionResponse(accepted store.AcceptedExpansion) (controllerwire.ExpansionAccepted, error) {
 	response := controllerwire.ExpansionAccepted{
-		SourceGeneration: accepted.SourceGeneration, State: string(accepted.State), BodyHash: accepted.BodyHash,
+		SourceGeneration: int64(accepted.SourceGeneration), State: string(accepted.State), BodyHash: accepted.BodyHash,
 		Jobs: make([]controllerwire.ExpandedJob, 0, len(accepted.Nodes)), Replayed: accepted.Replayed,
 	}
 	for _, node := range accepted.Nodes {
@@ -236,7 +235,7 @@ func engineActor(a capability.Authorized) store.Actor {
 	actor := store.Actor{
 		Result:    a.Result,
 		Authority: a.Principal.Authority, Kind: store.ActorRunHost,
-		CapabilityPrefix: principalCapabilityPrefix(a.Principal), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation),
+		CapabilityPrefix: principalCapabilityPrefix(a.Principal), NodeFence: runspec.NodeFence{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)},
 	}
 	if a.Access.Credential == capability.CredentialPublisher {
 		actor.Kind = store.ActorOperator
@@ -246,8 +245,7 @@ func engineActor(a capability.Authorized) store.Actor {
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger || a.Principal.Capability.Unit == capability.UnitPlan {
 		actor.Owner = store.OwnerLeaseRef{
-			Kind: store.OwnerTrigger, RunID: a.Target.RunID,
-			Holder: b.Holder, Generation: b.Generation,
+			Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)},
 		}
 	}
 	return actor

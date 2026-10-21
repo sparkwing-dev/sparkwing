@@ -82,7 +82,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			return RunCompletion{}, errors.New("scheduling changed the run identity")
 		}
 		for _, row := range snapshot.Nodes {
-			stop := active[row.Ref.NodeID]
+			stop := active[string(row.Ref.NodeID)]
 			if row.CancelRequestedAt == nil || row.Status == store.StatusDone {
 				continue
 			}
@@ -104,7 +104,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		selected := false
 		for _, row := range snapshot.Nodes {
-			reason, excluded := skips[row.Ref.NodeID]
+			reason, excluded := skips[string(row.Ref.NodeID)]
 			if !excluded || row.Status != store.StatusPending || row.ClaimedBy != "" || row.ReadyAt != nil || snapshot.Run.CancelRequestedAt != nil {
 				continue
 			}
@@ -117,19 +117,19 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			continue
 		}
 		for _, row := range snapshot.Nodes {
-			if row.Status != store.StatusDone || active[row.Ref.NodeID] != nil {
+			if row.Status != store.StatusDone || active[string(row.Ref.NodeID)] != nil {
 				continue
 			}
-			if generation, ok := debugged[row.Ref.NodeID]; ok && generation == row.Generation {
+			if generation, ok := debugged[string(row.Ref.NodeID)]; ok && generation == row.Generation {
 				continue
 			}
-			debugged[row.Ref.NodeID] = row.Generation
+			debugged[string(row.Ref.NodeID)] = row.Generation
 			boundary, err := debugBoundary(input, accepted, row, false)
 			if err != nil {
 				return RunCompletion{}, err
 			}
 			if boundary != nil {
-				launch(row.Ref.NodeID, func(ctx context.Context) error { return h.debugBoundary(ctx, input, accepted, row, false) })
+				launch(string(row.Ref.NodeID), func(ctx context.Context) error { return h.debugBoundary(ctx, input, accepted, row, false) })
 			}
 		}
 		graph, err := project(snapshot)
@@ -177,7 +177,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		// safety: ready work and live holders can predate this owner; neither needs a second release event.
 		for _, row := range snapshot.Nodes {
-			if active[row.Ref.NodeID] != nil || row.Status == store.StatusDone {
+			if active[string(row.Ref.NodeID)] != nil || row.Status == store.StatusDone {
 				continue
 			}
 			local := h.Local != nil && h.Local(row)
@@ -186,7 +186,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				continue
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
-				launch(row.Ref.NodeID, func(ctx context.Context) error {
+				launch(string(row.Ref.NodeID), func(ctx context.Context) error {
 					work := func(workCtx context.Context) error {
 						if !local && !burstConcurrency {
 							return h.followRemote(workCtx, ctx, input.Owner, row)
@@ -245,7 +245,7 @@ func (h *OwnerHost) executionError(ctx context.Context, runID string, result own
 
 func ownerNode(snapshot store.RunSnapshot, id string) (store.NodeRow, bool) {
 	for _, row := range snapshot.Nodes {
-		if row.Ref.NodeID == id && row.Ref.RunID == snapshot.Run.ID {
+		if row.Ref.NodeID == runspec.NodeID(id) && row.Ref.RunID == runspec.RunID(snapshot.Run.ID) {
 			return row, true
 		}
 	}
@@ -282,7 +282,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		return err
 	}
 	if selection := snapshot.Run.Retry; selection != nil {
-		if selected, ok := selection.Results[row.Ref.NodeID]; ok {
+		if selected, ok := selection.Results[string(row.Ref.NodeID)]; ok {
 			probe := request
 			probe.Policy, probe.MaterializeOnly = store.SourceManualRetry, true
 			probe.Source = &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &selected}
@@ -368,7 +368,7 @@ func admissionPolicy(failure *AdmissionFailure, generation int64) store.OwnerPol
 	} else if failure.Reason == store.FailureQueueTimeout {
 		kind = store.PolicyQueueTimeout
 	}
-	return store.OwnerPolicyResult{Kind: kind, Generation: generation}
+	return store.OwnerPolicyResult{Kind: kind, Generation: runspec.ClaimGeneration(generation)}
 }
 
 func (h *OwnerHost) followRemote(ctx, parent context.Context, actor store.Actor, before store.NodeRow) error {
@@ -386,14 +386,14 @@ func (h *OwnerHost) followRemote(ctx, parent context.Context, actor store.Actor,
 			}
 			ctx = parent
 		}
-		snapshot, err := h.Store.ReadSnapshot(ctx, before.Ref.RunID)
+		snapshot, err := h.Store.ReadSnapshot(ctx, string(before.Ref.RunID))
 		if err != nil {
 			if ctx.Err() != nil && waitFailure(err, context.Cause(ctx)) == nil {
 				continue
 			}
 			return errors.Join(stopped, err)
 		}
-		row, ok := ownerNode(snapshot, before.Ref.NodeID)
+		row, ok := ownerNode(snapshot, string(before.Ref.NodeID))
 		if !ok || row.Ref != before.Ref || row.SpecHash != before.SpecHash || row.StateSeq < before.StateSeq || row.Generation < before.Generation {
 			return errors.Join(stopped, errors.New("remote admission lost its persisted job identity"))
 		}
@@ -454,9 +454,9 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) EvaluationInput {
 	return EvaluationInput{
 		Engine: entry.Engine, Accepted: accepted, Entry: entry, GrantedRunner: input.GrantedRunner,
-		NodeID: row.Ref.NodeID, Generation: int64(row.Generation), SpecHash: row.SpecHash,
+		NodeID: string(row.Ref.NodeID), Generation: int64(row.Generation), SpecHash: row.SpecHash,
 		Storage:      input.Storage,
-		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: row.Ref.NodeID},
+		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: string(row.Ref.NodeID)},
 	}
 }
 
@@ -487,11 +487,11 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 	default:
 		return RunCompletion{}, errors.New("schedule returned an invalid run verdict")
 	}
-	_, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: input.RunID, Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
+	applied, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
 	if err != nil {
 		return RunCompletion{}, err
 	}
-	return RunCompletion{Outcome: decision.Outcome, Reason: decision.Reason}, nil
+	return committedRunCompletion(applied)
 }
 
 func (h *OwnerHost) wait(ctx context.Context, snapshot store.RunSnapshot, completed <-chan ownerExecution) (*ownerExecution, error) {
@@ -532,4 +532,13 @@ func waitFailure(err error, ignored ...error) error {
 		return nil
 	}
 	return err
+}
+
+func committedRunCompletion(applied store.Applied) (RunCompletion, error) {
+	switch applied.Outcome {
+	case store.RunSuccess, store.RunFailed, store.RunCancelled:
+		return RunCompletion{Outcome: string(applied.Outcome), Reason: applied.Reason}, nil
+	default:
+		return RunCompletion{}, errors.New("completion returned no committed run verdict")
+	}
 }

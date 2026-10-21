@@ -24,7 +24,7 @@ func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
 					t.Fatalf("finish=%+v, %v", applied, err)
 				}
 			}
-			node, err := f.tenant.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID)
+			node, err := f.tenant.GetNode(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 			if err != nil || node.Outcome != string(outcome) || node.FailureReason != result.Reason || !reflect.DeepEqual(node.ExitCode, result.ExitCode) || node.Error != result.MaskedError || node.FinishedAt == nil {
 				t.Fatalf("metadata=%+v, %v", node, err)
 			}
@@ -32,7 +32,7 @@ func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
 			if _, err := f.tenant.TransitionNode(t.Context(), finish); err == nil {
 				t.Fatal("different terminal metadata overwrote result")
 			}
-			after, err := f.tenant.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID)
+			after, err := f.tenant.GetNode(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 			if err != nil || !reflect.DeepEqual(node, after) {
 				t.Fatalf("overwrite changed node: %+v -> %+v, %v", node, after, err)
 			}

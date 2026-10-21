@@ -33,7 +33,7 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 	parents := map[string]store.AcceptedExpansionRow{}
 	for _, expansion := range snapshot.Expansions {
 		var plan nodeproto.PlanDoc
-		if expansion.Source.RunID != input.Accepted.RunID || expansion.Source.NodeID == "" || expansion.SourceGeneration < 0 || json.Unmarshal(expansion.Body, &plan) != nil || plan.Jobs == nil {
+		if expansion.Source.RunID != runspec.RunID(input.Accepted.RunID) || expansion.Source.NodeID == "" || expansion.SourceGeneration < 0 || json.Unmarshal(expansion.Body, &plan) != nil || plan.Jobs == nil {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry has an invalid accepted expansion")
 		}
 		hash, err := h.CanonicalHash(expansion.Body)
@@ -64,11 +64,11 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 			return nil, executorError(apierr.PlanDrift, "generator ancestry contains a cycle")
 		}
 		visiting[id] = true
-		row, ok := ownerNode(snapshot, parent.Source.NodeID)
+		row, ok := ownerNode(snapshot, string(parent.Source.NodeID))
 		if !ok || row.Generation != runspec.ClaimGeneration(parent.SourceGeneration) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry lost its successful source generation")
 		}
-		declaration := declarations[row.Ref.NodeID]
+		declaration := declarations[string(row.Ref.NodeID)]
 		hash, err := h.CanonicalHash(declaration)
 		if err != nil {
 			return nil, err
@@ -83,8 +83,8 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 		if string(hash) != row.SpecHash || persistedHash != hash {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry differs from its persisted source declaration")
 		}
-		replay = append(replay, GeneratorReplay{SourceJob: row.Ref.NodeID, SourceGeneration: int64(row.Generation), GeneratorID: declaration.Closures.Generate[0]})
-		id = parent.Source.NodeID
+		replay = append(replay, GeneratorReplay{SourceJob: string(row.Ref.NodeID), SourceGeneration: int64(row.Generation), GeneratorID: declaration.Closures.Generate[0]})
+		id = string(parent.Source.NodeID)
 	}
 	slices.Reverse(replay)
 	for i := range replay {
@@ -187,7 +187,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 		if !expected[generated.ID] {
 			return nil, executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
 		}
-		row, err := h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: generated.ID})
+		row, err := h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(generated.ID)})
 		if err != nil {
 			return nil, executorError(apierr.PlanDrift, "generator replay added a job absent from the accepted expansion")
 		}
@@ -195,7 +195,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 		if err != nil {
 			return nil, err
 		}
-		if string(hash) != row.SpecHash || row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != generated.ID {
+		if string(hash) != row.SpecHash || row.Ref.RunID != runspec.RunID(input.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(generated.ID) {
 			return nil, executorError(apierr.PlanDrift, "generator replay changed a persisted job")
 		}
 		delete(expected, generated.ID)
@@ -210,14 +210,14 @@ func replayTopology(reconstructed []nodeproto.JobSpec, snapshot store.RunSnapsho
 		seen[job.ID] = true
 	}
 	for _, row := range snapshot.Nodes {
-		if row.Ref.RunID != snapshot.Run.ID || row.Ref.NodeID == "" {
+		if row.Ref.RunID != runspec.RunID(snapshot.Run.ID) || row.Ref.NodeID == "" {
 			return nil, executorError(apierr.PlanDrift, "replay snapshot has a foreign job identity")
 		}
-		if replacing[row.Ref.NodeID] || seen[row.Ref.NodeID] {
+		if replacing[string(row.Ref.NodeID)] || seen[string(row.Ref.NodeID)] {
 			continue
 		}
 		var job nodeproto.JobSpec
-		if err := json.Unmarshal(row.Spec, &job); err != nil || job.ID != row.Ref.NodeID {
+		if err := json.Unmarshal(row.Spec, &job); err != nil || runspec.NodeID(job.ID) != row.Ref.NodeID {
 			return nil, executorError(apierr.PlanDrift, "replay snapshot has an invalid job declaration")
 		}
 		jobs = append(jobs, job)
@@ -228,7 +228,7 @@ func replayTopology(reconstructed []nodeproto.JobSpec, snapshot store.RunSnapsho
 
 func (h *sdkCode) replayMembers(snapshot store.RunSnapshot, replay GeneratorReplay) (map[string]bool, error) {
 	for _, accepted := range snapshot.Expansions {
-		if accepted.Source.RunID != snapshot.Run.ID || accepted.Source.NodeID != replay.SourceJob || accepted.SourceGeneration != replay.SourceGeneration {
+		if accepted.Source.RunID != runspec.RunID(snapshot.Run.ID) || accepted.Source.NodeID != runspec.NodeID(replay.SourceJob) || accepted.SourceGeneration != replay.SourceGeneration {
 			continue
 		}
 		var plan nodeproto.PlanDoc

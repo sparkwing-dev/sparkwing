@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -135,7 +137,7 @@ func TestEngineSnapshotRetainsAcceptedExpansionBodies(t *testing.T) {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	for i, row := range f.snapshot.Expansions {
-		if got.Expansions[i].SourceJob != row.Source.NodeID || got.Expansions[i].SourceGeneration != row.SourceGeneration || got.Expansions[i].BodyHash != row.BodyHash || string(got.Expansions[i].Body) != string(row.Body) {
+		if runspec.NodeID(got.Expansions[i].SourceJob) != row.Source.NodeID || got.Expansions[i].SourceGeneration != row.SourceGeneration || got.Expansions[i].BodyHash != row.BodyHash || string(got.Expansions[i].Body) != string(row.Body) {
 			t.Fatalf("expansion=%+v want=%+v", got.Expansions[i], row)
 		}
 	}

@@ -190,7 +190,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	now := tx.time
+	now, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return UnitClaim{}, clockErr1
+	}
 	var deadline time.Time
 	if row.expiry.Valid {
 		deadline = time.Unix(0, row.expiry.Int64).UTC()
@@ -213,8 +216,8 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	}
 	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation), LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
 	if unit.Kind == capability.UnitNode {
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}
-		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: string(unit.RunID), NodeID: string(unit.NodeID)}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}}, now)
+		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
+		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement.reason, team, unit.RunID, unit.NodeID)
 		}
@@ -242,20 +245,28 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		return UnitClaim{}, holderRefusal()
 	}
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: string(unit.RunID), Holder: row.holder, Generation: row.generation}
+		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 	}
 	if unit.Kind == capability.UnitEval {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: string(unit.RunID), SourceNodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Holder: row.holder, Generation: row.generation}
+		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 	}
 	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
 		observation := demand
 		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
 		observation.Labels = match.SelfAsserted(observation.Labels)
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.time})
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return UnitClaim{}, clockErr2
+		}
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: clockTime2})
 		if err != nil {
 			return UnitClaim{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.time.UnixNano(), team, observation.CapabilityPrefix); err != nil {
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return UnitClaim{}, clockErr3
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, clockTime3.UnixNano(), team, observation.CapabilityPrefix); err != nil {
 			return UnitClaim{}, err
 		}
 	}

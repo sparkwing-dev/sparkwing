@@ -214,7 +214,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	}
 	input := snapshot.request.Request
 	if input.Mode == runspec.IntakeExecute {
-		result.OwnerUnit = &OwnerLeaseRef{Kind: OwnerTrigger, RunID: id}
+		result.OwnerUnit = &OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		if input.Options.Runner.Set && input.Options.Runner.Value.Kind == runspec.RunnerHere {
 			issued, err := tx.store.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: request.Authority, Unit: capability.UnitTrigger, UnitID: id, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect, HereRunID: id}})
 			if err != nil {
@@ -289,15 +289,16 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 		if err = lockStateRunTx(ctx, tx, team, c.Binding.RunID); err != nil {
 			return p, err
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return p, err
 		}
-		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}
+		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 		if row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return p, holderRefusal()
 		}
-		if err = checkHolderTx(ctx, tx, team, row, actor, tx.time); err != nil {
+
+		if err = checkHolderTx(ctx, tx, team, row, actor); err != nil {
 			return p, err
 		}
 		var cancelled sql.NullInt64
@@ -559,7 +560,11 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	}
 	var hereKey, owner string
 	err := tx.QueryRowContext(ctx, `SELECT here_proof_public_key,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&hereKey, &owner)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.time) {
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return "", clockErr2
+	}
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, clockTime2) {
 		return "", nil
 	}
 	if err != nil {

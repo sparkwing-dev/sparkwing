@@ -374,13 +374,13 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 		accepted: make(map[string]bool),
 	}
 	for _, row := range snapshot.Nodes {
-		if row.Ref.RunID != snapshot.Run.ID {
+		if row.Ref.RunID != runspec.RunID(snapshot.Run.ID) {
 			return ScheduleSnapshot{}, fmt.Errorf("job %q belongs to another run", row.Ref.NodeID)
 		}
-		if _, exists := projection.rows[row.Ref.NodeID]; exists {
+		if _, exists := projection.rows[string(row.Ref.NodeID)]; exists {
 			return ScheduleSnapshot{}, fmt.Errorf("duplicate persisted job %q", row.Ref.NodeID)
 		}
-		projection.rows[row.Ref.NodeID] = row
+		projection.rows[string(row.Ref.NodeID)] = row
 	}
 	for _, job := range plan.Jobs {
 		if err := projection.add(job); err != nil {
@@ -475,9 +475,9 @@ func scheduleDeclaration(job nodeproto.JobSpec) ScheduleNode {
 }
 
 func (projection *scheduleProjection) expand(expansion AcceptedExpansionRow) error {
-	source, exists := projection.jobs[expansion.Source.NodeID]
+	source, exists := projection.jobs[string(expansion.Source.NodeID)]
 	row := projection.rows[source.ID]
-	if !exists || expansion.Source.RunID != projection.runID || projection.accepted[source.ID] || len(source.Closures.Generate) == 0 || row.Expansion != ExpansionAccepted || row.Generation != runspec.ClaimGeneration(expansion.SourceGeneration) {
+	if !exists || expansion.Source.RunID != runspec.RunID(projection.runID) || projection.accepted[source.ID] || len(source.Closures.Generate) == 0 || row.Expansion != ExpansionAccepted || row.Generation != runspec.ClaimGeneration(expansion.SourceGeneration) {
 		return fmt.Errorf("expansion source %q disagrees with persisted declaration or generation", expansion.Source.NodeID)
 	}
 	var body struct {

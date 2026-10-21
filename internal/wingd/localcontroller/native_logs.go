@@ -64,7 +64,7 @@ func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeComm
 	switch request.(type) {
 	case store.ReportNode, store.RetryNode, store.ReleaseNode:
 		ref, _ := store.NodeCommandAuthority(request)
-		if err := s.logs.closeNode(context.WithoutCancel(ctx), ref.NodeID); err != nil {
+		if err := s.logs.closeNode(context.WithoutCancel(ctx), string(ref.NodeID)); err != nil {
 			return store.Applied{}, err
 		}
 	}
@@ -101,11 +101,11 @@ func (l *localLogs) subject(ctx context.Context, node string) (capability.Princi
 		subject.Unit.Source = &blob.LogSource{NodeID: b.NodeID, Generation: b.Generation}
 	}
 	if node != "" {
-		row, err := l.readNode(ctx, controllerwire.NodeRef{RunID: l.run, NodeID: node})
+		row, err := l.readNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)})
 		if err != nil {
 			return p, blob.LogSubject{}, err
 		}
-		if row.Ref != (controllerwire.NodeRef{RunID: l.run, NodeID: node}) {
+		if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)}) {
 			return p, blob.LogSubject{}, nodeClaimMismatch()
 		}
 		if row.Status == store.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {

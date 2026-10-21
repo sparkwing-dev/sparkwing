@@ -12,7 +12,7 @@ type nodeResultRecords interface {
 
 func attachNodeResultRecordsTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition) error {
 	result := change.Extra.Result
-	if result == nil || result.OutputRecord == nil && result.ManifestRecord == nil || change.Cause == CauseMaterialize {
+	if result == nil || result.OutputRecord == nil && result.ManifestRecord == nil || change.Cause == causeMaterialize {
 		return nil
 	}
 	if change.Cause != CauseReport && change.Cause != CausePublish {
@@ -24,11 +24,13 @@ func attachNodeResultRecordsTx(ctx context.Context, tx *storeTx, team Team, row 
 	if err := tx.store.resultRecords.AttachResultRecords(ctx, tx, team, change.Actor, row, *result); err != nil {
 		return err
 	}
-	if err := prepareStateActorTx(ctx, tx, team, row.Ref.RunID, change.Actor, tx.time); err != nil {
+
+	if err := prepareStateActorTx(ctx, tx, team, string(row.Ref.RunID), change.Actor); err != nil {
 		return err
 	}
 	if change.Cause == CauseReport {
-		return checkHolderTx(ctx, tx, team, row, change.Actor, tx.time)
+
+		return checkHolderTx(ctx, tx, team, row, change.Actor)
 	}
 	return nil
 }

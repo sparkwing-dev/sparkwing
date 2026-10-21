@@ -162,7 +162,11 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return bindingRefusal()
 		}
 		var err error
-		result, err = admitRun(ctx, tx, t.team, request, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		result, err = admitRun(ctx, tx, t.team, request, clockTime1)
 		if err != nil {
 			return err
 		}
@@ -173,26 +177,46 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return nil
 		}
 		cursor, next := schedule.CursorAt, schedule.NextDueAt
-		fire := &CronFire{DueAt: due, DecidedAt: tx.time, Outcome: CronOutcomeFired, RunID: result.RunID, Args: input.RequestedArgs}
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		fire := &CronFire{DueAt: due, DecidedAt: clockTime2, Outcome: CronOutcomeFired, RunID: result.RunID, Args: input.RequestedArgs}
 		if due.IsZero() {
-			fire.DueAt, fire.Detail = tx.time, "run now"
+			clockTime3, clockErr3 := tx.now(ctx)
+			if clockErr3 != nil {
+				return clockErr3
+			}
+			fire.DueAt, fire.Detail = clockTime3, "run now"
 		} else {
 			if in.consent != "" {
 				expected, err := scheduleNext(schedule, due.Add(-time.Nanosecond), 0)
 				if err != nil {
 					return err
 				}
-				if due.After(tx.time) || !due.After(schedule.CursorAt) || expected == nil || !expected.Equal(due) {
+				clockTime4, clockErr4 := tx.now(ctx)
+				if clockErr4 != nil {
+					return clockErr4
+				}
+				if due.After(clockTime4) || !due.After(schedule.CursorAt) || expected == nil || !expected.Equal(due) {
 					return authorityError(apierr.Conflict, "schedule instant is not due")
 				}
 			}
 			cursor = due
-			next, err = scheduleNext(schedule, tx.time, 0)
+			clockTime5, clockErr5 := tx.now(ctx)
+			if clockErr5 != nil {
+				return clockErr5
+			}
+			next, err = scheduleNext(schedule, clockTime5, 0)
 			if err != nil {
 				return err
 			}
 		}
-		return t.resolveCronDueTx(ctx, tx, schedule.ID, cursor, next, fire, tx.time)
+		clockTime6, clockErr6 := tx.now(ctx)
+		if clockErr6 != nil {
+			return clockErr6
+		}
+		return t.resolveCronDueTx(ctx, tx, schedule.ID, cursor, next, fire, clockTime6)
 	})
 	if err != nil {
 		return AdmissionResult{}, err

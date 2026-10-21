@@ -19,7 +19,11 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 		return capability.RunnerSnapshot{}, err
 	}
 	defer rollbackOrLog(tx)
-	out := capability.RunnerSnapshot{Now: tx.time, Runners: []capability.RunnerObservation{}}
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return capability.RunnerSnapshot{}, clockErr1
+	}
+	out := capability.RunnerSnapshot{Now: clockTime1, Runners: []capability.RunnerObservation{}}
 	indices := map[string]int{}
 	agents, err := registeredAgentsTx(ctx, tx, t.team)
 	if err != nil {
@@ -61,6 +65,10 @@ func unavailableRunner(err error) bool {
 }
 
 func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]string, error) {
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return nil, clockErr2
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c JOIN runs r ON r.team=c.team AND r.id=c.bind_run
 	WHERE c.team=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND r.finished_at IS NULL AND r.status IN ('pending','running')
  AND `+liveCredentialSQL("c.")+` AND (
@@ -73,7 +81,7 @@ func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]strin
 	WHERE c.unit_kind='eval' AND e.team=c.team AND e.run_id=c.bind_run AND n.status='done' AND n.outcome IN ('success','memoized') AND n.expansion='expected'
  AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.generation=c.eval_unit_generation
  AND e.claimed_by=c.bind_holder AND e.status IN ('claimed','running') AND e.lease_expires_at>? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?))
- ORDER BY c.prefix`, team, tx.time.UnixNano(), tx.time.UnixNano(), tx.time.UnixNano(), tx.time.UnixNano(), tx.time.UnixNano(), tx.time.UnixNano())
+ ORDER BY c.prefix`, team, clockTime2.UnixNano(), clockTime2.UnixNano(), clockTime2.UnixNano(), clockTime2.UnixNano(), clockTime2.UnixNano(), clockTime2.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +120,11 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 	if at.Valid {
 		seen = time.Unix(0, at.Int64).UTC()
 	}
-	if seen.After(tx.time) {
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return clockErr3
+	}
+	if seen.After(clockTime3) {
 		return authorityError(apierr.IntegrityFailure, "runner observation is in the future")
 	}
 	i, found := indices[key]
@@ -146,7 +158,11 @@ func observeUnitTx(ctx context.Context, tx *storeTx, prefix string) error {
 			continue
 		}
 		c := ancestor.principal.Capability
-		result, err := tx.ExecContext(ctx, `UPDATE capabilities SET last_used_at=? WHERE prefix=? AND COALESCE(team,'')=?`, tx.time.UnixNano(), c.Prefix, c.Team)
+		clockTime4, clockErr4 := tx.now(ctx)
+		if clockErr4 != nil {
+			return clockErr4
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE capabilities SET last_used_at=? WHERE prefix=? AND COALESCE(team,'')=?`, clockTime4.UnixNano(), c.Prefix, c.Team)
 		if err != nil {
 			return err
 		}

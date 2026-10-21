@@ -4,10 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"time"
 )
 
-func assertSingletonLeaseTx(ctx context.Context, tx *storeTx, lease SingletonLease, name string, now time.Time) error {
+func assertSingletonLeaseTx(ctx context.Context, tx *storeTx, lease SingletonLease, name string) error {
 	if lease.Name != name || lease.Holder == "" || lease.Generation < 1 {
 		return ErrLockHeld
 	}
@@ -21,12 +20,9 @@ func assertSingletonLeaseTx(ctx context.Context, tx *storeTx, lease SingletonLea
 		return err
 	}
 	// safety: a lock wait can cross expiry, so check the clock after obtaining the fence.
-	current, err := tx.now(ctx)
+	now, err := tx.now(ctx)
 	if err != nil {
 		return err
-	}
-	if current.After(now) {
-		now = current
 	}
 	if holder != lease.Holder || generation != lease.Generation || until <= now.UnixNano() {
 		return ErrLockHeld

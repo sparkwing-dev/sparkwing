@@ -64,7 +64,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 			if err != nil || len(reaped) != 1-replay {
 				return fmt.Errorf("owner recovery %d: %+v: %v", replay, reaped, err)
 			}
-			if replay == 0 && (!reaped[0].Requeued || reaped[0].Disruptions != 0 || reaped[0].RunID != plan.RunID || reaped[0].Generation != plan.Actor.Owner.Generation) {
+			if replay == 0 && (!reaped[0].Requeued || reaped[0].Disruptions != 0 || reaped[0].RunID != plan.RunID || runspec.ClaimGeneration(reaped[0].Generation) != plan.Actor.Owner.Generation) {
 				return fmt.Errorf("unstarted recovery consumed execution or changed identity: %+v", reaped)
 			}
 		}
@@ -91,7 +91,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 			return errors.New("former owner renewed after recovery")
 		}
 		claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: rootPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(plan.RunID)}, Available: match.Resources{Cores: 8}})
-		if err != nil || int64(claim.Award.Generation) != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
+		if err != nil || claim.Award.Generation != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
 			return fmt.Errorf("owner reclaim: %+v: %v", claim, err)
 		}
 		plan.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}

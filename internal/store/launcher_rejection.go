@@ -42,8 +42,8 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			if !live {
 				continue
 			}
-			actor := Actor{Kind: ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}
-			target := expiredUnit{team: award.Claim.Team, ref: controllerwire.NodeRef{RunID: award.Claim.RunID, NodeID: award.Claim.NodeID}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}
+			actor := Actor{Kind: ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
+			target := expiredUnit{team: award.Claim.Team, ref: controllerwire.NodeRef{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID)}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}
 			recovery := ownerRecovery{generation: fence.Generation, lease: sql.NullInt64{Valid: true, Int64: award.Claim.Award.LeaseExpiresAt.UnixNano()}}
 			if fence.Kind == capability.UnitPlan {
 				err = tx.QueryRowContext(ctx, `SELECT started_at FROM triggers WHERE team=? AND id=?`, target.team, target.ref.RunID).Scan(&recovery.started)
@@ -55,16 +55,29 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			}
 			switch fence.Kind {
 			case capability.UnitNode:
-				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: NodeFailed, Actor: actor, Cause: CauseLaunchRejected, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}}, tx.time)
+
+				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: NodeFailed, Actor: actor, Cause: CauseLaunchRejected, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}})
 			case capability.UnitPlan:
-				_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: target.ref.RunID, To: RunFailed, Actor: actor, Cause: RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}, tx.time)
+				_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: target.ref.RunID, To: RunFailed, Actor: actor, Cause: RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"})
 				if err == nil {
-					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, tx.time)
+					clockTime3, clockErr3 := tx.now(ctx)
+					if clockErr3 != nil {
+						return clockErr3
+					}
+					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, clockTime3)
 				}
 			case capability.UnitEval:
-				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.time)
+				clockTime4, clockErr4 := tx.now(ctx)
+				if clockErr4 != nil {
+					return clockErr4
+				}
+				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", clockTime4)
 				if err == nil {
-					err = resolveExpansionLossTx(ctx, tx, target, "failed", tx.time)
+					clockTime5, clockErr5 := tx.now(ctx)
+					if clockErr5 != nil {
+						return clockErr5
+					}
+					err = resolveExpansionLossTx(ctx, tx, target, "failed", clockTime5)
 				}
 			}
 			if err != nil {

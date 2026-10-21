@@ -37,7 +37,11 @@ func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.
 		return nil, err
 	}
 
-	now := tx.time
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return *new([]ConcurrencyWaiter), clockErr1
+	}
+	now := clockTime1
 	nowNS := now.UnixNano()
 	expiresNS := now.Add(lease).UnixNano()
 	promote, err := txPromoteWaiters(ctx, tx, t.team, key, nowNS, expiresNS)
@@ -85,7 +89,11 @@ func (t *Tenant) heartbeatConcurrencySlotOnce(ctx context.Context, key, holderID
 
 	// safety: clock read after the lock, or a stale timestamp lets a
 	// heartbeat revive a holder whose lease already lapsed.
-	now := tx.time
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return *new(time.Time), *new(bool), clockErr2
+	}
+	now := clockTime2
 	expires = now.Add(lease)
 
 	var superInt int
@@ -136,7 +144,11 @@ func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outc
 	if err != nil {
 		return false, err
 	}
-	if err := txCommitChecked(ctx, tx, tx.time.UnixNano(), concurrencyKey{t.team, key}); err != nil {
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return *new(bool), clockErr3
+	}
+	if err := txCommitChecked(ctx, tx, clockTime3.UnixNano(), concurrencyKey{t.team, key}); err != nil {
 		return false, err
 	}
 	return released, nil
@@ -165,7 +177,11 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 		return false, nil, nil, err
 	}
 
-	now := tx.time
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return *new(bool), *new([]ConcurrencyWaiter), *new([]ConcurrencyWaiter), clockErr4
+	}
+	now := clockTime4
 	nowNS := now.UnixNano()
 	expiresNS := now.Add(promoteLease).UnixNano()
 	promoted, err = txPromoteWaiters(ctx, tx, t.team, key, nowNS, expiresNS)
@@ -219,7 +235,11 @@ func (t *Tenant) ForceReleaseSupersededHolders(ctx context.Context, key string) 
 			return nil, err
 		}
 	}
-	if err := txCommitChecked(ctx, tx, tx.time.UnixNano(), concurrencyKey{t.team, key}); err != nil {
+	clockTime5, clockErr5 := tx.now(ctx)
+	if clockErr5 != nil {
+		return *new([]ConcurrencyHolder), clockErr5
+	}
+	if err := txCommitChecked(ctx, tx, clockTime5.UnixNano(), concurrencyKey{t.team, key}); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -266,12 +286,20 @@ func (t *Tenant) cancelWaiter(ctx context.Context, key, runID, nodeID string, fe
 		return false, err
 	}
 	if hn > 0 {
-		now := tx.time
+		clockTime6, clockErr6 := tx.now(ctx)
+		if clockErr6 != nil {
+			return *new(bool), clockErr6
+		}
+		now := clockTime6
 		if _, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano()); err != nil {
 			return false, err
 		}
 	}
-	if err := txCommitChecked(ctx, tx, tx.time.UnixNano(), concurrencyKey{t.team, key}); err != nil {
+	clockTime7, clockErr7 := tx.now(ctx)
+	if clockErr7 != nil {
+		return *new(bool), clockErr7
+	}
+	if err := txCommitChecked(ctx, tx, clockTime7.UnixNano(), concurrencyKey{t.team, key}); err != nil {
 		return false, err
 	}
 	return waiterDeleted || hn > 0, nil

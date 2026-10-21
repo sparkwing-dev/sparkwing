@@ -127,7 +127,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	tenant, finish := runCompletionFixture(t, st)
-	run, err := tenant.ReadRun(ctx, finish.Unit.RunID)
+	run, err := tenant.ReadRun(ctx, string(finish.Unit.RunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		if i == 2 {
 			break
 		}
-		admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: run.Request.AuthorityRef, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: finish.Unit.RunID}}})
+		admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: run.Request.AuthorityRef, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: string(finish.Unit.RunID)}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,10 +158,10 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 			t.Fatal(err)
 		}
 		actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-		if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: admitted.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+		if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(admitted.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 			t.Fatal(err)
 		}
-		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunCompletion{RunID: admitted.RunID, Actor: actor, Cause: store.RunFinish}}
+		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: store.RunFinish}}
 	}
 	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded)
 	if err != nil {

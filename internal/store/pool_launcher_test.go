@@ -185,7 +185,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		if i > 0 {
 			cause = CauseReport
 		}
-		if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
 			t.Fatal(err)
 		}
 	}

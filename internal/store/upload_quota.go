@@ -26,7 +26,11 @@ func reserveBlobUploadQuotaTx(ctx context.Context, tx *storeTx, team Team, id, r
 	if err != nil {
 		return err
 	}
-	dimensions := uploadQuotaDimensions(blobUploadQuotaID(id), run, tx.time.Format("2006-01"), size, objects)
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
+	dimensions := uploadQuotaDimensions(blobUploadQuotaID(id), run, clockTime1.Format("2006-01"), size, objects)
 	dimensions[0].ceiling, dimensions[1].ceiling = policy.MaxBytesPerMonth, policy.MaxBytesPerRun
 	dimensions[2].ceiling = policy.MaxObjectsPerRun
 	for _, dimension := range dimensions {
@@ -49,7 +53,11 @@ func reserveUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, 
 }
 
 func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d uploadQuotaDimension, reserve bool) (string, error) {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`, team, d.quota, d.period, tx.time.UnixNano()); err != nil {
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return "", clockErr2
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`, team, d.quota, d.period, clockTime2.UnixNano()); err != nil {
 		return "", err
 	}
 	var prior string
@@ -58,12 +66,20 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 		return "", err
 	}
 	if d.quota == "storage" {
-		d.period = tx.time.Format("2006-01")
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return "", clockErr3
+		}
+		d.period = clockTime3.Format("2006-01")
 	}
 	if prior != d.period {
 		used = 0
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount),0) FROM quota_reservations WHERE team=? AND quota=? AND period=? AND state='held' AND expires_at>?", team, d.quota, d.period, tx.time.UnixNano()).Scan(&reserved); err != nil {
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return "", clockErr4
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount),0) FROM quota_reservations WHERE team=? AND quota=? AND period=? AND state='held' AND expires_at>?", team, d.quota, d.period, clockTime4.UnixNano()).Scan(&reserved); err != nil {
 		return "", err
 	}
 	if used < 0 || reserved < 0 || used > math.MaxInt64-reserved || d.amount > math.MaxInt64-used-reserved {
@@ -72,7 +88,11 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 	if d.amount > 0 && d.ceiling > 0 && d.amount > d.ceiling-used-reserved {
 		return "", &StorageQuotaError{Principal: string(team), Limit: d.limitName, Unit: d.unit, Used: used + reserved, Allowed: d.ceiling, Requested: d.amount}
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota=? AND state='held' AND expires_at<=?", team, d.quota, tx.time.UnixNano()); err != nil {
+	clockTime5, clockErr5 := tx.now(ctx)
+	if clockErr5 != nil {
+		return "", clockErr5
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota=? AND state='held' AND expires_at<=?", team, d.quota, clockTime5.UnixNano()); err != nil {
 		return "", err
 	}
 	if reserve {
@@ -80,6 +100,10 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 	} else {
 		used += d.amount
 	}
-	_, err := tx.ExecContext(ctx, "UPDATE quota_admission SET period=?,used=?,reserved=?,updated_at=? WHERE team=? AND quota=?", d.period, used, reserved, tx.time.UnixNano(), team, d.quota)
+	clockTime6, clockErr6 := tx.now(ctx)
+	if clockErr6 != nil {
+		return "", clockErr6
+	}
+	_, err := tx.ExecContext(ctx, "UPDATE quota_admission SET period=?,used=?,reserved=?,updated_at=? WHERE team=? AND quota=?", d.period, used, reserved, clockTime6.UnixNano(), team, d.quota)
 	return d.period, err
 }

@@ -54,7 +54,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"setup", "build-linux", "build-mac", "deploy", "notify"} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
 			for _, id := range []string{"prerequisite", "consumer", "outside"} {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
+				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
 				want := store.NodeSuccess
 				if id == "outside" {
 					want = store.NodeSkipped
@@ -137,7 +137,7 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				}
 			}
 			if generated {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "child"})
+				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "child"})
 				if err != nil || row.Outcome != store.NodeSuccess {
 					t.Errorf("generated child: row=%+v error=%v", row, err)
 				}

@@ -29,7 +29,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}
 	// safety: generated declarations are absent from the initial plan; their environment comes from persistence.
 	input.NodeID, input.RouteBinding.JobID = "generated", "generated"
-	st.row.Ref.NodeID = input.NodeID
+	st.row.Ref.NodeID = runspec.NodeID(input.NodeID)
 	job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{
 		"STARTUP": {Value: "interpreter", Startup: true}, "BODY": {Value: "body"},
 	}}

@@ -55,9 +55,13 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 		if amountMicro > 0 && amountMicro < take {
 			take = amountMicro
 		}
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return CreditReversal{}, clockErr1
+		}
 		grant := CreditGrant{
 			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.time,
+			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: clockTime1,
 		}
 		if err := l.insertGrant(ctx, grant); err != nil {
 			return CreditReversal{}, err

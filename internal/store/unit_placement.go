@@ -69,7 +69,11 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 			return decision, authorityError(apierr.BadRequest, "placement hold must not be negative")
 		}
 		deadline = deadline.Add(preference.Hold)
-		held[i] = i < rank && tx.time.Before(deadline)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return placementDecision{}, clockErr1
+		}
+		held[i] = i < rank && clockTime1.Before(deadline)
 	}
 	if !slices.Contains(held, true) {
 		return decision, nil
@@ -119,7 +123,10 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness ti
 	if liveness <= 0 {
 		return nil, nil
 	}
-	now := tx.time
+	now, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return nil, clockErr2
+	}
 	cutoff := now.Add(-liveness)
 	query := `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`
 	args := []any{team}

@@ -80,7 +80,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: "trunk"}
 		entry.DefaultBranch = "changed-origin-head"
 	}
-	unit := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", RunID: "run", Holder: "host", Generation: 1}
+	unit := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	sealed := runspec.SealedRequest{RunID: "run", Request: request, Hash: "request"}
 	s := newOwnerSealStore(store.RunRow{ID: "run", State: store.RunPending, Request: sealed, Owner: &unit})
 	var processes []*scriptedSDK

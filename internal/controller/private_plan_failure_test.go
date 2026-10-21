@@ -91,7 +91,7 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 			t.Fatalf("test did not use a persisted plan: %v", err)
 		}
 		binding := principal.Capability.Binding
-		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation), Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: binding.RunID, Holder: binding.Holder, Generation: binding.Generation}}
+		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(binding.RunID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}
 		change := store.RunCompletion{RunID: "run", Actor: actor, Cause: body.Cause, OwnerPolicy: body.OwnerPolicy, MaskedError: body.MaskedError}
 		if mutation%6 == 4 {
 			change.RunID = "foreign"

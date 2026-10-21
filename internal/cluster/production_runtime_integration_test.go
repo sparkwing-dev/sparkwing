@@ -224,7 +224,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: binding.Holder, Generation: binding.Generation}}}
+			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}}
 			if unit.Accepted != nil {
 				snapshot.Run.Spec, snapshot.Run.Plan = &unit.Accepted.Spec, unit.Accepted.Plan
 				snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
@@ -243,7 +243,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Status: store.StatusPending, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Status: store.StatusPending, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
 	if unit.Unit == capability.UnitEval {
 		row.Status, row.Outcome, row.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
 		row.ClaimedBy, row.CapabilityPrefix = "", ""

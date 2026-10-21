@@ -78,7 +78,7 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 					t.Fatalf("foreign list = %+v, %v", runs, err)
 				}
 				trigger, err := tenant.GetTrigger(t.Context(), plan.RunID)
-				if err != nil || trigger.Pipeline != run.Pipeline || trigger.Team != tenant.Team() || !reflect.DeepEqual(trigger.Args, run.Args) || trigger.ClaimSeq != plan.Actor.Owner.Generation {
+				if err != nil || trigger.Pipeline != run.Pipeline || trigger.Team != tenant.Team() || !reflect.DeepEqual(trigger.Args, run.Args) || runspec.ClaimGeneration(trigger.ClaimSeq) != plan.Actor.Owner.Generation {
 					t.Fatalf("trigger = %+v, %v", trigger, err)
 				}
 				triggers, err := tenant.ListTriggers(t.Context(), store.TriggerFilter{Pipelines: []string{"fixture"}, Repo: "acme/repo"})
@@ -179,21 +179,21 @@ func TestReportingReadsCurrentJobLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		job, err := f.tenant.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID)
+		job, err := f.tenant.GetNode(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 		if err != nil || job.ClaimedBy != current.ClaimedBy || runspec.ClaimGeneration(job.ClaimGeneration) != current.Generation || job.AttemptsConsumed != int(current.Attempt) || !reflect.DeepEqual(job.StartedAt, current.StartedAt) || !reflect.DeepEqual(job.LeaseExpiresAt, current.LeaseExpiresAt) {
 			t.Fatalf("job report = %+v, current = %+v, %v", job, current, err)
 		}
 		if len(job.ExecutionAttempts) != int(current.Attempt) {
 			t.Fatalf("attempt report = %+v", job.ExecutionAttempts)
 		}
-		jobs, err := f.tenant.ListNodes(t.Context(), f.ref.RunID)
+		jobs, err := f.tenant.ListNodes(t.Context(), string(f.ref.RunID))
 		if err != nil || len(jobs) != 1 || !reflect.DeepEqual(jobs[0], job) {
 			t.Fatalf("job list = %+v, %v", jobs, err)
 		}
-		if _, err := foreign.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID); !errors.Is(err, store.ErrNotFound) {
+		if _, err := foreign.GetNode(t.Context(), string(f.ref.RunID), string(f.ref.NodeID)); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("foreign job read = %v", err)
 		}
-		if jobs, err := foreign.ListNodes(t.Context(), f.ref.RunID); err != nil || len(jobs) != 0 {
+		if jobs, err := foreign.ListNodes(t.Context(), string(f.ref.RunID)); err != nil || len(jobs) != 0 {
 			t.Fatalf("foreign job list = %+v, %v", jobs, err)
 		}
 	}

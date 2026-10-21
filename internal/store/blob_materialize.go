@@ -23,7 +23,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 	if err != nil {
 		return result, err
 	}
-	if a.source.Kind != blob.UploadOwnerUnit || a.source.RunID != ref.RunID || !slices.Contains(a.capability.Grants, capability.DataRead) {
+	if a.source.Kind != blob.UploadOwnerUnit || runspec.RunID(a.source.RunID) != ref.RunID || !slices.Contains(a.capability.Grants, capability.DataRead) {
 		return result, blob.ErrDigestNotReadable
 	}
 	target, err := readNodeTx(ctx, tx, team, ref)
@@ -47,13 +47,17 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		if err != nil {
 			return result, err
 		}
-		if !found || record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.time) {
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return materializedRecords{}, clockErr1
+		}
+		if !found || record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(clockTime1) {
 			return result, blob.ErrNotFound
 		}
 		if record.ExpiresAt.Set && !record.Pinned {
 			expiries = append(expiries, record.ExpiresAt.Value)
 		}
-		if record.Key.Scope.Repo != a.authority.Repo || record.Key.Scope.Pipeline != a.pipeline || record.Key.Scope.Job != ref.NodeID {
+		if record.Key.Scope.Repo != a.authority.Repo || record.Key.Scope.Pipeline != a.pipeline || runspec.NodeID(record.Key.Scope.Job) != ref.NodeID {
 			return result, blob.ErrDigestNotReadable
 		}
 		if record.Key.Scope.Ref != a.authority.Ref.Scope {
@@ -116,11 +120,16 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 	if err := records.verifyMaterializedBlobs(ctx, tx, batch); err != nil {
 		return materializedRecords{}, err
 	}
-	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.time); err != nil {
+
+	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return materializedRecords{}, err
 	}
 	for _, expiry := range expiries {
-		if !expiry.After(tx.time) {
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return materializedRecords{}, clockErr3
+		}
+		if !expiry.After(clockTime3) {
 			return materializedRecords{}, blob.ErrNotFound
 		}
 	}
@@ -166,7 +175,7 @@ func (r *blobRecords) verifyMaterializedBlobs(ctx context.Context, tx *storeTx, 
 }
 
 func materializedKey(team Team, a blobActor, row NodeRow, kind blob.Kind) blob.RecordKey {
-	return blob.MaterializedRecordKey(string(team), row.Ref.RunID, row.Ref.NodeID, row.StateSeq+1, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, kind)
+	return blob.MaterializedRecordKey(string(team), string(row.Ref.RunID), string(row.Ref.NodeID), row.StateSeq+1, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, kind)
 }
 
 func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobActor, target NodeRow, source MaterializeSource) ([]blob.RecordKey, error) {
@@ -176,7 +185,7 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 	if source.Kind == SourceMemo {
 		key := source.Record
 		var spec nodeproto.JobSpec
-		if json.Unmarshal(target.Spec, &spec) != nil || spec.Memo == nil || key.Team != string(team) || key.Kind != blob.KindMemo || key.Scope.Repo != a.authority.Repo || key.Scope.Pipeline != a.pipeline || key.Scope.Job != target.Ref.NodeID || !slices.Contains(a.capability.Data.ReadRefs, key.Scope.Ref.CapabilityScope()) || key.Name != "output" && key.Name != "manifest" {
+		if json.Unmarshal(target.Spec, &spec) != nil || spec.Memo == nil || key.Team != string(team) || key.Kind != blob.KindMemo || key.Scope.Repo != a.authority.Repo || key.Scope.Pipeline != a.pipeline || runspec.NodeID(key.Scope.Job) != target.Ref.NodeID || !slices.Contains(a.capability.Data.ReadRefs, key.Scope.Ref.CapabilityScope()) || key.Name != "output" && key.Name != "manifest" {
 			return nil, blob.ErrDigestNotReadable
 		}
 		return []blob.RecordKey{key}, nil
@@ -219,7 +228,8 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT materialize_result"); err != nil {
 		return false, err
 	}
-	_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: transitionExtra{Materialize: request.Source}}, tx.time)
+
+	_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
 	if err != nil {
 		if !cacheMissError(err) {
 			return false, err

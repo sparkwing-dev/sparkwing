@@ -285,7 +285,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if err := private.AdoptClaim(ctx, claim); err != nil {
 			return err
 		}
-		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}
+		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: claim.Node.Ref.RunID, NodeID: claim.Node.Ref.NodeID, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}}
 		beat, err := state.RenewNodeClaim(ctx, claim.Node.Ref, actor)
 		if err != nil {
 			return fmt.Errorf("renew unstarted local job: %w", err)
@@ -298,7 +298,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	}
 	services.Config.Admission.Daemon = pipelineAdmission{}
 	bind := services.Config.Executor.Bind
-	if grant, err := bind(ctx, nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: admitted.RunID}, NodeID: "first", Generation: runspec.ClaimGeneration(actor.Owner.Generation), Authority: nodehost.ClaimAuthority{CapabilityPrefix: principal.Capability.Prefix}}); err == nil || grant.Binding.Routes.Bearer != "" {
+	if grant, err := bind(ctx, nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: admitted.RunID}, NodeID: "first", Generation: actor.Owner.Generation, Authority: nodehost.ClaimAuthority{CapabilityPrefix: principal.Capability.Prefix}}); err == nil || grant.Binding.Routes.Bearer != "" {
 		t.Fatal("owner authority substituted for a missing node award")
 	}
 	var mu sync.Mutex
@@ -364,7 +364,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if row.OutputRecord == nil {
 			t.Fatalf("job output was not committed: %+v", row)
 		}
-		if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[row.Ref.NodeID] {
+		if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[string(row.Ref.NodeID)] {
 			t.Fatalf("job used another award: %+v", row)
 		}
 	}

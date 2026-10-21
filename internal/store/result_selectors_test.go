@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestTerminalRecordSelectorsProperty(t *testing.T) {
@@ -31,7 +32,7 @@ func TestTerminalRecordSelectorsProperty(t *testing.T) {
 					if policy == SourceNone {
 						tenant, _, _ = reconcileFixture(t)
 						tenant.s.resultRecords = nodeResultRecordsFunc(func(context.Context, *storeTx, Team, Actor, NodeRow, NodeResult) error { return nil })
-						holder := Actor{Kind: ActorHolder, Authority: request.Actor.Authority, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
+						holder := Actor{Kind: ActorHolder, Authority: request.Actor.Authority, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 						holder.Authority.ID = "claim"
 						change := nodeTransition{Ref: request.Ref, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: want.Output, ManifestRecord: want.Manifest}}}
 						if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
@@ -58,7 +59,7 @@ func TestTerminalRecordSelectorsProperty(t *testing.T) {
 						t.Fatal(err)
 					}
 					assertResultSelectors(t, node, want)
-					snapshot, err := tenant.ReadSnapshot(t.Context(), request.Ref.RunID)
+					snapshot, err := tenant.ReadSnapshot(t.Context(), string(request.Ref.RunID))
 					if err != nil || len(snapshot.Nodes) != 1 {
 						t.Fatalf("snapshot: %+v, %v", snapshot, err)
 					}

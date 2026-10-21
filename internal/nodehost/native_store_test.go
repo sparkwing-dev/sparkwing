@@ -99,7 +99,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
 	f.Host.Layer = nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
-		if award.Node.Ref.NodeID != input.NodeID || len(award.Bearer) == 0 {
+		if award.Node.Ref.NodeID != runspec.NodeID(input.NodeID) || len(award.Bearer) == 0 {
 			return ProcessGrant{}, errors.New("native attempt has no adopted award")
 		}
 		lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(award.Bearer)}
@@ -293,10 +293,10 @@ func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, ho
 	if err = errors.Join(err, entry.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
+	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Input.RunID), To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "output"}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "output"}
 	if _, err := f.State.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}

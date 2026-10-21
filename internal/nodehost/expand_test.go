@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -148,7 +150,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: job.ID}, Spec: raw, SpecHash: string(hash)}
+			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Spec: raw, SpecHash: string(hash)}
 			state.nodes[job.ID] = row
 			snapshot.Nodes = append(snapshot.Nodes, row)
 		}
@@ -195,7 +197,7 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if input.NodeID == "summary" {
 			for _, child := range children {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: child.ID})
+				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(child.ID)})
 				if err != nil || row.Outcome != store.NodeSuccess {
 					return fmt.Errorf("waiter ran before %s succeeded: %v", child.ID, err)
 				}

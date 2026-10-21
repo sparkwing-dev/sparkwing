@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -40,7 +42,7 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	if err := teststore.SeedNodeReady(s, t.Context(), seed.RunID, seed.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	first, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: seed.RunID, NodeID: seed.NodeID})
+	first, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)})
 	if err != nil || first.ReadyAt == nil {
 		t.Fatalf("ready seed: %+v %v", first, err)
 	}

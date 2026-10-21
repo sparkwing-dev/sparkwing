@@ -43,12 +43,15 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 		if err != nil {
 			return err
 		}
-		now := tx.time
+		now, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
 		if row.team != string(claim.Team) || row.prefix != prefix || row.holder != claim.Award.Holder || row.generation != generation || !row.lease.Valid || row.lease.Int64 <= now.UnixNano() {
 			return holderRefusal()
 		}
 		if claim.Kind == capability.UnitNode {
-			node, err := readNodeTx(ctx, tx, claim.Team, controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID})
+			node, err := readNodeTx(ctx, tx, claim.Team, controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
 			if err != nil {
 				return err
 			}
@@ -59,8 +62,8 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 			if state != NodeClaimed || node.CancelRequestedAt != nil {
 				return holderRefusal()
 			}
-			actor := Actor{Kind: ActorHolder, Authority: ref, CapabilityPrefix: prefix, Holder: claim.Award.Holder, Generation: runspec.ClaimGeneration(generation)}
-			_, err = transitionNodeTx(ctx, tx, claim.Team, nodeTransition{Ref: node.Ref, To: NodePending, Cause: CauseRelease, Actor: actor, SourceAttempt: &node.Attempt}, now)
+			actor := Actor{Kind: ActorHolder, Authority: ref, CapabilityPrefix: prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: runspec.ClaimGeneration(generation)}}
+			_, err = transitionNodeTx(ctx, tx, claim.Team, nodeTransition{Ref: node.Ref, To: nodePending, Cause: CauseRelease, Actor: actor, SourceAttempt: &node.Attempt})
 			return err
 		}
 		return releaseOwnerUnitTx(ctx, tx, claim, unit)
@@ -83,10 +86,18 @@ func releaseOwnerUnitTx(ctx context.Context, tx *storeTx, claim UnitClaim, unit 
 	if status != "claimed" || started.Valid {
 		return holderRefusal()
 	}
-	target := expiredUnit{team: claim.Team, ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, kind: claim.Kind, sourceGeneration: unit.SourceGeneration}
+	target := expiredUnit{team: claim.Team, ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, kind: claim.Kind, sourceGeneration: unit.SourceGeneration}
 	owner := ownerRecovery{generation: int64(claim.Award.Generation), disruptions: disruptions}
 	if claim.Kind == capability.UnitEval {
-		return writeEvalRecoveryTx(ctx, tx, target, owner, "pending", tx.time)
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		return writeEvalRecoveryTx(ctx, tx, target, owner, "pending", clockTime2)
 	}
-	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, tx.time)
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return clockErr3
+	}
+	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}, clockTime3)
 }

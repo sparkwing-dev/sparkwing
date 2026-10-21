@@ -299,7 +299,11 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule) (store
 	var wasCreated bool
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		storedRow, wasCreated, err = t.armCronScheduleTx(ctx, tx, sched, repository, args, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		storedRow, wasCreated, err = t.armCronScheduleTx(ctx, tx, sched, repository, args, clockTime1)
 		return err
 	})
 	return storedRow, wasCreated, err
@@ -419,9 +423,13 @@ func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, 
 // instants that passed while it was paused.
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
 		return updateCronScheduleTx(ctx, tx, id,
 			`UPDATE cron_schedules SET paused = ?, updated_at = ? WHERE team = ? AND id = ?`,
-			boolToInt(paused), tx.time.UnixNano(), string(t.team), id)
+			boolToInt(paused), clockTime2.UnixNano(), string(t.team), id)
 	})
 }
 
@@ -429,9 +437,13 @@ func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bo
 // declares this schedule.
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return clockErr3
+		}
 		return updateCronScheduleTx(ctx, tx, id,
 			`UPDATE cron_schedules SET declared = ?, updated_at = ? WHERE team = ? AND id = ?`,
-			boolToInt(declared), tx.time.UnixNano(), string(t.team), id)
+			boolToInt(declared), clockTime3.UnixNano(), string(t.team), id)
 	})
 }
 
@@ -449,9 +461,13 @@ func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationI
 		}
 	}()
 
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return 0, clockErr4
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ? AND declared = 1`,
-		tx.time.UnixNano(), string(t.team), installationID, repositoryID)
+		clockTime4.UnixNano(), string(t.team), installationID, repositoryID)
 	if err != nil {
 		return 0, err
 	}
@@ -472,9 +488,13 @@ func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installatio
 		}
 	}()
 
+	clockTime5, clockErr5 := tx.now(ctx)
+	if clockErr5 != nil {
+		return 0, clockErr5
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		tx.time.UnixNano(), string(t.team), installationID)
+		clockTime5.UnixNano(), string(t.team), installationID)
 	if err != nil {
 		return 0, err
 	}
@@ -495,10 +515,14 @@ func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, insta
 		}
 	}()
 
+	clockTime6, clockErr6 := tx.now(ctx)
+	if clockErr6 != nil {
+		return 0, clockErr6
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_repository_id = ? AND github_repository_id > 0
 		  AND github_installation_id != ? AND declared = 1`,
-		tx.time.UnixNano(), string(t.team), repositoryID, installationID)
+		clockTime6.UnixNano(), string(t.team), repositoryID, installationID)
 	if err != nil {
 		return 0, err
 	}
@@ -509,9 +533,13 @@ func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, insta
 // identity, so a rename keeps its history and no second schedule appears.
 func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime7, clockErr7 := tx.now(ctx)
+		if clockErr7 != nil {
+			return clockErr7
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET repo_path = ?, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ?`,
-			repoURL, tx.time.UnixNano(), string(t.team), installationID, repositoryID)
+			repoURL, clockTime7.UnixNano(), string(t.team), installationID, repositoryID)
 		if isUniqueViolation(err) {
 			return fmt.Errorf("%w: a schedule already uses %s", ErrCronScheduleTaken, repoURL)
 		}
@@ -523,9 +551,13 @@ func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID,
 // when the expression never matches again.
 func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime8, clockErr8 := tx.now(ctx)
+		if clockErr8 != nil {
+			return clockErr8
+		}
 		return updateCronScheduleTx(ctx, tx, id,
 			`UPDATE cron_schedules SET next_due_at = ?, updated_at = ? WHERE team = ? AND id = ?`,
-			nullNanos(next), tx.time.UnixNano(), string(t.team), id)
+			nullNanos(next), clockTime8.UnixNano(), string(t.team), id)
 	})
 }
 
@@ -535,11 +567,15 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 // which then follows the checkout again.
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime9, clockErr9 := tx.now(ctx)
+		if clockErr9 != nil {
+			return clockErr9
+		}
 		return updateCronScheduleTx(ctx, tx, id,
 			`UPDATE cron_schedules
             SET locked_ref = ?, locked_binary = ?, locked_digest = ?, updated_at = ?
           WHERE team = ? AND id = ?`,
-			lock.Ref, lock.Binary, lock.Digest, tx.time.UnixNano(), string(t.team), id)
+			lock.Ref, lock.Binary, lock.Digest, clockTime9.UnixNano(), string(t.team), id)
 	})
 }
 
@@ -548,7 +584,13 @@ func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLo
 // declares. Base and SetAt come from the argument, and SetAt defaults
 // to now when it is zero.
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error { return t.setCronOverrideTx(ctx, tx, id, o, tx.time) })
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime10, clockErr10 := tx.now(ctx)
+		if clockErr10 != nil {
+			return clockErr10
+		}
+		return t.setCronOverrideTx(ctx, tx, id, o, clockTime10)
+	})
 }
 
 func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, o CronOverride, now time.Time) error {
@@ -594,13 +636,17 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
 // what the repository declares.
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime11, clockErr11 := tx.now(ctx)
+		if clockErr11 != nil {
+			return clockErr11
+		}
 		return updateCronScheduleTx(ctx, tx, id,
 			`UPDATE cron_schedules
             SET override_cron = NULL, override_tz = NULL, override_overlap = NULL,
                 override_catch_up_ns = NULL, override_args = NULL, override_base = NULL,
                 override_set_at = NULL, updated_at = ?
           WHERE team = ? AND id = ?`,
-			tx.time.UnixNano(), string(t.team), id)
+			clockTime11.UnixNano(), string(t.team), id)
 	})
 }
 
@@ -685,7 +731,13 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 	if fire != nil && !knownCronOutcome(fire.Outcome) {
 		return fmt.Errorf("ResolveCronDue: unknown outcome %q", fire.Outcome)
 	}
-	return t.s.inTx(ctx, func(tx *storeTx) error { return t.resolveCronDueTx(ctx, tx, id, cursor, next, fire, tx.time) })
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		clockTime12, clockErr12 := tx.now(ctx)
+		if clockErr12 != nil {
+			return clockErr12
+		}
+		return t.resolveCronDueTx(ctx, tx, id, cursor, next, fire, clockTime12)
+	})
 }
 
 func (t *Tenant) resolveCronDueTx(ctx context.Context, tx *storeTx, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {

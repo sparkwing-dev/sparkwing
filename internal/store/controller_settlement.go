@@ -6,26 +6,32 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition, now time.Time) (Applied, error) {
-	if _, err := controllerOwnerTx(ctx, tx, team, change.Ref.RunID, now); err != nil {
+func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (Applied, error) {
+	if _, err := controllerOwnerTx(ctx, tx, team, string(change.Ref.RunID)); err != nil {
 		return Applied{}, err
 	}
-	applied, err := transitionNodeStateTx(ctx, tx, team, change, now)
+	applied, err := transitionNodeStateTx(ctx, tx, team, change)
 	if err != nil {
 		return Applied{}, err
 	}
 	if !applied.Replayed {
-		if err = settleControllerTx(ctx, tx, team, change.Ref.RunID, tx.time); err != nil {
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return Applied{}, clockErr1
+		}
+		if err = settleControllerTx(ctx, tx, team, string(change.Ref.RunID), clockTime1); err != nil {
 			return Applied{}, err
 		}
 	}
 	return applied, nil
 }
 
-func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) (*Actor, error) {
+func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string) (*Actor, error) {
 	scheduled, err := controllerSchedulingTx(ctx, tx, team, runID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("run", runID)
@@ -42,14 +48,18 @@ func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string
 	if err != nil {
 		return nil, err
 	}
-	if until <= tx.time.UnixNano() {
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return nil, clockErr2
+	}
+	if until <= clockTime2.UnixNano() {
 		return nil, nil
 	}
-	return &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", RunID: runID, Holder: holder, Generation: generation}}, nil
+	return &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(runID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}, nil
 }
 
 func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) error {
-	actor, err := controllerOwnerTx(ctx, tx, team, runID, now)
+	actor, err := controllerOwnerTx(ctx, tx, team, runID)
 	if err != nil || actor == nil {
 		return err
 	}
@@ -68,7 +78,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 		decision := Decide(graph)
 		changed := false
 		for _, node := range decision.Nodes {
-			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: node.NodeID}, Actor: *actor}
+			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(node.NodeID)}, Actor: *actor}
 			switch node.Kind {
 			case DecisionExpand:
 				_, err = tx.ExecContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES (?,?,?,?,'pending',?) ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation, actor.Owner.Generation)
@@ -81,20 +91,20 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 			case DecisionApproval:
 				change.To, change.Cause = NodeApprovalPending, CauseApprovalOpen
 			case DecisionTerminal:
-				change.To, change.Cause = NodeState(node.Outcome), CauseDependency
+				change.To, change.Cause = NodeState(node.Outcome), causeDependency
 			case DecisionCancelHolder:
-				change.To, change.Cause = NodeCancelled, CauseCancel
+				change.To, change.Cause = NodeCancelled, causeCancel
 			default:
 				return errors.New("unknown scheduling decision")
 			}
-			applied, err := transitionNodeStateTx(ctx, tx, team, change, now)
+			applied, err := transitionNodeStateTx(ctx, tx, team, change)
 			if err != nil {
 				return err
 			}
 			changed = changed || !applied.Replayed
 		}
 		if decision.Outcome != "" {
-			_, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: runID, To: RunState(decision.Outcome), Actor: *actor, Cause: RunFinish, Reason: decision.Reason}, now)
+			_, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(runID), To: RunState(decision.Outcome), Actor: *actor, Cause: RunFinish, Reason: decision.Reason})
 			return err
 		}
 		if !changed {

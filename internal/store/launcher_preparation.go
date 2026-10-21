@@ -107,9 +107,16 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if err != nil {
 		return time.Time{}, err
 	}
-	expiry := tx.time
+	expiry, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return time.Time{}, clockErr1
+	}
 	if !beat.CancelRequested {
-		if expiry, err = leaseBoundTx(ctx, tx, current.Capability.Prefix, tx.time, funded); err != nil {
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return time.Time{}, clockErr2
+		}
+		if expiry, err = leaseBoundTx(ctx, tx, current.Capability.Prefix, clockTime2, funded); err != nil {
 			return time.Time{}, err
 		}
 	}
@@ -125,7 +132,11 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 		args = []any{expiry.UnixNano(), unit.Team, unit.RunID, unit.NodeID, unit.SourceGeneration, current.Capability.Prefix, fence.Generation, fence.Holder}
 	default:
 		query = `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND capability_prefix=? AND generation=? AND claimed_by=?`
-		args = []any{expiry.UnixNano(), tx.time.UnixNano(), unit.Team, unit.RunID, unit.NodeID, current.Capability.Prefix, fence.Generation, fence.Holder}
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return time.Time{}, clockErr3
+		}
+		args = []any{expiry.UnixNano(), clockTime3.UnixNano(), unit.Team, unit.RunID, unit.NodeID, current.Capability.Prefix, fence.Generation, fence.Holder}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -137,7 +148,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if beat.CancelRequested {
 		return time.Time{}, nil
 	}
-	if err = renewCapacityTx(ctx, tx, unit.Team, unit.RunID, unit.NodeID, tx.time, expiry); err != nil {
+	if err = renewCapacityTx(ctx, tx, unit.Team, unit.RunID, unit.NodeID, expiry); err != nil {
 		return time.Time{}, err
 	}
 	return expiry, observeUnitTx(ctx, tx, current.Capability.Prefix)

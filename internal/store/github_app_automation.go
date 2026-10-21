@@ -57,6 +57,10 @@ func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a Gi
 	if err != nil {
 		return err
 	}
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO github_app_automation
 	    (team, repo_key, repository_id, repository, installation_id, enabled_by, enabled_at, runner)
 	    SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
@@ -66,7 +70,7 @@ func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a Gi
 	    enabled_by = excluded.enabled_by, runner = excluded.runner,
 	    enabled_at = CASE WHEN github_app_automation.installation_id = excluded.installation_id
 	        THEN github_app_automation.enabled_at ELSE excluded.enabled_at END`,
-		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, tx.time.UnixNano(), string(runner), string(t.team), a.InstallationID)
+		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, clockTime1.UnixNano(), string(runner), string(t.team), a.InstallationID)
 	if err != nil {
 		return err
 	}

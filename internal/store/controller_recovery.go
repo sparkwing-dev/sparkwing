@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // ControllerRun identifies a visited run and carries its tenant into the next operation.
@@ -41,7 +43,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 	var targets []ControllerRun
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		targets = targets[:0]
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner", tx.time); err != nil {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner"); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT r.team,r.id FROM runs r WHERE `+controllerRunActive+` AND r.id>? ORDER BY r.id LIMIT ?`, after, limit)
@@ -64,7 +66,8 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 	var visited []ControllerRun
 	for _, ref := range targets {
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner", tx.time); err != nil {
+
+			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner"); err != nil {
 				return err
 			}
 			if err := lockStateRunTx(ctx, tx, ref.Team, ref.RunID); err != nil {
@@ -81,23 +84,28 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 			if err != nil {
 				return err
 			}
-			actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation, RunID: ref.RunID}}
+			actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation), RunID: runspec.RunID(ref.RunID)}}}
 			if run.State == RunPending && run.CancelRequestedAt == nil {
-				if _, err := transitionRunTx(ctx, tx, ref.Team, RunTransition{RunID: ref.RunID, To: RunRunning, Actor: actor, Cause: RunStart}, tx.time); err != nil {
+				if _, err := transitionRunTx(ctx, tx, ref.Team, RunTransition{RunID: runspec.RunID(ref.RunID), To: RunRunning, Actor: actor, Cause: RunStart}); err != nil {
 					return err
 				}
 			}
-			if err := settleControllerTx(ctx, tx, ref.Team, ref.RunID, tx.time); err != nil {
+			clockTime4, clockErr4 := tx.now(ctx)
+			if clockErr4 != nil {
+				return clockErr4
+			}
+			if err := settleControllerTx(ctx, tx, ref.Team, ref.RunID, clockTime4); err != nil {
 				return err
 			}
 			var until int64
 			if err := tx.QueryRowContext(ctx, "SELECT until FROM leases WHERE name='controller.owner'").Scan(&until); err != nil {
 				return err
 			}
-			if err := renewCapacityTx(ctx, tx, ref.Team, ref.RunID, "", tx.time, time.Unix(0, until)); err != nil {
+			if err := renewCapacityTx(ctx, tx, ref.Team, ref.RunID, "", time.Unix(0, until)); err != nil {
 				return err
 			}
-			return assertSingletonLeaseTx(ctx, tx, lease, "controller.owner", tx.time)
+
+			return assertSingletonLeaseTx(ctx, tx, lease, "controller.owner")
 		})
 		if err != nil {
 			return visited, err

@@ -2,10 +2,17 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	modernsqlite "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -195,8 +202,8 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	tenant, owner := secretReadStoreFixture(t)
 	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
 	b := owner.Binding
-	actor := Actor{Kind: ActorRunHost, Authority: owner.Principal.Authority, CapabilityPrefix: owner.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: b.RunID, Holder: b.Holder, Generation: b.Generation}}
-	ref := controllerwire.NodeRef{RunID: b.RunID, NodeID: "job"}
+	actor := Actor{Kind: ActorRunHost, Authority: owner.Principal.Authority, CapabilityPrefix: owner.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: "job"}
 	reconciled, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: ref, Actor: actor, Policy: SourceResume})
 	if err != nil || reconciled.Claim == nil {
 		t.Fatalf("job claim: %+v %v", reconciled, err)
@@ -211,7 +218,7 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	if row, err := tenant.ReadSecret(t.Context(), a); err != nil || row == nil {
 		t.Fatalf("unstarted job read: %+v %v", row, err)
 	}
-	holder := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: claim.CapabilityPrefix, Holder: claim.Holder, Generation: claim.Generation}
+	holder := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: new(runspec.AttemptOrdinal)}); err != nil {
 		t.Fatal(err)
 	}
@@ -239,5 +246,63 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	a.Target.SecretName = "EXTRA_GENERATED_SECRET"
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("job broadened pipeline declarations: %+v %v", row, err)
+	}
+}
+
+func TestSecretReadRefusesLeaseExpiredWhileWaitingForLock(t *testing.T) {
+	tenant, authorized := secretReadStoreFixture(t)
+	s := tenant.s
+	var expires int64
+	if err := s.db.QueryRow(`SELECT lease_expires_at FROM triggers WHERE id=?`, authorized.Binding.RunID).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "secret.db")
+	if _, err := s.db.Exec(`VACUUM INTO ?`, path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := (&modernsqlite.Driver{}).Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, release := make(chan struct{}), make(chan struct{})
+	var waited atomic.Bool
+	recording := &authorizationConnection{Conn: raw, beforeLock: func(query string) {
+		if strings.HasPrefix(query, "SELECT id FROM runs ") && waited.CompareAndSwap(false, true) {
+			close(locked)
+			<-release
+		}
+	}}
+	s.db = sql.OpenDB(authorizationConnector{conn: recording})
+	s.db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = s.db.Close() })
+	s.dialect = DialectPostgres
+	var clock atomic.Int64
+	clock.Store(expires - int64(time.Second))
+	s.pinnedClock = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	type result struct {
+		secret *Secret
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		secret, err := tenant.ReadSecret(t.Context(), authorized)
+		done <- result{secret, err}
+	}()
+	select {
+	case <-locked:
+	case got := <-done:
+		t.Fatalf("read finished before waiting on the run lock: %+v", got)
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	}
+	clock.Store(expires)
+	close(release)
+	got := <-done
+	if got.secret != nil || got.err == nil {
+		t.Fatalf("expired claim released secret after lock wait: %+v, %v", got.secret, got.err)
+	}
+	var releases int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&releases); err != nil || releases != 0 {
+		t.Fatalf("expired release audit count = %d, error = %v", releases, err)
 	}
 }

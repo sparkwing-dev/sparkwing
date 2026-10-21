@@ -24,7 +24,7 @@ func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc
 
 func capacityRow(t *testing.T, fixture *storeHostFixture, id string) store.NodeRow {
 	t.Helper()
-	row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
+	row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, Holder: award.Node.ClaimedBy, Generation: runspec.ClaimGeneration(int64(award.Node.Generation))}
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: award.Node.Ref.RunID, NodeID: award.Node.Ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
 	if _, err := first.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: row.Ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +132,8 @@ func TestStoreAdmissionSQLiteCancelOthersStopsOwnerSelfClaimedExecution(t *testi
 		return wait(ctx, before)
 	}
 	first.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-		ref := controllerwire.NodeRef{RunID: first.Accepted.RunID, NodeID: input.NodeID}
-		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: runspec.ClaimGeneration(int64(input.Generation))}
+		ref := controllerwire.NodeRef{RunID: runspec.RunID(first.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
 		applied, err := first.State.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(input.Attempt)})
 		if err != nil {
 			return err
@@ -347,7 +347,7 @@ func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) 
 		t.Fatalf("plan state=%+v err=%v", state, err)
 	}
 	cancelCapacityNode(t, fixture, capacityRow(t, fixture, "a"))
-	if _, err := fixture.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: fixture.Actor.Owner, Transition: store.RunCompletion{RunID: fixture.Accepted.RunID, Actor: fixture.Actor, Cause: store.RunFinish}}); err != nil {
+	if _, err := fixture.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: fixture.Actor.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(fixture.Accepted.RunID), Actor: fixture.Actor, Cause: store.RunFinish}}); err != nil {
 		t.Fatal(err)
 	}
 	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "global:deploys")
@@ -359,7 +359,7 @@ func TestStoreAdmissionSQLitePlanCapacityRetainedUntilRunFinishes(t *testing.T) 
 func TestStoreAdmissionRequiresCoordinationStore(t *testing.T) {
 	accepted := localAdmissionSeal(t, localAdmissionOptions())
 	row := localAdmissionRow("a")
-	admission := StoreAdmission{Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: accepted.RunID, Holder: "owner", Generation: 1}}}
+	admission := StoreAdmission{Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(accepted.RunID), Holder: "owner", Generation: 1}}}}
 	if err := admission.Node(t.Context(), accepted, row, func(context.Context) error { t.Error("job ran without store"); return nil }); err == nil {
 		t.Fatal("missing store admitted work")
 	}
@@ -377,7 +377,7 @@ func FuzzStoreAdmissionSQLiteRejectsStaleOwner(f *testing.F) {
 	f.Fuzz(func(t *testing.T, delta uint16) {
 		fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
 		actor := fixture.Actor
-		actor.Owner.Generation += int64(delta) + 1
+		actor.Owner.Generation += runspec.ClaimGeneration(int64(delta) + 1)
 		admission := StoreAdmission{Store: fixture.Tenant, Owner: actor}
 		if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { t.Error("stale owner ran"); return nil }); err == nil {
 			t.Fatal("stale owner admitted")
@@ -395,7 +395,7 @@ func TestStoreAdmissionSQLitePlanGroupBoundsTwoRuns(t *testing.T) {
 	secondAdmission := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
 	secondAdmission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
 		cancelCapacityNode(t, first, capacityRow(t, first, "a"))
-		_, err := first.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: first.Actor.Owner, Transition: store.RunCompletion{RunID: first.Accepted.RunID, Actor: first.Actor, Cause: store.RunFinish}})
+		_, err := first.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: first.Actor.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(first.Accepted.RunID), Actor: first.Actor, Cause: store.RunFinish}})
 		return err
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

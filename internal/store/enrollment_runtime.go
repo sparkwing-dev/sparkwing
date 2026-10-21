@@ -82,7 +82,11 @@ func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.Pro
 }
 
 func checkEnrollmentNamesTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,subject_id,revoked_at FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind=? AND audience='controller' AND bind_kind='none' AND unit_kind IS NULL AND parent_id IS NULL AND `+liveCredentialSQL("")+``, spec.Team, spec.Subject.Kind, tx.time.UnixNano(), tx.time.UnixNano())
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,subject_id,revoked_at FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind=? AND audience='controller' AND bind_kind='none' AND unit_kind IS NULL AND parent_id IS NULL AND `+liveCredentialSQL("")+``, spec.Team, spec.Subject.Kind, clockTime1.UnixNano(), clockTime1.UnixNano())
 	if err != nil {
 		return err
 	}

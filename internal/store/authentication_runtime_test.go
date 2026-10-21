@@ -166,7 +166,7 @@ func TestAuthenticationCancellationReasonKeepsJobIntentProperty(t *testing.T) {
 			if i == 0 {
 				reason = ""
 			}
-			_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
+			_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
 			if err != nil {
 				t.Fatal(err)
 			}

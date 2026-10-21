@@ -37,7 +37,11 @@ func (t *Tenant) BillingStanding(ctx context.Context) (out BillingStanding, err 
 	}
 	defer rollbackOrLog(tx)
 
-	return trustStandingTx(ctx, tx, t.team, tx.time)
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return BillingStanding{}, clockErr1
+	}
+	return trustStandingTx(ctx, tx, t.team, clockTime1)
 }
 
 func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (BillingStanding, error) {

@@ -149,7 +149,7 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	}
 	var node store.NodeRow
 	if claim.Kind == capability.UnitNode {
-		node, err = tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID})
+		node, err = tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
 		if err != nil {
 			return controllerwire.ClaimedUnit{}, err
 		}

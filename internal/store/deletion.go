@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -95,7 +97,11 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team) (TeamDele
 	var revoked []string
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, clockTime1)
 		return err
 	})
 	return result, revoked, err
@@ -355,7 +361,11 @@ func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err 
 }
 
 func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.time.UnixNano())...)
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return nil, clockErr2
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, clockTime2.UnixNano())...)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +402,7 @@ func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.T
 	tx.cancelingTeam = t.team
 	defer func() { tx.cancelingTeam = previous }()
 	for _, id := range ids {
-		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: id, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}, now); err != nil {
+		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: runspec.RunID(id), To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}); err != nil {
 			return err
 		}
 	}
@@ -478,13 +488,21 @@ func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder stri
 	if holder == "" {
 		return false, errors.New("store: a deletion lease needs a holder")
 	}
-	at := tx.time.UTC().UnixNano()
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return false, clockErr3
+	}
+	at := clockTime3.UTC().UnixNano()
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return false, clockErr4
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE team_deletions SET lease_holder = ?, lease_until = ?
 		WHERE slug = ?
 		  AND (state = ? OR (state = ? AND recheck_at IS NOT NULL AND recheck_at <= ?))
 		  AND (lease_until IS NULL OR lease_until < ? OR lease_holder = ?)`,
-		holder, tx.time.Add(lease).UTC().UnixNano(), string(NormalizeTeam(team)),
+		holder, clockTime4.Add(lease).UTC().UnixNano(), string(NormalizeTeam(team)),
 		TeamDeletionPending, TeamDeletionDone, at, at, holder)
 	if err != nil {
 		return false, err
@@ -496,10 +514,14 @@ func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder stri
 func (o *Operator) requireLease(ctx context.Context, team Team, holder, state string) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		var n int
+		clockTime5, clockErr5 := tx.now(ctx)
+		if clockErr5 != nil {
+			return clockErr5
+		}
 		if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM team_deletions
 		WHERE slug = ? AND state = ? AND lease_holder = ? AND lease_until >= ?`,
-			string(team), state, holder, tx.time.UTC().UnixNano()).Scan(&n); err != nil {
+			string(team), state, holder, clockTime5.UTC().UnixNano()).Scan(&n); err != nil {
 			return err
 		}
 		if n != 1 {
@@ -544,12 +566,20 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 		return err
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		at := tx.time.UTC().UnixNano()
+		clockTime6, clockErr6 := tx.now(ctx)
+		if clockErr6 != nil {
+			return clockErr6
+		}
+		at := clockTime6.UTC().UnixNano()
+		clockTime7, clockErr7 := tx.now(ctx)
+		if clockErr7 != nil {
+			return clockErr7
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
 			    lease_holder = '', lease_until = NULL
 			WHERE slug = ? AND state = ? AND lease_holder = ?`,
-			TeamDeletionDone, at, tx.time.Add(recheckAfter).UTC().UnixNano(), string(team), TeamDeletionPending, holder)
+			TeamDeletionDone, at, clockTime7.Add(recheckAfter).UTC().UnixNano(), string(team), TeamDeletionPending, holder)
 		if err != nil {
 			return err
 		}
@@ -626,7 +656,11 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string) (AccountDel
 	var result AccountDeletion
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, tx.time)
+		clockTime8, clockErr8 := tx.now(ctx)
+		if clockErr8 != nil {
+			return clockErr8
+		}
+		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, clockTime8)
 		return err
 	})
 	return result, err
@@ -868,8 +902,16 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 			return false, err
 		}
 	}
-	at := tx.time.UTC().UnixNano()
-	since := tx.time.Add(-24 * time.Hour).UnixNano()
+	clockTime9, clockErr9 := tx.now(ctx)
+	if clockErr9 != nil {
+		return false, clockErr9
+	}
+	at := clockTime9.UTC().UnixNano()
+	clockTime10, clockErr10 := tx.now(ctx)
+	if clockErr10 != nil {
+		return false, clockErr10
+	}
+	since := clockTime10.Add(-24 * time.Hour).UnixNano()
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM invitation_email_log WHERE address = ? AND sent_at <= ?`, address, since); err != nil {
 		return false, err

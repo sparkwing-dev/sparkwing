@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -50,7 +52,7 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture, operation, id stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "global:deploy", SlotHolderID: id, SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: int64(row.Generation)}
+	target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), SlotKey: "global:deploy", SlotHolderID: id, SlotRunID: string(f.ref.RunID), SlotNodeID: string(f.ref.NodeID), SlotGeneration: int64(row.Generation)}
 	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +65,7 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture, operation, id stri
 }
 
 func slotRequest(f *storeRecoveryFixture, id string) store.AcquireSlotRequest {
-	return store.AcquireSlotRequest{Key: "global:deploy", HolderID: id, RunID: f.ref.RunID, NodeID: f.ref.NodeID, Lease: time.Hour}
+	return store.AcquireSlotRequest{Key: "global:deploy", HolderID: id, RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Lease: time.Hour}
 }
 
 func TestConcurrencyHTTPUsesDeclaredGroupAndConcreteTransactions(t *testing.T) {
@@ -96,7 +98,7 @@ func TestConcurrencyHTTPUsesDeclaredGroupAndConcreteTransactions(t *testing.T) {
 	}
 	var group controllerwire.QueueGroup
 	call(http.MethodGet, "", "", http.StatusOK, &group)
-	if group.Capacity != 3 || group.UsedCost != 2 || len(group.Holders) != 1 || group.Holders[0].HolderID != "http-holder" || group.Holders[0].RunID != f.ref.RunID || group.Holders[0].JobID != f.ref.NodeID {
+	if group.Capacity != 3 || group.UsedCost != 2 || len(group.Holders) != 1 || group.Holders[0].HolderID != "http-holder" || runspec.RunID(group.Holders[0].RunID) != f.ref.RunID || runspec.NodeID(group.Holders[0].JobID) != f.ref.NodeID {
 		t.Fatalf("HTTP group differs from accepted declaration: %+v", group)
 	}
 	call(http.MethodGet, "/holder?holder_id=http-holder", "", http.StatusOK, nil)
@@ -171,7 +173,7 @@ func TestAuthorizedConcurrencyPreservesDeclarationAndAuthorityProperty(t *testin
 		t.Fatalf("request replaced declaration: %+v, %v", state, err)
 	}
 	read := slotAuthorization(t, f, "/holder", "holder")
-	if holder, err := f.tenant.ReadAuthorizedHolder(t.Context(), read, "global:deploy", "holder"); err != nil || holder.RunID != f.ref.RunID || holder.Cost != 2 {
+	if holder, err := f.tenant.ReadAuthorizedHolder(t.Context(), read, "global:deploy", "holder"); err != nil || runspec.RunID(holder.RunID) != f.ref.RunID || holder.Cost != 2 {
 		t.Fatalf("read own holder: %+v, %v", holder, err)
 	}
 	before := *state
@@ -204,7 +206,7 @@ func TestAuthorizedConcurrencyCancellationKeepsReportingAndRevocationRefusesAll(
 	if _, err := f.tenant.AcquireAuthorizedSlot(t.Context(), acquire, slotRequest(f, "holder")); err == nil {
 		t.Fatal("cancelled claim reacquired capacity")
 	}
-	if _, err := f.tenant.ResolveAuthorizedWaiter(t.Context(), resolve, "global:deploy", f.ref.RunID, f.ref.NodeID, "", "", "", false); err == nil {
+	if _, err := f.tenant.ResolveAuthorizedWaiter(t.Context(), resolve, "global:deploy", string(f.ref.RunID), string(f.ref.NodeID), "", "", "", false); err == nil {
 		t.Fatal("cancelled claim resolved sensitive capacity")
 	}
 	until, _, err := f.tenant.HeartbeatAuthorizedSlot(t.Context(), heartbeat, "global:deploy", "holder", time.Hour)
@@ -251,7 +253,7 @@ func TestAuthorizedConcurrencyRefusesForeignHolderGenerationAndReadEdges(t *test
 	random := rand.New(rand.NewPCG(7311, 9914))
 	for range 32 {
 		run, job := competitor, fmt.Sprintf("job/%x", random.Uint64())
-		if _, err := f.tenant.ResolveAuthorizedWaiter(t.Context(), resolve, "global:deploy", f.ref.RunID, f.ref.NodeID, "", run, job, false); err == nil {
+		if _, err := f.tenant.ResolveAuthorizedWaiter(t.Context(), resolve, "global:deploy", string(f.ref.RunID), string(f.ref.NodeID), "", run, job, false); err == nil {
 			t.Fatal("undeclared leader edge resolved")
 		}
 	}
@@ -390,10 +392,10 @@ func TestAuthorizedReleaseIgnoresReportedOutcomeForPromotion(t *testing.T) {
 			if _, err := f.tenant.AcquireAuthorizedSlot(t.Context(), slotAuthorization(t, f, "/acquire", "leader"), slotRequest(f, "leader")); err != nil {
 				t.Fatal(err)
 			}
-			if err := teststore.SeedNode(f.s, t.Context(), store.Node{RunID: f.ref.RunID, NodeID: "follower", Status: "pending"}); err != nil {
+			if err := teststore.SeedNode(f.s, t.Context(), store.Node{RunID: string(f.ref.RunID), NodeID: "follower", Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
-			queued, err := f.tenant.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "global:deploy", HolderID: "follower", RunID: f.ref.RunID, NodeID: "follower", Policy: store.OnLimitQueue, Capacity: 3, Cost: 2})
+			queued, err := f.tenant.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "global:deploy", HolderID: "follower", RunID: string(f.ref.RunID), NodeID: "follower", Policy: store.OnLimitQueue, Capacity: 3, Cost: 2})
 			if err != nil || queued.Kind != store.AcquireQueued {
 				t.Fatalf("follower setup: %+v %v", queued, err)
 			}

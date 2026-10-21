@@ -56,7 +56,11 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 			if page.Kind != kind || kind == capability.BillingPageCredits && page.AmountCents != amount || kind != capability.BillingPageCredits && amount != 0 {
 				return authorityError(apierr.Conflict, "idempotency key names another billing request")
 			}
-			if !tx.time.Before(page.ExpiresAt) {
+			clockTime1, clockErr1 := tx.now(ctx)
+			if clockErr1 != nil {
+				return clockErr1
+			}
+			if !clockTime1.Before(page.ExpiresAt) {
 				return authorityError(apierr.Conflict, "payment page reservation expired")
 			}
 			return nil
@@ -68,7 +72,11 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		if err != nil {
 			return err
 		}
-		page = capability.BillingPage{Kind: kind, Team: string(t.team), ExpiresAt: tx.time.Add(billingPageLife)}
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		page = capability.BillingPage{Kind: kind, Team: string(t.team), ExpiresAt: clockTime2.Add(billingPageLife)}
 		if err := tx.QueryRowContext(ctx, `SELECT t.card_customer,a.email FROM teams t JOIN accounts a ON a.id=? WHERE t.name=?`, p.Capability.Subject.ID, t.team).Scan(&page.Customer, &page.Email); err != nil {
 			return err
 		}
@@ -78,7 +86,11 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 				return ErrInvalidInput
 			}
 			page.AmountCents = amount
-			page.ReservationID, err = t.openCreditCheckoutTx(ctx, tx, amount*MicroCreditsPerCent, tx.time, billingPageLife)
+			clockTime3, clockErr3 := tx.now(ctx)
+			if clockErr3 != nil {
+				return clockErr3
+			}
+			page.ReservationID, err = t.openCreditCheckoutTx(ctx, tx, amount*MicroCreditsPerCent, clockTime3, billingPageLife)
 		case capability.BillingPageCard:
 			if amount != 0 {
 				return ErrInvalidInput
@@ -131,7 +143,11 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 			expected.Customer = page.Customer
 		}
 		u, urlErr := url.Parse(page.URL)
-		if !reflect.DeepEqual(expected, page) || page.ProviderID == "" || urlErr != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || page.ExpiresAt.After(prior.ExpiresAt) || !page.ExpiresAt.After(tx.time) {
+		clockTime4, clockErr4 := tx.now(ctx)
+		if clockErr4 != nil {
+			return clockErr4
+		}
+		if !reflect.DeepEqual(expected, page) || page.ProviderID == "" || urlErr != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || page.ExpiresAt.After(prior.ExpiresAt) || !page.ExpiresAt.After(clockTime4) {
 			return ErrInvalidInput
 		}
 		if prior.URL != "" {
@@ -180,7 +196,11 @@ func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capab
 		if prior.Kind != page.Kind || prior.Team != page.Team || prior.AmountCents != page.AmountCents {
 			return ErrInvalidInput
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE billing_pages SET failed_at=? WHERE team=? AND id=?`, tx.time.UnixNano(), t.team, page.ReservationID)
+		clockTime5, clockErr5 := tx.now(ctx)
+		if clockErr5 != nil {
+			return clockErr5
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE billing_pages SET failed_at=? WHERE team=? AND id=?`, clockTime5.UnixNano(), t.team, page.ReservationID)
 		return err
 	})
 }

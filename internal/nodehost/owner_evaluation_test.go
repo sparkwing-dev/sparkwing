@@ -247,7 +247,7 @@ func TestOwnerEvaluationValidatorSeesRawCombinedBodyAndPersistedTopology(t *test
 			return validate(raw, ctx)
 		}
 		validated = true
-		if ctx.SourceJob != st.row.Ref.NodeID || len(ctx.ExistingJobs) != 1 || ctx.ExistingJobs[0].ID != in.NodeID {
+		if runspec.NodeID(ctx.SourceJob) != st.row.Ref.NodeID || len(ctx.ExistingJobs) != 1 || ctx.ExistingJobs[0].ID != in.NodeID {
 			t.Fatalf("context = %+v", ctx)
 		}
 		if !strings.Contains(string(raw), `"unrecognized":true`) {

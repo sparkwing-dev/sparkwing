@@ -114,7 +114,7 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 	if err := host.AdoptClaim(t.Context(), claim); err != nil {
 		t.Fatal(err)
 	}
-	nodeActor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, Generation: claim.Node.Generation}
+	nodeActor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: claim.Node.Generation}}
 	started, err := host.TransitionNode(t.Context(), store.StartNode{Ref: claim.Node.Ref, Actor: nodeActor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("start: %+v %#v", started, err)
@@ -231,7 +231,7 @@ func TestLocalHostPrivateTransportDrainsCancelledOwner(t *testing.T) {
 	if err := host.AdoptClaim(t.Context(), claim); err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, Generation: claim.Node.Generation}
+	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: claim.Node.Generation}}
 	started, err := host.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +302,7 @@ func FuzzLocalHostRejectsForeignAuthority(f *testing.F) {
 		value = "foreign:" + value
 		switch field % 10 {
 		case 0:
-			node.Ref.RunID = value
+			node.Ref.RunID = runspec.RunID(value)
 		case 1:
 			node.OwnerCapabilityPrefix = value
 		case 2:

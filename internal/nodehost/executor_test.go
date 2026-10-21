@@ -45,7 +45,7 @@ func (s *executorStore) ReadNode(_ context.Context, ref controllerwire.NodeRef) 
 	if ref == s.row.Ref {
 		return s.row, nil
 	}
-	if row, ok := s.nodes[ref.NodeID]; ok {
+	if row, ok := s.nodes[string(ref.NodeID)]; ok {
 		return row, nil
 	}
 	return store.NodeRow{}, errors.New("node absent")
@@ -224,7 +224,7 @@ func FuzzNodeExecutorCapturesSourceAttempt(f *testing.F) {
 	f.Add(uint16(15), uint8(1), true)
 	f.Fuzz(func(t *testing.T, initial uint16, retries uint8, replaced bool) {
 		input, state, deps, processes := executorFixture(t)
-		input.Attempt, state.row.Attempt = runspec.AttemptOrdinal(int64(initial)), runspec.AttemptOrdinal(int64(initial))
+		input.Attempt, state.row.Attempt = runspec.AttemptOrdinal(initial), runspec.AttemptOrdinal(initial)
 		executorRetryBudget(t, &input, state, int(retries%4))
 		start := deps.Start
 		deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
@@ -746,21 +746,21 @@ func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDep
 	for i, declaration := range []nodeproto.JobSpec{root, parent, unrelated} {
 		body, _ := json.Marshal(declaration)
 		hash, _ := executorHash(declaration)
-		state.nodes[declaration.ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: declaration.ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(int64(i + 2)), Spec: body, SpecHash: string(hash)}
+		state.nodes[declaration.ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(declaration.ID)}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(i + 2), Spec: body, SpecHash: string(hash)}
 	}
 	for i, declaration := range []nodeproto.JobSpec{parent, job, {ID: "unused", Groups: []string{"other"}}} {
 		body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{declaration}}
 		raw, _ := json.Marshal(body)
 		hash, _ := executorHash(body)
-		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: []string{"root", "parent", "unrelated"}[i]}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
+		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID([]string{"root", "parent", "unrelated"}[i])}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
 	}
 	reads := []string{}
 	deps.Store = recordedReplayStore{state}
 	deps.ReadOutput = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
-		if ref.RunID != "run" || ref.NodeID != "root" && ref.NodeID != "parent" || runspec.ClaimGeneration(generation) != state.nodes[ref.NodeID].Generation {
+		if ref.RunID != "run" || ref.NodeID != "root" && ref.NodeID != "parent" || runspec.ClaimGeneration(generation) != state.nodes[string(ref.NodeID)].Generation {
 			t.Fatal("read outside the persisted ancestor generations")
 		}
-		reads = append(reads, ref.NodeID)
+		reads = append(reads, string(ref.NodeID))
 		return json.Marshal(ref.NodeID)
 	}
 	start := deps.Start
@@ -827,7 +827,7 @@ func FuzzRecordedReplayValidatesLineageBeforeOutputReads(f *testing.F) {
 		case 2:
 			state.expansions[0].BodyHash = "changed:" + value
 		case 3:
-			state.expansions[0].Source.RunID = "changed:" + value
+			state.expansions[0].Source.RunID = runspec.RunID("changed:" + value)
 		case 4:
 			row.Status = store.StatusPending
 		case 5:
@@ -837,7 +837,7 @@ func FuzzRecordedReplayValidatesLineageBeforeOutputReads(f *testing.F) {
 		case 7:
 			row.Spec = json.RawMessage(`{"id":"changed"}`)
 		case 8:
-			row.Ref.NodeID = "changed:" + value
+			row.Ref.NodeID = runspec.NodeID("changed:" + value)
 		case 9:
 			state.expansions[0].SourceGeneration++
 		}
@@ -886,7 +886,7 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	s.nodes = map[string]store.NodeRow{"source": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeFailed}}
 	failure := nodeproto.JobFailure{Job: "source", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
 	deps.ReadFailure = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
-		if runspec.ClaimGeneration(generation) != s.nodes[ref.NodeID].Generation {
+		if runspec.ClaimGeneration(generation) != s.nodes[string(ref.NodeID)].Generation {
 			t.Fatal("failure reader lost the source generation")
 		}
 		return &failure, nil

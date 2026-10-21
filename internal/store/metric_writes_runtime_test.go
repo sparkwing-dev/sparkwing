@@ -22,7 +22,7 @@ func metricAuthorization(t *testing.T, f *storeRecoveryFixture, kind string) cap
 	if !ok {
 		t.Fatal("missing metric route")
 	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID}
+	target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID)}
 	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestMetricTransactionsRecheckReportingAuthorityProperty(t *testing.T) {
 			t.Fatalf("forged usage %d committed", i)
 		}
 	}
-	samples, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+	samples, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil || len(samples) != 0 {
 		t.Fatalf("refused metrics = %v, %v", samples, err)
 	}
@@ -150,7 +150,7 @@ func TestMetricRunHostReportsFinishedJobsUnderItsOwnFence(t *testing.T) {
 				live = append(live, capability.LiveAccess{RuleIndex: i})
 			}
 		}
-		target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID}
+		target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID)}
 		a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, capability.Authenticated{Principal: principal, Method: route.Method, Pattern: route.Path, Live: live}, target)
 		if err != nil {
 			t.Fatal(err)

@@ -626,6 +626,10 @@ components:
           type: boolean
         generation:
           type: integer
+        outcome:
+          type: string
+        reason:
+          type: string
         replayed:
           type: boolean
         state_seq:
@@ -6081,18 +6085,24 @@ components:
           type: string
         Kind:
           type: string
+        NodeID:
+          type: string
         Owner:
           $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
         Result:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.RecordedResult'
             - type: "null"
+        RunID:
+          type: string
       required:
         - Result
         - ConsoleProof
         - Authority
         - Kind
         - CapabilityPrefix
+        - RunID
+        - NodeID
         - Holder
         - Generation
         - Owner

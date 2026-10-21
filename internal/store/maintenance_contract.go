@@ -73,10 +73,15 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 	if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
 		return SingletonLease{}, err
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name, tx.time); err != nil {
+
+	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name); err != nil {
 		return SingletonLease{}, err
 	}
-	lease.ExpiresAt = tx.time.Add(ttl)
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return SingletonLease{}, clockErr2
+	}
+	lease.ExpiresAt = clockTime2.Add(ttl)
 	if _, err := tx.ExecContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
 		return SingletonLease{}, err
 	}
@@ -158,7 +163,11 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error {
 		return err
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		result, err := tx.ExecContext(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, tx.time.UnixNano())
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return clockErr3
+		}
+		result, err := tx.ExecContext(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, clockTime3.UnixNano())
 		if err != nil {
 			return err
 		}

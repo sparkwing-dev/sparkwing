@@ -73,7 +73,11 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 	var out StandingRequest
 	err := t.billingMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
 		actor := p.Capability.Subject.ID
-		standing, err := trustStandingTx(ctx, tx, t.team, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		standing, err := trustStandingTx(ctx, tx, t.team, clockTime1)
 		if err != nil {
 			return err
 		}
@@ -88,7 +92,10 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 		if err != nil {
 			return err
 		}
-		now := tx.time
+		now, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
 			return err
 		}
@@ -136,7 +143,10 @@ func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, st
 	if err != nil {
 		return r, err
 	}
-	now := tx.time
+	now, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return StandingRequest{}, clockErr3
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE standing_requests SET state=?,decided_by=?,decided_at=?,decision_reason=? WHERE team=? AND id=? AND state=?`, state, actor, now.UnixNano(), reason, team, id, StandingRequestOpen); err != nil {
 		return r, err
 	}

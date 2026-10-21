@@ -276,14 +276,14 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+			actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 			// safety: another pass can commit recovery and plan acceptance
 			// between candidate selection and the per-unit transaction.
 			err = s.inTx(t.Context(), func(tx *storeTx) error {
-				if err := assertSingletonLeaseTx(t.Context(), tx, lease, "controller.reaper", tx.time); err != nil {
+				if err := assertSingletonLeaseTx(t.Context(), tx, lease, "controller.reaper"); err != nil {
 					return err
 				}
-				reaped, err := reapOwnerUnitTx(t.Context(), tx, stale[0], actor, tx.time)
+				reaped, err := reapOwnerUnitTx(t.Context(), tx, stale[0], actor, transactionTime(t, tx))
 				if err == nil && reaped != nil {
 					t.Errorf("stale candidate recovered accepted plan: %+v", reaped)
 				}
@@ -306,7 +306,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 
 func TestRunOwnerLostRefusesUnstartedLocalOwner(t *testing.T) {
 	tenant, _, lease := ownerReaperFixture(t, false, 0, runspec.OriginLocal)
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunOwnerLost, Actor: actor}); err == nil {
 		t.Fatal("unstarted local owner failed as an orphan")
 	}

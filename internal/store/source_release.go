@@ -67,7 +67,11 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if policy == nil {
 			policy = sharedSourceReleaseContracts{}
 		}
-		audit, err = policy.AuthorizeSourceRelease(request, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		audit, err = policy.AuthorizeSourceRelease(request, clockTime1)
 		if err != nil {
 			return err
 		}

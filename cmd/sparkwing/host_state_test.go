@@ -45,7 +45,7 @@ func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
 		called := false
 		failure := errors.New("node authority unavailable")
 		nodes := nodeControllerState{PrivateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
-			if ref != (controllerwire.NodeRef{RunID: run, NodeID: node}) {
+			if ref != (controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}) {
 				t.Fatal("step selected another node's authority")
 			}
 			if refuse {
@@ -108,7 +108,7 @@ func TestCLIHostStatePreservesStepAttemptProperty(t *testing.T) {
 
 func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 	request := store.PlanAcceptance{
-		RunID: "current-run", Actor: store.Actor{Owner: store.OwnerLeaseRef{RunID: "current-run", Holder: "owner", Generation: 7}},
+		RunID: "current-run", Actor: store.Actor{Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "current-run", Holder: "owner", Generation: 7}}},
 		Seal: runspec.SealInput{Plan: json.RawMessage(`{"jobs":[]}`)},
 	}
 	want := controllerwire.PlanAccepted{Plan: request.Seal.Plan, PlanHash: "plan-hash", Replayed: true}
@@ -170,7 +170,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		attempt := int64(ordinal) + 1
 		actor := store.Actor{
 			Kind: store.ActorRunHost, CapabilityPrefix: secret,
-			Owner: store.OwnerLeaseRef{RunID: "run", Holder: secret, Generation: int64(generation) + 1},
+			Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: secret, Generation: runspec.ClaimGeneration(int64(generation) + 1)}},
 		}
 		calls := 0
 		wire, err := client.NewEngineClient(client.EngineOptions{
@@ -242,7 +242,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 }
 
 func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
-	owner := store.OwnerLeaseRef{RunID: "run", Holder: "host", Generation: 1}
+	owner := store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	want := errors.New("completion not committed")
 	calls := 0
 	wire := hostStateController{finish: func(_ context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
@@ -279,7 +279,7 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}
+	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	request := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
 		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
 	}}

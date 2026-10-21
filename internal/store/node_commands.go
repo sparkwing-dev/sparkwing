@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"reflect"
 	"time"
 
@@ -12,14 +13,9 @@ import (
 // Each command fixes its edge and carries only that edge's payload.
 type NodeCommand interface {
 	nodeChange() nodeTransition
-	bind(controllerwire.NodeRef, Actor) NodeCommand
 }
 
 func (c nodeTransition) nodeChange() nodeTransition { return c }
-func (c nodeTransition) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
 
 // NodeCommandAuthority returns the target and captured authority for transport selection.
 func NodeCommandAuthority(c NodeCommand) (controllerwire.NodeRef, Actor) {
@@ -35,7 +31,9 @@ func BindNodeCommand(c NodeCommand, ref controllerwire.NodeRef, actor Actor) Nod
 	if nilNodeCommand(c) {
 		return nil
 	}
-	return c.bind(ref, actor)
+	change := c.nodeChange()
+	change.Ref, change.Actor = ref, actor
+	return change
 }
 
 // StartNode requests the start edge.
@@ -94,7 +92,7 @@ type ReleaseNode struct {
 }
 
 func (c ReleaseNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: NodePending, Cause: CauseRelease, Extra: transitionExtra{}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: nodePending, Cause: CauseRelease, Extra: transitionExtra{}}
 }
 
 // CancelNode requests the cancel edge.
@@ -105,7 +103,7 @@ type CancelNode struct {
 }
 
 func (c CancelNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: NodeCancelled, Cause: CauseCancel, Extra: transitionExtra{Result: c.Result}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: c.Result}}
 }
 
 // DependencyNode requests the dependency edge.
@@ -117,7 +115,7 @@ type DependencyNode struct {
 }
 
 func (c DependencyNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: CauseDependency, Extra: transitionExtra{Result: c.Result}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: causeDependency, Extra: transitionExtra{Result: c.Result}}
 }
 
 // OwnerPolicyNode requests the ownerpolicy edge.
@@ -130,7 +128,7 @@ type OwnerPolicyNode struct {
 }
 
 func (c OwnerPolicyNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: CauseOwnerPolicy, Extra: transitionExtra{Result: c.Result, OwnerPolicy: c.OwnerPolicy}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: causeOwnerPolicy, Extra: transitionExtra{Result: c.Result, OwnerPolicy: c.OwnerPolicy}}
 }
 
 // OpenApprovalNode requests the approvalopen edge.
@@ -152,7 +150,7 @@ type ResolveApprovalNode struct {
 }
 
 func (c ResolveApprovalNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: CauseApprovalResolve, Extra: transitionExtra{Approval: c.Approval}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: causeApprovalResolve, Extra: transitionExtra{Approval: c.Approval}}
 }
 
 // TimeoutApprovalNode requests the approvaltimeout edge.
@@ -162,111 +160,41 @@ type TimeoutApprovalNode struct {
 }
 
 func (c TimeoutApprovalNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: "", Cause: CauseApprovalTimeout, Extra: transitionExtra{}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: "", Cause: causeApprovalTimeout, Extra: transitionExtra{}}
 }
 
-// MaterializeNode requests the materialize edge.
-type MaterializeNode struct {
+// materializeNode requests the materialize edge.
+type materializeNode struct {
 	Ref         controllerwire.NodeRef
 	Actor       Actor
 	Materialize *MaterializeSource
 }
 
-func (c MaterializeNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: "", Cause: CauseMaterialize, Extra: transitionExtra{Materialize: c.Materialize}}
+func (c materializeNode) nodeChange() nodeTransition {
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: "", Cause: causeMaterialize, Extra: transitionExtra{Materialize: c.Materialize}}
 }
 
-// PublishNode requests the publish edge.
-type PublishNode struct {
+// publishNode requests the publish edge.
+type publishNode struct {
 	Ref     controllerwire.NodeRef
 	Actor   Actor
 	Outcome NodeState
 	Result  *NodeResult
 }
 
-func (c PublishNode) nodeChange() nodeTransition {
+func (c publishNode) nodeChange() nodeTransition {
 	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: c.Outcome, Cause: CausePublish, Extra: transitionExtra{Result: c.Result}}
 }
 
-// PublishNodeAttempt requests the publishattempt edge.
-type PublishNodeAttempt struct {
+// publishNodeAttempt requests the publishattempt edge.
+type publishNodeAttempt struct {
 	Ref         controllerwire.NodeRef
 	Actor       Actor
 	Publication *runspec.PublishedAttempt
 }
 
-func (c PublishNodeAttempt) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: transitionExtra{Publication: c.Publication}}
-}
-
-func (c StartNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c RetryNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c ReportNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c ReadyNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c ReleaseNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c CancelNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c DependencyNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c OwnerPolicyNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c OpenApprovalNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c ResolveApprovalNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c TimeoutApprovalNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c MaterializeNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c PublishNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
-}
-
-func (c PublishNodeAttempt) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
+func (c publishNodeAttempt) nodeChange() nodeTransition {
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: nodePending, Cause: CausePublishAttempt, Extra: transitionExtra{Publication: c.Publication}}
 }
 
 // RevokeNode withdraws an unstarted offer under its owner authority.
@@ -276,12 +204,7 @@ type RevokeNode struct {
 }
 
 func (c RevokeNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: NodePending, Cause: CauseRevoke}
-}
-
-func (c RevokeNode) bind(ref controllerwire.NodeRef, actor Actor) NodeCommand {
-	c.Ref, c.Actor = ref, actor
-	return c
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, To: nodePending, Cause: CauseRevoke}
 }
 
 func nilNodeCommand(command NodeCommand) bool {
@@ -290,4 +213,82 @@ func nilNodeCommand(command NodeCommand) bool {
 	}
 	value := reflect.ValueOf(command)
 	return value.Kind() == reflect.Pointer && value.IsNil()
+}
+
+// NodeCommandPayload carries an edge and its captured source attempt.
+type NodeCommandPayload struct {
+	To            NodeState               `json:"to"`
+	Cause         TransitionCause         `json:"cause"`
+	SourceAttempt *runspec.AttemptOrdinal `json:"source_attempt,omitempty"`
+	Extra         NodeCommandExtra        `json:"extra"`
+}
+
+// NodeCommandExtra omits award and execution authority.
+type NodeCommandExtra struct {
+	OwnerPolicy *OwnerPolicyResult        `json:"owner_policy,omitempty"`
+	Result      *NodeResult               `json:"result,omitempty"`
+	Materialize *MaterializeSource        `json:"materialize,omitempty"`
+	Approval    *ApprovalResolution       `json:"approval,omitempty"`
+	RetryAt     *time.Time                `json:"retry_at,omitempty"`
+	Publication *runspec.PublishedAttempt `json:"publication,omitempty"`
+}
+
+// NodeCommand validates the payload and binds authenticated authority.
+func (body NodeCommandPayload) NodeCommand(ref controllerwire.NodeRef, actor Actor) (NodeCommand, error) {
+	var command NodeCommand
+	switch body.Cause {
+	case CauseStart:
+		command = StartNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt}
+	case CauseRetry:
+		command = RetryNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Result: body.Extra.Result, RetryAt: body.Extra.RetryAt}
+	case CauseReport:
+		command = ReportNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Outcome: body.To, Result: body.Extra.Result}
+	case CauseRelease:
+		if body.To == NodeReady {
+			command = ReadyNode{Ref: ref, Actor: actor}
+		} else {
+			command = ReleaseNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt}
+		}
+	case causeCancel:
+		command = CancelNode{Ref: ref, Actor: actor, Result: body.Extra.Result}
+	case causeDependency:
+		command = DependencyNode{Ref: ref, Actor: actor, Outcome: body.To, Result: body.Extra.Result}
+	case causeOwnerPolicy:
+		command = OwnerPolicyNode{Ref: ref, Actor: actor, Outcome: body.To, Result: body.Extra.Result, OwnerPolicy: body.Extra.OwnerPolicy}
+	case CauseApprovalOpen:
+		command = OpenApprovalNode{Ref: ref, Actor: actor}
+	case causeApprovalResolve:
+		command = ResolveApprovalNode{Ref: ref, Actor: actor, Outcome: body.To, Approval: body.Extra.Approval}
+	case causeApprovalTimeout:
+		command = TimeoutApprovalNode{Ref: ref, Actor: actor}
+	case causeMaterialize:
+		command = materializeNode{Ref: ref, Actor: actor, Materialize: body.Extra.Materialize}
+	case CausePublish:
+		command = publishNode{Ref: ref, Actor: actor, Outcome: body.To, Result: body.Extra.Result}
+	case CausePublishAttempt:
+		command = publishNodeAttempt{Ref: ref, Actor: actor, Publication: body.Extra.Publication}
+	case CauseRevoke:
+		command = RevokeNode{Ref: ref, Actor: actor}
+	default:
+		return nil, fmt.Errorf("unsupported node command %q", body.Cause)
+	}
+	encoded, err := NodeCommandPayloadFor(command)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(body, encoded) {
+		return nil, fmt.Errorf("node command carries conflicting fields")
+	}
+	return command, nil
+}
+
+// NodeCommandPayloadFor omits authenticated authority and server-owned attempt facts.
+func NodeCommandPayloadFor(command NodeCommand) (NodeCommandPayload, error) {
+	if nilNodeCommand(command) {
+		return NodeCommandPayload{}, fmt.Errorf("node command is required")
+	}
+	c := command.nodeChange()
+	return NodeCommandPayload{To: c.To, Cause: c.Cause, SourceAttempt: c.SourceAttempt, Extra: NodeCommandExtra{
+		OwnerPolicy: c.Extra.OwnerPolicy, Result: c.Extra.Result, Materialize: c.Extra.Materialize, Approval: c.Extra.Approval, RetryAt: c.Extra.RetryAt, Publication: c.Extra.Publication,
+	}}, nil
 }

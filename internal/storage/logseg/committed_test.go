@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -63,7 +65,7 @@ func TestCommittedReadsVerifyBytesAndResume(t *testing.T) {
 				f.view.Segments = f.view.Segments[1:]
 			}
 			var out bytes.Buffer
-			actor := store.Actor{Holder: "reader"}
+			actor := store.Actor{NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "reader"}}
 			result, err := r.Read(t.Context(), actor, request, &out)
 			if err != nil || out.String() != want[min(int(offset), len(want)):] || result.Bytes != int64(out.Len()) || !result.Complete || f.actor != actor || f.request.Offset != offset {
 				t.Fatalf("offset %d: result = %+v, %v; bytes = %q", offset, result, err, out.String())

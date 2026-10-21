@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+func transactionTime(t *testing.T, tx *storeTx) time.Time {
+	t.Helper()
+	now, err := tx.now(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return now
+}
+
 func TestTransactionClockSnapshot(t *testing.T) {
 	s := authorityStore(t)
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
@@ -20,13 +29,9 @@ func TestTransactionClockSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	want := now
 	now = now.Add(time.Hour)
-	if !tx.time.Equal(want) || calls != 1 {
-		t.Fatalf("snapshot = %v, clock calls = %d; want %v, 1", tx.time, calls, want)
-	}
-	if current, err := tx.now(t.Context()); err != nil || !current.Equal(now) || !tx.time.Equal(want) {
-		t.Fatalf("write fence clock = %v, snapshot = %v, error = %v", current, tx.time, err)
+	if current, err := tx.now(t.Context()); err != nil || !current.Equal(now) || calls != 2 {
+		t.Fatalf("write fence clock = %v, calls = %d, error = %v", current, calls, err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
@@ -36,13 +41,12 @@ func TestTransactionClockSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(next)
-	if !next.time.Equal(now) || calls != 3 {
-		t.Fatalf("next snapshot = %v, clock calls = %d; want %v, 3", next.time, calls, now)
-	}
-	want = now
+	want := now
 	now = now.Add(time.Hour)
-	if current, err := next.now(t.Context()); err != nil || !current.Equal(want) || calls != 3 {
-		t.Fatalf("read snapshot clock = %v, calls = %d, error = %v", current, calls, err)
+	for range 2 {
+		if current, err := next.now(t.Context()); err != nil || !current.Equal(want) || calls != 3 {
+			t.Fatalf("read snapshot clock = %v, calls = %d, error = %v", current, calls, err)
+		}
 	}
 }
 

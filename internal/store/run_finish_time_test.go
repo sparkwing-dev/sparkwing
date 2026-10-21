@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -40,11 +42,11 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 				s = storetest.Open(t, store.WithPolicies(sealStorePolicies))
 				tenant, finish = runCompletionFixture(t, s)
 				if status == store.RunCancelled {
-					run, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+					run, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: run.ID, To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: run.Request.AuthorityRef}}); err != nil {
+					if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(run.ID), To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: run.Request.AuthorityRef}}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -57,7 +59,7 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 			if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
 				t.Fatal(err)
 			}
-			run, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+			run, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 			afterTime, clockErr := s.TestOnlyDatabaseTime(t.Context())
 			if clockErr != nil {
 				t.Fatal(clockErr)
@@ -68,7 +70,7 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 			if applied, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil || !applied.Replayed {
 				t.Fatalf("finish replay: %+v, %v", applied, err)
 			}
-			after, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+			after, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 			if err != nil || !reflect.DeepEqual(run, after) {
 				t.Fatalf("replay changed terminal state: %+v, %v", after, err)
 			}

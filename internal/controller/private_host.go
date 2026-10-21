@@ -45,20 +45,20 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 		return engineLookupError(err)
 	}
 	for _, node := range snapshot.Nodes {
-		if node.Ref.NodeID == a.Target.NodeID {
+		if node.Ref.NodeID == runspec.NodeID(a.Target.NodeID) {
 			var job nodeproto.JobSpec
 			if err := json.Unmarshal(node.Spec, &job); err != nil {
 				return err
 			}
 			sources := map[string]blob.RecordKey{}
 			for _, source := range snapshot.Nodes {
-				if source.Ref == node.Ref || source.Status != store.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return edge.Producer == source.Ref.NodeID }) {
+				if source.Ref == node.Ref || source.Status != store.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return runspec.NodeID(edge.Producer) == source.Ref.NodeID }) {
 					continue
 				}
-				sources[source.Ref.NodeID] = *source.ManifestRecord
+				sources[string(source.Ref.NodeID)] = *source.ManifestRecord
 			}
-			ancestors := generatorSources(snapshot.Expansions, node.Ref.NodeID)
-			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row store.NodeRow) bool { return row.Ref != node.Ref && !ancestors[row.Ref.NodeID] })
+			ancestors := generatorSources(snapshot.Expansions, string(node.Ref.NodeID))
+			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row store.NodeRow) bool { return row.Ref != node.Ref && !ancestors[string(row.Ref.NodeID)] })
 			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot, ArtifactSources: sources})
 			return nil
 		}
@@ -74,7 +74,7 @@ func generatorSources(expansions []store.AcceptedExpansionRow, id string) map[st
 			continue
 		}
 		for _, job := range plan.Jobs {
-			parents[job.ID] = expansion.Source.NodeID
+			parents[job.ID] = string(expansion.Source.NodeID)
 		}
 	}
 	sources := map[string]bool{}
@@ -115,14 +115,14 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
 		ctx := s.placementContext(r.Context())
-		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
+		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 		if err != nil {
 			return engineLookupError(err)
 		}
 		writeJSON(w, http.StatusOK, node)
 		return nil
 	}
-	node, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
+	node, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -159,7 +159,7 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return err
 	}
-	change := store.RunTransition{RunID: a.Target.RunID, Actor: engineActor(a), To: body.To, Cause: body.Cause, Reason: body.Reason, MaskedError: body.MaskedError, OwnerPolicy: body.OwnerPolicy}
+	change := store.RunTransition{RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a), To: body.To, Cause: body.Cause, Reason: body.Reason, MaskedError: body.MaskedError, OwnerPolicy: body.OwnerPolicy}
 	var applied store.Applied
 	if finish {
 		applied, err = tenant.FinishRunAndUnit(r.Context(), store.FinishRunRequest{Transition: store.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner})
@@ -174,7 +174,7 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 }
 
 func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body localhostwire.LocalNodeTransition
+	var body store.NodeCommandPayload
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
-	change, err := body.NodeCommand(controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, engineActor(a))
+	change, err := body.NodeCommand(controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a))
 	if err != nil {
 		return invalidEngineBody(err.Error())
 	}
@@ -310,12 +310,12 @@ func localHostOwnsNode(owner capability.Principal, node store.NodeRow, child cap
 	c, b := child.Capability, child.Capability.Binding
 	return owner.Authority.Kind == capability.AuthorityCapability && owner.Capability.Prefix != "" &&
 		owner.Capability.Unit == capability.UnitTrigger && owner.Capability.Binding.RunID != "" &&
-		node.Ref.RunID == owner.Capability.Binding.RunID && node.Ref.NodeID != "" && node.OwnerCapabilityPrefix == owner.Capability.Prefix &&
+		node.Ref.RunID == runspec.RunID(owner.Capability.Binding.RunID) && node.Ref.NodeID != "" && node.OwnerCapabilityPrefix == owner.Capability.Prefix &&
 		node.CapabilityPrefix != "" && node.Generation > 0 && node.ClaimedBy == owner.Capability.Binding.Holder &&
 		child.Authority == (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix}) &&
 		child.Class == capability.CredentialBearer && c.Audience == capability.Controller && c.Team == owner.Capability.Team && c.Subject == owner.Capability.Subject &&
 		c.Prefix == node.CapabilityPrefix && c.Unit == capability.UnitNode && c.Purpose == capability.PurposeWork &&
-		b.Kind == capability.BindingNode && b.RunID == node.Ref.RunID && b.NodeID == node.Ref.NodeID && runspec.ClaimGeneration(b.Generation) == node.Generation && b.Holder == node.ClaimedBy
+		b.Kind == capability.BindingNode && runspec.RunID(b.RunID) == node.Ref.RunID && runspec.NodeID(b.NodeID) == node.Ref.NodeID && runspec.ClaimGeneration(b.Generation) == node.Generation && b.Holder == node.ClaimedBy
 }
 
 func localHostRefusal() error {

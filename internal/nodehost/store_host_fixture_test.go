@@ -130,7 +130,7 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Input.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
 	spec, _ := json.Marshal(accepted.Spec)

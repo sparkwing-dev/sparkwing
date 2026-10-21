@@ -231,9 +231,13 @@ func (s *Store) GrantFreeSlot(ctx context.Context, team Team) (err error) {
 	if !exists {
 		return fmt.Errorf("%w: team %s", ErrNotFound, team)
 	}
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO free_slots (team, taken_at) VALUES (?,?)
-ON CONFLICT (team) DO NOTHING`, string(team), tx.time.UnixNano()); err != nil {
+ON CONFLICT (team) DO NOTHING`, string(team), clockTime1.UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()

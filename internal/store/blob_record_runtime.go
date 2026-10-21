@@ -163,7 +163,11 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 	if err != nil {
 		return blob.Record{}, err
 	}
-	if request.ExpiresAt.Set && !request.ExpiresAt.Value.After(tx.time) {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return blob.Record{}, clockErr1
+	}
+	if request.ExpiresAt.Set && !request.ExpiresAt.Value.After(clockTime1) {
 		return blob.Record{}, authorityError(apierr.BadRequest, "record expiry is not in the future")
 	}
 	if request.Key.Kind == blob.KindOutput || (request.Key.Kind == blob.KindMemo && request.Key.Name == "output") {
@@ -177,16 +181,28 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 	}
 	if request.Key.Kind == blob.KindMemo {
 		if !request.ExpiresAt.Set {
-			request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: tx.time.Add(limits.MemoDefaultTTL)}
+			clockTime2, clockErr2 := tx.now(ctx)
+			if clockErr2 != nil {
+				return blob.Record{}, clockErr2
+			}
+			request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: clockTime2.Add(limits.MemoDefaultTTL)}
 		}
-		if request.ExpiresAt.Value.After(tx.time.Add(limits.MemoMaxTTL)) {
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return blob.Record{}, clockErr3
+		}
+		if request.ExpiresAt.Value.After(clockTime3.Add(limits.MemoMaxTTL)) {
 			return blob.Record{}, authorityError(apierr.BadRequest, "memo expiry exceeds the maximum TTL")
 		}
 		if request.Key.Name == "manifest" && (!request.ManifestDigest.Set || request.ManifestDigest.Value != request.Digest) {
 			return blob.Record{}, authorityError(apierr.BadRequest, "manifest-only memo must identify its manifest")
 		}
 	}
-	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.time, ExpiresAt: request.ExpiresAt}
+	clockTime4, clockErr4 := tx.now(ctx)
+	if clockErr4 != nil {
+		return blob.Record{}, clockErr4
+	}
+	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: clockTime4, ExpiresAt: request.ExpiresAt}
 	batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false, nil)
 	if err != nil {
 		return blob.Record{}, err

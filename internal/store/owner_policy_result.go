@@ -25,7 +25,7 @@ const (
 // OwnerPolicyResult binds a declared decision to its captured work generation.
 type OwnerPolicyResult struct {
 	Kind       OwnerPolicyKind
-	Generation int64
+	Generation runspec.ClaimGeneration
 }
 
 func (p OwnerPolicyResult) outcome() NodeState {
@@ -41,20 +41,9 @@ func (p OwnerPolicyResult) outcome() NodeState {
 	}
 }
 
-func (p OwnerPolicyResult) runOutcome() (RunState, error) {
-	switch p.Kind {
-	case PolicyAdmissionSkip:
-		return RunSuccess, nil
-	case PolicyAdmissionFail, PolicyQueueTimeout:
-		return RunFailed, nil
-	default:
-		return "", errors.New("invalid plan admission policy result")
-	}
-}
-
 func checkNodeOwnerPolicy(row NodeRow, change nodeTransition) error {
 	policy, result := change.Extra.OwnerPolicy, change.Extra.Result
-	if policy == nil || runspec.ClaimGeneration(policy.Generation) < 0 || runspec.ClaimGeneration(policy.Generation) != row.Generation || row.ReadyAt != nil || result == nil || policy.outcome() == "" || policy.outcome() != change.To {
+	if policy == nil || policy.Generation < 0 || policy.Generation != row.Generation || row.ReadyAt != nil || result == nil || policy.outcome() == "" || policy.outcome() != change.To {
 		return holderRefusal()
 	}
 	if policy.Kind == PolicyQueueTimeout && result.Reason != FailureQueueTimeout {
@@ -70,19 +59,15 @@ func checkNodeOwnerPolicy(row NodeRow, change nodeTransition) error {
 }
 
 func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunRow, change RunTransition, now time.Time) error {
-	if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID, now); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID); err != nil {
 		return err
 	}
 	policy := change.OwnerPolicy
 	if policy == nil || policy.Generation != change.Actor.Owner.Generation || row.Spec == nil || row.CancelRequestedAt != nil {
 		return holderRefusal()
 	}
-	want, err := policy.runOutcome()
-	if err != nil {
-		return err
-	}
-	if change.To != want {
-		return errors.New("plan verdict disagrees with admission policy")
+	if policy.Kind != PolicyAdmissionSkip && policy.Kind != PolicyAdmissionFail && policy.Kind != PolicyQueueTimeout {
+		return errors.New("invalid plan admission policy result")
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
 	if err != nil {
@@ -96,12 +81,13 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 			return errors.New("plan admission refusal requires unreleased work")
 		}
 		_, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{
-			Ref: node.Ref, Actor: change.Actor, To: policy.outcome(), Cause: CauseOwnerPolicy,
-			Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: int64(node.Generation)}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
-		}, tx.time)
+			Ref: node.Ref, Actor: change.Actor, To: policy.outcome(), Cause: causeOwnerPolicy,
+			Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: node.Generation}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
+		})
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err = tx.ExecContext(ctx, `UPDATE nodes SET expansion=CASE WHEN outcome IN ('success','memoized') THEN 'failed' ELSE 'none' END WHERE team=? AND run_id=? AND expansion='expected'`, team, row.ID)
+	return err
 }

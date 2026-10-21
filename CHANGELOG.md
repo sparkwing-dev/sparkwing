@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Session expiry and store mutations use transaction time. Schema baseline 16 adds generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
+- **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 16 adds generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
 
 - **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
 

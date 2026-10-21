@@ -30,14 +30,14 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 		}
 		body.Source = &controllerwire.ReuseSource{Policy: string(request.Source.Kind), Attempt: request.Source.Source, Record: request.Source.Record}
 		if result := request.Source.Result; result != nil {
-			body.Source.Result = &controllerwire.MaterializedResultSource{RunID: result.Ref.RunID, JobID: result.Ref.NodeID, StateSeq: result.StateSeq}
+			body.Source.Result = &controllerwire.MaterializedResultSource{RunID: string(result.Ref.RunID), JobID: string(result.Ref.NodeID), StateSeq: result.StateSeq}
 		}
 	}
-	wire, err := s.Controller.ReconcileJob(ctx, request.Ref.RunID, request.Ref.NodeID, body)
+	wire, err := s.Controller.ReconcileJob(ctx, string(request.Ref.RunID), string(request.Ref.NodeID), body)
 	if err != nil {
 		return store.ReconciledNode{}, err
 	}
-	row, err := executionRow(request.Ref.RunID, wire.Job)
+	row, err := executionRow(string(request.Ref.RunID), wire.Job)
 	if err != nil || row.Ref != request.Ref {
 		return store.ReconciledNode{}, errors.Join(err, errors.New("reconciliation response changed its job"))
 	}
@@ -45,12 +45,12 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	if wire.Source != nil {
 		result.Source = &store.MaterializeSource{Kind: store.SourcePolicy(wire.Source.Policy), Source: wire.Source.Attempt, Record: wire.Source.Record}
 		if source := wire.Source.Result; source != nil {
-			result.Source.Result = &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: source.RunID, NodeID: source.JobID}, StateSeq: source.StateSeq}
+			result.Source.Result = &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: runspec.RunID(source.RunID), NodeID: runspec.NodeID(source.JobID)}, StateSeq: source.StateSeq}
 		}
 	}
 	if result.Kind == store.Execute {
 		claim := wire.Claim
-		if request.MaterializeOnly || claim == nil || claim.Unit != capability.UnitNode || claim.RunID != request.Ref.RunID || claim.JobID != request.Ref.NodeID || claim.Capability == "" || claim.Binding.Kind != capability.BindingNode || claim.Binding.RunID != request.Ref.RunID || claim.Binding.NodeID != request.Ref.NodeID || claim.Binding.Holder != row.ClaimedBy || runspec.ClaimGeneration(claim.Binding.Generation) != row.Generation || runspec.AttemptOrdinal(claim.Binding.Attempt) != row.Attempt {
+		if request.MaterializeOnly || claim == nil || claim.Unit != capability.UnitNode || runspec.RunID(claim.RunID) != request.Ref.RunID || runspec.NodeID(claim.JobID) != request.Ref.NodeID || claim.Capability == "" || claim.Binding.Kind != capability.BindingNode || runspec.RunID(claim.Binding.RunID) != request.Ref.RunID || runspec.NodeID(claim.Binding.NodeID) != request.Ref.NodeID || claim.Binding.Holder != row.ClaimedBy || runspec.ClaimGeneration(claim.Binding.Generation) != row.Generation || runspec.AttemptOrdinal(claim.Binding.Attempt) != row.Attempt {
 			return store.ReconciledNode{}, errors.New("reconciliation returned an inconsistent execution award")
 		}
 		result.Claim = &store.ClaimAward{Holder: claim.Binding.Holder, Generation: runspec.ClaimGeneration(claim.Binding.Generation), CapabilityPrefix: row.CapabilityPrefix, LeaseExpiresAt: claim.LeaseExpiresAt}
@@ -81,26 +81,26 @@ func (s *RemoteOwnerStore) AcceptExpansion(ctx context.Context, submission store
 	if s.Controller == nil || submission.Source.RunID == "" || submission.Source.NodeID == "" || submission.SourceGeneration < 0 || (len(submission.Body) == 0) == (submission.Failure == nil) {
 		return store.AcceptedExpansion{}, errors.New("expansion requires a bound source and body or failure")
 	}
-	body := controllerwire.ExpansionSubmission{SourceGeneration: submission.SourceGeneration, Body: slices.Clone(submission.Body)}
+	body := controllerwire.ExpansionSubmission{SourceGeneration: int64(submission.SourceGeneration), Body: slices.Clone(submission.Body)}
 	if submission.Failure != nil {
 		body.Failure = &apierr.Error{Code: submission.Failure.Code, Message: submission.Failure.MaskedError}
 	}
-	wire, err := s.Controller.AcceptExpansion(ctx, submission.Source.RunID, submission.Source.NodeID, body)
+	wire, err := s.Controller.AcceptExpansion(ctx, string(submission.Source.RunID), string(submission.Source.NodeID), body)
 	if err != nil {
 		return store.AcceptedExpansion{}, err
 	}
-	if wire.SourceGeneration != submission.SourceGeneration || wire.State != string(store.ExpansionAccepted) && wire.State != string(store.ExpansionFailed) {
+	if runspec.ClaimGeneration(wire.SourceGeneration) != submission.SourceGeneration || wire.State != string(store.ExpansionAccepted) && wire.State != string(store.ExpansionFailed) {
 		return store.AcceptedExpansion{}, errors.New("expansion response changed its source generation or resolution")
 	}
-	result := store.AcceptedExpansion{Source: submission.Source, SourceGeneration: wire.SourceGeneration, State: store.ExpansionState(wire.State), BodyHash: wire.BodyHash, Replayed: wire.Replayed}
+	result := store.AcceptedExpansion{Source: submission.Source, SourceGeneration: runspec.ClaimGeneration(wire.SourceGeneration), State: store.ExpansionState(wire.State), BodyHash: wire.BodyHash, Replayed: wire.Replayed}
 	seen := map[string]bool{}
 	for _, job := range wire.Jobs {
-		row, err := executionRow(submission.Source.RunID, job.Current)
+		row, err := executionRow(string(submission.Source.RunID), job.Current)
 		var declaration nodeproto.JobSpec
-		if err != nil || json.Unmarshal(row.Spec, &declaration) != nil || !reflect.DeepEqual(job.Job, declaration) || row.SpecHash != job.SpecHash || !reflect.DeepEqual(row.Execution, job.Execution) || seen[row.Ref.NodeID] {
+		if err != nil || json.Unmarshal(row.Spec, &declaration) != nil || !reflect.DeepEqual(job.Job, declaration) || row.SpecHash != job.SpecHash || !reflect.DeepEqual(row.Execution, job.Execution) || seen[string(row.Ref.NodeID)] {
 			return store.AcceptedExpansion{}, errors.New("expansion response differs from its persisted generated job")
 		}
-		seen[row.Ref.NodeID] = true
+		seen[string(row.Ref.NodeID)] = true
 		result.Nodes = append(result.Nodes, row)
 	}
 	if wire.State == string(store.ExpansionFailed) && len(result.Nodes) != 0 {
@@ -115,7 +115,7 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (store.NodeRow,
 		return store.NodeRow{}, errors.New("execution response has an invalid persisted job")
 	}
 	return store.NodeRow{
-		Ref: controllerwire.NodeRef{RunID: runID, NodeID: job.ID}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
+		Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(job.ID)}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
 		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, OwnerCapabilityPrefix: job.OwnerCapabilityPrefix, Generation: runspec.ClaimGeneration(job.Generation), Attempt: runspec.AttemptOrdinal(job.Attempt), ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
 		ReadyAt: job.ReadyAt, LeaseExpiresAt: job.LeaseExpiresAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, CancelRequestedAt: job.CancelRequestedAt,
 		OutputRecord: job.OutputRecord, ManifestRecord: job.ManifestRecord,

@@ -171,11 +171,11 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "accepted plan hash does not match its declarations")
 	}
-	row, err = h.deps.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	row, err = h.deps.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return spec, row, job, err
 	}
-	if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != input.NodeID || row.Generation != input.Generation || row.Attempt != input.Attempt || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix {
+	if row.Ref.RunID != runspec.RunID(input.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(input.NodeID) || row.Generation != input.Generation || row.Attempt != input.Attempt || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix {
 		return spec, row, job, executorError(apierr.LockHeld, "node execution no longer holds the accepted claim")
 	}
 	constructed, err := NewNodeInput(input.Accepted, row, input.Engine, input.GrantedRunner)
@@ -308,7 +308,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command 
 	if err := context.Cause(ctx); err != nil {
 		return store.Applied{}, err
 	}
-	command = store.BindNodeCommand(command, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, executorActor(input))
+	command = store.BindNodeCommand(command, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, executorActor(input))
 	applied, err := h.deps.Store.TransitionNode(ctx, command)
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
@@ -317,7 +317,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command 
 }
 
 func executorActor(input NodeInput) store.Actor {
-	return store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}
+	return store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
 }
 
 func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store.NodeResult, runErr error) error {

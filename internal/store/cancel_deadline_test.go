@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -135,7 +137,16 @@ func TestControllerOwnerCannotRenewPastCancellationDrain(t *testing.T) {
 	operator := authorityMember(t, tenant.s, "cancel-controller", RoleOwner)
 	operator.Kind = ActorOperator
 	started := *now
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: row.ID, To: RunCancelled, Cause: RunCancel, Actor: operator}); err != nil {
+	for _, table := range []string{"holders", "waiters"} {
+		key := "global:drain-" + table
+		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a',?,1,1)`, key)
+		if table == "holders" {
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a',?,'held',?,'',?,?)`, key, row.ID, now.UnixNano(), now.Add(time.Hour).UnixNano())
+		} else {
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,policy,lease_expires_at) VALUES ('a',?,'waiting',?,'',?,'queue',?)`, key, row.ID, now.UnixNano(), now.Add(time.Hour).UnixNano())
+		}
+	}
+	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(row.ID), To: RunCancelled, Cause: RunCancel, Actor: operator}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := started.Add(5 * time.Minute)
@@ -144,6 +155,16 @@ func TestControllerOwnerCannotRenewPastCancellationDrain(t *testing.T) {
 		beat, err := tenant.RenewOwner(t.Context(), owner)
 		if err != nil || !beat.CancelRequested || beat.ExpiresAt.After(deadline) {
 			t.Fatalf("controller renewal: %+v %v", beat, err)
+		}
+		lease := SingletonLease{Name: owner.Owner.Name, Holder: owner.Owner.Holder, Generation: int64(owner.Owner.Generation)}
+		if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
+			var expiry int64
+			if err := tenant.s.db.QueryRow(`SELECT lease_expires_at FROM `+table+` WHERE run_id=?`, row.ID).Scan(&expiry); err != nil || expiry > deadline.UnixNano() {
+				t.Fatalf("%s renewed beyond stop deadline: %d, deadline %d: %v", table, expiry, deadline.UnixNano(), err)
+			}
 		}
 	}
 	*now = deadline

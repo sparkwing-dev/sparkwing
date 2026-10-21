@@ -45,7 +45,7 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tenant, now, nodeTransition{Ref: controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "imported"}, Actor: actor, To: NodeSuccess, Cause: CausePublish, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	return tenant, now, nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "imported"}, Actor: actor, To: NodeSuccess, Cause: CausePublish, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 }
 
 func TestPublicationUsesNoControllerExecution(t *testing.T) {
@@ -57,17 +57,17 @@ func TestPublicationUsesNoControllerExecution(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), result); err != nil {
 		t.Fatal(err)
 	}
-	run, err := tenant.ReadRun(t.Context(), result.Ref.RunID)
+	run, err := tenant.ReadRun(t.Context(), string(result.Ref.RunID))
 	if err != nil || run.State != RunPending || run.Owner != nil {
 		t.Fatalf("controller settled publication before publisher finish: %+v, %v", run, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
 	rewriteSchemaCount(t, tenant.s.db, "eval_units", 0)
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: run.ID, To: RunSuccess, Cause: RunFinish, Actor: Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, RunID: run.ID, Holder: lease.Holder, Generation: lease.Generation}}}); err == nil {
+	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(run.ID), To: RunSuccess, Cause: RunFinish, Actor: Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run.ID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}}); err == nil {
 		t.Fatal("controller finished a published run")
 	}
 	*now = now.Add(time.Second)
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: run.ID, To: RunSuccess, Cause: RunPublish, Actor: result.Actor}); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(run.ID), To: RunSuccess, Cause: RunPublish, Actor: result.Actor}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -84,8 +84,8 @@ func TestPublicationRequiresScopedAuthorityForJobsAndRun(t *testing.T) {
 				}
 				c := authorityRoot("invalid-publisher", "a")
 				c.Grants = []capability.Grant{capability.DataWrite}
-				c.Binding = capability.Binding{Kind: capability.BindingRun, RunID: result.Ref.RunID}
-				c.Data = &capability.DataScope{Use: capability.DataPublish, RunID: result.Ref.RunID, RepositoryKey: "gh:1"}
+				c.Binding = capability.Binding{Kind: capability.BindingRun, RunID: string(result.Ref.RunID)}
+				c.Data = &capability.DataScope{Use: capability.DataPublish, RunID: string(result.Ref.RunID), RepositoryKey: "gh:1"}
 				switch problem {
 				case "grant":
 					c.Grants = []capability.Grant{capability.RunsWrite}
@@ -110,7 +110,7 @@ func TestPublicationRequiresScopedAuthorityForJobsAndRun(t *testing.T) {
 				}
 				authorityPersist(t, tenant.s, c)
 				result.Actor.Authority.ID, result.Actor.CapabilityPrefix = c.Prefix, c.Prefix
-				before, err := tenant.ReadStateEvents(t.Context(), result.Ref.RunID, 0, 20)
+				before, err := tenant.ReadStateEvents(t.Context(), string(result.Ref.RunID), 0, 20)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -122,7 +122,7 @@ func TestPublicationRequiresScopedAuthorityForJobsAndRun(t *testing.T) {
 				if err == nil {
 					t.Fatal("invalid publisher committed")
 				}
-				after, err := tenant.ReadStateEvents(t.Context(), result.Ref.RunID, 0, 20)
+				after, err := tenant.ReadStateEvents(t.Context(), string(result.Ref.RunID), 0, 20)
 				if err != nil || len(before) != len(after) {
 					t.Fatalf("refused publication changed events: %v", err)
 				}
@@ -136,7 +136,7 @@ func TestPublicationRecordRefusalRollsBackResult(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tenant, now, result := publicationFixture(t)
 			result.Extra.Result.OutputRecord = &blob.RecordKey{Team: "a", Kind: blob.KindOutput, Name: "output"}
-			before, err := tenant.ReadStateEvents(t.Context(), result.Ref.RunID, 0, 20)
+			before, err := tenant.ReadStateEvents(t.Context(), string(result.Ref.RunID), 0, 20)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,7 +159,7 @@ func TestPublicationRecordRefusalRollsBackResult(t *testing.T) {
 			if err != nil || row.Status != StatusPending || row.StateSeq != 0 {
 				t.Fatalf("refused result changed job: %+v, %v", row, err)
 			}
-			after, err := tenant.ReadStateEvents(t.Context(), result.Ref.RunID, 0, 20)
+			after, err := tenant.ReadStateEvents(t.Context(), string(result.Ref.RunID), 0, 20)
 			if err != nil || len(before) != len(after) {
 				t.Fatalf("refused result changed events: %v", err)
 			}
@@ -183,7 +183,7 @@ func TestPublicationCommitsResultsAndCompletionOnce(t *testing.T) {
 			t.Fatalf("publish completion %d: %+v, %v", i, applied, err)
 		}
 	}
-	run, err := tenant.ReadRun(t.Context(), result.Ref.RunID)
+	run, err := tenant.ReadRun(t.Context(), string(result.Ref.RunID))
 	if err != nil || run.State != RunSuccess || run.FinishedAt == nil || run.Owner != nil {
 		t.Fatalf("published run: %+v, %v", run, err)
 	}
@@ -217,7 +217,7 @@ func TestPublicationCompletionChecksPersistedVerdict(t *testing.T) {
 	if _, err := tenant.TransitionRun(t.Context(), finish); err != nil {
 		t.Fatal(err)
 	}
-	run, err := tenant.ReadRun(t.Context(), finish.RunID)
+	run, err := tenant.ReadRun(t.Context(), string(finish.RunID))
 	if err != nil || run.State != RunFailed {
 		t.Fatalf("persisted job verdict: %s, %v", run.State, err)
 	}

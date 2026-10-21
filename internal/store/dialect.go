@@ -140,7 +140,7 @@ type storeTx struct {
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
-	time                 time.Time
+	clock                func(context.Context) (time.Time, error)
 	cancelingTeam        Team
 	tx                   *sql.Tx
 	dialect              Dialect
@@ -169,20 +169,20 @@ func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeT
 			return nil, errors.Join(err, raw.Rollback())
 		}
 	}
-	var err error
-	t.time, err = t.readClock(ctx)
+	now, err := t.readClock(ctx)
 	if err != nil {
 		return nil, errors.Join(err, raw.Rollback())
+	}
+	t.clock = t.readClock
+	if read {
+		t.clock = func(context.Context) (time.Time, error) { return now, nil }
 	}
 	return t, nil
 }
 
 // now preserves read snapshots and rechecks write fences after lock or policy work.
 func (t *storeTx) now(ctx context.Context) (time.Time, error) {
-	if t.snapshotRead {
-		return t.time, nil
-	}
-	return t.readClock(ctx)
+	return t.clock(ctx)
 }
 
 func (t *storeTx) readClock(ctx context.Context) (time.Time, error) {
@@ -213,7 +213,7 @@ func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
 		return time.Time{}, err
 	}
 	defer rollbackOrLog(tx)
-	return tx.time, nil
+	return tx.now(ctx)
 }
 
 // safety: Postgres takes a fresh snapshot per statement unless the isolation

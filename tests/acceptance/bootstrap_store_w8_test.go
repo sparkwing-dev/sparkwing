@@ -169,7 +169,7 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: held.RunID, NodeID: held.JobID})
+	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(held.RunID), NodeID: runspec.NodeID(held.JobID)})
 	if err != nil || row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != award.Binding.Generation || row.ClaimedBy != "" {
 		t.Fatalf("Cloud persisted completion: outcome=%s attempt=%d generation=%d error=%v", row.Outcome, row.Attempt, row.Generation, err)
 	}

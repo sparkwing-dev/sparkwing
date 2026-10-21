@@ -55,14 +55,15 @@ func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref contro
 	if !slices.Contains(p.Capability.Grants, capability.NodeReport) {
 		return NodeRow{}, authorityError(apierr.Forbidden, "job reporting grant is required")
 	}
-	if err := lockStateRunTx(ctx, tx, team, ref.RunID); err != nil {
+	if err := lockStateRunTx(ctx, tx, team, string(ref.RunID)); err != nil {
 		return NodeRow{}, err
 	}
 	row, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil {
 		return row, err
 	}
-	if err := checkHolderTx(ctx, tx, team, row, actor, tx.time); err != nil {
+
+	if err := checkHolderTx(ctx, tx, team, row, actor); err != nil {
 		return row, err
 	}
 	if row.Attempt <= 0 {
@@ -103,7 +104,7 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID}, report.Actor)
+	row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)}, report.Actor)
 	if err != nil {
 		return err
 	}
@@ -126,11 +127,19 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 		start = sql.NullInt64{Int64: report.StartedAt.UnixNano(), Valid: true}
 	}
 	if !start.Valid {
-		start = sql.NullInt64{Int64: tx.time.UnixNano(), Valid: true}
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		start = sql.NullInt64{Int64: clockTime2.UnixNano(), Valid: true}
 	}
 	end := sql.NullInt64{}
 	if report.State != "running" {
-		end = sql.NullInt64{Int64: tx.time.UnixNano(), Valid: true}
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return clockErr3
+		}
+		end = sql.NullInt64{Int64: clockTime3.UnixNano(), Valid: true}
 		if report.FinishedAt != nil {
 			end.Int64 = report.FinishedAt.UnixNano()
 		}

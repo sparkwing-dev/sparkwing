@@ -59,7 +59,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 			})
 			var paused []string
 			f.Host.Debug = debugWaitFunc(func(ctx context.Context, b DebugBoundary) error {
-				if b.Ref != (controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "build"}) || b.Reason != reason || b.Actor != f.Actor || b.Timeout != defaultDebugPauseTimeout {
+				if b.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"}) || b.Reason != reason || b.Actor != f.Actor || b.Timeout != defaultDebugPauseTimeout {
 					return errors.New("pause lost its selected policy or owner authority")
 				}
 				mu.Lock()
@@ -67,7 +67,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 				if slices.Contains(ran, "build") != (reason != store.PauseReasonBefore) || slices.Contains(ran, "deploy") {
 					t.Errorf("execution at pause: %v", ran)
 				}
-				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "deploy"})
+				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "deploy"})
 				if err != nil || row.ReadyAt != nil || row.ClaimedBy != "" {
 					t.Errorf("downstream released during pause: %+v error=%v", row, err)
 				}
@@ -139,7 +139,7 @@ func TestDebugCancellationStopsOwnerWithoutChangingTerminalResult(t *testing.T) 
 			if _, err := f.Host.Run(ctx, f.Input); !errors.Is(err, stopped) {
 				t.Fatalf("error=%v, want cancellation cause", err)
 			}
-			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "build"})
+			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})
 			if err != nil || reason == store.PauseReasonAfter && row.Outcome != store.NodeSuccess || reason == store.PauseReasonBefore && row.Status != store.StatusPending {
 				t.Fatalf("persisted result=%+v error=%v", row, err)
 			}
@@ -159,7 +159,7 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	f := newStoreHostFixtureOn(t, openStore(t), plan, options)
 	var paused []string
 	f.Host.Debug = debugWaitFunc(func(ctx context.Context, b DebugBoundary) error {
-		paused = append(paused, b.Ref.NodeID+":"+b.Reason)
+		paused = append(paused, string(b.Ref.NodeID)+":"+b.Reason)
 		if _, err := f.Tenant.GetApproval(ctx, f.Input.RunID, "gate"); !errors.Is(err, store.ErrNotFound) {
 			return errors.New("approval opened before pause-before released")
 		}

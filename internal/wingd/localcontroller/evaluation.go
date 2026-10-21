@@ -25,11 +25,11 @@ func (c *nodeClaims) evaluate(ctx context.Context, input nodehost.EvaluationInpu
 	if (!owner && !evaluator) || input.Accepted.RunID != b.RunID || input.NodeID == "" || input.SpecHash == "" {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
-	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: b.RunID, NodeID: input.NodeID})
+	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return nodehost.ProcessGrant{}, err
 	}
-	if row.Ref != (controllerwire.NodeRef{RunID: b.RunID, NodeID: input.NodeID}) || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
+	if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(input.NodeID)}) || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
 	var job nodeproto.JobSpec
@@ -64,7 +64,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 	if err != nil {
 		return err
 	}
-	if row.Ref != b.source || row.Generation != runspec.ClaimGeneration(b.generation) || row.SpecHash != b.hash || p.Capability.Binding.RunID != b.source.RunID {
+	if row.Ref != b.source || row.Generation != runspec.ClaimGeneration(b.generation) || row.SpecHash != b.hash || runspec.RunID(p.Capability.Binding.RunID) != b.source.RunID {
 		return nodeClaimMismatch()
 	}
 	if rule == capability.BindReadSet {
@@ -72,7 +72,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 		if err := json.Unmarshal(row.Spec, &source); err != nil {
 			return err
 		}
-		if source.ID != b.source.NodeID || target.RunID != b.source.RunID {
+		if runspec.NodeID(source.ID) != b.source.NodeID || runspec.RunID(target.RunID) != b.source.RunID {
 			return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 		}
 		if target.Pipeline != "" {
@@ -86,11 +86,11 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		} else if p.Capability.Unit == capability.UnitEval {
-			if target.NodeID != b.source.NodeID {
+			if runspec.NodeID(target.NodeID) != b.source.NodeID {
 				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		} else {
-			output, err := b.readNode(ctx, controllerwire.NodeRef{RunID: b.source.RunID, NodeID: target.NodeID})
+			output, err := b.readNode(ctx, controllerwire.NodeRef{RunID: b.source.RunID, NodeID: runspec.NodeID(target.NodeID)})
 			if err != nil {
 				if errors.Is(err, store.ErrNotFound) {
 					return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
@@ -101,7 +101,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 			if err := json.Unmarshal(output.Spec, &job); err != nil {
 				return err
 			}
-			if output.Ref != (controllerwire.NodeRef{RunID: b.source.RunID, NodeID: target.NodeID}) || job.ID != target.NodeID || !capability.ReadsJobOutput(source, job) {
+			if output.Ref != (controllerwire.NodeRef{RunID: b.source.RunID, NodeID: runspec.NodeID(target.NodeID)}) || job.ID != target.NodeID || !capability.ReadsJobOutput(source, job) {
 				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		}

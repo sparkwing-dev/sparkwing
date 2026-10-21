@@ -64,7 +64,7 @@ func TestEngineClientRoutes(t *testing.T) {
 		{"expand", "POST", "/api/v1/runs/r1/jobs/j1/expansion", controllerwire.ExpansionAccepted{SourceGeneration: 3, State: "succeeded", Jobs: []controllerwire.ExpandedJob{}}, func(c controllerwire.Controller) (any, error) {
 			return c.AcceptExpansion(ctx, "r1", "j1", controllerwire.ExpansionSubmission{SourceGeneration: 3, Body: json.RawMessage(`{"jobs":[]}`)})
 		}},
-		{"finish", "POST", "/api/v1/runs/r1/finish", controllerwire.Applied{StateSeq: 6}, func(c controllerwire.Controller) (any, error) {
+		{"finish", "POST", "/api/v1/runs/r1/finish", controllerwire.Applied{StateSeq: 6, Outcome: "cancelled", Reason: "operator cancelled"}, func(c controllerwire.Controller) (any, error) {
 			return c.Finish(ctx, "r1", controllerwire.FinishRequest{})
 		}},
 		{"cancel", "POST", "/api/v1/runs/r1/cancel", controllerwire.Applied{CancelRequested: true}, func(c controllerwire.Controller) (any, error) {

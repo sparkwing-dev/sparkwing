@@ -157,7 +157,11 @@ func paymentEventReplayTx(ctx context.Context, tx *storeTx, event capability.Pay
 // safety: Add funds and refills settle through this one path, under the team's ledger lock: a refused card closes
 // the row unpaid and queues its refund, a paid one funds one grant and takes back any refund that arrived first.
 func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
-	team, now := checkout.result.Team, tx.time
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return clockErr1
+	}
+	team, now := checkout.result.Team, clockTime1
 	l, err := lockLedgerTx(ctx, tx, team)
 	if err != nil {
 		return err
@@ -228,7 +232,11 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 }
 
 func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
-	team, now := checkout.result.Team, tx.time
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return clockErr2
+	}
+	team, now := checkout.result.Team, clockTime2
 	failure := ""
 	kind := BusinessEventCheckoutFailed
 	switch {
@@ -253,7 +261,11 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 // settlement finds the team through the checkout's payment; a warned card also holds the team. Refusal removes the
 // matching saved card, and a refused refill records its failure, so later passes cannot charge it again.
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
-	team, now := checkout.result.Team, tx.time
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return clockErr3
+	}
+	team, now := checkout.result.Team, clockTime3
 	checkout.result.Refused = refusal.reason
 	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?, warning_id=?,
 	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END

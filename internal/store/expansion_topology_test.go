@@ -54,7 +54,7 @@ func TestGeneratedDependenciesUseAcceptedTopologyProperty(t *testing.T) {
 			if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
-			snapshot, err := tenant.ReadSnapshot(t.Context(), request.Source.RunID)
+			snapshot, err := tenant.ReadSnapshot(t.Context(), string(request.Source.RunID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,14 +63,14 @@ func TestGeneratedDependenciesUseAcceptedTopologyProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, row := range snapshot.Nodes {
-				deps := []string{"missing", row.Ref.NodeID, fmt.Sprintf("forged-%x", random.Uint64())}
+				deps := []string{"missing", string(row.Ref.NodeID), fmt.Sprintf("forged-%x", random.Uint64())}
 				body, err := json.Marshal(deps)
 				if err != nil {
 					t.Fatal(err)
 				}
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET deps_json=? WHERE team=? AND run_id=? AND node_id=?`, body, tenant.team, row.Ref.RunID, row.Ref.NodeID)
 			}
-			snapshot, err = tenant.ReadSnapshot(t.Context(), request.Source.RunID)
+			snapshot, err = tenant.ReadSnapshot(t.Context(), string(request.Source.RunID))
 			if err != nil {
 				t.Fatal(err)
 			}

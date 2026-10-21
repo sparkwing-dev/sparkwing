@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -49,7 +51,7 @@ func TestFollowReconciliationWaitsAndReclaims(t *testing.T) {
 		{Kind: store.Execute, Node: store.NodeRow{Ref: ref, Status: store.StatusPending, StateSeq: 7, Generation: 3, Attempt: 3, ClaimedBy: "new", CapabilityPrefix: "claim", LeaseExpiresAt: &expires}, Claim: &store.ClaimAward{Holder: "new", Generation: 3, CapabilityPrefix: "claim", LeaseExpiresAt: expires}},
 	}}
 	var followed []int64
-	request := store.ReconcileRequest{Ref: ref, Actor: store.Actor{Holder: "owner"}, Policy: store.SourceResume}
+	request := store.ReconcileRequest{Ref: ref, Actor: store.Actor{NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "owner"}}, Policy: store.SourceResume}
 	result, err := FollowReconciliation(t.Context(), f, request, func(_ context.Context, got controllerwire.NodeRef, after int64) error {
 		if got != ref {
 			t.Fatalf("ref = %#v", got)

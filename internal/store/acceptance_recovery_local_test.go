@@ -35,14 +35,14 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.owner, f.ref = f.plan.Actor, controllerwire.NodeRef{RunID: f.plan.RunID}
+			f.owner, f.ref = f.plan.Actor, controllerwire.NodeRef{RunID: runspec.RunID(f.plan.RunID)}
 			if _, err := f.tenant.AcceptPlan(ctx, f.plan); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.tenant.TransitionRun(ctx, store.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 				t.Fatal(err)
 			}
-			before, err := f.tenant.ReadRun(ctx, f.ref.RunID)
+			before, err := f.tenant.ReadRun(ctx, string(f.ref.RunID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,14 +71,14 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 					}
 					continue
 				}
-				if len(units) != 1 || units[0].RunID != f.ref.RunID || units[0].Kind != "trigger" || units[0].Generation != f.owner.Owner.Generation || units[0].Failed != started || units[0].Requeued == started || units[0].Cancelled {
+				if len(units) != 1 || runspec.RunID(units[0].RunID) != f.ref.RunID || units[0].Kind != "trigger" || runspec.ClaimGeneration(units[0].Generation) != f.owner.Owner.Generation || units[0].Failed != started || units[0].Requeued == started || units[0].Cancelled {
 					t.Fatalf("orphan recovery: %+v", units)
 				}
 			}
 			if err := f.reopen(ctx); err != nil {
 				t.Fatal(err)
 			}
-			run, err := f.tenant.ReadRun(ctx, f.ref.RunID)
+			run, err := f.tenant.ReadRun(ctx, string(f.ref.RunID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,10 +97,10 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if err := f.s.DB().QueryRowContext(ctx, `SELECT status,generation,disruptions,claimed_by,lease_expires_at,started_at FROM triggers WHERE team=? AND id=?`, f.tenant.Team(), f.ref.RunID).Scan(&status, &generation, &lost, &holder, &lease, &execution); err != nil {
 				t.Fatal(err)
 			}
-			if status != wantOwner || generation != f.owner.Owner.Generation || lost != disruptions || holder.Valid || lease.Valid || execution.Valid != started {
+			if status != wantOwner || runspec.ClaimGeneration(generation) != f.owner.Owner.Generation || lost != disruptions || holder.Valid || lease.Valid || execution.Valid != started {
 				t.Fatalf("owner: status=%s generation=%d disruptions=%d holder=%v lease=%v started=%v", status, generation, lost, holder, lease, execution)
 			}
-			events, err := f.tenant.ReadStateEvents(ctx, f.ref.RunID, 0, 100)
+			events, err := f.tenant.ReadStateEvents(ctx, string(f.ref.RunID), 0, 100)
 			if err != nil {
 				t.Fatal(err)
 			}

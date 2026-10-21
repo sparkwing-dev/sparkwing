@@ -88,8 +88,8 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 		t.Fatalf("memo=%+v,%v", hit, err)
 	}
 	a := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}
-	ref := controllerwire.NodeRef{RunID: a.RunID, NodeID: a.NodeID}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}
 	report := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &artifacts.Key}}}
 	if _, err := records.tenant.TransitionNode(t.Context(), report); err != nil {
 		t.Fatal(err)

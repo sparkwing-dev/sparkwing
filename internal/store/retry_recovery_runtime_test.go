@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -20,7 +22,7 @@ func TestRecoveryPreservesTheAcceptedJobInItsTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
-	if err != nil || len(reaped) != 1 || reaped[0].Team != tenant.team || reaped[0].RunID != ref.RunID {
+	if err != nil || len(reaped) != 1 || reaped[0].Team != tenant.team || runspec.RunID(reaped[0].RunID) != ref.RunID {
 		t.Fatalf("recovery identity = %+v, %v", reaped, err)
 	}
 	after, err := tenant.ReadNode(t.Context(), ref)
@@ -64,7 +66,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 		t.Fatal("reaped holder reported into a later generation")
 	}
 	oldReport.SourceAttempt = sourceAttempt(4)
-	oldReport.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, Holder: "next-runner", Generation: 3}
+	oldReport.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "next-runner", Generation: 3}}
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +97,7 @@ func TestRecoveryNeverResetsTerminalJobs(t *testing.T) {
 			if err != nil || before.Status != StatusDone || before.Outcome != want {
 				t.Fatalf("terminal = %+v, %v", before, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: NodePending, Actor: reaper, Cause: CauseLeaseLapse}); err == nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: nodePending, Actor: reaper, Cause: CauseLeaseLapse}); err == nil {
 				t.Fatal("terminal job reopened")
 			}
 			after, err := tenant.ReadNode(t.Context(), ref)

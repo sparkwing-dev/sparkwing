@@ -180,7 +180,7 @@ func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
 func seedMaintenanceGit(t *testing.T, tenant *Tenant, row GitCredential) {
 	t.Helper()
 	if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := tenant.putGitCredentialTx(t.Context(), tx, row, tx.time)
+		_, err := tenant.putGitCredentialTx(t.Context(), tx, row, transactionTime(t, tx))
 		return err
 	}); err != nil {
 		t.Fatal(err)

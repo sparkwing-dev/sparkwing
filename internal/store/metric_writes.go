@@ -25,7 +25,7 @@ func (t *Tenant) WriteMetric(ctx context.Context, a capability.Authorized, sampl
 		if err := t.metricAuthorityTx(ctx, tx, a, "metrics"); err != nil {
 			return err
 		}
-		return insertMetricTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, sample)
+		return insertMetricTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, sample)
 	})
 }
 
@@ -38,7 +38,7 @@ func (t *Tenant) WriteUsage(ctx context.Context, a capability.Authorized, usage 
 		if err := t.metricAuthorityTx(ctx, tx, a, "usage"); err != nil {
 			return err
 		}
-		return addUsageTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, usage)
+		return addUsageTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, usage)
 	})
 }
 
@@ -72,15 +72,15 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 			continue
 		}
 		if rule.Credential == capability.CredentialClaim {
-			actor := Actor{Authority: p.Authority, CapabilityPrefix: c.Prefix, Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}
+			actor := Actor{Authority: p.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
 			switch rule.Binding {
 			case capability.BindOwnNode:
 				actor.Kind = ActorHolder
-				row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
+				row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 				if err != nil {
 					return err
 				}
-				if err := checkHolderTx(ctx, tx, t.team, row, actor, tx.time); err != nil {
+				if err := checkHolderTx(ctx, tx, t.team, row, actor); err != nil {
 					return err
 				}
 				if row.FinishedAt != nil || row.Attempt != runspec.AttemptOrdinal(a.Binding.Attempt) || runspec.AttemptOrdinal(b.Attempt) > 0 && runspec.AttemptOrdinal(b.Attempt) != row.Attempt {
@@ -89,8 +89,8 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 				b.Attempt = int64(row.Attempt)
 			case capability.BindRunOfTrigger:
 				actor.Kind = ActorRunHost
-				actor.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: b.RunID, Holder: b.Holder, Generation: b.Generation}
-				if err := checkOwnerTx(ctx, tx, t.team, actor, a.Target.RunID, tx.time); err != nil {
+				actor.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
+				if err := checkOwnerTx(ctx, tx, t.team, actor, a.Target.RunID); err != nil {
 					return err
 				}
 			default:

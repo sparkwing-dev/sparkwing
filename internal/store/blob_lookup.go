@@ -81,7 +81,11 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if err != nil {
 		return result, err
 	}
-	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.time)) {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return blob.RecordLookupResult{}, clockErr1
+	}
+	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(clockTime1)) {
 		return result, nil
 	}
 	if request.VerifiedDefaultOnly {
@@ -441,7 +445,11 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 			return blob.MemoHit{}, err
 		}
 		record := original
-		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, tx.time
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return blob.MemoHit{}, clockErr2
+		}
+		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, clockTime2
 		record.ExpiresAt = runspec.Optional[time.Time]{}
 		record.ManifestDigest = runspec.Optional[blob.Digest]{}
 		record.Pinned = false

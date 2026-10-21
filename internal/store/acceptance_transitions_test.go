@@ -30,7 +30,7 @@ func checkStoreTransitions(t *testing.T) (err error) {
 	if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 		return err
 	}
-	ref := controllerwire.NodeRef{RunID: plan.RunID, NodeID: "alpha"}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}
 	ready := store.ReadyNode{Ref: ref, Actor: plan.Actor}
 	withdraw := store.RevokeNode{Ref: ref, Actor: plan.Actor}
 	for _, change := range []store.NodeCommand{ready, withdraw} {
@@ -38,7 +38,7 @@ func checkStoreTransitions(t *testing.T) (err error) {
 			return err
 		}
 	}
-	demand := store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}}
 	if _, err := s.AsOperator().ClaimUnit(ctx, demand); err == nil {
 		return errors.New("withdrawn job remained claimable")
 	}
@@ -80,7 +80,7 @@ func checkStoreHeldTransitions(ctx context.Context, tenant *store.Tenant, withdr
 	if err != nil || !reflect.DeepEqual(before, after) {
 		return fmt.Errorf("refused withdrawal changed holder: %v", err)
 	}
-	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	stale := holder
 	stale.Generation++
 	if _, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: stale, SourceAttempt: acceptanceAttempt(0)}); err == nil {
@@ -125,13 +125,13 @@ func checkStoreTerminalReplay(ctx context.Context, tenant *store.Tenant, finish 
 	if err != nil || !reflect.DeepEqual(before, after) {
 		return fmt.Errorf("terminal refusal changed state: %v", err)
 	}
-	events, err := tenant.ReadStateEvents(ctx, ref.RunID, 0, 100)
+	events, err := tenant.ReadStateEvents(ctx, string(ref.RunID), 0, 100)
 	if err != nil {
 		return err
 	}
 	var kinds []string
 	for _, event := range events {
-		if event.NodeID == ref.NodeID {
+		if runspec.NodeID(event.NodeID) == ref.NodeID {
 			kinds = append(kinds, event.Kind)
 			if event.StateSeq != int64(len(kinds)) {
 				return errors.New("job event sequence is not continuous")

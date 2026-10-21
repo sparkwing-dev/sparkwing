@@ -237,7 +237,7 @@ func TestLogPersistenceMaintenanceBoundsAndRollsBackTheBatch(t *testing.T) {
 func maintenanceOwnerLogFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenant, SegmentCommit) {
 	t.Helper()
 	s, claim := releaseFixture(t, kind)
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogUnitKind(kind), Generation: int64(claim.Award.Generation)}}
 	if kind == capability.UnitEval {
 		subject.Unit.Source = &blob.LogSource{NodeID: "job", Generation: claim.SourceGeneration}

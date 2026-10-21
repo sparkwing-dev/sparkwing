@@ -31,7 +31,7 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: "machine", Generation: 7}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "machine", Generation: 7}}
 	return s, &Tenant{s: s, team: "a"}, actor, runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7}
 }
 
@@ -198,7 +198,7 @@ func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
 func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(`{"retry":{"set":true,"value":2}}`))
-	ref := controllerwire.NodeRef{RunID: attempt.RunID, NodeID: attempt.NodeID}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
 	for retry := range 2 {
 		if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "old result"}); err != nil {
 			t.Fatal(err)
@@ -210,7 +210,7 @@ func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		node, err := tenant.GetNode(t.Context(), ref.RunID, ref.NodeID)
+		node, err := tenant.GetNode(t.Context(), string(ref.RunID), string(ref.NodeID))
 		if err != nil || node.Summary != "" || len(node.Annotations) != 0 || int64(node.AttemptsConsumed) != int64(applied.Attempt) {
 			t.Fatalf("new attempt inherited metadata: %+v, %v", node, err)
 		}

@@ -52,7 +52,7 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
 		return nil, nil, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
 	}
-	ref := controllerwire.NodeRef{RunID: accepted.RunID, NodeID: nodeID}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(accepted.RunID), NodeID: runspec.NodeID(nodeID)}
 	row, err := e.Store.ReadNode(ctx, ref)
 	if err != nil {
 		return nil, nil, err

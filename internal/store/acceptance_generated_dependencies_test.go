@@ -53,7 +53,7 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	}
 	binding := owner.Capability.Binding
 	binding.Kind, binding.NodeID, binding.Generation = capability.BindingNode, "alpha", int64(source.Generation)
-	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: plan.Actor.Owner.Generation}
+	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: int64(plan.Actor.Owner.Generation)}
 	expander, err := s.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{
 		Parent: plan.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
 		Binding: binding, ExpiresAt: owner.Capability.ExpiresAt, Repositories: owner.Capability.Repositories,
@@ -61,7 +61,7 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	request := store.ExpansionSubmission{Source: source.Ref, SourceGeneration: int64(source.Generation), Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
+	request := store.ExpansionSubmission{Source: source.Ref, SourceGeneration: source.Generation, Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
 	accepted, err := tenant.AcceptExpansion(ctx, request)
 	if err != nil || len(accepted.Nodes) != 2 {
 		return fmt.Errorf("accept expansion: %+v, %v", accepted, err)
@@ -141,15 +141,15 @@ func checkStoreGeneratedMembership(ctx context.Context, s *store.Store, plan sto
 }
 
 func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *store.Tenant, plan store.PlanAcceptance, id string) (store.NodeRow, error) {
-	ref := controllerwire.NodeRef{RunID: plan.RunID, NodeID: id}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}
 	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: plan.Actor}); err != nil {
 		return store.NodeRow{}, err
 	}
-	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		return store.NodeRow{}, err
 	}
-	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	start, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return store.NodeRow{}, err

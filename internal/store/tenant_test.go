@@ -158,11 +158,11 @@ func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
 	st := storetest.New(t).Open(t)
 	own, finish := runCompletionFixture(t, st)
 	foreign := tenantFor(t, st, "foreign")
-	before, err := own.ReadRun(t.Context(), finish.Unit.RunID)
+	before, err := own.ReadRun(t.Context(), string(finish.Unit.RunID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := foreign.ReadRun(t.Context(), finish.Unit.RunID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := foreign.ReadRun(t.Context(), string(finish.Unit.RunID)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("foreign read: %v", err)
 	}
 	if _, err := foreign.FinishRunAndUnit(t.Context(), finish); err == nil {
@@ -175,7 +175,7 @@ func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
 	if _, err := own.FinishRunAndUnit(t.Context(), missing); err == nil {
 		t.Fatal("missing run finish succeeded")
 	}
-	after, err := own.ReadRun(t.Context(), finish.Unit.RunID)
+	after, err := own.ReadRun(t.Context(), string(finish.Unit.RunID))
 	if err != nil || before.State != after.State || after.FinishedAt != nil || before.StateSeq != after.StateSeq {
 		t.Fatalf("refused mutation changed run: %+v, %v", after, err)
 	}

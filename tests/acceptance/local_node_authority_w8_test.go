@@ -38,7 +38,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 		t.Fatal("initial claim:", err)
 	}
 	attempt := int64(0)
-	applied, err := tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
+	applied, err := tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
 	if err != nil {
 		t.Fatal("start:", err)
 	}
@@ -59,7 +59,7 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 		p := binding.Principal
 		attempt := int64(0)
-		applied, err := binding.Tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
+		applied, err := binding.Tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
 		if err != nil {
 			return runners.NativeServices{}, err
 		}

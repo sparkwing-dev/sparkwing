@@ -67,7 +67,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 			t.Fatal(err)
 		}
 		input.SpecHash = "job-hash"
-		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Generation: input.Generation, SpecHash: input.SpecHash, Spec: body}
+		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: input.Generation, SpecHash: input.SpecHash, Spec: body}
 		var spec runspec.Spec
 		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 			t.Fatal(err)

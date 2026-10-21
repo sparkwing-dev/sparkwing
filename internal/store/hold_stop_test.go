@@ -167,7 +167,7 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 			if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: request.RunID, To: RunRunning, Cause: RunStart, Actor: request.Actor}); err != nil {
+			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(request.RunID), To: RunRunning, Cause: RunStart, Actor: request.Actor}); err != nil {
 				t.Fatal(err)
 			}
 			fundUnitClaim(t, s)
@@ -182,11 +182,11 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 			}
 			start := func(id, prefix string) (UnitClaim, Actor) {
 				t.Helper()
-				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: id}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor}); err != nil {
 					t.Fatal(err)
 				}
 				claim, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}})
-				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: id}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)
 				}
 				return claim, actor
@@ -211,11 +211,11 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 			if beat, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || beat.CancelRequested {
 				t.Fatalf("independent customer job cancelled: %+v %v", beat, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
 			_, next := start("next", "customer-runner")
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "next"}, Actor: next, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "next"}, Actor: next, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
 			now = beat.ExpiresAt
@@ -226,10 +226,10 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "blocked"}, To: NodeSkipped, Cause: CauseDependency, Actor: request.Actor}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "blocked"}, To: NodeSkipped, Cause: causeDependency, Actor: request.Actor}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: request.Actor.Owner, Transition: RunCompletion{RunID: request.RunID, Cause: RunFinish, Actor: request.Actor}}); err != nil {
+			if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: request.Actor.Owner, Transition: RunCompletion{RunID: runspec.RunID(request.RunID), Cause: RunFinish, Actor: request.Actor}}); err != nil {
 				t.Fatal(err)
 			}
 			run, err := tenant.ReadRun(t.Context(), request.RunID)

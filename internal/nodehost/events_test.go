@@ -14,12 +14,12 @@ import (
 )
 
 func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome store.NodeState) error {
-	actor := store.Actor{Kind: store.ActorHolder, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Generation: runspec.ClaimGeneration(int64(input.Generation))}
-	started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: actor, SourceAttempt: new(input.Attempt)})
+	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: input.Authority.CapabilityPrefix, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+	started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt)})
 	if err != nil {
 		return err
 	}
-	_, err = f.State.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}})
+	_, err = f.State.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}})
 	return err
 }
 

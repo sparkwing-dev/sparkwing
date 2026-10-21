@@ -20,7 +20,11 @@ func (o *Operator) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, CardRefundDue, tx.time.UnixNano())
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return nil, clockErr1
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, CardRefundDue, clockTime1.UnixNano())
 	if err != nil {
 		return nil, err
 	}

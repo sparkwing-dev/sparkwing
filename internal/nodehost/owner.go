@@ -114,7 +114,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 		err = maskHostError(err, h.Mask)
 	}()
-	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
+	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != runspec.RunID(input.RunID) {
 		return completion, errors.New("run host requires a bound owner and sealed request")
 	}
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
@@ -186,7 +186,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		return completion, err
 	}
 	if snapshot.Run.State == store.RunPending {
-		_, err = h.Store.TransitionRun(ctx, store.RunTransition{RunID: input.RunID, To: store.RunRunning, Actor: input.Owner, Cause: store.RunStart})
+		_, err = h.Store.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(input.RunID), To: store.RunRunning, Actor: input.Owner, Cause: store.RunStart})
 		if err != nil {
 			return completion, err
 		}
@@ -199,19 +199,15 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		completion, err := h.Around(ctx, accepted, schedule)
 		var refused *AdmissionFailure
 		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
-			policy := admissionPolicy(refused, input.Owner.Owner.Generation)
-			outcome := store.RunFailed
-			if refused.Outcome == store.NodeSkipped {
-				outcome = store.RunSuccess
-			}
-			_, err = h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{
-				RunID: input.RunID, Actor: input.Owner, Cause: store.RunPolicyRefused,
+			policy := admissionPolicy(refused, int64(input.Owner.Owner.Generation))
+			applied, finishErr := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{
+				RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunPolicyRefused,
 				OwnerPolicy: &policy, Reason: refused.Reason,
 			}})
-			if err != nil {
-				return RunCompletion{}, err
+			if finishErr != nil {
+				return RunCompletion{}, finishErr
 			}
-			completion = RunCompletion{Outcome: string(outcome), Reason: refused.Reason}
+			completion, err = committedRunCompletion(applied)
 		}
 		return completion, err
 	}
@@ -244,7 +240,7 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
-	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: actor.Owner.RunID, Holder: actor.Owner.Holder, Generation: actor.Owner.Generation}, actor, computing)
+	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: string(actor.Owner.RunID), Holder: actor.Owner.Holder, Generation: int64(actor.Owner.Generation)}, actor, computing)
 }
 
 func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, actor store.Actor, computing func() bool) (context.Context, func()) {
@@ -375,7 +371,7 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 	_, err := h.Store.FinishRunAndUnit(finishCtx, store.FinishRunRequest{
 		Unit: input.Owner.Owner,
 		Transition: store.RunCompletion{
-			RunID: input.RunID, Actor: input.Owner,
+			RunID: runspec.RunID(input.RunID), Actor: input.Owner,
 			Cause: store.RunFinish, Reason: reason, MaskedError: message,
 		},
 	})

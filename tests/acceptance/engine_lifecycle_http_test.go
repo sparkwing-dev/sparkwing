@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -111,7 +113,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 					}
 				case "owner finish":
 					finish := f.finish
-					if finish.Unit != finish.Transition.Actor.Owner || finish.Unit != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "runner", Generation: 4}) || finish.Transition.Actor.Authority != p.Authority || finish.Transition.Cause != store.RunFinish {
+					if finish.Unit != finish.Transition.Actor.Owner || finish.Unit != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "runner", Generation: 4}}) || finish.Transition.Actor.Authority != p.Authority || finish.Transition.Cause != store.RunFinish {
 						t.Fatalf("finish = %+v", finish)
 					}
 				case "published finish":

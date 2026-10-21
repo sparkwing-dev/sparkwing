@@ -55,7 +55,7 @@ func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, 
 	}
 	actor := store.Actor{Authority: a.Principal.Authority, Kind: store.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
 	applied, err := tenant.TransitionRun(ctx, store.RunTransition{
-		RunID: a.Target.RunID, To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: body.Reason,
+		RunID: runspec.RunID(a.Target.RunID), To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: body.Reason,
 	})
 	return appliedResponse(applied), engineLookupError(err)
 }
@@ -120,6 +120,7 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 
 func appliedResponse(applied store.Applied) controllerwire.Applied {
 	return controllerwire.Applied{
+		Outcome: string(applied.Outcome), Reason: applied.Reason,
 		Replayed: applied.Replayed, CancelRequested: applied.CancelRequested,
 		StateSeq: applied.StateSeq, Generation: int64(applied.Generation), Attempt: int64(applied.Attempt),
 	}
@@ -139,7 +140,7 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 	if a.Target.RunID == "" || a.Target.NodeID == "" {
 		return nil, invalidEngineBody("transition requires a job")
 	}
-	ref, actor := controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, engineActor(a)
+	ref, actor := controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a)
 	var resultForStore *store.NodeResult
 	if result := body.Result; result != nil {
 		if int64(len(result.MaskedError)) > limits.ErrorBytes {
@@ -162,47 +163,18 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 		}
 	}
 	switch store.TransitionCause(body.Cause) {
-	case store.CauseStart:
-		if body.To != string(store.NodeRunning) || resultForStore != nil || body.RetryAt != nil || body.Publication != nil {
-			return nil, invalidEngineBody("start carries conflicting fields")
-		}
-		return store.StartNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt)}, nil
-	case store.CauseRetry:
-		if body.To != string(store.NodeRunning) || body.Publication != nil {
-			return nil, invalidEngineBody("retry carries conflicting fields")
-		}
-		return store.RetryNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt), Result: resultForStore, RetryAt: body.RetryAt}, nil
-	case store.CauseReport:
-		if body.RetryAt != nil || body.Publication != nil {
-			return nil, invalidEngineBody("report carries conflicting fields")
-		}
-		return store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt), Outcome: store.NodeState(body.To), Result: resultForStore}, nil
-	case store.CausePublish:
-		if body.SourceAttempt != nil || body.RetryAt != nil || body.Publication != nil {
-			return nil, invalidEngineBody("publish carries conflicting fields")
-		}
-		return store.PublishNode{Ref: ref, Actor: actor, Outcome: store.NodeState(body.To), Result: resultForStore}, nil
-	case store.CausePublishAttempt:
-		if body.To != string(store.NodePending) || body.SourceAttempt != nil || body.RetryAt != nil || resultForStore != nil {
-			return nil, invalidEngineBody("publish attempt carries conflicting fields")
-		}
-		return store.PublishNodeAttempt{Ref: ref, Actor: actor, Publication: body.Publication}, nil
-	case store.CauseRelease:
-		if resultForStore != nil || body.RetryAt != nil || body.Publication != nil {
-			return nil, invalidEngineBody("release carries conflicting fields")
-		}
-		switch store.NodeState(body.To) {
-		case store.NodeReady:
-			if body.SourceAttempt == nil {
-				return store.ReadyNode{Ref: ref, Actor: actor}, nil
-			}
-		case store.NodePending:
-			return store.ReleaseNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt)}, nil
-		}
-		return nil, invalidEngineBody("release requires ready without an attempt, or pending")
+	case store.CauseStart, store.CauseRetry, store.CauseReport, store.CausePublish, store.CausePublishAttempt, store.CauseRelease:
 	default:
 		return nil, invalidEngineBody("unsupported node command")
 	}
+	command, err := (store.NodeCommandPayload{
+		To: store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt),
+		Extra: store.NodeCommandExtra{Result: resultForStore, RetryAt: body.RetryAt, Publication: body.Publication},
+	}).NodeCommand(ref, actor)
+	if err != nil {
+		return nil, invalidEngineBody(err.Error())
+	}
+	return command, nil
 }
 
 func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) (store.FinishRunRequest, error) {
@@ -214,7 +186,7 @@ func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) 
 		return store.FinishRunRequest{}, invalidEngineBody("finish requires a run")
 	}
 	change := store.RunTransition{
-		RunID: a.Target.RunID, Actor: engineActor(a),
+		RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a),
 		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked,
 	}
 	if a.Access.Credential == capability.CredentialPublisher {

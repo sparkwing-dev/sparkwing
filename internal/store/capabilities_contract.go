@@ -373,7 +373,11 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 	}
 
 	c := node.principal.Capability
-	if !capability.CredentialAlive(c, tx.time) {
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return authorityNode{}, clockErr1
+	}
+	if !capability.CredentialAlive(c, clockTime1) {
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if node.requirement != nil {
@@ -630,7 +634,10 @@ func (op *Operator) revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capa
 	}); err != nil {
 		return err
 	}
-	now := tx.time
+	now, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return clockErr2
+	}
 	if ref.Kind == capability.AuthorityCapability {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {

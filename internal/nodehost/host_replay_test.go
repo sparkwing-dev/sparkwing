@@ -70,7 +70,7 @@ func TestGeneratorReplay(t *testing.T) {
 			s.nodes = map[string]store.NodeRow{"peer": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "peer"}, Spec: peerBody, SpecHash: string(peerHash)}}
 			read := s.readNode
 			s.readNode = func(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
-				if row, ok := s.nodes[ref.NodeID]; ok && row.Ref == ref {
+				if row, ok := s.nodes[string(ref.NodeID)]; ok && row.Ref == ref {
 					return row, nil
 				}
 				return read(ctx, ref)

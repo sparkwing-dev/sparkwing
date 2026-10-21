@@ -4198,10 +4198,12 @@ Successful transaction construction captures database time. Failure to read that
 clock aborts construction before any transaction body runs. Read transactions
 keep that instant and one database snapshot. Mutation authority and lease checks
 read fresh database time after lock waits or policy work, through the same
-error-returning clock owner. Lifecycle, identity, billing and schedule mutations
+error-returning clock owner. Mutation transactions expose no stored snapshot
+timestamp, and lifecycle guards accept no caller-supplied time.
+Lifecycle, identity, billing and schedule mutations
 use store time instead of a caller clock. Schedule due times and provider event
 timestamps remain domain facts.
-Capacity locks refresh the decision time after waiting, before counting holders
+Capacity decisions read time after waiting for locks, before counting holders
 or promoting waiters.
 Blob lookup budgets read elapsed database time through one budget check. They
 do not reuse the authorization snapshot. Cache lookup exhaustion remains a miss.
@@ -4213,6 +4215,8 @@ Runs, nodes and triggers store a generated `drain_deadline_at` from their first
 write, including concurrency supersession. Cancellation clamps existing work and
 slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
 bounds. The schema baseline is version 16.
+The shared capacity writer applies the bound to each holder and waiter,
+including controller reconciliation.
 
 `Tenant.TransitionNode` accepts the closed `NodeCommand` interface. `StartNode`,
 `RetryNode`, `ReportNode` and `ReleaseNode` carry the captured attempt. Start,
@@ -4220,9 +4224,16 @@ retry, ready, release and cancel commands fix their destination. Approval timeou
 reads its verdict from the persisted policy. Each command exposes only its own
 payload. `BindNodeCommand` supplies authenticated transport authority without
 changing the operation. The private normalizer retains the transition table as
-the single state owner. The local host adapter rejects fields that the selected
-command cannot carry. Node rows and execution inputs keep claim generations and
+the single state owner. Controller and local transports decode through
+`NodeCommandPayload`, which rejects fields that the selected command cannot
+carry. Materialization and publication command types remain private to the store.
+Node rows and execution inputs keep claim generations and
 attempt ordinals distinct. Actor generations and command source attempts use
-those same types.
-Run completion carries no requested outcome and derives its verdict from
-persisted state.
+those same types. Lifecycle commands retain typed run and node identifiers.
+Holder actors carry complete `NodeFence` values, and owner references carry
+`EvalFence` values. Guards compare the captured target and generations together.
+Run completion carries no requested outcome. Admission refusal first persists
+its job outcomes and resolves expansions, then derives the run verdict through
+the shared scheduler. Existing required-job failures retain their effect.
+Completion returns the committed outcome and reason, which the host reports
+and the foreground CLI uses for its exit status.

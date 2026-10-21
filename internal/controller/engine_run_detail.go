@@ -80,13 +80,13 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	}
 	nodes := make(map[string]store.NodeRow, len(facts.Snapshot.Nodes))
 	for _, row := range facts.Snapshot.Nodes {
-		if row.Ref.RunID != run.ID || row.Ref.NodeID == "" {
+		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
 			return controllerwire.RunDetail{}, errors.New("invalid persisted status job")
 		}
-		if _, exists := nodes[row.Ref.NodeID]; exists {
+		if _, exists := nodes[string(row.Ref.NodeID)]; exists {
 			return controllerwire.RunDetail{}, errors.New("duplicate persisted status job")
 		}
-		nodes[row.Ref.NodeID] = row
+		nodes[string(row.Ref.NodeID)] = row
 		detail.Jobs = append(detail.Jobs, snapshotJob(row))
 	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)

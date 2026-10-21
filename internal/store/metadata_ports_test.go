@@ -23,7 +23,7 @@ func metadataAttempt(t *testing.T, f *storeRecoveryFixture) runspec.AttemptIdent
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runspec.AttemptIdentity{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, Generation: int64(row.Generation), Attempt: int64(row.Attempt)}
+	return runspec.AttemptIdentity{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(row.Generation), Attempt: int64(row.Attempt)}
 }
 
 func metadataStep(t *testing.T, f *storeRecoveryFixture, step, state string) {
@@ -170,20 +170,20 @@ func TestMetadataWritesCannotCrossClaimFencesProperty(t *testing.T) {
 		actor, ref, forged := f.holder, f.ref, attempt
 		switch random.IntN(7) {
 		case 0:
-			actor.Generation += runspec.ClaimGeneration(int64(random.IntN(100) + 1))
+			actor.Generation += runspec.ClaimGeneration(random.IntN(100) + 1)
 		case 1:
 			actor.Holder = fmt.Sprintf("foreign-%x", random.Uint64())
 		case 2:
 			actor.CapabilityPrefix = fmt.Sprintf("foreign-%x", random.Uint64())
 		case 3:
-			ref.RunID = fmt.Sprintf("foreign-%x", random.Uint64())
-			forged.RunID = ref.RunID
+			ref.RunID = runspec.RunID(fmt.Sprintf("foreign-%x", random.Uint64()))
+			forged.RunID = string(ref.RunID)
 		case 4:
-			ref.NodeID = fmt.Sprintf("foreign-%x", random.Uint64())
-			forged.NodeID = ref.NodeID
+			ref.NodeID = runspec.NodeID(fmt.Sprintf("foreign-%x", random.Uint64()))
+			forged.NodeID = string(ref.NodeID)
 		case 5:
 			forged.Team = fmt.Sprintf("foreign-%x", random.Uint64())
-			ref.RunID = forged.Team
+			ref.RunID = runspec.RunID(forged.Team)
 		case 6:
 			actor.Authority.ID = fmt.Sprintf("foreign-%x", random.Uint64())
 		}

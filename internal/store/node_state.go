@@ -27,7 +27,7 @@ type NodeState string
 
 // Logical node states use the terminal outcome as the terminal state name.
 const (
-	NodePending         NodeState = "pending"
+	nodePending         NodeState = "pending"
 	NodeReady           NodeState = "ready"
 	NodeClaimed         NodeState = "claimed"
 	NodeRunning         NodeState = "running"
@@ -89,21 +89,9 @@ const (
 
 // OwnerLeaseRef identifies a fence to re-read under the store clock, never a caller's liveness assertion.
 type OwnerLeaseRef struct {
-	Kind             OwnerLeaseKind
-	Name             string
-	RunID            string
-	SourceNodeID     string
-	SourceGeneration int64
-	Holder           string
-	Generation       int64
-}
-
-func (ref OwnerLeaseRef) evalFence() runspec.EvalFence {
-	return runspec.EvalFence{RunID: runspec.RunID(ref.RunID), SourceNodeID: runspec.NodeID(ref.SourceNodeID), SourceGeneration: runspec.ClaimGeneration(ref.SourceGeneration), Holder: ref.Holder, Generation: runspec.ClaimGeneration(ref.Generation)}
-}
-
-func nodeFence(runID runspec.RunID, nodeID runspec.NodeID, holder string, generation runspec.ClaimGeneration) runspec.NodeFence {
-	return runspec.NodeFence{RunID: runID, NodeID: nodeID, Holder: holder, Generation: generation}
+	Kind OwnerLeaseKind
+	Name string
+	runspec.EvalFence
 }
 
 // Actor carries server-derived tagged authority; C2 resolves it through the current
@@ -115,9 +103,8 @@ type Actor struct {
 	Authority        capability.AuthorityRef
 	Kind             ActorKind
 	CapabilityPrefix string
-	Holder           string
-	Generation       runspec.ClaimGeneration
-	Owner            OwnerLeaseRef
+	runspec.NodeFence
+	Owner OwnerLeaseRef
 }
 
 // NodeRow contains the state facts consumed by the shared decision and reconciliation functions.
@@ -176,22 +163,22 @@ type TransitionCause string
 // Causes distinguish retry, materialization and cancellation even when their logical states coincide.
 const (
 	CauseRelease         TransitionCause = "release"
-	CauseDependency      TransitionCause = "dependency"
-	CauseOwnerPolicy     TransitionCause = "owner_policy"
+	causeDependency      TransitionCause = "dependency"
+	causeOwnerPolicy     TransitionCause = "owner_policy"
 	CauseUnpriced        TransitionCause = "unpriced"
 	CauseApprovalOpen    TransitionCause = "approval_open"
-	CauseApprovalResolve TransitionCause = "approval_resolve"
-	CauseApprovalTimeout TransitionCause = "approval_timeout"
+	causeApprovalResolve TransitionCause = "approval_resolve"
+	causeApprovalTimeout TransitionCause = "approval_timeout"
 	CauseRevoke          TransitionCause = "revoke"
 	CauseAward           TransitionCause = "award"
 	CauseQueueTimeout    TransitionCause = "queue_timeout"
-	CauseMaterialize     TransitionCause = "materialize"
+	causeMaterialize     TransitionCause = "materialize"
 	CauseStart           TransitionCause = "start"
 	CauseReport          TransitionCause = "report"
 	CauseLaunchRejected  TransitionCause = "launch_rejected"
 	CauseRetry           TransitionCause = "retry"
 	CauseLeaseLapse      TransitionCause = "lease_lapse"
-	CauseCancel          TransitionCause = "cancel"
+	causeCancel          TransitionCause = "cancel"
 	CausePublish         TransitionCause = "publish"
 	CausePublishAttempt  TransitionCause = "publish_attempt"
 )
@@ -239,32 +226,32 @@ func NodeTransitions() []NodeEdge {
 	cancellers := []ActorKind{ActorOperator, ActorController, ActorReaper}
 	return []NodeEdge{
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeFailed}, []ActorKind{ActorLauncher}, CauseLaunchRejected, []EdgeGuard{GuardLauncherAward}, false},
-		{[]NodeState{NodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorClaimant}, CauseUnpriced, []EdgeGuard{GuardUnclaimed, GuardUnpriced}, false},
-		{[]NodeState{NodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
-		{[]NodeState{NodePending}, []NodeState{NodePending}, []ActorKind{ActorOperator}, CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
-		{[]NodeState{NodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{NodePending}, []NodeState{NodeSkipped, NodeCancelled}, owners, CauseDependency, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{NodePending}, []NodeState{NodeSuccess, NodeFailed, NodeSkipped}, owners, CauseOwnerPolicy, []EdgeGuard{GuardOwner, GuardUnclaimed, GuardOwnerPolicy}, false},
-		{[]NodeState{NodePending, NodeReady}, []NodeState{NodeApprovalPending}, owners, CauseApprovalOpen, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorOperator}, CauseApprovalResolve, []EdgeGuard{GuardApproval}, false},
-		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorReaper, ActorRunHost}, CauseApprovalTimeout, []EdgeGuard{GuardApprovalTimeout}, false},
-		{[]NodeState{NodeReady}, []NodeState{NodePending}, owners, CauseRevoke, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]NodeState{nodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorClaimant}, CauseUnpriced, []EdgeGuard{GuardUnclaimed, GuardUnpriced}, false},
+		{[]NodeState{nodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
+		{[]NodeState{nodePending}, []NodeState{nodePending}, []ActorKind{ActorOperator}, CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
+		{[]NodeState{nodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]NodeState{nodePending}, []NodeState{NodeSkipped, NodeCancelled}, owners, causeDependency, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]NodeState{nodePending}, []NodeState{NodeSuccess, NodeFailed, NodeSkipped}, owners, causeOwnerPolicy, []EdgeGuard{GuardOwner, GuardUnclaimed, GuardOwnerPolicy}, false},
+		{[]NodeState{nodePending, NodeReady}, []NodeState{NodeApprovalPending}, owners, CauseApprovalOpen, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorOperator}, causeApprovalResolve, []EdgeGuard{GuardApproval}, false},
+		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorReaper, ActorRunHost}, causeApprovalTimeout, []EdgeGuard{GuardApprovalTimeout}, false},
+		{[]NodeState{NodeReady}, []NodeState{nodePending}, owners, CauseRevoke, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
 		{[]NodeState{NodeReady}, []NodeState{NodeClaimed}, []ActorKind{ActorHolder, ActorRunHost}, CauseAward, []EdgeGuard{GuardAward, GuardUnclaimed}, false},
-		{[]NodeState{NodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorReaper}, CauseQueueTimeout, []EdgeGuard{GuardQueueDeadline, GuardUnclaimed}, false},
-		{[]NodeState{NodePending, NodeReady, NodeClaimed}, terminal, []ActorKind{ActorRunHost}, CauseMaterialize, []EdgeGuard{GuardOwner, GuardMaterialize}, false},
+		{[]NodeState{nodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorReaper}, CauseQueueTimeout, []EdgeGuard{GuardQueueDeadline, GuardUnclaimed}, false},
+		{[]NodeState{nodePending, NodeReady, NodeClaimed}, terminal, []ActorKind{ActorRunHost}, causeMaterialize, []EdgeGuard{GuardOwner, GuardMaterialize}, false},
 		{[]NodeState{NodeClaimed}, []NodeState{NodeRunning}, []ActorKind{ActorHolder}, CauseStart, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeClaimed}, []NodeState{NodePending}, []ActorKind{ActorHolder}, CauseRelease, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeClaimed}, []NodeState{NodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired}, false},
+		{[]NodeState{NodeClaimed}, []NodeState{nodePending}, []ActorKind{ActorHolder}, CauseRelease, []EdgeGuard{GuardHolder}, false},
+		{[]NodeState{NodeClaimed}, []NodeState{nodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired}, false},
 		{[]NodeState{NodeClaimed}, terminal, []ActorKind{ActorHolder}, CauseReport, []EdgeGuard{GuardHolder}, false},
 		{[]NodeState{NodeRunning}, []NodeState{NodeRunning}, []ActorKind{ActorHolder}, CauseRetry, []EdgeGuard{GuardHolder, GuardRetry}, false},
 		{[]NodeState{NodeRunning}, terminal, []ActorKind{ActorHolder}, CauseReport, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeRunning}, []NodeState{NodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired, GuardDisruptions}, false},
+		{[]NodeState{NodeRunning}, []NodeState{nodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired, GuardDisruptions}, false},
 		{[]NodeState{NodeRunning}, []NodeState{NodeFailed}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardDisruptionCap}, false},
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardCancelLapse}, false},
-		{[]NodeState{NodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, cancellers, CauseCancel, []EdgeGuard{GuardCancel, GuardUnclaimed}, false},
-		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, cancellers, CauseCancel, []EdgeGuard{GuardCancel}, true},
-		{[]NodeState{NodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, CauseCancel, []EdgeGuard{GuardOwner, GuardCancel, GuardUnclaimed}, false},
-		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, CauseCancel, []EdgeGuard{GuardOwner, GuardCancel}, true},
+		{[]NodeState{nodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, cancellers, causeCancel, []EdgeGuard{GuardCancel, GuardUnclaimed}, false},
+		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, cancellers, causeCancel, []EdgeGuard{GuardCancel}, true},
+		{[]NodeState{nodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, causeCancel, []EdgeGuard{GuardOwner, GuardCancel, GuardUnclaimed}, false},
+		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, causeCancel, []EdgeGuard{GuardOwner, GuardCancel}, true},
 	}
 }
 
@@ -333,6 +320,8 @@ type nodeTransition struct {
 
 // Applied distinguishes an identical replay from a state change or a cooperative cancellation request.
 type Applied struct {
+	Outcome         RunState
+	Reason          string
 	Replayed        bool
 	CancelRequested bool
 	StateSeq        int64
@@ -373,7 +362,8 @@ func (t *Tenant) TransitionNode(ctx context.Context, command NodeCommand) (Appli
 	var out Applied
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		var err error
-		out, err = transitionNodeTx(ctx, tx, t.team, change, tx.time)
+
+		out, err = transitionNodeTx(ctx, tx, t.team, change)
 		return err
 	})
 	return out, err
@@ -413,31 +403,35 @@ func nodeState(row NodeRow) (NodeState, error) {
 		if row.ReadyAt != nil {
 			return NodeReady, nil
 		}
-		return NodePending, nil
+		return nodePending, nil
 	default:
 		return "", authorityError(apierr.IntegrityFailure, "unknown job status")
 	}
 }
 
 // safety: holder rights and replay digest are rechecked under locks using the store clock before any status write.
-func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition, now time.Time) (Applied, error) {
+func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (Applied, error) {
 	if err := validateSourceAttempt(change); err != nil {
 		return Applied{}, err
 	}
-	if err := prepareStateActorTx(ctx, tx, team, change.Ref.RunID, change.Actor, now); err != nil {
+	if err := prepareStateActorTx(ctx, tx, team, string(change.Ref.RunID), change.Actor); err != nil {
 		return Applied{}, err
 	}
-	if change.Cause == CauseMaterialize {
+	if change.Cause == causeMaterialize {
 		var err error
 		change, err = materializeChangeTx(ctx, tx, team, change)
 		if err != nil {
 			return Applied{}, err
 		}
 	}
-	if err := lockStateRunTx(ctx, tx, team, change.Ref.RunID); err != nil {
+	if err := lockStateRunTx(ctx, tx, team, string(change.Ref.RunID)); err != nil {
 		return Applied{}, err
 	}
-	now = tx.time
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return *new(Applied), clockErr2
+	}
+	now := clockTime2
 	row, err := readNodeTx(ctx, tx, team, change.Ref)
 	if err != nil {
 		return Applied{}, err
@@ -446,7 +440,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	if err != nil {
 		return Applied{}, err
 	}
-	if change.Cause == CauseApprovalTimeout && change.To == "" {
+	if change.Cause == causeApprovalTimeout && change.To == "" {
 		var policy string
 		if err := tx.QueryRowContext(ctx, `SELECT on_timeout FROM approvals WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID).Scan(&policy); err != nil {
 			return Applied{}, err
@@ -458,13 +452,13 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 		return Applied{}, err
 	}
 	if change.Actor.Kind == ActorReaper {
-		if err := checkReaperTx(ctx, tx, change.Actor, now); err != nil {
+		if err := checkReaperTx(ctx, tx, change.Actor); err != nil {
 			return Applied{}, err
 		}
 	}
 	if row.StateDigest == digest && reflect.DeepEqual(row.StateActor, change.Actor) {
 		if change.Actor.Kind == ActorRunHost {
-			if err := checkOwnerTx(ctx, tx, team, change.Actor, change.Ref.RunID, now); err != nil {
+			if err := checkOwnerTx(ctx, tx, team, change.Actor, string(change.Ref.RunID)); err != nil {
 				return Applied{}, err
 			}
 		}
@@ -550,7 +544,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 		return Applied{}, err
 	}
 	if row.CancelRequestedAt != nil {
-		if err := clampRunLeasesTx(ctx, tx, team, change.Ref.RunID, change.Ref.NodeID); err != nil {
+		if err := clampRunLeasesTx(ctx, tx, team, string(change.Ref.RunID), string(change.Ref.NodeID)); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -570,7 +564,7 @@ func validateSourceAttempt(change nodeTransition) error {
 }
 
 func validateRecordedFailure(ref controllerwire.NodeRef, failure *nodeproto.JobFailure) error {
-	if failure.Job != ref.NodeID || failure.Stage == "" || failure.Error == nil {
+	if runspec.NodeID(failure.Job) != ref.NodeID || failure.Stage == "" || failure.Error == nil {
 		return authorityError(apierr.BadRequest, "failure requires its job, stage and structured error")
 	}
 	if int64(len(failure.Error.Message)) > limits.ErrorBytes {
@@ -589,7 +583,7 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) erro
 	if row.Ref.RunID == "" || row.Ref.NodeID == "" || row.Status != StatusPending || row.StateSeq != 0 || row.ClaimedBy != "" || row.Generation != 0 || row.SpecHash == "" {
 		return errors.New("invalid initial job")
 	}
-	if err := enforceNodesPerRunTx(ctx, tx, team, row.Ref.RunID); err != nil {
+	if err := enforceNodesPerRunTx(ctx, tx, team, string(row.Ref.RunID)); err != nil {
 		return err
 	}
 	execution, err := json.Marshal(row.Execution)
@@ -624,13 +618,13 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 			return errors.New("job error exceeds limit")
 		}
 	}
-	if change.Extra.Materialize != nil && change.Cause != CauseMaterialize {
+	if change.Extra.Materialize != nil && change.Cause != causeMaterialize {
 		return errors.New("unexpected materialization")
 	}
-	if change.Extra.OwnerPolicy != nil && change.Cause != CauseOwnerPolicy {
+	if change.Extra.OwnerPolicy != nil && change.Cause != causeOwnerPolicy {
 		return errors.New("unexpected owner policy result")
 	}
-	if change.Extra.Approval != nil && change.Cause != CauseApprovalResolve && change.Cause != CauseApprovalTimeout {
+	if change.Extra.Approval != nil && change.Cause != causeApprovalResolve && change.Cause != causeApprovalTimeout {
 		return errors.New("unexpected approval")
 	}
 	if change.Extra.Claim != nil && change.Cause != CauseAward {
@@ -649,14 +643,14 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		switch guard {
 		case GuardOwner:
 			check := checkOwnerTx
-			if change.Cause == CauseCancel {
+			if change.Cause == causeCancel {
 				check = checkOwnerLeaseTx
 			}
-			if err := check(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+			if err := check(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
 			if change.To == NodeReady {
-				run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+				run, err := readRunTx(ctx, tx, team, string(row.Ref.RunID))
 				if err != nil {
 					return err
 				}
@@ -665,11 +659,11 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				}
 			}
 		case GuardLauncherAward:
-			award, err := checkLauncherActorTx(ctx, tx, team, row.Ref.RunID, change.Actor)
+			award, err := checkLauncherActorTx(ctx, tx, team, string(row.Ref.RunID), change.Actor)
 			if err != nil {
 				return err
 			}
-			if award.Claim.Kind != capability.UnitNode || award.Claim.NodeID != row.Ref.NodeID {
+			if award.Claim.Kind != capability.UnitNode || runspec.NodeID(award.Claim.NodeID) != row.Ref.NodeID {
 				return holderRefusal()
 			}
 		case GuardUnclaimed:
@@ -681,7 +675,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				return err
 			}
 		case GuardOwnerPolicy:
-			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			run, err := readRunTx(ctx, tx, team, string(row.Ref.RunID))
 			if err != nil {
 				return err
 			}
@@ -692,11 +686,11 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				return err
 			}
 		case GuardHolder:
-			if err := checkHolderTx(ctx, tx, team, row, change.Actor, now); err != nil {
+			if err := checkHolderTx(ctx, tx, team, row, change.Actor); err != nil {
 				return err
 			}
 		case GuardCancel:
-			if err := checkCancelActorTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+			if err := checkCancelActorTx(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
 		case GuardExpired, GuardDisruptions, GuardCancelLapse, GuardDisruptionCap:
@@ -704,7 +698,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				return holderRefusal()
 			}
 			cancel := row.CancelRequestedAt != nil
-			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			run, err := readRunTx(ctx, tx, team, string(row.Ref.RunID))
 			if err != nil {
 				return err
 			}
@@ -731,15 +725,15 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 			if err != nil {
 				return err
 			}
-			awarded := nodeFence(runspec.RunID(row.Ref.RunID), runspec.NodeID(row.Ref.NodeID), award.Holder, award.Generation)
-			if change.Actor.CapabilityPrefix != award.CapabilityPrefix || awarded != nodeFence(runspec.RunID(row.Ref.RunID), runspec.NodeID(row.Ref.NodeID), change.Actor.Holder, change.Actor.Generation) {
+			awarded := runspec.NodeFence{RunID: row.Ref.RunID, NodeID: row.Ref.NodeID, Holder: award.Holder, Generation: award.Generation}
+			if change.Actor.CapabilityPrefix != award.CapabilityPrefix || awarded != change.Actor.NodeFence {
 				return holderRefusal()
 			}
-			if cap.Team != string(team) || awarded != nodeFence(runspec.RunID(cap.Binding.RunID), runspec.NodeID(cap.Binding.NodeID), cap.Binding.Holder, runspec.ClaimGeneration(cap.Binding.Generation)) {
+			if cap.Team != string(team) || awarded != (runspec.NodeFence{RunID: runspec.RunID(cap.Binding.RunID), NodeID: runspec.NodeID(cap.Binding.NodeID), Holder: cap.Binding.Holder, Generation: runspec.ClaimGeneration(cap.Binding.Generation)}) {
 				return holderRefusal()
 			}
 		case GuardQueueDeadline:
-			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			run, err := readRunTx(ctx, tx, team, string(row.Ref.RunID))
 			if err != nil {
 				return err
 			}
@@ -754,7 +748,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				return errors.New("materialization requires transactional source read authority")
 			}
 		case GuardPublication:
-			if err := checkPublisherTx(ctx, tx, team, change.Actor, row.Ref.RunID); err != nil {
+			if err := checkPublisherTx(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
 			if change.Cause == CausePublish && row.Attempt > 0 {
@@ -843,7 +837,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		row.Attempt++
 		row.StartedAt = &now
 		if a := change.Extra.Attempt; a != nil {
-			if a.Identity.Team != string(team) || a.Identity.RunID != row.Ref.RunID || a.Identity.NodeID != row.Ref.NodeID || runspec.AttemptOrdinal(a.Identity.Attempt) != row.Attempt || runspec.ClaimGeneration(a.Identity.Generation) != row.Generation {
+			if a.Identity.Team != string(team) || runspec.RunID(a.Identity.RunID) != row.Ref.RunID || runspec.NodeID(a.Identity.NodeID) != row.Ref.NodeID || runspec.AttemptOrdinal(a.Identity.Attempt) != row.Attempt || runspec.ClaimGeneration(a.Identity.Generation) != row.Generation {
 				return errors.New("attempt identity does not match claim")
 			}
 		}
@@ -872,7 +866,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 			return err
 		}
 		row.Status = StatusApprovalPending
-	case NodePending:
+	case nodePending:
 		if row.Status == StatusRunning && change.Cause == CauseLeaseLapse {
 			row.Disruptions++
 		}
@@ -891,7 +885,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		if row.Expansion == ExpansionExpected && change.To != NodeSuccess && change.To != NodeMemoized {
 			row.Expansion = ExpansionNone
 		}
-		if err := releaseCapacityTx(ctx, tx, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+		if err := releaseCapacityTx(ctx, tx, team, string(row.Ref.RunID), string(row.Ref.NodeID)); err != nil {
 			return err
 		}
 	}
@@ -937,7 +931,7 @@ func timeNS(value *time.Time) any {
 }
 
 func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, kind string, stateSeq int64, payload any, now time.Time) error {
-	seq, err := appendEventTx(ctx, tx, team, ref.RunID, ref.NodeID, kind, payload, now)
+	seq, err := appendEventTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), kind, payload, now)
 	if err != nil {
 		return err
 	}
@@ -958,12 +952,12 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 	}
 	resolution := ""
 	approver := change.Actor.Owner.Holder
-	if change.Cause == CauseApprovalTimeout {
+	if change.Cause == causeApprovalTimeout {
 		if timeout <= 0 || time.Unix(0, requested).Add(time.Duration(timeout)*time.Millisecond).After(now) {
 			return errors.New("approval deadline not reached")
 		}
 		if change.Actor.Kind != ActorReaper {
-			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+			if err := checkOwnerTx(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
 		}

@@ -80,7 +80,7 @@ func TestSourceAttemptFencesUnstartedAndResumedClaims(t *testing.T) {
 				tenant, _, actor := liveHolderFixture(t)
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',started_at=NULL,attempt=?`, ordinal)
-				to := NodePending
+				to := nodePending
 				if cause == CauseStart {
 					to = NodeRunning
 				} else if cause == CauseReport {
@@ -114,7 +114,7 @@ func TestSourceAttemptFencesUnstartedAndResumedClaims(t *testing.T) {
 
 func TestOwnerAndReaperDoNotSelectExecutionAttempts(t *testing.T) {
 	tenant, _, reaper := stateFixture(t)
-	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Cause: CauseLeaseLapse, Actor: reaper, SourceAttempt: sourceAttempt(3)}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: nodePending, Cause: CauseLeaseLapse, Actor: reaper, SourceAttempt: sourceAttempt(3)}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("reaper accepted a caller-selected attempt")
 	}
@@ -125,7 +125,7 @@ func TestOwnerAndReaperDoNotSelectExecutionAttempts(t *testing.T) {
 	root := authorityRoot("owner", "a")
 	root.Grants = []capability.Grant{capability.RunsControl}
 	authorityPersist(t, tenant.s, root)
-	change = nodeTransition{Ref: change.Ref, To: NodeCancelled, Cause: CauseCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}}, SourceAttempt: sourceAttempt(3)}
+	change = nodeTransition{Ref: change.Ref, To: NodeCancelled, Cause: causeCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}}, SourceAttempt: sourceAttempt(3)}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("operator selected an execution attempt")
 	}

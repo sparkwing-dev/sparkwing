@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -19,11 +21,15 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 			return err
 		}
 
-		row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: target.RunID, NodeID: target.NodeID})
+		row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE debug_pauses SET released_at=?,released_by=?,release_kind=? WHERE team=? AND run_id=? AND node_id=? AND released_at IS NULL`, tx.time.UnixNano(), current.Capability.Subject.ID, PauseReleaseManual, t.team, target.RunID, target.NodeID)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE debug_pauses SET released_at=?,released_by=?,release_kind=? WHERE team=? AND run_id=? AND node_id=? AND released_at IS NULL`, clockTime1.UnixNano(), current.Capability.Subject.ID, PauseReleaseManual, t.team, target.RunID, target.NodeID)
 		if err != nil {
 			return err
 		}
@@ -36,7 +42,11 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 				return err
 			}
 		}
-		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, tx.time)
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, clockTime2)
 		return err
 	})
 }

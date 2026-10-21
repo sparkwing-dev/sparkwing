@@ -17,7 +17,7 @@ func localOwnerRenew(current func(context.Context) (capability.Principal, error)
 		}
 		c := principal.Capability
 		owned := c.Unit == capability.UnitTrigger && c.Binding.Kind == capability.BindingTrigger || c.Unit == capability.UnitPlan && c.Binding.Kind == capability.BindingRun
-		fenced := actor.Owner == store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: c.Binding.RunID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+		fenced := actor.Owner == store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 		if fence := c.Binding.Expansion; c.Unit == capability.UnitEval && fence != nil {
 			owned, fenced = true, actor.Holder == fence.Holder && actor.Generation == runspec.ClaimGeneration(fence.Generation)
 		}

@@ -69,7 +69,7 @@ type AcceptedPlan struct {
 // expansion is an explicit jobs array, never an omitted or null body.
 type ExpansionSubmission struct {
 	Source           controllerwire.NodeRef
-	SourceGeneration int64
+	SourceGeneration runspec.ClaimGeneration
 	Actor            Actor
 	Body             json.RawMessage
 	Failure          *ExpansionFailure
@@ -84,7 +84,7 @@ type ExpansionFailure struct {
 // AcceptedExpansion reports persisted topology; deterministic code reconstruction must reproduce each SpecHash.
 type AcceptedExpansion struct {
 	Source           controllerwire.NodeRef
-	SourceGeneration int64
+	SourceGeneration runspec.ClaimGeneration
 	State            ExpansionState
 	BodyHash         string
 	Nodes            []NodeRow
@@ -107,7 +107,11 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		t.s.uninstallLocalSecrets(key, &installed)
 		var err error
-		result, err = admitRun(ctx, tx, t.team, request, tx.time)
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		result, err = admitRun(ctx, tx, t.team, request, clockTime1)
 		if err == nil {
 			key = localSecretKey{t.team, result.RunID}
 			installed, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
@@ -133,7 +137,11 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 	var result AcceptedPlan
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.time)
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		result, err = sealRunSpecTx(ctx, tx, t.team, request, clockTime2)
 		if err != nil {
 			return err
 		}
@@ -165,14 +173,13 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		return result, authorityError(apierr.BadRequest, "invalid expansion failure")
 	}
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		now := tx.time
-		if err := expansionAuthorityTx(ctx, tx, t.team, request, now); err != nil {
+		if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
-		if err := lockStateRunTx(ctx, tx, t.team, request.Source.RunID); err != nil {
+		if err := lockStateRunTx(ctx, tx, t.team, string(request.Source.RunID)); err != nil {
 			return err
 		}
-		snapshot, err := readSnapshotTx(ctx, tx, t.team, request.Source.RunID)
+		snapshot, err := readSnapshotTx(ctx, tx, t.team, string(request.Source.RunID))
 		if err != nil {
 			return err
 		}
@@ -186,7 +193,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err != nil {
 			return err
 		}
-		if source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != runspec.ClaimGeneration(request.SourceGeneration) {
+		if source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != request.SourceGeneration {
 			return holderRefusal()
 		}
 		result = AcceptedExpansion{Source: request.Source, SourceGeneration: request.SourceGeneration}
@@ -200,7 +207,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			if err != nil {
 				return err
 			}
-			if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.time); err != nil {
+			if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 				return err
 			}
 			result.Replayed = true
@@ -215,7 +222,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 				return err
 			}
 		}
-		if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.time); err != nil {
+		if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
 		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, result.BodyHash, accepted.body, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
@@ -230,12 +237,16 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err := finishExpansionBillingTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
-		return settleControllerTx(ctx, tx, t.team, request.Source.RunID, now)
+		now, err := tx.now(ctx)
+		if err != nil {
+			return err
+		}
+		return settleControllerTx(ctx, tx, t.team, string(request.Source.RunID), now)
 	})
 	return result, err
 }
 
-func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, now time.Time) error {
+func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission) error {
 	preliminary, err := authorityChainTx(ctx, tx, request.Actor.Authority, false)
 	if err != nil {
 		return err
@@ -244,18 +255,10 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	if lease == nil {
 		return holderRefusal()
 	}
-	var controllerGeneration int64
+	var controllerGeneration, controllerUntil int64
 	if lease.Kind == capability.UnitEval {
-		var until int64
-		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&controllerGeneration, &until); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&controllerGeneration, &controllerUntil); err != nil {
 			return err
-		}
-		now, err = tx.now(ctx)
-		if err != nil {
-			return err
-		}
-		if until <= now.UnixNano() {
-			return holderRefusal()
 		}
 	}
 	chain, err := authorityChainTx(ctx, tx, request.Actor.Authority, true)
@@ -263,7 +266,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		return err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || c.Binding.RunID != request.Source.RunID || c.Binding.NodeID != request.Source.NodeID || c.Binding.Generation != request.SourceGeneration {
+	if c.Team != string(team) || c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
 		return holderRefusal()
 	}
 	lease = c.Binding.Expansion
@@ -275,7 +278,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	var until, cancelled sql.NullInt64
 	switch lease.Kind {
 	case capability.UnitTrigger:
-		if lease.ID != request.Source.RunID {
+		if runspec.RunID(lease.ID) != request.Source.RunID {
 			return holderRefusal()
 		}
 		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind='trigger'`+tx.forUpdate(), team, lease.ID).Scan(&status, &holder, &prefix, &generation, &until, &cancelled)
@@ -284,13 +287,13 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		}
 	case capability.UnitEval:
 		unit, decodeErr := decodeAwardUnit(lease.Kind, lease.ID)
-		if decodeErr != nil || string(unit.RunID) != request.Source.RunID || string(unit.NodeID) != request.Source.NodeID || unit.SourceGeneration != request.SourceGeneration {
+		if decodeErr != nil || unit.RunID != request.Source.RunID || unit.NodeID != request.Source.NodeID || runspec.ClaimGeneration(unit.SourceGeneration) != request.SourceGeneration {
 			return holderRefusal()
 		}
 		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
-		stored := OwnerLeaseRef{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: holder, Generation: generation}
-		presented := OwnerLeaseRef{RunID: c.Binding.RunID, SourceNodeID: c.Binding.NodeID, SourceGeneration: c.Binding.Generation, Holder: lease.Holder, Generation: lease.Generation}
-		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || stored.evalFence() != presented.evalFence()) {
+		stored := runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: holder, Generation: runspec.ClaimGeneration(generation)}
+		credential := runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), SourceNodeID: runspec.NodeID(c.Binding.NodeID), SourceGeneration: runspec.ClaimGeneration(c.Binding.Generation), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}
+		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || request.Actor.Owner.Kind != OwnerEval || stored != request.Actor.Owner.EvalFence || request.Actor.Owner.EvalFence != credential) {
 			return holderRefusal()
 		}
 	default:
@@ -299,9 +302,12 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	if err != nil {
 		return err
 	}
-	now, err = tx.now(ctx)
+	now, err := tx.now(ctx)
 	if err != nil {
 		return err
+	}
+	if lease.Kind == capability.UnitEval && controllerUntil <= now.UnixNano() {
+		return holderRefusal()
 	}
 	if status != "claimed" && status != "running" || holder != lease.Holder || generation != lease.Generation || !until.Valid || until.Int64 <= now.UnixNano() || cancelled.Valid {
 		return holderRefusal()
@@ -310,7 +316,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 }
 
 func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, actor Actor, now time.Time) error {
-	if err := checkReaperTx(ctx, tx, actor, now); err != nil {
+	if err := checkReaperTx(ctx, tx, actor); err != nil {
 		return err
 	}
 	return resolveExpansionLossTx(ctx, tx, target, status, now)
@@ -341,7 +347,7 @@ func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit
 	if count != 1 {
 		return holderRefusal()
 	}
-	return settleControllerTx(ctx, tx, target.team, target.ref.RunID, now)
+	return settleControllerTx(ctx, tx, target.team, string(target.ref.RunID), now)
 }
 
 func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result AdmissionResult, snapshot admittedSnapshot, p capability.Principal, key, scope, digest string, policy IntakePolicyFacts, now time.Time) error {
@@ -426,7 +432,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		if len(job.Closures.Generate) > 0 {
 			expansion = ExpansionExpected
 		}
-		if err = insertNodeTx(ctx, tx, team, NodeRow{Ref: controllerwire.NodeRef{RunID: id, NodeID: job.ID}, Status: StatusPending, Spec: raw, SpecHash: string(hash), Execution: execution, Expansion: expansion}); err != nil {
+		if err = insertNodeTx(ctx, tx, team, NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: raw, SpecHash: string(hash), Execution: execution, Expansion: expansion}); err != nil {
 			return err
 		}
 	}
@@ -452,7 +458,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 			return AcceptedPlan{}, err
 		}
 		if err == nil && until > now.UnixNano() {
-			controller = &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", RunID: request.RunID, Holder: holder, Generation: generation}}
+			controller = &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(request.RunID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}
 		}
 	}
 	if err := planAuthorityTx(ctx, tx, team, request); err != nil {
@@ -486,7 +492,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 		return AcceptedPlan{}, authorityError(apierr.Unavailable, "controller ownership lease is unavailable")
 	}
 	if !replay {
-		if err = writeAcceptedPlanTx(ctx, tx, team, run.ID, spec, body, request.Actor.Owner.Generation); err != nil {
+		if err = writeAcceptedPlanTx(ctx, tx, team, run.ID, spec, body, int64(request.Actor.Owner.Generation)); err != nil {
 			return AcceptedPlan{}, err
 		}
 	} else {
@@ -503,11 +509,15 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 			return AcceptedPlan{}, err
 		}
 		if run.State == RunPending {
-			if _, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: run.ID, To: RunRunning, Actor: *controller, Cause: RunStart}, tx.time); err != nil {
+			if _, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(run.ID), To: RunRunning, Actor: *controller, Cause: RunStart}); err != nil {
 				return AcceptedPlan{}, err
 			}
 		}
-		if err = settleControllerTx(ctx, tx, team, run.ID, tx.time); err != nil {
+		clockTime7, clockErr7 := tx.now(ctx)
+		if clockErr7 != nil {
+			return AcceptedPlan{}, clockErr7
+		}
+		if err = settleControllerTx(ctx, tx, team, run.ID, clockTime7); err != nil {
 			return AcceptedPlan{}, err
 		}
 		return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: &controller.Owner, Replayed: replay}, nil

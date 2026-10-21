@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func capacityFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
@@ -14,7 +16,7 @@ func capacityFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','owner',?,2)`, now.Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation) VALUES ('a','run','job','pending',?,?,3)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','key',1,1)`)
-	actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", Holder: "owner", Generation: 2}}
+	actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{Holder: "owner", Generation: 2}}}
 	return tenant, now, actor
 }
 

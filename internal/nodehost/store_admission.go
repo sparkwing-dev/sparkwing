@@ -51,7 +51,7 @@ func (a *StoreAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 	if err != nil {
 		return RunCompletion{}, err
 	}
-	err = a.acquire(ctx, accepted.RunID, "", a.Owner.Owner.Generation, spec.Resolved.Settings.Concurrency)
+	err = a.acquire(ctx, accepted.RunID, "", int64(a.Owner.Owner.Generation), spec.Resolved.Settings.Concurrency)
 	if err != nil {
 		return RunCompletion{}, err
 	}
@@ -63,10 +63,10 @@ func (a *StoreAdmission) Node(ctx context.Context, accepted AcceptedRun, row sto
 	if _, err := admissionSpec(accepted); err != nil {
 		return err
 	}
-	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" || row.Generation < 0 {
+	if row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID == "" || row.Generation < 0 {
 		return errors.New("store admission requires the accepted job identity")
 	}
-	if err := a.acquire(ctx, accepted.RunID, row.Ref.NodeID, int64(row.Generation), row.Execution.Concurrency); err != nil {
+	if err := a.acquire(ctx, accepted.RunID, string(row.Ref.NodeID), int64(row.Generation), row.Execution.Concurrency); err != nil {
 		return err
 	}
 	return body(ctx)
@@ -76,7 +76,7 @@ func (a *StoreAdmission) acquire(ctx context.Context, runID, jobID string, gener
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	if a.Store == nil || a.Owner.Kind != store.ActorRunHost || a.Owner.Owner.RunID != runID || a.Owner.Owner.Holder == "" || a.Owner.Owner.Generation < 1 {
+	if a.Store == nil || a.Owner.Kind != store.ActorRunHost || a.Owner.Owner.RunID != runspec.RunID(runID) || a.Owner.Owner.Holder == "" || a.Owner.Owner.Generation < 1 {
 		return errors.New("store admission requires the current run owner")
 	}
 	groups = slices.Clone(groups)
@@ -137,7 +137,7 @@ func (a *StoreAdmission) group(ctx context.Context, key string, binding store.Ca
 		return a.confirm(ctx, key, id, binding, group.Cost)
 	case store.AcquireQueued:
 		if a.Queued != nil {
-			if err := a.Queued(ctx, controllerwire.NodeRef{RunID: binding.RunID, NodeID: binding.NodeID}, response); err != nil {
+			if err := a.Queued(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}, response); err != nil {
 				return err
 			}
 		}

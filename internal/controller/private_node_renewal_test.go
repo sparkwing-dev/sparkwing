@@ -21,7 +21,7 @@ func TestPrivateNodeRenewalAndStartRetainExactClaimFence(t *testing.T) {
 	if err := host.AdoptClaim(t.Context(), award); err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: award.Node.CapabilityPrefix, Generation: award.Node.Generation}
+	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: award.Node.Generation}}
 	if _, err := host.RenewNode(t.Context(), award.Node.Ref, actor, false); err != nil {
 		t.Fatal(err)
 	}

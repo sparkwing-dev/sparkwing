@@ -85,7 +85,7 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 	case capability.BindRunOfTrigger:
 		allowed = b.Kind == capability.BindingTrigger && c.Unit == capability.UnitTrigger && b.RunID != "" && b.RunID == target.RunID
 		if allowed && target.NodeID != "" {
-			_, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: target.RunID, NodeID: target.NodeID})
+			_, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 			if errors.Is(err, ErrNotFound) {
 				return bindingRefusal()
 			}

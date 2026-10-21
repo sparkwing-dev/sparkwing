@@ -59,9 +59,9 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
 		return result, err
 	}
-	validation := nodeproto.ValidationContext{Placement: RequestPlacement(snapshot.Run.Request.Request), Secrets: secrets, Expansion: true, SourceJob: request.Source.NodeID, ExistingConcurrency: plan.Concurrency}
+	validation := nodeproto.ValidationContext{Placement: RequestPlacement(snapshot.Run.Request.Request), Secrets: secrets, Expansion: true, SourceJob: string(request.Source.NodeID), ExistingConcurrency: plan.Concurrency}
 	for _, node := range snapshot.Nodes {
-		if priorJobs[node.Ref.NodeID] {
+		if priorJobs[string(node.Ref.NodeID)] {
 			continue
 		}
 		var job nodeproto.JobSpec
@@ -91,7 +91,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]NodeRow, error) {
 	var result []NodeRow
 	for _, job := range plan.Jobs {
-		index := slices.IndexFunc(snapshot.Nodes, func(node NodeRow) bool { return node.Ref.NodeID == job.ID })
+		index := slices.IndexFunc(snapshot.Nodes, func(node NodeRow) bool { return node.Ref.NodeID == runspec.NodeID(job.ID) })
 		if index < 0 {
 			return nil, errors.New("accepted expansion job is missing")
 		}
@@ -129,7 +129,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 		if len(job.Closures.Generate) > 0 {
 			expansion = ExpansionExpected
 		}
-		node := NodeRow{Ref: controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: job.ID}, Status: StatusPending, Spec: spec, SpecHash: string(hash), Execution: execution, Expansion: expansion}
+		node := NodeRow{Ref: controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: spec, SpecHash: string(hash), Execution: execution, Expansion: expansion}
 		if err := insertNodeTx(ctx, tx, team, node); err != nil {
 			return nil, err
 		}
@@ -141,7 +141,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 			snapshot.Nodes[i].Expansion, snapshot.Nodes[i].ExpansionDigest = ExpansionAccepted, accepted.hash
 		}
 	}
-	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: request.SourceGeneration, Body: accepted.body, BodyHash: accepted.hash})
+	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.hash})
 	if _, err := snapshot.Scheduling(); err != nil {
 		return nil, err
 	}

@@ -63,7 +63,7 @@ func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef con
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, s, owner)
 	rewriteSchemaExec(t, s.db, "INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','target','claimed','trigger',1,1,'host','target-owner',1,?,?,?)", expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "target", Holder: "host", Generation: 1}}
+	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "target", Holder: "host", Generation: 1}}}
 	source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: sourceRef, StateSeq: 1}}
 	return s, tenant, ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "target", NodeID: "job"}, Actor: actor, Policy: source.Kind, Source: &source}
 }
@@ -107,8 +107,8 @@ func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, outp
 		t.Fatal(err)
 	}
 	attempt := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(attempt.Generation)}
-	ref := controllerwire.NodeRef{RunID: attempt.RunID, NodeID: attempt.NodeID}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(attempt.Generation)}}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
 	change := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(attempt.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &out.Key, ManifestRecord: &artifacts.Key}}}
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestBlobMaterializationSourceScopeProperty(t *testing.T) {
 		case 4:
 			rewriteSchemaExec(t, tx, "UPDATE capabilities SET revoked_at=1 WHERE prefix='target-owner'")
 		}
-		_, err = transitionNodeTx(t.Context(), tx, tenant.team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: transitionExtra{Materialize: request.Source}}, tx.time)
+		_, err = transitionNodeTx(t.Context(), tx, tenant.team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
 		return err != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 80, Rand: rand.New(rand.NewSource(701))}); err != nil {

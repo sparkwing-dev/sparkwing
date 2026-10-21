@@ -140,7 +140,11 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return tx.Commit()
 	}
 	if !exists {
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, tx.time.UnixNano(), tx.time.UnixNano())
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, clockTime1.UnixNano(), clockTime1.UnixNano())
 		if err != nil {
 			return err
 		}
@@ -152,14 +156,22 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		seal = tx.time.UnixNano()
+		clockTime2, clockErr2 := tx.now(ctx)
+		if clockErr2 != nil {
+			return clockErr2
+		}
+		seal = clockTime2.UnixNano()
 		completeness = "complete"
 		finalDigest = digest
 		if commit.IncompleteReason != "" {
 			completeness = "incomplete"
 		}
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.time.UnixNano(), t.team, commit.Subject.RunID, identity.id)
+	clockTime3, clockErr3 := tx.now(ctx)
+	if clockErr3 != nil {
+		return clockErr3
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, clockTime3.UnixNano(), t.team, commit.Subject.RunID, identity.id)
 	if err != nil {
 		return err
 	}
@@ -228,7 +240,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || runspec.ClaimGeneration(a.Generation) != runspec.ClaimGeneration(c.Binding.Generation) || runspec.ClaimGeneration(a.Generation) != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
 			return holderRefusal()
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: subject.RunID, NodeID: a.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(subject.RunID), NodeID: runspec.NodeID(a.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -246,12 +258,17 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return holderRefusal()
 		}
 		if finished.Valid {
-			if row.Status != StatusDone || (!sealedReplay && tx.time.UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
+			clockTime4, clockErr4 := tx.now(ctx)
+			if clockErr4 != nil {
+				return clockErr4
+			}
+			if row.Status != StatusDone || (!sealedReplay && clockTime4.UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
 				return holderRefusal()
 			}
 			return nil
 		}
-		return checkHolderTx(ctx, tx, team, row, actor, tx.time)
+
+		return checkHolderTx(ctx, tx, team, row, actor)
 	}
 	if subject.Unit == nil {
 		return holderRefusal()
@@ -334,8 +351,9 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 	}
 	if c.Unit == capability.UnitTrigger {
 		owner := actor
-		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: c.Binding.RunID, Holder: actor.Holder, Generation: int64(actor.Generation)}
-		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID, tx.time); err != nil {
+		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: actor.Holder, Generation: actor.Generation}}
+
+		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID); err != nil {
 			return result, err
 		}
 	} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {

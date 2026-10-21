@@ -38,8 +38,8 @@ func blobResultFixture(t *testing.T) (*Store, *blobRecords, nodeTransition) {
 	}
 	s.resultRecords = records
 	a := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}
-	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: a.RunID, NodeID: a.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &request.Key}}}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &request.Key}}}
 	return s, records, change
 }
 
@@ -75,7 +75,7 @@ func TestBlobResultRecordsCommitAndReplayWithTerminalState(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "events", 1)
 	rewriteSchemaCount(t, s.db, "blob_records", 2)
-	events, err := records.tenant.ReadStateEvents(t.Context(), change.Ref.RunID, 0, 10)
+	events, err := records.tenant.ReadStateEvents(t.Context(), string(change.Ref.RunID), 0, 10)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("result events: %+v, %v", events, err)
 	}
@@ -234,7 +234,7 @@ func TestBlobResultRecordsUseTheOwningTransaction(t *testing.T) {
 		if _, err := tx.ExecContext(t.Context(), "DELETE FROM blob_members WHERE team='a'"); err != nil {
 			return err
 		}
-		if _, err := transitionNodeTx(t.Context(), tx, "a", change, tx.time); errors.Is(err, errBlobIOPending) {
+		if _, err := transitionNodeTx(t.Context(), tx, "a", change); errors.Is(err, errBlobIOPending) {
 			return err
 		} else if !errors.Is(err, blob.ErrIntegrity) {
 			return fmt.Errorf("result ignored its transaction's removed member: %v", err)
@@ -242,7 +242,7 @@ func TestBlobResultRecordsUseTheOwningTransaction(t *testing.T) {
 		if _, err := tx.ExecContext(t.Context(), "INSERT INTO blob_members(team,manifest_digest,member_digest) SELECT team,digest,? FROM blob_records WHERE team='a' AND kind='manifest'", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
 			return err
 		}
-		if _, err := transitionNodeTx(t.Context(), tx, "a", change, tx.time); err != nil {
+		if _, err := transitionNodeTx(t.Context(), tx, "a", change); err != nil {
 			return err
 		}
 		return rollback

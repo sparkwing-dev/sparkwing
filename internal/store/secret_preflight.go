@@ -93,7 +93,11 @@ func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request Pl
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE team=? AND run_id=? AND node_id=? AND kind=?`, team, refused.RunID, PlanNodeID, EventKindSecretPreflightRefused).Scan(&existing); err != nil || existing != 0 {
 			return err
 		}
-		if _, err := appendEventTx(ctx, tx, team, refused.RunID, PlanNodeID, EventKindSecretPreflightRefused, map[string]string{"message": refused.Detail()}, tx.time); err != nil {
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return clockErr1
+		}
+		if _, err := appendEventTx(ctx, tx, team, refused.RunID, PlanNodeID, EventKindSecretPreflightRefused, map[string]string{"message": refused.Detail()}, clockTime1); err != nil {
 			return err
 		}
 		return planAuthorityTx(ctx, tx, team, request)

@@ -69,7 +69,7 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 		Semaphores:   claims, SemaphoresOnly: !parent.resources, Resources: resources,
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
-	err = a.hold(ctx, controllerwire.NodeRef{RunID: accepted.RunID}, request, func(ctx context.Context, held Lease) error {
+	err = a.hold(ctx, controllerwire.NodeRef{RunID: runspec.RunID(accepted.RunID)}, request, func(ctx context.Context, held Lease) error {
 		parent.token = held.Token()
 		completion, err = body(context.WithValue(ctx, localRunLease{}, parent))
 		return err
@@ -88,7 +88,7 @@ func (a *LocalAdmission) ClaimedNode(ctx context.Context, accepted AcceptedRun, 
 	if err != nil {
 		return err
 	}
-	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" {
+	if row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID == "" {
 		return errors.New("claimed job admission requires its accepted run and job")
 	}
 	var claims []wingwire.SemaphoreClaim
@@ -100,8 +100,8 @@ func (a *LocalAdmission) ClaimedNode(ctx context.Context, accepted AcceptedRun, 
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
-		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID),
-		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
+		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID)),
+		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
 		Semaphores: claims, Resources: localResources(row.Execution.Resources.Value),
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
@@ -117,7 +117,7 @@ func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row sto
 		return err
 	}
 	parent, ok := ctx.Value(localRunLease{}).(localRunLease)
-	if !ok || parent.runID != accepted.RunID || parent.token == "" || row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" {
+	if !ok || parent.runID != accepted.RunID || parent.token == "" || row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID == "" {
 		return errors.New("local job admission requires its live parent run lease")
 	}
 	claims, err := a.claims(row.Execution.Concurrency, accepted.RunID)
@@ -131,16 +131,16 @@ func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row sto
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
 		OwnerRunID: a.holderRunID(accepted.RunID), OwnerLeaseToken: parent.token, SubLease: true,
-		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
+		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
 		Semaphores: claims, SemaphoresOnly: semaphoresOnly,
 		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value,
 		Class: options.AdmissionClass.Value,
 	}
 	if semaphoresOnly {
-		request.RunID = wingwire.NodeSemaphoreParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID)
+		request.RunID = wingwire.NodeSemaphoreParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID))
 		request.Resources = wingwire.HostResources{}
 	} else {
-		request.RunID = wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID)
+		request.RunID = wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID))
 	}
 	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }

@@ -139,7 +139,7 @@ func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: runspec.CheckoutDeclarations{Version: 1}, Plan: raw, Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
+	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: runspec.CheckoutDeclarations{Version: 1}, Plan: raw, Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
 	return tenant, request, now
 }
 
@@ -293,7 +293,7 @@ func TestPlanSealPersistsReplayAndExecutionSettings(t *testing.T) {
 	if first.Replayed || first.Spec.Hash == "" || first.PlanHash == "" || first.Owner == nil {
 		t.Fatalf("accepted=%+v", first)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil || node.SpecHash == "" || node.StateSeq != 0 || node.Status != StatusPending || !reflect.DeepEqual(node.Execution, first.Spec.Resolved.Settings.Jobs["job"]) {
 		t.Fatalf("node=%+v %v", node, err)
 	}
@@ -433,7 +433,7 @@ func TestPlanClassificationNeverShrinks(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',capability_prefix='planner',generation=1,lease_expires_at=? WHERE id=?`, tenant.s.now().Add(time.Hour).UnixNano(), admitted.RunID)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
 	resolved, _ := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
-	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
+	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestPlanControllerHandoffKeepsExactReplay(t *testing.T) {
 	if err := tenant.s.db.QueryRow(`SELECT COALESCE(claimed_by,''),capability_prefix FROM triggers WHERE id=?`, request.RunID).Scan(&holder, &prefix); err != nil || holder != "" || prefix != "" {
 		t.Fatalf("finished owner still held: %q %q %v", holder, prefix, err)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil || node.ReadyAt == nil {
 		t.Fatalf("controller did not schedule: %+v %v", node, err)
 	}
@@ -506,7 +506,7 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	if run.Spec == nil || !reflect.DeepEqual(*run.Spec, source.Spec) || !reflect.DeepEqual(run.Request, source.Spec.Request) || run.Lineage.RetryOf != plan.RunID || !run.Lineage.Retrier.Set || run.Lineage.Retrier.Value.ID != "retrier" || run.Request.Request.Actor.ID != "member" || !run.Request.Request.PullRequest.Set || run.Request.Request.PullRequest.Value.Number != 42 {
 		t.Fatalf("retry lost seals/lineage: %+v", run)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: retry.RunID, NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})
 	if err != nil || node.Generation != 0 || node.Status != StatusPending {
 		t.Fatalf("retry job=%+v %v", node, err)
 	}
@@ -593,7 +593,7 @@ func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 				t.Fatalf("published plan=%+v %v", accepted, err)
 			}
 			rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "imported"})
+			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "imported"})
 			if err != nil || node.ClaimedBy != "" || node.Generation != 0 {
 				t.Fatalf("published job=%+v %v", node, err)
 			}
@@ -783,7 +783,7 @@ func TestPlanGuardRefusalPersistsSealWithoutOfferingJobs(t *testing.T) {
 					t.Fatalf("guard refusal settlement=%s %+v", snapshot.Run.State, snapshot.Nodes)
 				}
 			} else {
-				_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor})
+				_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor})
 				if err == nil {
 					t.Fatal("guard-refused job became offerable")
 				}

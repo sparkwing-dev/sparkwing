@@ -10,12 +10,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func recoveryFailureFixture(t *testing.T) (*Tenant, Actor, Actor, *nodeproto.JobFailure) {
 	t.Helper()
 	tenant, _, owner := reconcileFixture(t)
-	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
+	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 	root := authorityRoot("owner", "a")
 	root.Subject.ID = "host"
 	root.Grants = []capability.Grant{capability.TriggerHost, capability.NodesClaim, capability.DataRead}
@@ -101,7 +102,7 @@ func TestRecoveryFailureReadRequiresTheClaimedJobsDeclaredEdge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	reader := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	got, err := tenant.ReadFailure(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"}, 2, reader)
 	if err != nil || !reflect.DeepEqual(got, failure) {
 		t.Fatalf("declared recovery read: %+v, %v", got, err)

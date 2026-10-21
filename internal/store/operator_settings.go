@@ -68,7 +68,11 @@ func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authori
 			if err != nil {
 				return err
 			}
-			g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(req.Reason), p.Capability.Subject.ID, tx.time
+			clockTime1, clockErr1 := tx.now(ctx)
+			if clockErr1 != nil {
+				return clockErr1
+			}
+			g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(req.Reason), p.Capability.Subject.ID, clockTime1
 		}
 		for _, field := range []struct{ supplied, stored *int }{
 			{req.HourlyLimit, &g.Limits.HourlyLimit},

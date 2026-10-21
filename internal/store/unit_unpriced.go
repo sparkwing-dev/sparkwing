@@ -23,8 +23,9 @@ func (o *Operator) failUnpricedClaim(ctx context.Context, demand UnitDemand, ref
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}
-		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: refusal.RunID, NodeID: refusal.NodeID}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}
-		_, err := transitionNodeTx(ctx, tx, team, change, tx.time)
+		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(refusal.RunID), NodeID: runspec.NodeID(refusal.NodeID)}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}
+
+		_, err := transitionNodeTx(ctx, tx, team, change)
 		return err
 	})
 }
@@ -41,7 +42,7 @@ func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row NodeRow, change 
 		return err
 	}
 	p := chain[0].principal
-	unit := UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(row.Ref.RunID), NodeID: runspec.NodeID(row.Ref.NodeID)}
+	unit := UnitRef{Kind: capability.UnitNode, RunID: row.Ref.RunID, NodeID: row.Ref.NodeID}
 	if _, err := claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
 		return err
 	}

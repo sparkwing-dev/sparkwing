@@ -174,7 +174,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		upload.Key.Kind = blob.KindManifest
 		return upload, err
 	}, Producer: func(ctx context.Context, input nodehost.NodeInput, producer string) (blob.RecordKey, error) {
-		row, err := cfg.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: producer})
+		row, err := cfg.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(producer)})
 		if err != nil {
 			return blob.RecordKey{}, err
 		}

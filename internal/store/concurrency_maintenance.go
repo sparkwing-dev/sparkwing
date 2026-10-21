@@ -36,7 +36,7 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 		return ConcurrencyMaintenanceResult{}, err
 	}
 	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.time); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
 		return ConcurrencyMaintenanceResult{}, err
 	}
 	keys, err := tx.operator.lockMaintenanceCapacityTx(ctx, tx)
@@ -55,7 +55,10 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 			return ConcurrencyMaintenanceResult{}, err
 		}
 		result.StaleHolders = append(result.StaleHolders, holders...)
-		now := tx.time
+		now, err := tx.now(ctx)
+		if err != nil {
+			return ConcurrencyMaintenanceResult{}, err
+		}
 		promoted, err := txPromoteWaiters(ctx, tx, key.team, key.key, now.UnixNano(), now.Add(opts.Lease).UnixNano())
 		if err != nil {
 			return ConcurrencyMaintenanceResult{}, err
@@ -63,11 +66,15 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 		result.Promoted += len(promoted)
 	}
 	for _, key := range keys {
-		if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.time.UnixNano()); err != nil {
+		clockTime3, clockErr3 := tx.now(ctx)
+		if clockErr3 != nil {
+			return ConcurrencyMaintenanceResult{}, clockErr3
+		}
+		if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, clockTime3.UnixNano()); err != nil {
 			return ConcurrencyMaintenanceResult{}, err
 		}
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.time); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
 		return ConcurrencyMaintenanceResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -77,10 +84,14 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 }
 
 func (op *Operator) lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) ([]concurrencyKey, error) {
+	clockTime5, clockErr5 := tx.now(ctx)
+	if clockErr5 != nil {
+		return nil, clockErr5
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT team,key FROM concurrency_entries e
 WHERE EXISTS (SELECT 1 FROM concurrency_waiters w WHERE w.team=e.team AND w.key=e.key)
 OR EXISTS (SELECT 1 FROM concurrency_holders h WHERE h.team=e.team AND h.key=e.key AND (h.lease_expires_at<=? OR EXISTS (SELECT 1 FROM runs r WHERE r.team=h.team AND r.id=h.run_id AND r.finished_at IS NOT NULL)))
-ORDER BY team,key`+tx.forUpdate(), tx.time.UnixNano())
+ORDER BY team,key`+tx.forUpdate(), clockTime5.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -95,5 +106,5 @@ ORDER BY team,key`+tx.forUpdate(), tx.time.UnixNano())
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	return keys, tx.capacityLocked(ctx)
+	return keys, nil
 }

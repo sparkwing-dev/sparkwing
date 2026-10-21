@@ -29,7 +29,11 @@ func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipe
 	}
 	if maxAge > 0 {
 		query += " AND COALESCE(finished_at,started_at,created_at)>=?"
-		args = append(args, tx.time.Add(-maxAge).UnixNano())
+		clockTime1, clockErr1 := tx.now(ctx)
+		if clockErr1 != nil {
+			return nil, clockErr1
+		}
+		args = append(args, clockTime1.Add(-maxAge).UnixNano())
 	}
 	var team Team
 	var id string

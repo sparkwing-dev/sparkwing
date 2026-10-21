@@ -44,7 +44,11 @@ func (o *Operator) ReadAuthentication(ctx context.Context, lookup capability.Cre
 	if err := authenticationResultTx(ctx, tx, chain[0].principal.Capability, evidence, &out.Binding); err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
-	out.Now = tx.time
+	clockTime1, clockErr1 := tx.now(ctx)
+	if clockErr1 != nil {
+		return capability.AuthenticationSnapshot{}, clockErr1
+	}
+	out.Now = clockTime1
 	if err := tx.Commit(); err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
@@ -91,7 +95,11 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 		return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "invalid local peer authority")
 	}
 	p.Class = capability.CredentialPeer
-	out := capability.AuthenticationSnapshot{Now: tx.time, Authorities: []capability.AuthorityState{{Principal: p}}}
+	clockTime2, clockErr2 := tx.now(ctx)
+	if clockErr2 != nil {
+		return capability.AuthenticationSnapshot{}, clockErr2
+	}
+	out := capability.AuthenticationSnapshot{Now: clockTime2, Authorities: []capability.AuthorityState{{Principal: p}}}
 	return out, tx.Commit()
 }
 

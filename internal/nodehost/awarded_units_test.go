@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -41,11 +43,11 @@ func (s *evalUnitStore) AcceptExpansion(_ context.Context, submission store.Expa
 
 func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "source"}, Generation: 0, SpecHash: "source-hash", Status: store.StatusDone, Outcome: store.NodeMemoized, Expansion: store.ExpansionExpected}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "source"}, Generation: 0, SpecHash: "source-hash", Status: store.StatusDone, Outcome: store.NodeMemoized, Expansion: store.ExpansionExpected}
 	state.snapshot.Nodes = []store.NodeRow{row}
 	s := &evalUnitStore{ownerFixture: state}
 	host.Store = s
-	input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "eval"}, CapabilityPrefix: "eval", Holder: "source-holder", Generation: 0}
+	input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "eval"}, CapabilityPrefix: "eval", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "source-holder", Generation: 0}}
 	fence := capability.LeaseRef{Kind: capability.UnitEval, ID: "evaluation", Holder: "eval-holder", Generation: 7}
 	var spec struct {
 		Resolved struct {
@@ -60,12 +62,12 @@ func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 		return &source.Entry{Engine: engine.Resolved{Identity: spec.Resolved.Engine}}, context.Cause(ctx)
 	}
 	host.Expand = func(_ context.Context, evaluation EvaluationInput, observed store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
-		if evaluation.Generation != 0 || evaluation.NodeID != row.Ref.NodeID || evaluation.SpecHash != row.SpecHash || observed.Generation != 0 {
+		if evaluation.Generation != 0 || runspec.NodeID(evaluation.NodeID) != row.Ref.NodeID || evaluation.SpecHash != row.SpecHash || observed.Generation != 0 {
 			t.Fatal("eval replaced the source identity with its lease or a work attempt")
 		}
 		return json.RawMessage(`{"jobs":[]}`), nil, nil
 	}
-	if err := host.Evaluate(t.Context(), input, row.Ref.NodeID, int64(row.Generation), fence); err != nil {
+	if err := host.Evaluate(t.Context(), input, string(row.Ref.NodeID), int64(row.Generation), fence); err != nil {
 		t.Fatal(err)
 	}
 	if s.submitted.Actor != input.Owner || s.submitted.Source != row.Ref || s.submitted.SourceGeneration != 0 || string(s.submitted.Body) != `{"jobs":[]}` || state.finished.Transition.RunID != "" {

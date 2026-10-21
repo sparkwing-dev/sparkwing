@@ -77,14 +77,14 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "award"}, Capability: capability.Capability{
 		Prefix: "award", Issuance: capability.Award, Team: "team", Unit: kind, UnitID: unit.UnitID, Purpose: unit.Purpose, Delivery: unit.Delivery, Binding: unit.Binding,
 	}}
-	row := store.RunRow{ID: unit.RunID, Team: "team", Request: unit.Request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: unit.RunID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}}
+	row := store.RunRow{ID: unit.RunID, Team: "team", Request: unit.Request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}
 	state := &hostingState{snapshot: store.RunSnapshot{Run: row}}
 	if kind == capability.UnitNode {
 		unit.Accepted.Spec.Request = unit.Request
 		state.snapshot.Run.Spec = &unit.Accepted.Spec
 		state.snapshot.Run.Plan = unit.Accepted.Plan
 		state.snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
-		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
+		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
 	}
 	// safety: the store's snapshot must not share mutable objects with the received award.
 	body, err := json.Marshal(state.snapshot)

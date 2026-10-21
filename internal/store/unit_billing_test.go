@@ -164,7 +164,7 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(11 * time.Second)
-	request.Actor = Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix}
+	request.Actor = Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}}
 	request.Failure.Code = apierr.SDKError
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -387,7 +387,7 @@ func TestMeteredUnitStaleReportCannotSettleReplacementProperty(t *testing.T) {
 		*now = now.Add(time.Duration(1+random.IntN(10)) * time.Second)
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?`, now.UnixNano())
 		_, replacement := meteredUnitClaim(t, s, demand)
-		actor.Generation += runspec.ClaimGeneration(int64(random.IntN(2)))
+		actor.Generation += runspec.ClaimGeneration(random.IntN(2))
 		if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(0)}); err == nil {
 			t.Fatal("stale report settled replacement")
 		}

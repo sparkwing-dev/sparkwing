@@ -53,7 +53,7 @@ func (s *cliOwnerStore) ReadSnapshot(_ context.Context, run string) (store.RunSn
 }
 
 func (s *cliOwnerStore) FinishRunAndUnit(_ context.Context, finish store.FinishRunRequest) (store.Applied, error) {
-	if finish.Transition.Actor != s.actor || finish.Unit != s.actor.Owner || finish.Transition.RunID != s.snapshot.Run.ID {
+	if finish.Transition.Actor != s.actor || finish.Unit != s.actor.Owner || finish.Transition.RunID != runspec.RunID(s.snapshot.Run.ID) {
 		return store.Applied{}, errors.New("completion changed the awarded owner")
 	}
 	s.finished = &finish
@@ -84,8 +84,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					award.Accepted = &controllerwire.PlanAccepted{Spec: spec, Plan: plan, PlanHash: spec.PlanHash}
 					actor := store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-						Kind: store.OwnerTrigger, RunID: award.RunID,
-						Holder: award.Binding.Holder, Generation: award.Binding.Generation,
+						Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
 					}}
 					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{
 						ID: award.RunID, State: store.RunRunning, Request: award.Request, Spec: &spec,
@@ -119,7 +118,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 						finish: func(ctx context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
 							_, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
 								Unit: state.actor.Owner, Transition: store.RunCompletion{
-									RunID: run, Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
+									RunID: runspec.RunID(run), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
 								},
 							})
 							return controllerwire.Applied{}, err
@@ -132,7 +131,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					owner.Renew = adapter.RenewOwner
 					host := cliNativeOwner(t, adapter, owner)
 					bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
-						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{RunID: "foreign-run"}}}, close: func() error { closed++; return nil }}, nil
+						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "foreign-run"}}}}, close: func() error { closed++; return nil }}, nil
 					}
 					var completion nodehost.RunCompletion
 					if here {

@@ -36,7 +36,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sealed, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: plan.RunID, NodeID: job})
+			sealed, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)})
 			if err != nil || sealed.SpecHash == "" {
 				t.Fatalf("accepted job has no spec hash: %v", err)
 			}
@@ -49,8 +49,8 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ref := controllerwire.NodeRef{RunID: plan.RunID, NodeID: job}
-			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Labels: []string{label}, Available: match.Resources{Cores: 8}}
+			ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)}
+			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Labels: []string{label}, Available: match.Resources{Cores: 8}}
 			refuse := func(request store.UnitDemand) {
 				t.Helper()
 				before := readMutationSnapshot(t, tenant, s, plan.RunID)
@@ -109,7 +109,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 				t.Fatalf("award lost stored identity: %+v", claim)
 			}
 			refuse(demand)
-			holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+			holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 			for _, change := range []store.NodeCommand{
 				store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)},
 				store.ReportNode{Ref: ref, Actor: holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)},

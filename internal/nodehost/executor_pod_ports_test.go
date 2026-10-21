@@ -217,7 +217,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state.nodes[jobs[i].ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: jobs[i].ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(int64(i + 1)), Spec: body, SpecHash: string(hash)}
+		state.nodes[jobs[i].ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobs[i].ID)}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(i + 1), Spec: body, SpecHash: string(hash)}
 		expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{jobs[i+1]}}
 		body, err = json.Marshal(expansion)
 		if err != nil {
