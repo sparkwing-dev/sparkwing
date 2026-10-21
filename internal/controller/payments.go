@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -102,3 +103,42 @@ func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ 
 }
 
 var _ PaymentSettler = (*store.Operator)(nil)
+
+// ReconcilePayments pulls provider-owned facts through the same settlement transaction
+// as webhooks. Restore must complete this sweep before acknowledging recovered state.
+func ReconcilePayments(ctx context.Context, verifier capability.PaymentAuthenticator, deployment string, ledger PaymentSettler) error {
+	puller, ok := verifier.(capability.PaymentPuller)
+	if !ok || ledger == nil || strings.TrimSpace(deployment) == "" {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "payment reconciliation is not configured"}
+	}
+	return puller.PullPayments(ctx, capability.PaymentScope{Deployment: strings.ToLower(strings.TrimSpace(deployment)), Records: ledger}, func(proof capability.VerifiedPaymentEvent) error {
+		event := proof.Event()
+		recorded, err := ledger.RecordsPaymentParent(ctx, capability.PaymentRoute{Mode: event.Mode, Kind: event.Kind, ObjectID: event.ObjectID, CheckoutID: event.CheckoutID, PaymentID: event.PaymentID})
+		if err != nil {
+			return err
+		}
+		if !recorded {
+			return &apierr.Error{Code: apierr.Conflict, Message: "provider payment has no restored team correlation; repair its reservation before acknowledging restore"}
+		}
+		_, err = ledger.SettlePayment(ctx, proof)
+		return err
+	})
+}
+
+func (s *Server) runPaymentReconciliation(ctx context.Context) {
+	if s.paymentVerifier == nil || s.paymentLedger == nil {
+		return
+	}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if err := ReconcilePayments(ctx, s.paymentVerifier, s.paymentDeployment, s.paymentLedger); err != nil && ctx.Err() == nil {
+			s.logger.Error("payment provider reconciliation failed; next sweep retries", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

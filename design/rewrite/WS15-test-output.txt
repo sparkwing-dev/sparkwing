@@ -1,0 +1,35 @@
+WS15 focused verification
+Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-WS15
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller ./internal/wingd/localcontroller -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestOpenExistingSchemaErrors|TestOpenRefusesAStoreFromAnotherBaseline|TestOlderSchema|TestTenantSQLScope|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.354s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.117s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	3.351s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	1.640s
+ok  	github.com/sparkwing-dev/sparkwing/internal/crons	4.165s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	0.623s
+ok  	github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller	0.140s [no tests to run]
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller ./internal/wingd/localcontroller -tags rewrite_integration -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestOpenExistingSchemaErrors|TestOpenRefusesAStoreFromAnotherBaseline|TestOlderSchema|TestTenantSQLScope|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.137s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.132s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	3.237s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	1.326s
+ok  	github.com/sparkwing-dev/sparkwing/internal/crons	7.235s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	0.634s
+ok  	github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller	0.157s [no tests to run]
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials ./internal/localsecrets ./internal/fssecure -count=1
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.287s
+ok  	github.com/sparkwing-dev/sparkwing/internal/localsecrets	2.531s
+ok  	github.com/sparkwing-dev/sparkwing/internal/fssecure	1.310s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing vet ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller ./internal/wingd/localcontroller ./internal/localsecrets ./internal/fssecure
+exit: 0
+
+NOT RUN: full suite, full rewrite_integration suite, PostgreSQL and socket-dependent tests; harness lead owns these.
+Candidate context unavailable: Xwing tried to mkdir ~/.xwing/locks/sessions.index, outside sandbox writes. No candidate installed or real HOME used.
+Integration merge: HEAD and bw-3095-rewrite identical (rev-list 0 0); git merge could not write read-only ORIG_HEAD metadata.

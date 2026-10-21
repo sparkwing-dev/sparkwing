@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).AcknowledgeRestore":             "offline restore acknowledgement advances every tenant schedule past the recovery window before schedules resume",
 	"(*Operator).readAuthorityNodeTx":            "a global capability prefix or session hash identifies authority before its authenticated team and immutable membership epoch can be resolved",
 	"(*Operator).recordSessionMembershipsTx":     "sign-in discovers all current memberships of its authenticated session before recording each through a tenant handle",
 	"(*Operator).lookupSessionTx":                "a global session digest identifies the one session being validated and renewed before its team is known",

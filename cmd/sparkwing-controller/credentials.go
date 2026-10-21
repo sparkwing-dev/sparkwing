@@ -35,7 +35,7 @@ const (
 // hold; any other name is refused, so a misspelled one fails startup
 // instead of reading as absent.
 var controllerCredentialNames = []string{
-	credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
+	"credential-epoch", credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
 	credBootstrapAdminToken, credLicense, credGitHubClientSecret, credGoogleClientSecret,
 	credGitHubAppKey, credGitHubAppWebhookSecret, credGitHubAppPreviousHook, credCloudFrontKey,
 	credBillingToken, credStripeAPIKey, credStripeWebhookSecret,

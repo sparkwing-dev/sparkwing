@@ -922,8 +922,8 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 		}
 		now := tx.now(ctx)
 		expires := now.Add(ttl)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(credential_epoch,hash,team,principal,scopes,account_id,created_at,expires_at)
+ VALUES (?,?,?,?, '',?,?,?)`, tx.store.credentialEpoch, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
 			return err
 		}
 		if err := tx.operator.recordSessionMembershipsTx(ctx, tx, sessionDigest(raw)); err != nil {

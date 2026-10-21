@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -42,13 +43,23 @@ func bytesOrNil(s string) []byte {
 }
 
 func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath string, opts ...store.Option) (*store.Store, error) {
+	var st *store.Store
+	var err error
 	if cfg.Store() == deployment.StorePostgres {
-		return store.OpenControllerPostgres(ctx, cfg.PGURL(), func(err error) {
+		st, err = store.OpenControllerPostgres(ctx, cfg.PGURL(), func(err error) {
 			slog.Error("controller must fail-stop", "err", err)
 			os.Exit(1)
 		}, opts...)
+	} else {
+		st, err = store.Open(sqlitePath, opts...) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
 	}
-	return store.Open(sqlitePath, opts...) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
+	if err != nil {
+		return nil, err
+	}
+	if err := st.EnsureCredentialEpoch(ctx); err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
+	return st, nil
 }
 
 // deploymentRecord is what a serving controller leaves beside its state for
@@ -124,9 +135,20 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 		}
 		dialect, target = store.DialectPostgres, creds.PGURL
 	}
-	st, err := store.OpenExisting(ctx, dialect, target)
+	epochDir := rec.CredentialsDir
+	if epochDir == "" {
+		epochDir = filepath.Dir(stateDB)
+	}
+	epoch, err := credentials.LoadOrCreateEpoch(epochDir)
 	if err != nil {
 		return nil, err
+	}
+	st, err := store.OpenExisting(ctx, dialect, target, store.WithCredentialEpoch(epoch))
+	if err != nil {
+		return nil, err
+	}
+	if err := st.EnsureCredentialEpoch(ctx); err != nil {
+		return nil, errors.Join(err, st.Close())
 	}
 	conn, err := st.Connection(ctx)
 	switch {

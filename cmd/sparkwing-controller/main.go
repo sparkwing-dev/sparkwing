@@ -44,6 +44,9 @@ func main() {
 	if len(args) > 0 && args[0] == "admin" {
 		run = func(args []string) error { return runAdmin(args[1:], os.Stdout, os.Stderr) }
 	}
+	if len(args) > 0 && args[0] == "restore" {
+		run = func(args []string) error { return runRestore(args[1:], os.Stdout, os.Stderr) }
+	}
 	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing-controller:", err)
 		os.Exit(1)
@@ -281,6 +284,10 @@ func run(args []string) error {
 			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
 		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "usage: sparkwing-controller [flags]\n       sparkwing-controller admin freeze|unfreeze|grant [flags]\n       sparkwing-controller restore prepare|reconcile|acknowledge [flags]\n\nController flags:")
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -464,7 +471,15 @@ func run(args []string) error {
 	}
 	var srv *controller.Server
 	var closeObjects func() error
-	st, serr := openControllerStore(ctx, cfg, p.StateDB(), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	epochDir := *credentialsDir
+	if epochDir == "" {
+		epochDir = p.Root
+	}
+	epoch, err := credentials.LoadOrCreateEpoch(epochDir)
+	if err != nil {
+		return err
+	}
+	st, serr := openControllerStore(ctx, cfg, p.StateDB(), store.WithCredentialEpoch(epoch), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		var err error
 		srv, err = newControllerServer(st, cfg, p.Root, readProvenance().Version, nil)
 		if err != nil {

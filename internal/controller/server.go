@@ -465,6 +465,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runBucketCeiling(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runBilling(ctx, BillingInterval)
+	go s.runPaymentReconciliation(ctx)
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 
 	errCh := make(chan error, len(servers))

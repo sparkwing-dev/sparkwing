@@ -86,6 +86,7 @@ const RetrySourceManual = "manual"
 type Store struct {
 	creditMeteringOff  atomic.Bool
 	controllerEpoch    int64
+	credentialEpoch    string
 	controllerFailStop func(error)
 
 	runEnvCipher     SessionKeyCipher
@@ -1424,7 +1425,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 16
+const expectedSchemaVersion = 17
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1492,8 +1493,7 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 				"(it holds tables but no sparkwing_schema_version); point sparkwing at an empty database")
 		}
 	default:
-		return fmt.Errorf("sparkwing: this store predates the baseline (it records schema version %d, this build "+
-			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
+		return schemaMismatchError(version, remedy)
 	}
 	if s.dialect == DialectPostgres {
 		var translated string
