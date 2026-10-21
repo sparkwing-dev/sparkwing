@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -80,30 +79,30 @@ func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T
 	if err != nil || row == nil || row.Value != "sealed" || row.Pipeline != "p" {
 		t.Fatalf("read: %+v %v", row, err)
 	}
-	events, err := tenant.ReadStateEvents(t.Context(), a.Binding.RunID, 0, 100)
+	events, err := tenant.BusinessEvents(t.Context(), "secret.released")
 	if err != nil {
 		t.Fatal(err)
 	}
 	count := 0
 	for _, event := range events {
-		if event.Kind != "secret_released" {
+		if event.Kind != "secret.released" {
 			continue
 		}
 		count++
-		var body map[string]any
-		if err := json.Unmarshal(event.Payload, &body); err != nil || body["name"] != "KEY" || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
-			t.Fatalf("audit: %+v %v", event, err)
+		body := event.Attrs
+		if body["name"] != "KEY" || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
+			t.Fatalf("audit: %+v", event)
 		}
 	}
 	if count != 1 {
 		t.Fatalf("release audits: %d", count)
 	}
-	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_release BEFORE INSERT ON events WHEN NEW.kind='secret_released' BEGIN SELECT RAISE(ABORT,'refused'); END`)
+	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_release BEFORE INSERT ON audit_events WHEN NEW.kind='secret.released' BEGIN SELECT RAISE(ABORT,'refused'); END`)
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("unaudited read: %+v %v", row, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_release`)
-	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER cancel_on_release AFTER INSERT ON events WHEN NEW.kind='secret_released' BEGIN UPDATE runs SET cancel_requested_at=1 WHERE id=NEW.run_id; END`)
+	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER cancel_on_release AFTER INSERT ON audit_events WHEN NEW.kind='secret.released' BEGIN UPDATE runs SET cancel_requested_at=1 WHERE id=NEW.run_id; END`)
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("read outlived authorization: %+v %v", row, err)
 	}
@@ -154,7 +153,7 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 				t.Fatalf("invalid read %d: %+v %v", i, row, err)
 			}
 			var count int
-			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='secret_released'`).Scan(&count); err != nil || count != 0 {
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='secret.released'`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("refused release audit: %d %v", count, err)
 			}
 		})

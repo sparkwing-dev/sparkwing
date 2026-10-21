@@ -80,6 +80,10 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 				return err
 			}
 		}
-		return nil
+		operation := "membership.removed"
+		if change.Role != nil {
+			operation = "membership.role:" + string(*change.Role)
+		}
+		return recordMutationAuditTx(tx, t.team, p.Capability.Subject.ID, operation, change.AccountID)
 	})
 }

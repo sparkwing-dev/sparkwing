@@ -106,7 +106,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 			}
 		}
 		var count int
-		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM credit_grants)+(SELECT COUNT(*) FROM credit_freezes)+(SELECT COUNT(*) FROM team_deletions)+(SELECT COUNT(*) FROM business_events)+(SELECT COUNT(*) FROM standing_requests WHERE state<>'open')`).Scan(&count)
+		err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM credit_grants)+(SELECT COUNT(*) FROM credit_freezes)+(SELECT COUNT(*) FROM team_deletions)+(SELECT COUNT(*) FROM audit_events)+(SELECT COUNT(*) FROM standing_requests WHERE state<>'open')`).Scan(&count)
 		return err == nil && count == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
@@ -130,7 +130,7 @@ func TestConsoleWritesRecheckConfigurationBeforeCommit(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM credit_freezes`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("hold survived rollback: %d %v", count, err)
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events`).Scan(&count); err != nil || count != 0 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("audit survived rollback: %d %v", count, err)
 	}
 }
@@ -259,7 +259,7 @@ func TestConsoleTeamDeletionUsesNativeCancellation(t *testing.T) {
 	}
 }
 
-func TestConsoleGlobalAdmissionAuditDeduplicatesAndDeletes(t *testing.T) {
+func TestConsoleGlobalAdmissionAuditDeduplicatesAndSurvivesDeletion(t *testing.T) {
 	s, c, a := consoleFixture(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('victim','victim@example.test',1,1)`)
 	for range 2 {
@@ -268,14 +268,14 @@ func TestConsoleGlobalAdmissionAuditDeduplicatesAndDeletes(t *testing.T) {
 		}
 	}
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE team IS NULL AND account='victim'`).Scan(&count); err != nil || count != 1 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team IS NULL AND account='victim'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("global audit: %d %v", count, err)
 	}
 	a.Target.AccountID = "victim"
 	if _, err := c.ConsoleDeleteAccount(t.Context(), a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE account='victim'`).Scan(&count); err != nil || count != 0 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE account='victim'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("deleted audit: %d %v", count, err)
 	}
 }

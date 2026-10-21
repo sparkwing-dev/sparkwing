@@ -188,6 +188,5 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 }
 
 func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO git_credential_releases(id,team,credential_id,host,repository_key,run_id,node_id,generation,machine_id,owner_account_id,runner,capability_prefix,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, audit.ID, audit.Team, audit.CredentialID, audit.Host, audit.RepositoryKey, audit.RunID, audit.NodeID, audit.Generation, audit.MachineID, audit.OwnerAccountID, audit.MachineID, audit.CapabilityPrefix, audit.ReleasedAt.UnixNano())
-	return err
+	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: audit.ReleasedAt, Team: Team(audit.Team), Kind: "git_credential.released", SubjectID: audit.CredentialID, RunID: audit.RunID, Actor: audit.OwnerAccountID, Attrs: map[string]any{"release": audit}})
 }

@@ -18,7 +18,7 @@ func TestReleaseUnitOwnerFenceProperty(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, claim := releaseFixture(t, kind)
-			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,lease_expires_at=NULL,attempt=0`)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',attempt=0`)
 			tenant := &Tenant{s: s, team: claim.Team}
 			before, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
 			if err != nil {
@@ -99,10 +99,10 @@ func releaseFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim) 
 		purpose = capability.PurposePlan
 	case capability.UnitEval:
 		unit.NodeID, unit.SourceGeneration, purpose = "job", 2, capability.PurposeEval
-		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,lease_expires_at,expires_at,owner_generation) VALUES ('a','run','job',2,'claimed',7,'machine',?,?,1)`, s.now().Add(time.Hour).UnixNano(), s.now().Add(time.Hour).UnixNano())
+		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,expires_at,owner_generation) VALUES ('a','run','job',2,'pending',6,?,1)`, s.now().Add(time.Hour).UnixNano())
 	}
 	if kind == capability.UnitTrigger || kind == capability.UnitPlan {
-		rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='claimed',unit_kind=?,generation=7,claimed_by='machine',lease_expires_at=? WHERE id='run'`, kind, s.now().Add(time.Hour).UnixNano())
+		rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind=?,generation=6 WHERE id='run'`, kind)
 	}
 	id, err := encodeAwardUnit(unit)
 	if err != nil {
@@ -112,20 +112,15 @@ func releaseFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim) 
 	var issued capability.Issued
 	err = s.inTx(t.Context(), func(tx *storeTx) error {
 		var err error
-		issued, err = s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &award})
+		issued, err = issueFixtureAward(t, s, tx, award)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := issued.Capability
-	switch kind {
-	case capability.UnitNode:
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET capability_prefix=? WHERE run_id='run'`, c.Prefix)
-	case capability.UnitEval:
-		rewriteSchemaExec(t, s.db, `UPDATE eval_units SET capability_prefix=?`, c.Prefix)
-	default:
-		rewriteSchemaExec(t, s.db, `UPDATE triggers SET capability_prefix=? WHERE id='run'`, c.Prefix)
+	if kind == capability.UnitNode {
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='pending',started_at=NULL WHERE run_id='run'`)
 	}
 	return s, UnitClaim{Team: "a", Kind: kind, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: c.Prefix, Holder: "machine", Generation: 7}}
 }
@@ -213,7 +208,7 @@ func TestReleaseUnitCannotRequeueCancelledOwnerWork(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, claim := releaseFixture(t, kind)
-			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL`)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix=''`)
 			operator := authorityRoot("operator", "a")
 			operator.Grants = []capability.Grant{capability.RunsControl}
 			authorityPersist(t, s, operator)

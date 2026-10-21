@@ -127,7 +127,7 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 }
 
 func TestRunCompletionFailureRollsBackOwnerAndVerdict(t *testing.T) {
-	for _, table := range []string{"events", "business_events"} {
+	for _, table := range []string{"events", "audit_events"} {
 		t.Run(table, func(t *testing.T) {
 			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 			tenant, finish := runCompletionFixture(t, s)

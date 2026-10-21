@@ -40,7 +40,7 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 	if got, err := c.ConsoleRefund(t.Context(), foreign, req, "request"); err == nil || got.Grant != nil {
 		t.Fatalf("foreign payer: %+v %v", got, err)
 	}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_console_refund BEFORE INSERT ON business_events WHEN NEW.kind='operator.refund_recorded' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_console_refund BEFORE INSERT ON audit_events WHEN NEW.kind='operator.refund_recorded' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if got, err := c.ConsoleRefund(t.Context(), a, req, "request"); err == nil || got.Grant != nil {
 		t.Fatalf("audit failure returned refund: %+v %v", got, err)
 	}

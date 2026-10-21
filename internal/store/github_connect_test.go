@@ -325,7 +325,7 @@ func TestGitHubReclaimRollsBackWhenAuditCannotCommit(t *testing.T) {
 	if _, err := old.TestOnlySeedGitHubInstallation(t.Context(), row, *now); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_reclaim_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_reclaim_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if _, err := tenant.BindAuthorizedGitHubInstallation(t.Context(), a, row); err == nil {
 		t.Fatal("reclaim committed without audit")
 	}

@@ -16,7 +16,7 @@ import (
 // RegisterGitHubRunner records repository consent under current team administration authority.
 func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authorized, row GitHubRunnerBinding) (GitHubRunnerBinding, error) {
 	var out GitHubRunnerBinding
-	err := t.mutateCredentials(ctx, a, func(tx *storeTx, actor string) error {
+	err := t.mutateCredentials(ctx, a, "RegisterGitHubRunner", row.Repository, func(tx *storeTx, actor string) error {
 		repo, valid := ParseGitHubRepo(row.Repository)
 		if !valid || row.RepositoryID <= 0 || row.RepositoryOwnerID <= 0 {
 			return ErrInvalidInput
@@ -70,7 +70,7 @@ func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized
 		}); err != nil {
 			return err
 		}
-		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, _ capability.Principal) error {
+		return t.teamMutationInTx(ctx, tx, a, "RevokeGitHubRunner", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 			result, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
 			if err := credentialRowChanged(result, err); err != nil {
 				return err

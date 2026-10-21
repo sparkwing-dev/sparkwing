@@ -30,7 +30,7 @@ func (f consoleStoreFake) ConsoleSetBillingTrust(ctx context.Context, a capabili
 		args []any
 	}{
 		{`UPDATE teams SET billing_trust=?,billing_trust_by=?,billing_trust_at=?,billing_trust_reason=? WHERE name=?`, []any{req.Trust, actor, time.Now().UnixNano(), req.Reason, a.Target.Team}},
-		{`INSERT INTO business_events(id,ts,team,kind,actor,attrs) VALUES (?,?,?,?,?,?)`, []any{"fixture-trust-" + a.Target.Team, time.Now().UnixNano(), a.Target.Team, store.BusinessEventBillingTrustChanged, actor, `{"reason":"` + req.Reason + `"}`}},
+		{`INSERT INTO audit_events(id,ts,team,kind,actor,attrs) VALUES (?,?,?,?,?,?)`, []any{"fixture-trust-" + a.Target.Team, time.Now().UnixNano(), a.Target.Team, store.BusinessEventBillingTrustChanged, actor, `{"reason":"` + req.Reason + `"}`}},
 	} {
 		if _, err := teststore.Exec(ctx, f.store, stmt.sql, stmt.args...); err != nil {
 			return store.BillingStanding{}, err

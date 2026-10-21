@@ -2964,7 +2964,7 @@ The existing reversePaymentTx owns prior reversals and the paid-total bound.
 Its reference is `refund:<mode>:<refund_id>`, shared with verified provider
 settlement, so later delivery cannot debit the same refund twice.
 
-The existing business_events table retains operator.refund_recorded with the
+The audit_events table retains operator.refund_recorded with the
 operator, reason, normalized request digest and result. Its subject hashes the
 operator and request key, scoped by path team. Exact replay returns the receipt.
 Changed request or mode conflicts. Authority is rechecked even on replay.

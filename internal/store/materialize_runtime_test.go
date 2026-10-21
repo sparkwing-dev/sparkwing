@@ -193,7 +193,7 @@ func TestReconcileRetryCanReuseMaterializedResult(t *testing.T) {
 			owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "next", Holder: "host", Generation: 1}
 			owner.ExpiresAt = &expiry
 			authorityPersist(t, tenant.s, owner)
-			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','next','claimed','trigger',1,1,'host','next-owner',1,?,?,?)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','next','claimed','trigger',1,1,'host','next-owner',1,?,?,?,1)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
 			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "next-owner"}, CapabilityPrefix: "next-owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "next", Holder: "host", Generation: 1}}
 			source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: first.Node.Ref, StateSeq: first.Node.StateSeq}}
 			tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, Actor, controllerwire.NodeRef, MaterializeSource) (materializedRecords, error) {

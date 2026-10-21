@@ -10,8 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
-func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized, write func(*storeTx, string) error) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized, operation, subject string, write func(*storeTx, string) error) error {
+	return t.teamMutationTx(ctx, a, operation, subject, func(tx *storeTx, p capability.Principal) error {
 		return write(tx, p.Capability.Subject.ID)
 	})
 }
@@ -22,7 +22,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 		return ErrInvalidInput
 	}
 	row := sealed.row
-	return t.mutateCredentials(ctx, a, func(tx *storeTx, actor string) error {
+	return t.mutateCredentials(ctx, a, "WriteSecret", row.Pipeline+"/"+row.Name, func(tx *storeTx, actor string) error {
 		if err := secretname.Validate(row.Name); err != nil {
 			return ErrInvalidInput
 		}
@@ -49,7 +49,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 
 // RemoveSecret deletes an exact secret scope under current administration authority.
 func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
-	return t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
+	return t.mutateCredentials(ctx, a, "RemoveSecret", pipeline+"/"+name, func(tx *storeTx, _ string) error {
 		result, err := tx.ExecContext(ctx, `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, t.team, name, pipeline)
 		return credentialRowChanged(result, err)
 	})
@@ -76,7 +76,7 @@ func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized
 	}
 	row := sealed.row
 	var out GitCredential
-	err := t.mutateCredentials(ctx, a, func(tx *storeTx, actor string) error {
+	err := t.mutateCredentials(ctx, a, "WriteGitCredential", row.Host+"/"+row.Repository, func(tx *storeTx, actor string) error {
 		if row.Team != "" && row.Team != t.team || row.CreatedBy != "" && row.CreatedBy != actor {
 			return bindingRefusal()
 		}
@@ -94,7 +94,7 @@ func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized
 // ConfirmGitCredentialFor confirms only the currently pinned host fingerprint.
 func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, repository, fingerprint string) (GitCredential, error) {
 	var out GitCredential
-	err := t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
+	err := t.mutateCredentials(ctx, a, "ConfirmGitCredentialFor", host+"/"+repository, func(tx *storeTx, _ string) error {
 		var err error
 		out, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND repository_key=?`+tx.forUpdate(), t.team, host, repository))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -125,7 +125,7 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 
 // RemoveGitCredential deletes a host credential under current administration authority.
 func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host, repository string) error {
-	return t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
+	return t.mutateCredentials(ctx, a, "RemoveGitCredential", host+"/"+repository, func(tx *storeTx, _ string) error {
 		result, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team=? AND host=? AND repository_key=?`, t.team, host, repository)
 		return credentialRowChanged(result, err)
 	})

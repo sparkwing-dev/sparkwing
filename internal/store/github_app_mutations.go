@@ -18,7 +18,7 @@ func (t *Tenant) UnbindAuthorizedGitHubInstallation(ctx context.Context, a capab
 		}); err != nil {
 			return err
 		}
-		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, _ capability.Principal) error {
+		return t.teamMutationInTx(ctx, tx, a, "UnbindAuthorizedGitHubInstallation", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 			return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
 		})
 	})
@@ -27,7 +27,7 @@ func (t *Tenant) UnbindAuthorizedGitHubInstallation(ctx context.Context, a capab
 // PutAuthorizedGitHubTrigger commits a subscription under current team administration.
 func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Authorized, row GitHubAppTrigger) (GitHubAppTrigger, error) {
 	var out GitHubAppTrigger
-	err := t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+	err := t.teamMutationTx(ctx, a, "PutAuthorizedGitHubTrigger", string(t.team), func(tx *storeTx, p capability.Principal) error {
 		if row.Team != "" && row.Team != t.team || row.CreatedBy != "" && row.CreatedBy != p.Capability.Subject.ID {
 			return bindingRefusal()
 		}
@@ -44,7 +44,7 @@ func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Au
 
 // DeleteAuthorizedGitHubTrigger removes only this tenant's exact subscription.
 func (t *Tenant) DeleteAuthorizedGitHubTrigger(ctx context.Context, a capability.Authorized, repository int64, pipeline string) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "DeleteAuthorizedGitHubTrigger", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 		result, err := tx.ExecContext(ctx, `DELETE FROM github_app_triggers WHERE team=? AND repository_id=? AND pipeline=?`, t.team, repository, pipeline)
 		return credentialRowChanged(result, err)
 	})
@@ -52,7 +52,7 @@ func (t *Tenant) DeleteAuthorizedGitHubTrigger(ctx context.Context, a capability
 
 // PutAuthorizedGitHubAutomation commits consent for this tenant's active installation.
 func (t *Tenant) PutAuthorizedGitHubAutomation(ctx context.Context, a capability.Authorized, row GitHubAppAutomation) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "PutAuthorizedGitHubAutomation", string(t.team), func(tx *storeTx, p capability.Principal) error {
 		if row.EnabledBy != "" && row.EnabledBy != p.Capability.Subject.ID {
 			return bindingRefusal()
 		}
@@ -66,7 +66,7 @@ func (t *Tenant) PutAuthorizedGitHubAutomation(ctx context.Context, a capability
 
 // DeleteAuthorizedGitHubAutomation revokes this tenant's repository consent.
 func (t *Tenant) DeleteAuthorizedGitHubAutomation(ctx context.Context, a capability.Authorized, repository int64) error {
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "DeleteAuthorizedGitHubAutomation", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND repository_id=?`, t.team, repository)
 		return err
 	})
@@ -75,7 +75,7 @@ func (t *Tenant) DeleteAuthorizedGitHubAutomation(ctx context.Context, a capabil
 // SetAuthorizedGitHubExtraRepos replaces repository slugs and verified identities atomically.
 func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability.Authorized, repository string, extras []string, ids map[string]int64) ([]string, error) {
 	var out []string
-	err := t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+	err := t.teamMutationTx(ctx, a, "SetAuthorizedGitHubExtraRepos", string(t.team), func(tx *storeTx, p capability.Principal) error {
 		var err error
 		out, err = t.setGitHubExtraReposTx(ctx, tx, repository, extras, ids, p.Capability.Subject.ID)
 		return err

@@ -440,7 +440,7 @@ func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {
 	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 {
 		t.Fatalf("a failed refill escaped the windows: %+v, %v", st.Refill, err)
 	}
-	rewriteSchemaCount(t, s.db, "business_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
+	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
 	addFunds(t, s, 100, "pi_manual")
 	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "" {
 		t.Fatalf("a paid Add funds kept the refill failure: %+v, %v", st.Refill, err)

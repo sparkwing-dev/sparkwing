@@ -105,7 +105,7 @@ func TestAuthenticationSnapshotSeparatesEvalAndSourceLiveness(t *testing.T) {
 	eval.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: unitID, Holder: "eval-host", Generation: 8}}
 	authorityPersist(t, tenant.s, eval)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation) VALUES ('a','run','job',2,'running',8,'eval-host','eval',?,4)`, now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','eval',?,4,1,1)`, now.Add(time.Minute).UnixNano())
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Digest: eval.Digest, Audience: capability.Controller}
 	for _, owner := range []string{"live", "replaced", "absent"} {
 		if owner == "replaced" {
@@ -126,7 +126,7 @@ func TestAuthenticationSnapshotSeparatesEvalAndSourceLiveness(t *testing.T) {
 
 func TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=NULL WHERE id='run'`)
 	got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(actor.CapabilityPrefix)), Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || !got.Binding.HereClaimed || got.Binding.Current.Generation != 1 || got.Binding.Current.Holder != "" || !got.Binding.LeaseExpiresAt.IsZero() {
 		t.Fatalf("requeued owner: %+v, %v", got.Binding, err)

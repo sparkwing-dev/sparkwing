@@ -188,7 +188,7 @@ func readMutationSnapshot(t *testing.T, tenant *store.Tenant, s *store.Store, ru
 	if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM run_effects`).Scan(&effects); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM business_events`).Scan(&businessEvents); err != nil {
+	if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_events`).Scan(&businessEvents); err != nil {
 		t.Fatal(err)
 	}
 	return mutationSnapshot{snapshot, awards, events, effects, businessEvents}

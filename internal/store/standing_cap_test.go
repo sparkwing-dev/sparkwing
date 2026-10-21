@@ -151,7 +151,7 @@ func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT three_d_secure FROM credit_checkouts WHERE id=?`, checkout).Scan(&recorded); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow(`SELECT attrs FROM business_events WHERE team='a' AND kind=?`, BusinessEventCheckoutPaid).Scan(&attrs); err != nil {
+	if err := s.db.QueryRow(`SELECT attrs FROM audit_events WHERE team='a' AND kind=?`, BusinessEventCheckoutPaid).Scan(&attrs); err != nil {
 		t.Fatal(err)
 	}
 	if recorded != "authenticated" || !strings.Contains(attrs, `"three_d_secure":"authenticated"`) {
@@ -181,7 +181,7 @@ func TestStandingCapNoFaultOperatorReleaseKeepsCleanDays(t *testing.T) {
 	standingCapWant(t, tenant, now.Add(42*24*time.Hour-time.Nanosecond), "Trusted", "Established", "Trusted")
 	standingCapWant(t, tenant, now.Add(42*24*time.Hour), "High", "High", "High")
 	var noFault int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE team='a' AND kind=? AND attrs LIKE '%"no_fault":true%'`, BusinessEventTeamUnfrozen).Scan(&noFault); err != nil || noFault != 1 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team='a' AND kind=? AND attrs LIKE '%"no_fault":true%'`, BusinessEventTeamUnfrozen).Scan(&noFault); err != nil || noFault != 1 {
 		t.Fatalf("no-fault audit events=%d: %v", noFault, err)
 	}
 }

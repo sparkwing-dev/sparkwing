@@ -1425,7 +1425,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 15
+const expectedSchemaVersion = 16
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1496,17 +1496,15 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 		return fmt.Errorf("sparkwing: this store predates the baseline (it records schema version %d, this build "+
 			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
 	}
-	if s.dialect == DialectPostgres {
-		var translated string
-		translated, err = TranslateSchema(schemaNeutral, s.dialect)
-		if err == nil {
-			err = execStatements(ctx, tx, translated)
-		}
-	} else {
-		_, err = tx.ExecContext(ctx, schemaNeutral)
+	translated, err := TranslateSchema(schemaNeutral, s.dialect)
+	if err == nil {
+		err = execStatements(ctx, tx, translated)
 	}
 	if err != nil {
 		return fmt.Errorf("create baseline schema: %w", err)
+	}
+	if err := tx.operator.installAuditProtection(ctx, tx); err != nil {
+		return fmt.Errorf("protect audit history: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,

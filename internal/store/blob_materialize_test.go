@@ -62,7 +62,7 @@ func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef con
 	expiry := s.now().Add(time.Hour)
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, s, owner)
-	rewriteSchemaExec(t, s.db, "INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','target','claimed','trigger',1,1,'host','target-owner',1,?,?,?)", expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, "INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','target','claimed','trigger',1,1,'host','target-owner',1,?,?,?,1)", expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
 	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "target", Holder: "host", Generation: 1}}
 	source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: sourceRef, StateSeq: 1}}
 	return s, tenant, ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "target", NodeID: "job"}, Actor: actor, Policy: source.Kind, Source: &source}

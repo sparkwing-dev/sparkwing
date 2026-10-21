@@ -23,7 +23,7 @@ func (t *Tenant) githubConnectTx(ctx context.Context, a capability.Authorized, u
 		}); err != nil {
 			return err
 		}
-		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, p capability.Principal) error {
+		return t.teamMutationInTx(ctx, tx, a, "githubConnectTx", string(t.team), func(tx *storeTx, p capability.Principal) error {
 			if !a.Principal.DirectAccountSession() || !p.DirectAccountSession() || p.Capability.Subject != a.Principal.Capability.Subject || p.Capability.Team != a.Principal.Capability.Team || !p.Capability.IssuedAt.Equal(a.Principal.Capability.IssuedAt) {
 				return bindingRefusal()
 			}

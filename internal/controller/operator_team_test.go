@@ -94,7 +94,7 @@ func TestOperatorCreateTeamCloudHTTP(t *testing.T) {
 }
 
 func TestOperatorCreateTeamHTTPRollsBackEveryWrite(t *testing.T) {
-	for _, table := range []string{"capabilities", "business_events", "commit"} {
+	for _, table := range []string{"capabilities", "audit_events", "commit"} {
 		t.Run(table, func(t *testing.T) {
 			e, _ := engineRuntimeStore(t)
 			raw := reviewSeed(t, e.Store)
@@ -109,7 +109,7 @@ func TestOperatorCreateTeamHTTPRollsBackEveryWrite(t *testing.T) {
 				t.Fatalf("private failure: %s", w.Body)
 			}
 			var count int
-			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM accounts)+(SELECT COUNT(*) FROM teams WHERE name='atomic-team')+(SELECT COUNT(*) FROM capabilities WHERE team='atomic-team')+(SELECT COUNT(*) FROM memberships WHERE team='atomic-team')+(SELECT COUNT(*) FROM business_events WHERE team='atomic-team')`).Scan(&count); err != nil || count != 0 {
+			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM accounts)+(SELECT COUNT(*) FROM teams WHERE name='atomic-team')+(SELECT COUNT(*) FROM capabilities WHERE team='atomic-team')+(SELECT COUNT(*) FROM memberships WHERE team='atomic-team')+(SELECT COUNT(*) FROM audit_events WHERE team='atomic-team')`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("partial writes=%d %v", count, err)
 			}
 		})
@@ -183,7 +183,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 			return err == nil && len(events) == 1 && events[0].Actor == "bootstrap:admin"
 		}
 		var count int
-		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM memberships WHERE team=?)+(SELECT COUNT(*) FROM capabilities WHERE team=?)+(SELECT COUNT(*) FROM business_events WHERE team=?)`, slug, slug, slug).Scan(&count); err != nil {
+		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM memberships WHERE team=?)+(SELECT COUNT(*) FROM capabilities WHERE team=?)+(SELECT COUNT(*) FROM audit_events WHERE team=?)`, slug, slug, slug).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		return (w.Code == 401 || w.Code == 403) && err != nil && count == 0

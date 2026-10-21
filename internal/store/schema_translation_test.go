@@ -90,7 +90,7 @@ func TestTranslateSchemaKeepsQuotedBlobNames(t *testing.T) {
 	if got != want {
 		t.Fatalf("translation = %q", got)
 	}
-	if got, err := TranslateSchema(neutral, DialectSQLite); err != nil || got != neutral {
+	if got, err := TranslateSchema(neutral, DialectSQLite); err != nil || got != neutral[:len(neutral)-1]+" STRICT;" {
 		t.Fatalf("SQLite translation = %q, %v", got, err)
 	}
 	if _, err = TranslateSchema(neutral, Dialect(100)); err == nil {

@@ -38,7 +38,7 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 			return err
 		}
 	}
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "SetAuthorizedTeamSettings", string(t.team), func(tx *storeTx, p capability.Principal) error {
 		previous, err := teamSettingsTx(ctx, tx, t.team)
 		if err != nil {
 			return err

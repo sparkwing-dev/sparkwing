@@ -186,8 +186,15 @@ its opt-in (a metered runner, or a machine an owner opted in), its host-key
 confirmation, its audit row and its per-minute limit, and it reaches only a
 runner's node or trigger claim; a Cloud Job's claim never receives it.
 
+Secret releases, source credential releases and privileged mutations share the
+append-only `audit_events` table. Audit rows have no run or team foreign key,
+so deletion preserves the facts. Run deletion records a `run.deleted` tombstone.
+Owners may delete any finished team run; editors may delete only runs admitted
+under their own account identity. SQLite triggers and PostgreSQL permissions
+and triggers reject audit updates and deletes.
+
 One policy applies to every claim: at most ten asks a minute, an audit row in
-`git_credential_releases` for every token issued and every credential
+`audit_events` for every token issued and every credential
 released, and, for a claim with a node of its own, at most three credentials
 and none once its attempt has started, since the node's own process holds the
 same token. The in-memory token reuse the bearer routes kept is gone. A

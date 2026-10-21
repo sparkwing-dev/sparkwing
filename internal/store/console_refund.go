@@ -58,7 +58,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			Digest [32]byte       `json:"digest"`
 			Result CreditReversal `json:"result"`
 		}
-		err = tx.QueryRowContext(ctx, `SELECT attrs FROM business_events WHERE team=? AND kind='operator.refund_recorded' AND subject_id=?`, t.team, subject).Scan(&body)
+		err = tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind='operator.refund_recorded' AND subject_id=?`, t.team, subject).Scan(&body)
 		if err == nil {
 			if err := json.Unmarshal(body, &receipt); err != nil {
 				return CreditReversal{}, err

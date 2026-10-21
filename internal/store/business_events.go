@@ -34,7 +34,8 @@ const maxBusinessEventAttrsBytes = 4096
 // back and never misses one that committed.
 //
 // SubjectID names the event within its team and kind, and a second event
-// with the same team, kind and subject is dropped. That makes a replayed
+// with the same team, kind and subject is dropped for idempotent facts. Release
+// and mutation kinds retain every occurrence. That makes a replayed
 // webhook idempotent, and an empty SubjectID a once-per-team fact, the way
 // [BusinessEventFirstRunSucceeded] is recorded.
 type BusinessEvent struct {
@@ -44,6 +45,7 @@ type BusinessEvent struct {
 	Account   string
 	Kind      string
 	SubjectID string
+	RunID     string
 	Actor     string
 	Attrs     map[string]any
 }
@@ -57,7 +59,7 @@ func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 		return fmt.Errorf("%w: a business event names its kind", ErrInvalidInput)
 	}
 	if ev.At.IsZero() {
-		ev.At = time.Now()
+		ev.At = tx.now()
 	}
 	attrs := []byte("{}")
 	if len(ev.Attrs) > 0 {
@@ -70,33 +72,39 @@ func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 				ErrInvalidInput, len(attrs), maxBusinessEventAttrsBytes)
 		}
 	}
-	id, err := newCreditID("event")
-	if err != nil {
-		return err
-	}
-	var team any = string(ev.Team)
-	if ev.Team == "" {
-		identity, err := json.Marshal([]string{ev.Kind, ev.SubjectID})
+	var id string
+	switch ev.Kind {
+	case "team.mutated", "secret.released", "git_credential.released":
+		var err error
+		id, err = newCreditID("event")
+		if err != nil {
+			return err
+		}
+	default:
+		identity, err := json.Marshal([]string{string(ev.Team), ev.Kind, ev.SubjectID})
 		if err != nil {
 			return err
 		}
 		sum := sha256.Sum256(identity)
-		id = "global:" + hex.EncodeToString(sum[:])
+		id = "fact:" + hex.EncodeToString(sum[:])
+	}
+	var team any = string(ev.Team)
+	if ev.Team == "" {
 		team = nil
 	}
-	_, err = tx.Exec(`
-		INSERT INTO business_events (id, ts, team, account, kind, subject_id, actor, attrs)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := tx.Exec(`
+		INSERT INTO audit_events (id, ts, team, account, kind, subject_id, actor, attrs, run_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING`,
 		id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID,
-		truncate(ev.Actor, 200), string(attrs))
+		truncate(ev.Actor, 200), string(attrs), ev.RunID)
 	return err
 }
 
 // BusinessEvents returns t's events of kind, or of every kind when kind is
 // empty, oldest first.
 func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error) {
-	query := `SELECT id, ts, team, account, kind, subject_id, actor, attrs FROM business_events WHERE team = ?`
+	query := `SELECT id, ts, team, account, kind, subject_id, actor, attrs, run_id FROM audit_events WHERE team = ?`
 	args := []any{string(t.team)}
 	if kind != "" {
 		query, args = query+` AND kind = ?`, append(args, kind)
@@ -111,7 +119,7 @@ func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessE
 		var ev BusinessEvent
 		var ts int64
 		var team, attrs string
-		if err := rows.Scan(&ev.ID, &ts, &team, &ev.Account, &ev.Kind, &ev.SubjectID, &ev.Actor, &attrs); err != nil {
+		if err := rows.Scan(&ev.ID, &ts, &team, &ev.Account, &ev.Kind, &ev.SubjectID, &ev.Actor, &attrs, &ev.RunID); err != nil {
 			return nil, err
 		}
 		ev.At, ev.Team = time.Unix(0, ts), Team(team)

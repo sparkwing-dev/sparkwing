@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Authorized, grant capability.Grant, write func(*storeTx, capability.Principal) error) error {
+func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Authorized, grant capability.Grant, operation string, write func(*storeTx, capability.Principal) error) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
@@ -37,15 +37,17 @@ func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Author
 		if err := write(tx, p); err != nil {
 			return err
 		}
-		_, err = check()
-		return err
+		if _, err = check(); err != nil {
+			return err
+		}
+		return recordMutationAuditTx(tx, Team(a.Target.Team), p.Capability.Subject.ID, operation, string(grant))
 	})
 }
 
 // WriteComputeLimits commits a validated batch under current deployment authority.
 func (o *Operator) WriteComputeLimits(ctx context.Context, a capability.Authorized, updates map[string]int64) (ComputeLimits, error) {
 	var out ComputeLimits
-	err := operatorSettingsWrite(ctx, o, a, capability.OperatorLimits, func(tx *storeTx, _ capability.Principal) error {
+	err := operatorSettingsWrite(ctx, o, a, capability.OperatorLimits, "WriteComputeLimits", func(tx *storeTx, _ capability.Principal) error {
 		var err error
 		out, err = setComputeLimitsTx(ctx, tx, updates)
 		return err
@@ -55,7 +57,7 @@ func (o *Operator) WriteComputeLimits(ctx context.Context, a capability.Authoriz
 
 // WriteSignUpSettings commits supplied fields and operator provenance atomically.
 func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authorized, req SignUpSettingsChange) error {
-	return operatorSettingsWrite(ctx, o, a, capability.OperatorLimits, func(tx *storeTx, p capability.Principal) error {
+	return operatorSettingsWrite(ctx, o, a, capability.OperatorLimits, "WriteSignUpSettings", func(tx *storeTx, p capability.Principal) error {
 		g, err := lockSignUpGateTx(ctx, tx)
 		if err != nil {
 			return err
@@ -90,7 +92,7 @@ func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authori
 
 // WriteStorageSettings replaces deployment storage policy under current authority.
 func (o *Operator) WriteStorageSettings(ctx context.Context, a capability.Authorized, in StorageSettings) error {
-	return operatorSettingsWrite(ctx, o, a, capability.OperatorObjectStore, func(tx *storeTx, _ capability.Principal) error {
+	return operatorSettingsWrite(ctx, o, a, capability.OperatorObjectStore, "WriteStorageSettings", func(tx *storeTx, _ capability.Principal) error {
 		return setStorageSettingsTx(ctx, tx, in)
 	})
 }
@@ -109,7 +111,7 @@ func operatorStorageTeam(ctx context.Context, tx *storeTx, a capability.Authoriz
 // WriteStorageQuota replaces the selected team's write quota while preserving its allowance.
 func (o *Operator) WriteStorageQuota(ctx context.Context, a capability.Authorized, in StorageQuota) (StorageQuota, error) {
 	var out StorageQuota
-	err := operatorSettingsWrite(ctx, o, a, capability.OperatorObjectStore, func(tx *storeTx, _ capability.Principal) error {
+	err := operatorSettingsWrite(ctx, o, a, capability.OperatorObjectStore, "WriteStorageQuota", func(tx *storeTx, _ capability.Principal) error {
 		team, err := operatorStorageTeam(ctx, tx, a)
 		if err != nil {
 			return err
@@ -126,7 +128,7 @@ func (o *Operator) WriteStorageQuota(ctx context.Context, a capability.Authorize
 // WriteStorageAllowance changes only the selected team's retained-byte allowance.
 func (o *Operator) WriteStorageAllowance(ctx context.Context, a capability.Authorized, bytes int64) (StorageQuota, error) {
 	var out StorageQuota
-	err := operatorSettingsWrite(ctx, o, a, capability.OperatorObjectStore, func(tx *storeTx, _ capability.Principal) error {
+	err := operatorSettingsWrite(ctx, o, a, capability.OperatorObjectStore, "WriteStorageAllowance", func(tx *storeTx, _ capability.Principal) error {
 		team, err := operatorStorageTeam(ctx, tx, a)
 		if err != nil {
 			return err

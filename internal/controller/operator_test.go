@@ -339,7 +339,7 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 	}
 
 	admitted := map[string]string{}
-	rows, err := teststore.SQL(t, f.store).Query(`SELECT account, actor, attrs FROM business_events WHERE kind = ?`, store.BusinessEventAccountAdmitted)
+	rows, err := teststore.SQL(t, f.store).Query(`SELECT account, actor, attrs FROM audit_events WHERE kind = ?`, store.BusinessEventAccountAdmitted)
 	if err != nil {
 		t.Fatal(err)
 	}

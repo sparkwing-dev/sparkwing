@@ -2,11 +2,12 @@ package store
 
 import (
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"math/rand/v2"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
@@ -40,7 +41,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 			until := now.Add(time.Duration(random.IntN(3)-1) * time.Minute)
 			row.LeaseExpiresAt = &until
 			if state == NodeRunning {
-				row.Status, row.Attempt = StatusRunning, 1
+				row.Status, row.Attempt, row.StartedAt = StatusRunning, 1, now
 			}
 		case NodeApprovalPending:
 			row.Status = StatusApprovalPending
@@ -54,7 +55,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		if row.ClaimedBy != "" {
 			holder = row.ClaimedBy
 		}
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,ready_at,claimed_by,capability_prefix,generation,attempt,lease_expires_at,finished_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Status, row.Outcome, timeNS(row.ReadyAt), holder, row.CapabilityPrefix, row.Generation, row.Attempt, timeNS(row.LeaseExpiresAt), timeNS(row.FinishedAt), []byte(`{}`), []byte(`{}`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,ready_at,claimed_by,capability_prefix,generation,attempt,lease_expires_at,finished_at,started_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Status, row.Outcome, timeNS(row.ReadyAt), holder, row.CapabilityPrefix, row.Generation, row.Attempt, timeNS(row.LeaseExpiresAt), timeNS(row.FinishedAt), timeNS(row.StartedAt), []byte(`{}`), []byte(`{}`))
 		if run < 2 && row.Status != StatusDone {
 			key := string(state)
 			if state == NodePending {

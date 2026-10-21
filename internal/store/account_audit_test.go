@@ -17,7 +17,7 @@ func TestAccountAdmissionAuditRemainsOutsideTenantQueriesProperty(t *testing.T) 
 		name := fmt.Sprintf("audit%s%x", separator, random.Uint64())
 		account := signIn(t, s, fmt.Sprintf("subject-%d", i), name+"@example.test")
 		var count int
-		if err := s.DB().QueryRowContext(t.Context(), storetest.Rebind(s, `SELECT COUNT(*) FROM business_events WHERE account=? AND kind=? AND team IS NULL`), account.Account.ID, store.BusinessEventAccountAdmitted).Scan(&count); err != nil || count != 1 {
+		if err := s.DB().QueryRowContext(t.Context(), storetest.Rebind(s, `SELECT COUNT(*) FROM audit_events WHERE account=? AND kind=? AND team IS NULL`), account.Account.ID, store.BusinessEventAccountAdmitted).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("account admission audit: count=%d, %v", count, err)
 		}
 		rows, err := tenant(t, s, account.PersonalTeam).BusinessEvents(t.Context(), "")

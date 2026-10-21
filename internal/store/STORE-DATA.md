@@ -1,5 +1,23 @@
 # Store data persistence
 
+## Schema and audit invariants
+
+The baseline uses SQLite STRICT tables with INT, REAL, TEXT and BLOB declarations.
+PostgreSQL uses BIGINT, DOUBLE PRECISION, TEXT and BYTEA. Both dialects enforce
+claim and terminal tuples, one open attempt per node, nonnegative resource and
+counter domains, boolean flags, and nonempty concurrency keys. Installations
+are referenced with their tenant. Job receipts reference the exact attempt and
+generation. Sessions, memberships and identities reference an existing account.
+The schema counterexample suites exercise these rules against either dialect.
+
+Secret releases, source credential releases and privileged mutations append to
+`audit_events` in the transaction that authorizes them. Audit rows retain plain
+team and run identifiers because deleting a run, team or account must preserve
+the facts. Database triggers reject updates and deletion, including PostgreSQL
+TRUNCATE. A run deletion appends a `run.deleted` tombstone. Editors may delete
+only runs they submitted. Owners may delete any run in their team.
+
+
 Record writes, reads and memo copies call `blob.RecordNamespace` and
 `blob.AuthorizeEdge` directly. The store's rule adapter and permissive test
 implementation are removed. Store tests use the shared rules with valid sealed

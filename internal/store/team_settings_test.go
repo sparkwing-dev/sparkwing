@@ -88,7 +88,7 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 			t.Fatalf("missing audit facts: %+v", event)
 		}
 	}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_setting_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_setting_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err == nil {
 		t.Fatal("committed setting without its audit")
 	}

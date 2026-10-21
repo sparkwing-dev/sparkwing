@@ -29,7 +29,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	team := owner.Account.ActiveTeam
 	tn := tenant(t, st, team)
 
-	if n := countWhere(t, st, "business_events", "kind = '"+store.BusinessEventAccountAdmitted+
+	if n := countWhere(t, st, "audit_events", "kind = '"+store.BusinessEventAccountAdmitted+
 		"' AND account = '"+owner.Account.ID+"'"); n != 1 {
 		t.Fatalf("admission events = %d, want 1", n)
 	}
@@ -84,9 +84,8 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}
 }
 
-// Deleting an account removes its admission and every trace of its id in
-// other events; purging a team removes the team's events.
-func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
+// Audit facts survive account and team deletion.
+func TestAuditEventsSurviveAccountAndTeamDeletion(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
@@ -98,17 +97,17 @@ func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
 	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {
 		t.Fatal(err)
 	}
-	if n := countWhere(t, st, "business_events", "account = '"+leaver.Account.ID+"' OR actor = '"+leaver.Account.ID+"'"); n != 0 {
-		t.Fatalf("events still naming the deleted account = %d", n)
+	if n := countWhere(t, st, "audit_events", "account = '"+leaver.Account.ID+"' OR actor = '"+leaver.Account.ID+"'"); n == 0 {
+		t.Fatalf("retained account events = %d", n)
 	}
-	if n := countWhere(t, st, "business_events", "account = '"+owner.Account.ID+"' AND team IS NULL"); n != 1 {
+	if n := countWhere(t, st, "audit_events", "account = '"+owner.Account.ID+"' AND team IS NULL"); n != 1 {
 		t.Fatalf("the remaining account's admission = %d, want 1", n)
 	}
 	deleteAndPurge(t, st, "acme", now)
-	if n := countWhere(t, st, "business_events", "team = 'acme'"); n != 0 {
-		t.Fatalf("events of the purged team = %d", n)
+	if n := countWhere(t, st, "audit_events", "team = 'acme'"); n == 0 {
+		t.Fatalf("retained purged team events = %d", n)
 	}
-	if n := countWhere(t, st, "business_events", "team = '"+string(owner.PersonalTeam)+"'"); n == 0 {
+	if n := countWhere(t, st, "audit_events", "team = '"+string(owner.PersonalTeam)+"'"); n == 0 {
 		t.Fatal("the purge removed another team's events")
 	}
 }

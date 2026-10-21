@@ -22,7 +22,7 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	issued, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec})
+	issued, err := issueFixtureAward(t, s, tx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}

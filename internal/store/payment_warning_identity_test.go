@@ -74,7 +74,7 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 	}
 	path := blobAccountingDiskStore(t, s)
 	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "card", Actionable: true}
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_warning_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_warning_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err == nil {
 		t.Fatal("warning committed without its audit")
 	}

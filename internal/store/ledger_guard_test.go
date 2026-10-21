@@ -154,10 +154,10 @@ func TestLedgerGuardPostgresQuotedValues(t *testing.T) {
 
 func TestLedgerGuardTruncateTableLists(t *testing.T) {
 	for _, q := range []string{
-		`TRUNCATE business_events, credit_grants`,
-		`TRUNCATE business_events,credit_charges`,
-		`TRUNCATE TABLE business_events, ONLY public."credit_grants" RESTART IDENTITY CASCADE`,
-		`TRUNCATE business_events, payment_events, credit_charges, credit_grants`,
+		`TRUNCATE audit_events, credit_grants`,
+		`TRUNCATE audit_events,credit_charges`,
+		`TRUNCATE TABLE audit_events, ONLY public."credit_grants" RESTART IDENTITY CASCADE`,
+		`TRUNCATE audit_events, payment_events, credit_charges, credit_grants`,
 		`TRUNCATE teams CASCADE`,
 		`SELECT 1; /* ledger rows cascade from teams */ TRUNCATE teams CASCADE`,
 	} {

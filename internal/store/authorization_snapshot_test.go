@@ -92,7 +92,11 @@ func singleCursorStore(t *testing.T) (*Store, *authorizationConnection) {
 			t.Error(err)
 		}
 	})
-	rewriteSchemaExec(t, db, schemaNeutral)
+	schema, err := TranslateSchema(schemaNeutral, DialectSQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, db, schema)
 	return &Store{db: db, dialect: DialectSQLite}, recording
 }
 

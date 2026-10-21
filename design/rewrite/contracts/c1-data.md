@@ -678,7 +678,7 @@ Revocation updates the envelope and authority generation. Descendants
 retain their ancestry check. Every effect rolls back after a failed write.
 
 `SchemaTables` is the single table inventory in `schema.go`. Runtime purge,
-tenant SQL guards and shape tests use it. Operator-owned `business_events`,
+tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
 `capabilities` and `sessions` may carry a nullable team. Their bound rows leave
 with that team. Purge removes quota reservations before aggregates and removes
 runs after their operational rows and restrictive pins. Generated SQLite checks
@@ -1608,7 +1608,7 @@ dependency, reads the confirmed team credential, and commits the complete
 `SourceReleaseAudit` before returning the sealed credential. The controller owns
 decryption. Audit or commit failure returns neither credential nor audit. A final
 clock check refuses a lease or authority that expires during policy work.
-`git_credential_releases` includes repository_key, node_id, generation, machine_id
+`audit_events` retains source release repository_key, node_id, generation, machine_id
 and owner_account_id so the C2 audit survives without consulting mutable claims.
 Release timestamps use store-clock nanoseconds.
 
@@ -2811,7 +2811,7 @@ hold no competing idempotency fields.
    implementation. Hashes exclude their own fields and seal timestamps; object
    keys sort, list order and explicit presence remain stable. Typed namespace
    components must encode without collisions, including manual ref scope.
-7. Account audit and account sessions may precede any team. `business_events` and
+7. Account audit and account sessions may precede any team. `audit_events` and
    `sessions` are operator-owned with nullable team. Tenant queries still filter it. Intake idempotency belongs to `runs`, scoped by the server-derived principal
    and pipeline, so published runs receive the same replay guarantee.
 8. Newest-success pins use a restrictive run FK because a cascading pin would
@@ -3274,7 +3274,7 @@ Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefu
 and the request key, returning CreditReversal. It runs through consoleWrite,
 resolves the persisted paid grant before any reversal and checks its team
 against the path. Its reference matches verified refund settlement. A receipt
-in business_events retains the normalized request digest and result. The
+in audit_events retains the normalized request digest and result. The
 existing ledger lock serializes reads, replay, reversal and receipt commit.
 
 <!-- design:end -->

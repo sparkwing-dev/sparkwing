@@ -9,7 +9,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 14, which drops `card_charges`,
+schema baseline moves to version 16, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -3082,3 +3082,14 @@ Within Sparkwing, `NodeRef` and the credential DTOs `CreateTokenRequest`,
 `RotatedToken` live in `internal/controllerwire`.
 `RunSnapshot` remains a private host read model in `internal/store`.
 Routes, JSON field names and runtime behavior are unchanged.
+
+## Run deletion and audit retention
+
+Editors may delete only runs they submitted. Owners may delete any run in their
+team. Deletion retains a tombstone and the run's secret and source credential
+release history in the append-only audit log. Team and account deletion also
+retain audit facts.
+
+The store baseline uses SQLite STRICT tables and stronger relational and row
+constraints on both dialects. Recreate stores from another baseline before
+starting this build. There is no in-place migration.
