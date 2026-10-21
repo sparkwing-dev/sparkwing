@@ -270,13 +270,13 @@ const (
 	ApprovalApprove ApprovalTimeoutPolicy = "approve"
 )
 
-// SkipPredicate is a function evaluated by the orchestrator after
-// upstream dependencies complete. Any registered predicate returning
-// true marks the node Skipped without dispatching its job.
+// SkipPredicate is a function evaluated after upstream dependencies complete.
+// Executable-job predicates run on the executing host under the actual job
+// award, inside its acquired concurrency slot. A true result skips the body
+// and releases the job's groups. Approval predicates gate the human wait.
 //
-// Predicates MUST be cheap and side-effect-free; they run on the
-// coordinator path with a short default timeout. Long-running logic
-// belongs in a dedicated job feeding typed output via Ref.
+// Predicates must be cheap and side-effect-free because their budget is short.
+// Long-running logic belongs in a dedicated job feeding typed output via Ref.
 type SkipPredicate func(ctx context.Context) bool
 
 // BeforeRunFn runs once before the first Run attempt. A non-nil error
@@ -406,10 +406,11 @@ func SkipBudget(d time.Duration) SkipOption {
 	}
 }
 
-// SkipIf registers a predicate the orchestrator evaluates after this
-// node's dependencies complete. If the predicate returns true, the
-// node is marked Skipped with the reason and its work is never
-// dispatched. A skipped node satisfies dependencies, so its dependents can run.
+// SkipIf registers a predicate evaluated on the executing host after this
+// node's dependencies complete and its concurrency groups are acquired.
+// Evaluation uses the node's actual execution award. If a predicate returns
+// true, the node is marked Skipped and releases its groups without running
+// its body. A skipped node satisfies dependencies, so its dependents can run.
 // Apply the predicate to those dependents or their JobGroup to skip them too.
 //
 // Typed upstream output is consumed via closure capture + Ref.Get:
@@ -423,8 +424,9 @@ func SkipBudget(d time.Duration) SkipOption {
 //	    })
 //
 // Multiple SkipIf calls accumulate with OR semantics: any true result
-// skips the node. Predicates run on the coordinator path with a
-// default 30s budget; pass SkipBudget(d) to override:
+// skips the node. A node that skips still waits for its concurrency slot
+// and briefly occupies a machine. Predicates have a default 30s budget;
+// pass SkipBudget(d) to override:
 //
 //	deploy.SkipIf(pred, sparkwing.SkipBudget(2*time.Minute))
 func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode {

@@ -15,7 +15,7 @@ func setTestPolicies(h *OwnerHost, f func(context.Context, testPolicyName, Evalu
 			return f(ctx, testPolicyName{name}, in, row, s)
 		}
 	}
-	h.DebugPolicy, h.SkipPolicy, h.ApprovalPolicy, h.MemoPolicy, h.AdmissionPolicy = bind("debug"), bind("skip_if"), bind("approval"), bind("memo"), bind("admission")
+	h.DebugPolicy, h.SkipPolicy, h.ApprovalPolicy, h.AdmissionPolicy = bind("debug"), bind("skip_if"), bind("approval"), bind("admission")
 }
 
 func setTestExecutor(d *ExecutorDependencies, f func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)) {
@@ -28,7 +28,7 @@ func setTestExecutor(d *ExecutorDependencies, f func(context.Context, testPolicy
 }
 
 func ownerOperationsFixture(h OwnerHost) OwnerOperations {
-	return OwnerOperations{Renew: h.Renew, Acquire: h.Acquire, Prepare: h.Prepare, Project: h.Project, Decide: h.Decide, Wait: h.Wait, WaitNode: h.WaitNode, Debug: h.Debug, MemoPolicy: h.MemoPolicy, AdmissionPolicy: h.AdmissionPolicy, Local: h.Local, AdoptClaim: h.AdoptClaim, Delegator: h.Delegator, ExpansionActor: h.ExpansionActor, Expand: h.Expand}
+	return OwnerOperations{Renew: h.Renew, Acquire: h.Acquire, Prepare: h.Prepare, Project: h.Project, Decide: h.Decide, Wait: h.Wait, WaitNode: h.WaitNode, Debug: h.Debug, AdmissionPolicy: h.AdmissionPolicy, Local: h.Local, AdoptClaim: h.AdoptClaim, Delegator: h.Delegator, ExpansionActor: h.ExpansionActor, Expand: h.Expand}
 }
 
 func executionOperationsFixture(h ExecutorDependencies) ExecutionOperations {
@@ -38,5 +38,5 @@ func executionOperationsFixture(h ExecutorDependencies) ExecutionOperations {
 func setTestNativePolicies(h *OwnerOperations, f func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)) {
 	var host OwnerHost
 	setTestPolicies(&host, f)
-	h.MemoPolicy, h.AdmissionPolicy = host.MemoPolicy, host.AdmissionPolicy
+	h.AdmissionPolicy = host.AdmissionPolicy
 }

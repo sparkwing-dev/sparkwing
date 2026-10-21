@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **execution:** Evaluate executable jobs' `SkipIf` and memo checks on the executing host under the job's award, after concurrency admission. A skipped job waits for its slot, then releases its groups without running its body. The coordinator no longer acquires job groups for evaluation.
+
 - **concurrency (Breaking):** Remove the unused `CancelTimeout` option and its wire and stored waiter fields. Cancellation waits for holders to release their capacity.
 
 - **concurrency (Breaking):** Give plan and job groups separate namespaces, so the same name at both levels identifies independent budgets. Refuse box-scoped plan groups when accepting a pipeline because a run can span machines. Use job-level box scope for per-machine budgets. See [migration](docs/migrations/_unreleased.md#concurrency-admission-and-queue-views).

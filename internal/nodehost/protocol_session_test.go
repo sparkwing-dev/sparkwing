@@ -693,15 +693,15 @@ func ownerPolicyJob() nodeproto.JobSpec {
 	return nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"slow", "skip"}}}
 }
 
-func TestOwnerPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
+func TestExecutorPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
 	for _, mode := range []string{"continue", "revocation", "cleanup"} {
-		t.Run(mode, func(t *testing.T) { ownerPolicyNativeSkip(t, mode) })
+		t.Run(mode, func(t *testing.T) { executorPolicyNativeSkip(t, mode) })
 	}
 }
 
-func ownerPolicyNativeSkip(t *testing.T, mode string) {
+func executorPolicyNativeSkip(t *testing.T, mode string) {
 	t.Helper()
-	in, st, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
+	in, st, deps, _ := executorPolicyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -738,12 +738,9 @@ func ownerPolicyNativeSkip(t *testing.T, mode string) {
 			return nil
 		},
 	}
-	deps.Start = cfg.StartEvaluation
-	host, err := NewOwnerEvaluator(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := host.SkipIf(t.Context(), in)
+	deps.Start = cfg.Start
+	host, spec, job := executorPolicyHost(t, deps, in)
+	result, err := host.skipIf(t.Context(), in, spec, job)
 	if mode != "continue" {
 		if err == nil || result.Skip || len(result.TimedOut) != 0 || revoked != 1 || cleaned != 1 || strings.Contains(err.Error(), "private") {
 			t.Fatalf("skip = %+v, revocations = %d, cleanups = %d, error = %v", result, revoked, cleaned, err)

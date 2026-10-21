@@ -20,7 +20,7 @@ func capacityFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 
 func TestRewriteCapacityAdoptsOnlyContinuousHolders(t *testing.T) {
 	tenant, now, actor := capacityFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','holder','run','job',?,?,2)`, now.Add(-time.Minute).UnixNano(), now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','holder','run','job',?,?,3)`, now.Add(-time.Minute).UnixNano(), now.Add(time.Minute).UnixNano())
 	ctx := context.Background()
 	binding := CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}
 	adopted, err := tenant.AdoptCapacity(ctx, "job:global:key", "holder", binding, actor)
@@ -42,7 +42,9 @@ func TestRewriteCapacityAdoptsOnlyContinuousHolders(t *testing.T) {
 func TestRewriteCapacityWaiterKeepsOnlyLiveArrival(t *testing.T) {
 	tenant, now, actor := capacityFixture(t)
 	arrival := now.Add(-time.Minute)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run','job',?,?,2,'queue')`, arrival.UnixNano(), now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run','job',?,?,3,'queue')`, arrival.UnixNano(), now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET holder='successor',generation=3 WHERE name='controller.owner'`)
+	actor.Owner.Holder, actor.Owner.Generation = "successor", 3
 	binding := CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}
 	adopted, err := tenant.AdoptCapacity(context.Background(), "job:global:key", "waiter", binding, actor)
 	if err != nil || adopted != adoptWaiter {
@@ -58,4 +60,23 @@ func TestRewriteCapacityWaiterKeepsOnlyLiveArrival(t *testing.T) {
 		t.Fatalf("expired waiter: %+v %v", adopted, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "concurrency_waiters", 0)
+}
+
+func TestRewriteCapacityDoesNotAdoptReplacedNodeExecution(t *testing.T) {
+	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
+		t.Run(table, func(t *testing.T) {
+			tenant, now, actor := capacityFixture(t)
+			if table == "concurrency_holders" {
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','old','run','job',1,?,2)`, now.Add(time.Minute).UnixNano())
+			} else {
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','old','run','job',1,?,2,'queue')`, now.Add(time.Minute).UnixNano())
+			}
+			binding := CapacityBinding{RunID: "run", NodeID: "job", Generation: 3}
+			adopted, err := tenant.AdoptCapacity(t.Context(), "job:global:key", "old", binding, actor)
+			if err != nil || adopted != acquireAgain {
+				t.Fatalf("replaced node execution retained capacity: %s, %v", adopted, err)
+			}
+			rewriteSchemaCount(t, tenant.s.db, table, 0)
+		})
+	}
 }

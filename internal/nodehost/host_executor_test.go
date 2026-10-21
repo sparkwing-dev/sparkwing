@@ -25,8 +25,8 @@ import (
 func executionHostFixture(t *testing.T, mode string, trace *[]string, processes *[]*scriptedSDK, configure ...func(*ExecutorDependencies)) (NodeInput, *executionHostFixtureState, *ClaimedNodeHost) {
 	t.Helper()
 	job := nodeproto.JobSpec{
-		ID: "job", Memo: &nodeproto.MemoSpec{}, Steps: []nodeproto.StepSpec{{ID: "body", Risks: []string{"prod"}}},
-		Closures: nodeproto.ClosureSpec{SkipIf: []string{"owner_skip"}, MemoKey: "owner_key", BeforeRun: []string{"before"}, AfterRun: []string{"after"}},
+		ID: "job", Steps: []nodeproto.StepSpec{{ID: "body", Risks: []string{"prod"}}},
+		Closures: nodeproto.ClosureSpec{BeforeRun: []string{"before"}, AfterRun: []string{"after"}},
 	}
 	if mode == "verify_refused" {
 		job.Closures.Verify = "verify"

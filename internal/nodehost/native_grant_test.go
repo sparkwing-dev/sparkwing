@@ -31,7 +31,10 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 			}
 			var err error
 			if owner {
-				input, st, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) { job.Closures.SkipIf = []string{"condition"} })
+				input, st, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
+					job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+					job.Closures.SkipIf = []string{"condition"}
+				})
 				input.RouteBinding.Routes.Bearer = "parent"
 				cfg.Environments.Store = st
 				deps.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) { return grant, bindError }
@@ -40,7 +43,7 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 				if buildErr != nil {
 					t.Fatal(buildErr)
 				}
-				_, err = host.SkipIf(t.Context(), input)
+				_, err = host.approvalSkipIf(t.Context(), input)
 			} else {
 				input, st, deps, _ := executorFixture(t)
 				input.RouteBinding.Routes.Bearer = "parent"

@@ -457,7 +457,7 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "memo", "admission", "ready", "claim", "node_renew", "execute", "success", "finish"}
+	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "admission", "ready", "claim", "node_renew", "execute", "success", "finish"}
 	if !reflect.DeepEqual(f.trace, want) {
 		t.Fatalf("trace=%v", f.trace)
 	}

@@ -5,7 +5,11 @@ machine. It does not assess job risk. Risk declarations and approvals remain
 deterministic pipeline contracts and are unaffected by admission mode.
 
 Logical capacity follows one order: plan groups, job groups, then machine
-CPU and memory.
+CPU and memory. An executable job evaluates `SkipIf` and memo checks on its
+executing host after acquiring those resources, under its actual award. The
+coordinator acquires no job groups for evaluation. A job that skips still waits
+for its concurrency slot and briefly occupies a machine, then releases its
+job groups without running its body.
 
 Recovery reconciles released work immediately. If plan capacity has lapsed,
 running jobs finish and their results settle while the run waits to reacquire.

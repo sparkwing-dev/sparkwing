@@ -23,8 +23,11 @@ cannot be revived. No compute is held while logical admission waits. Compute
 releases after joined cleanup; job terminal transitions release job capacity,
 and run completion releases plan capacity after workers drain.
 
-Owner closure evaluation uses the same admission order. An independent expansion
-evaluation admits plan capacity under its exact expansion lease, then compute;
+Executable-job SkipIf and memo checks run first on the executing host, under the
+actual job award, after plan groups, job groups and machine admission. The
+coordinator acquires no job groups for evaluation. A skip ends the job and releases
+its groups without invoking its body. An independent expansion evaluation admits
+plan capacity under its exact expansion lease, then compute;
 its terminal source job's groups remain released. An admission failure before
 execution reports the fenced setup result without starting an attempt. Runner
 compute is optional; logical admission is always on.
@@ -220,8 +223,8 @@ artifact layer. Native placement and cache assembly remain open.
 [Directory caching](w3-depcache-continuation.md) adds the executor depcache layer,
 package-manager resolution and opt-in remote directory-cache reads.
 [Memo verification](w3-memo-continuation.md) adds verified lookup/copy results
-and remote memo reads. Owner-side source selection and atomic materialization
-still need the C1 contract completions listed there.
+and remote memo reads. Executable-job memo evaluation and verified materialization
+run in the shared executor under the job award and concurrency slot.
 
 ## Amendment 1: shared host inputs
 
@@ -362,7 +365,6 @@ are part of this contract.
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
 | `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks, bounded by its persisted job timeout and parent deadline. |
-| `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
 | `nodehost.ProcessGrant` | Transfers a process binding and its idempotent revoker to the executor or owner evaluator. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
 | `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through canonical validation and acceptance. |
@@ -463,13 +465,16 @@ are part of this contract.
    SDK invocation. Terminal and blocked-step records carry the same holder,
    capability, generation and attempt as the job. A refused write stops further
    dispatch, joins active steps and fails loudly without an application retry.
-7. The owner calls debug, skip_if, approval, memo and admission in order. They
-   precede release. The executor stages artifacts and caches, then runs attempts
-   under timeout and retry before publishing and joining cleanup.
-   A local in-process execution applies both sides once. A dispatched executor
-   applies only its side. A launcher pod may evaluate owner closures, but the
-   controller records their decisions through the same transitions. Bounce,
-   worker-cap and retry-auto layers do not exist.
+7. The owner gates new releases on plan admission and applies debug and approval
+   policies. Executable jobs acquire their job groups and machine resources under
+   the actual execution award. The shared executor evaluates SkipIf, then memo
+   checks, before staging artifacts and caches or invoking the body. A skip or
+   memo hit settles the job and releases its groups. The coordinator acquires no
+   job groups to evaluate these closures. The executor runs bodies under timeout
+   and retry before publishing and joining cleanup. Local and dispatched jobs
+   use this same path. Approval SkipIf remains an admission condition. Its host
+   placement awaits resolution because approval-only jobs have no execution award.
+   Bounce, worker-cap and retry-auto layers do not exist.
 8. Executor attempts replan only to reconstruct code and verify accepted hashes.
    Generated jobs replay their generator chain from recorded outputs for the same
    purpose. Replay cannot add, delete or change persisted topology. A mismatch
@@ -511,7 +516,10 @@ The store's `ReconcileNode` owns authorized memo/retry materialization and its
 terminal lifecycle event. A failed copy cannot publish partial result edges or
 report memoized success. Missing or corrupt required bytes become a miss; live
 authorization and claim-fence refusals remain errors. Owner policies supply a
-scoped source to reconciliation rather than copying results in the host.
+scoped source for retry and coalescing. Executable-job memo checks run in the
+shared executor after SkipIf under the actual job award and acquired groups.
+Verified memo bytes are copied into the awarded attempt before memoized success
+is reported. The store and storage adapters retain scope and copy authorization.
 
 Explicit `RemoteCache` remains read-only. Artifact and depcache readers use its
 verified downloads; it grants no local upload receipt or lifecycle authority.
@@ -795,23 +803,27 @@ The owner and claimed-node adapters preserve it. A successful cancellation reply
 uses that reason in `lease.CancelError`. An absent reason keeps `cancel_requested`.
 Failed renewal replies cannot request cancellation or replace the first cause.
 
-`OwnerEvaluator.SkipIf` evaluates predicates in declaration order and stops at
+The shared predicate evaluator evaluates predicates in declaration order and stops at
 the first true result. Each predicate reconstructs and checks the accepted code
 in its own process. An expired eval is cancelled by private request ID and joined
 before that process closes. The
 per-predicate budget is 30 seconds unless declared otherwise. Timeout means
-don't skip and records the predicate index in `SkipEvaluation.TimedOut` for host
+don't skip and records the predicate index in the evaluation diagnostics for host
 diagnostics. The next predicate starts after close and cleanup join. Null and
-non-boolean results, drift, SDK failures and cleanup errors prevent dispatch.
+non-boolean results, drift, SDK failures and cleanup errors prevent body execution.
 
-`NewNativeHost` installs this evaluator for the `skip_if` owner layer. Approval
-opening uses the store transition and state follower. Its caller-supplied
-`OwnerOperations` supplies active debug and memo policies. Requester adapters
+`NewNativeHost` installs executable-job predicates in the shared executor after
+admission under the actual award. The owner evaluator retains approval
+conditions before the human wait. Approval opening uses the store transition and
+state follower. Decision 42 leaves approval placement unresolved because these
+jobs have no execution award. Its caller-supplied `OwnerOperations` supplies
+active debug policy. Requester adapters
 require machine CPU/memory admission. Runner adapters enable compute admission
 only with `runner.local_admission`; placement eligibility does not decide this
 requirement. `ComposeNativeAdmission` always supplies controller-backed logical
 concurrency to remote owners through `RemoteHostStore`. Its capacity store uses
-the private owner transport, including before a job has an execution award.
+the private owner transport for plan admission. Executable-job admission uses the
+actual job award before predicate and memo evaluation.
 Plan and job groups have separate persisted key namespaces. Pipeline acceptance
 refuses box-scoped plan groups because a run can span machines, naming the group
 and pointing at job-level box scope. Controller scheduling admits all plan
@@ -832,10 +844,10 @@ a concurrency namespace.
 The private client sends only the unit binding; the store admits all its groups.
 Selection uses the scheduler's dependency closure, including present
 optional dependencies and generator sources. The
-native layer logs timeout indices and proposes a skipped transition only after
-evaluation, revocation and cleanup join. Approval SkipIf success still requires
-the missing C1 owner approval-success edge. The native layer refuses that case
-instead of recording the approval as a skipped job.
+executor logs timeout indices and reports a skipped result only after evaluation,
+revocation and cleanup join. Approval SkipIf success uses the fenced
+PolicyApprovalBypass owner transition, which releases dependents without
+creating an execution attempt.
 
 Both session implementations use one platform process launcher. The duplicate
 native launch functions and their forwarding file are removed. Native owner
@@ -856,12 +868,12 @@ SDK may already have consumed the frame while the writer has not yet published
 completion. A completed write proceeds to targeted cancellation and leaves the
 session usable. A blocked write still fails the session and joins the child.
 
-`OwnerEvaluator.MemoKey` evaluates the declared closure with its existing
-30-second budget. A nonempty string supplies the key; null disables memoization
-for the job. NoMemo bypasses reads while preserving key evaluation for later
-writes. The store and storage adapters still own scope, result authorization and
-materialization. Neither evaluator creates an attempt. Cancellation retains its
-cause, and other policy error text passes through masking.
+The shared executor evaluates the memo-key closure after SkipIf, inside the
+job's acquired concurrency slot, with its existing 30-second budget. A nonempty
+string supplies the key; null disables memoization for the job. NoMemo bypasses
+reads while preserving key evaluation for later writes. The store and storage adapters still own scope, result authorization and
+materialization. The executable job uses its awarded attempt. Cancellation
+retains its cause, and other policy error text passes through masking.
 
 `OwnerEvaluator.Expand` checks the persisted source generation and declaration
 hash, then reads its authorized recorded output. A successful or memoized source
@@ -963,17 +975,19 @@ byte/record transactions. Generated tests cover outside symlink chains and
 attempt/scope mismatches. Real upload binding, source record reads, edge checks
 and native placement assembly remain integration points.
 
-Owner reuse now probes MaterializeOnly before admission. A hit materializes;
-a miss returns Dispatch without awarding execution. DecisionCancelHolder uses
+Owner retry and coalescing reuse can probe MaterializeOnly before admission.
+Executable-job memo checks instead run inside the execution slot under the job
+award. A retry or coalescing hit materializes; a miss returns Dispatch without
+awarding execution. DecisionCancelHolder uses
 the run owner's scoped cancellation transition. Native store/HTTP assembly must
 still supply those transactions.
 
-Owner policy also needs a fenced store edge for a skip predicate that errors
-before dispatch. `NodeTransitions` permits owner dependency skips and cancels,
-but no pending-to-failed policy result. Debug pause status detail has no typed
+Executable-job predicate errors report a fenced failure from the executor under
+the job award. Owner approval-condition failures retain the owner policy result
+path. Debug pause status detail has no typed
 mutation in `TransitionExtra`. Neither path may fall back to legacy raw writers.
-Approval conditions need a pending-to-success edge when SkipIf returns true,
-because that bypass must release dependents. A skipped dependency would suppress
+Approval conditions use the pending-to-success PolicyApprovalBypass edge when
+SkipIf returns true, because that bypass must release dependents. A skipped dependency would suppress
 them. Approval waiting also needs the persisted opening time and resolution ID
 in the read contract so a replacement owner retains the original deadline.
 Eval log identity accepts a materialized source at generation zero because

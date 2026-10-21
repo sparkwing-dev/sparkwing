@@ -31,10 +31,17 @@ Recovery always settles completed work and follows released jobs while plan
 capacity is unavailable. Each job passes through the same admission operation under its
 award before source preparation or execution. Burst self-claims use that same
 operation before reserving compute for reconciliation. Reentrant execution
-reuses its live reservation. Owner closure evaluation retains its committed
-admission behavior while predicate placement awaits Korey's ruling. The known
-opposite-host box-group cycle and skip-to-SDKError conversion are tracked by the
-skipped ws12j #1 simulation seed. Independent expansion evaluations admit plan
+reuses its live reservation. An executable job evaluates SkipIf and its memo
+key first on its executing host, under its actual award, after logical groups
+and machine admission. A skip releases its groups and ends the job before its
+body runs. The coordinator acquires no job groups for these evaluations. This
+keeps predicates inside the slot protecting their state and prevents opposite
+hosts from holding each other's job groups while awaiting execution. A job
+that will skip still queues for its groups and briefly occupies a machine.
+Approval SkipIf remains an admission condition that can bypass the human wait.
+Its existing owner-host logical and compute admission is retained pending the
+lead clarification, because approval-only jobs have no execution award.
+Independent expansion evaluations admit plan
 capacity under their expansion lease, then compute. Their source job is already
 terminal, so its released job groups are not revived. Planning before acceptance
 has no accepted groups to acquire. Its existing unit lease remains its authority.
@@ -68,9 +75,9 @@ A fair drain checks progress and settlement. CI runs 12 fixed seeds. Set
 `TestNativeAdmissionSeededRecovery` varies completion and release order with
 compute enabled and disabled, checking settlement and new ready, approval and
 expansion gates. Mutations restoring the recovery-entry and waiter-continuity
-defects fail their respective simulations. The real-store predicate seed
-`TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J` stays skipped pending
-the placement ruling. Set `SPARKWING_REPRO_WS12J_PREDICATE=1` to reproduce it.
+defects fail their respective simulations. Predicate placement follows decision
+42. The real-store predicate regression must verify executing-host admission,
+skip settlement and release without coordinator job-group acquisition.
 
 Regressions exercise controller-owned plan contention, owner and independent
 claim contention with a finite compute budget, compute enabled and disabled,

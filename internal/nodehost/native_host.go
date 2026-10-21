@@ -88,7 +88,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		return nil, nil, nil, err
 	}
 	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.StartPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker}
-	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, MemoPolicy: config.Owner.MemoPolicy, AdmissionPolicy: config.Owner.AdmissionPolicy, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
+	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, AdmissionPolicy: config.Owner.AdmissionPolicy, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
@@ -113,18 +113,6 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	owner.ApprovalPolicy = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
-	}
-	if owner.MemoPolicy == nil {
-		owner.MemoPolicy = func(_ context.Context, _ EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
-			var job nodeproto.JobSpec
-			if err := json.Unmarshal(row.Spec, &job); err != nil {
-				return OwnerLayerResult{}, err
-			}
-			if job.Memo != nil || job.Closures.MemoKey != "" {
-				return OwnerLayerResult{}, errors.New("native host requires the memo owner policy adapter")
-			}
-			return OwnerLayerResult{}, nil
-		}
 	}
 	if owner.Expand == nil {
 		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
@@ -151,7 +139,6 @@ type OwnerOperations struct {
 	Wait            func(context.Context, store.RunSnapshot) error
 	WaitNode        WaitNodeChange
 	Debug           DebugBoundaryWaiter
-	MemoPolicy      OwnerPolicy
 	AdmissionPolicy OwnerPolicy
 	Local           func(store.NodeRow) bool
 	AdoptClaim      func(context.Context, store.ReconciledNode) error

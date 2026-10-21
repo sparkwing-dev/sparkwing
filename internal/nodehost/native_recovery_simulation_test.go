@@ -8,11 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"sync/atomic"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -170,68 +168,113 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool, kind 
 	}
 }
 
-// ws12j #1 also describes an opposite-host box cycle. Predicate placement is
-// reserved for Korey's ruling; this real-store seed pins its skip-to-SDKError path.
+// The ws12j #1 seed covers both a capacity-policy skip and a true predicate.
+// Both settle as skips; evaluation can only run inside its actual job award.
 func TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J(t *testing.T) {
-	if os.Getenv("SPARKWING_REPRO_WS12J_PREDICATE") != "1" {
-		t.Skip("ws12j #1: pending predicate-placement ruling; set SPARKWING_REPRO_WS12J_PREDICATE=1 for the known failing seed")
-	}
-	plan := capacityPlan("skip", 0, "job")
-	plan.Jobs[0].Closures.SkipIf = []string{"guard"}
-	f := newStoreHostFixture(t, plan)
-	other := newStoreHostFixtureOn(t, f.Store, capacityPlan("skip", 0, "job"), runspec.Options{})
-	releaseRemote(t, other, "job")
-	_, holder := claimRemote(t, other, "job")
-	row := capacityRow(t, other, "job")
-	if err := (&storeAdmission{Store: other.Tenant, Owner: executorActor(holder)}).Node(t.Context(), other.Accepted, row, func(context.Context) error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	row = capacityRow(t, f, "job")
-	decision, err := f.Tenant.AdmitCapacity(t.Context(), store.CapacityBinding{RunID: f.Input.RunID, NodeID: "job", Generation: row.Generation}, f.Actor)
-	if err != nil || decision.Kind != store.AcquireSkipped {
-		t.Fatalf("seed did not create capacity skip: %+v error=%v", decision, err)
-	}
-	_, _, deps, _ := evaluationFixture(t)
-	deps.Store = f.State
-	deps.EnsureEngine = func(_ context.Context, identity engine.Identity, _ releaseasset.Target) (engine.Resolved, error) {
-		return engine.Resolved{Identity: identity}, nil
-	}
-	deps.Start = func(context.Context, EvaluationInput) (ExecutorProcess, error) {
-		return &executorProcess{plan: plan, answer: func(_ context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpEval {
-				return nodeproto.EvalResult{Value: json.RawMessage("false")}, nil
+	for _, compute := range []bool{false, true} {
+		for _, scope := range []string{"global", "run", "box"} {
+			for _, policySkip := range []bool{false, true} {
+				if policySkip && scope == "run" {
+					continue
+				}
+				t.Run(fmt.Sprintf("compute=%t/scope=%s/policy_skip=%t", compute, scope, policySkip), func(t *testing.T) {
+					plan := capacityPlan("skip", 0, "job")
+					plan.Jobs[0].Concurrency[0].Scope = new(scope)
+					plan.Jobs[0].Closures.SkipIf = []string{"guard"}
+					f := newStoreHostFixture(t, plan)
+					var other *storeHostFixture
+					if policySkip {
+						other = newStoreHostFixtureOn(t, f.Store, plan, runspec.Options{})
+						releaseRemote(t, other, "job")
+						_, holder := claimRemote(t, other, "job")
+						if _, err := other.Tenant.AdmitCapacity(t.Context(), store.CapacityBinding{RunID: holder.Accepted.RunID, NodeID: holder.NodeID, Generation: holder.Generation}, executorActor(holder)); err != nil {
+							t.Fatal(err)
+						}
+					}
+					config, _, _, _ := nativeHostFixture(t)
+					config.Store, config.Owner = f.State, ownerOperationsFixture(f.Host)
+					config.Evaluation.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) {
+						t.Error("coordinator evaluated an executable predicate")
+						return ProcessGrant{}, errors.New("coordinator predicate")
+					}
+					daemon := newFakeDaemon()
+					var machine *LocalAdmission
+					if compute {
+						machine = &LocalAdmission{Daemon: daemon}
+					}
+					config.Admission = ComposeNativeAdmission(f.Tenant, machine, false)
+					owner, _, _, err := NewNativeHost(config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, _, deps, _ := executorFixture(t)
+					deps.Store, deps.Bind = f.State, nil
+					deps.EnsureEngine = func(_ context.Context, identity engine.Identity, _ releaseasset.Target) (engine.Resolved, error) {
+						return engine.Resolved{Identity: identity}, nil
+					}
+					evaluated := 0
+					deps.Start = func(ctx context.Context, input NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
+						row := capacityRow(t, f, input.NodeID)
+						if row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix || row.Attempt != input.Attempt || row.Status != store.StatusRunning {
+							return nil, errors.New("predicate lacks actual running job award")
+						}
+						return &executorProcess{plan: plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
+							if request.Op != nodeproto.OpEval {
+								return nil, nil
+							}
+							if request.Closure != "guard" {
+								return nil, errors.New("unexpected predicate")
+							}
+							key := fixtureJobCapacityKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
+							state, err := f.Tenant.GetConcurrencyState(ctx, key)
+							if err != nil || state == nil || len(state.Holders) != 1 || state.Holders[0].RunID != f.Input.RunID || state.Holders[0].NodeID != input.NodeID {
+								return nil, fmt.Errorf("predicate escaped its job groups: %+v %v", state, err)
+							}
+							want := 0
+							if compute {
+								want = 1
+							}
+							if live, _, _ := daemon.counts(); live != want {
+								return nil, fmt.Errorf("predicate compute=%d want %d", live, want)
+							}
+							evaluated++
+							return nodeproto.EvalResult{Value: json.RawMessage("true")}, nil
+						}}, nil
+					}
+					deps.PrepareArtifacts = func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+						t.Error("skip prepared artifacts")
+						return nil, errors.New("skip entered body layers")
+					}
+					owner.Executor, err = NewNodeExecutor(deps)
+					if err != nil {
+						t.Fatal(err)
+					}
+					completion, err := owner.Run(t.Context(), f.Input)
+					row := capacityRow(t, f, "job")
+					wantEvaluated := 1
+					if policySkip {
+						wantEvaluated = 0
+					}
+					if err != nil || completion.Outcome != "success" || row.Outcome != store.NodeSkipped || evaluated != wantEvaluated {
+						t.Fatalf("completion=%+v error=%v row=%+v evaluations=%d", completion, err, row, evaluated)
+					}
+					key := fixtureJobCapacityKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
+					state, err := f.Tenant.GetConcurrencyState(t.Context(), key)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantHolders := 0
+					if other != nil {
+						wantHolders = 1
+					}
+					if state == nil || len(state.Holders) != wantHolders || len(state.Waiters) != 0 {
+						t.Fatalf("skip leaked or disturbed capacity: %+v", state)
+					}
+					if live, granted, released := daemon.counts(); live != 0 || granted != released {
+						t.Fatalf("skip leaked compute: %d/%d/%d", live, granted, released)
+					}
+				})
 			}
-			return nil, nil
-		}}, nil
-	}
-	evaluator, err := NewOwnerEvaluator(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config, _, _, _ := nativeHostFixture(t)
-	config.Store, config.Owner = f.State, ownerOperationsFixture(f.Host)
-	config.Admission = ComposeNativeAdmission(f.Tenant, nil, false)
-	config.Admission.capacity.Owner = f.Actor
-	owner, _, _, err := NewNativeHost(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, err := f.Host.Acquire(t.Context(), f.Input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = owner.Around(t.Context(), f.Accepted, func(ctx context.Context) (RunCompletion, error) {
-		_, err := evaluator.SkipIf(ctx, ownerEvaluation(f.Input, f.Accepted, entry, row))
-		return RunCompletion{}, err
-	})
-	var refused *AdmissionFailure
-	if !errors.As(err, &refused) || refused.Outcome != store.NodeSkipped {
-		var structured *apierr.Error
-		var code apierr.Code
-		if errors.As(err, &structured) {
-			code = structured.Code
 		}
-		row := capacityRow(t, f, "job")
-		t.Fatalf("ws12j #1 seed: admission skip lost through native Around: code=%s error=%v node_status=%s outcome=%s", code, err, row.Status, row.Outcome)
 	}
 }

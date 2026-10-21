@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -35,7 +36,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	defer func() { cancel(context.Canceled); workers.Wait() }()
 	completed := make(chan ownerExecution)
 	active := map[string]context.CancelCauseFunc{}
-	releasing := map[string]bool{}
+	releasing := map[string]*atomic.Bool{}
 	debugged := map[string]int64{}
 	project, decide := h.Project, h.Decide
 	if project == nil {
@@ -48,7 +49,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		workCtx, stop := context.WithCancelCause(ctx)
 		active[nodeID] = stop
 		workers.Add(1)
-		isRelease := releasing[nodeID]
+		isRelease := releasing[nodeID] != nil
 		go func() {
 			defer workers.Done()
 			defer stop(nil)
@@ -89,7 +90,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		for _, row := range snapshot.Nodes {
 			stop := active[row.Ref.NodeID]
-			if stop != nil && releasing[row.Ref.NodeID] && row.Status == store.StatusDone {
+			if stop != nil && releasing[row.Ref.NodeID] != nil && releasing[row.Ref.NodeID].Load() && row.Status == store.StatusDone {
 				stop(context.Canceled)
 			}
 			if row.CancelRequestedAt == nil || row.Status == store.StatusDone {
@@ -167,9 +168,12 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				continue
 			}
 			if action.Kind == store.DecisionReady || action.Kind == store.DecisionApproval {
-				releasing[action.NodeID] = true
+				releasePending := &atomic.Bool{}
+				releasePending.Store(true)
+				releasing[action.NodeID] = releasePending
 				launch(action.NodeID, func(ctx context.Context) error {
 					return h.release(ctx, input, accepted, entry, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
+						releasePending.Store(false)
 						return h.execute(ctx, input, accepted, entry, request)
 					})
 				})
@@ -282,7 +286,7 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 }
 
 func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
-	if h.DebugPolicy == nil || h.SkipPolicy == nil || h.ApprovalPolicy == nil || h.MemoPolicy == nil || h.AdmissionPolicy == nil {
+	if h.DebugPolicy == nil || h.SkipPolicy == nil || h.ApprovalPolicy == nil || h.AdmissionPolicy == nil {
 		return errors.New("run host requires owner layer policies before dispatch")
 	}
 	if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
@@ -318,19 +322,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			_, err = h.Store.TransitionNode(ctx, change)
 			return true, err
 		}
-		if result.Source != nil {
-			request.Source, request.Policy = result.Source, result.Source.Kind
-			probe := request
-			probe.MaterializeOnly = true
-			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
-			if err != nil {
-				return true, err
-			}
-			if reused.Kind != store.Dispatch {
-				return true, nil
-			}
-			request.Source, request.Policy = nil, store.SourceNone
-		}
+
 		return false, nil
 	}
 	if done, err := apply(h.DebugPolicy); done || err != nil {
@@ -343,9 +335,6 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		return err
 	}
 	if kind != store.DecisionApproval {
-		if done, err := apply(h.MemoPolicy); done || err != nil {
-			return err
-		}
 		if done, err := apply(h.AdmissionPolicy); done || err != nil {
 			return err
 		}

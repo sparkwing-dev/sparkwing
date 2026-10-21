@@ -22,7 +22,7 @@ func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	var layers []string
 	setTestPolicies(&host, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
-		if layer.Name == "memo" || layer.Name == "admission" {
+		if layer.Name == "admission" {
 			return OwnerLayerResult{}, errors.New("approval entered compute policy")
 		}
 		return OwnerLayerResult{}, nil
@@ -246,41 +246,6 @@ func (s *ownerReconcileProbe) ReconcileNode(_ context.Context, request store.Rec
 	return s.result, nil
 }
 
-func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
-	for _, kind := range []store.ReconcileKind{store.Dispatch, store.Materialize, store.KeepTerminal} {
-		t.Run(string(kind), func(t *testing.T) {
-			f, h, input := newOwnerFixture(t, true)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
-			returned := row
-			if kind != store.Dispatch {
-				returned.Status, returned.Outcome = store.StatusDone, store.NodeMemoized
-			}
-			probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
-			h.Store = probe
-			setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
-				if layer.Name == "admission" && kind != store.Dispatch {
-					t.Fatal("materialized hit took compute admission")
-				}
-				if layer.Name == "memo" {
-					return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceMemo}}, nil
-				}
-				return OwnerLayerResult{}, nil
-			})
-			request, err := releasedRequest(&h, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
-			if err != nil || request != nil || !probe.request.MaterializeOnly || probe.request.Policy != store.SourceMemo {
-				t.Fatalf("probe=%+v returned=%+v error=%v", probe.request, request, err)
-			}
-			want := []string(nil)
-			if kind == store.Dispatch {
-				want = []string{"ready"}
-			}
-			if !reflect.DeepEqual(f.trace, want) {
-				t.Fatalf("release after %s: %v", kind, f.trace)
-			}
-		})
-	}
-}
-
 func TestOwnerHostRequestsHolderCancellationThroughTransition(t *testing.T) {
 	f, h, input := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4, Status: store.StatusRunning, ClaimedBy: "remote"}
@@ -312,7 +277,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	if _, err := releasedRequest(&host, t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 5 {
+	if policies != 4 {
 		t.Fatalf("owner policies=%d", policies)
 	}
 }

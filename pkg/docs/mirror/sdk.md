@@ -269,7 +269,10 @@ The gate itself only declares a decision.
 `Memo` reuses a successful job result. Its callback returns `sw.MemoValue` and an
 error. Build keys with `sw.MemoKey(parts...)`, set retention with
 `sw.MemoTTL(duration)`, and return `sw.NoMemo` to bypass reuse. Empty keys fail.
-The maximum memo TTL is 30 days. Missing or corrupt objects produce a miss.
+The key callback runs after SkipIf on the executing host under the job's actual
+award, inside its concurrency slot. A memo hit releases the job's groups without
+running its body. The maximum memo TTL is 30 days. Missing or corrupt objects
+produce a miss.
 
 ```go
 sw.Job(plan, "build", Build{}).

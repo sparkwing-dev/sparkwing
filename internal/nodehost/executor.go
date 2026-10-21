@@ -134,7 +134,42 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	if err != nil {
 		return h.report(ctx, input, h.failure(err), err)
 	}
+	decision, err := h.skipIf(ctx, input, spec, job)
+	if err != nil {
+		return h.report(ctx, input, h.failure(err), err)
+	}
+	for _, index := range decision.TimedOut {
+		if err := h.diagnostic(ctx, input, "warn", "skip_if_timeout", "", "SkipIf predicate exceeded its budget; continuing without skipping", map[string]any{"predicate": index}); err != nil {
+			return h.report(ctx, input, h.failure(err), err)
+		}
+	}
+	if decision.Skip {
+		return h.report(ctx, input, store.NodeResult{Outcome: store.NodeSkipped, Reason: "skip_if"}, nil)
+	}
+	var memoHash runspec.Hash
+	var memoResult *store.NodeResult
+	if job.Memo != nil || job.Closures.MemoKey != "" {
+		err = h.withProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
+			memoHash, memoResult, err = h.memo(ctx, session, code, job, spec)
+			return err
+		})
+		if err != nil {
+			return h.report(ctx, input, h.failure(err), err)
+		}
+		if memoResult != nil {
+			return h.report(ctx, input, *memoResult, nil)
+		}
+	}
 	result, runErr := h.layers(ctx, &input, job, func() (store.NodeResult, error) { return h.attempts(ctx, &input, spec, row, job) })
+	if runErr == nil && result.Outcome == store.NodeSuccess {
+		if err := h.saveMemo(ctx, input, memoHash, result); err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				runErr, result = errors.Join(cause, err), h.failure(errors.Join(cause, err))
+			} else if logErr := h.diagnostic(ctx, input, "warn", "memo_publish", "", "memo publication failed; a later run will execute again", map[string]any{"error": h.deps.Mask(err.Error())}); logErr != nil {
+				runErr, result = logErr, h.failure(logErr)
+			}
+		}
+	}
 	return h.report(ctx, input, result, runErr)
 }
 

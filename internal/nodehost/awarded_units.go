@@ -60,7 +60,6 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if h.bindAdmission != nil {
 		h.bindAdmission(h, input.Owner)
 	}
-	parent = context.WithValue(parent, admissionContext{}, h.executionAdmission)
 	if err := h.unitReady(input); err != nil {
 		return err
 	}

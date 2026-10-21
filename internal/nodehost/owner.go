@@ -42,11 +42,9 @@ type OwnerPlanning struct {
 	Resolve      func(nodeproto.PlanDoc) (runspec.Resolved, error)
 }
 
-// OwnerLayerResult either proposes a store transition or an authorized reuse candidate.
-// A transition ends this scheduling pass; a source still needs atomic reconciliation.
+// OwnerLayerResult proposes a store transition that ends this scheduling pass.
 type OwnerLayerResult struct {
 	Transition *store.NodeTransition
-	Source     *store.MaterializeSource
 }
 
 // OwnerHost coordinates the frozen lifecycle with source, SDK and placement adapters.
@@ -79,7 +77,6 @@ type OwnerHost struct {
 	DebugPolicy     OwnerPolicy
 	SkipPolicy      OwnerPolicy
 	ApprovalPolicy  OwnerPolicy
-	MemoPolicy      OwnerPolicy
 	AdmissionPolicy OwnerPolicy
 	Local           func(store.NodeRow) bool
 	Admit           func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error

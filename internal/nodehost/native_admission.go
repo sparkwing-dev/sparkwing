@@ -32,7 +32,8 @@ func ComposeNativeAdmission(capacity CapacityStore, compute *LocalAdmission, req
 	return admission
 }
 
-type admissionContext struct{}
+// Approval-only nodes retain their admission path while their host placement is decided.
+type approvalAdmissionContext struct{}
 
 type computeReservation struct {
 	ref       controllerwire.NodeRef
@@ -63,8 +64,7 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		if err := a.check(spec.Resolved.Settings.Concurrency); err != nil {
 			return RunCompletion{}, err
 		}
-		ctx = context.WithValue(ctx, admissionContext{}, a)
-		return body(ctx)
+		return body(context.WithValue(ctx, approvalAdmissionContext{}, a))
 	}
 	// safety: readiness reserves no compute: a claimant may already hold the job's capacity.
 	owner.Admit = func(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {

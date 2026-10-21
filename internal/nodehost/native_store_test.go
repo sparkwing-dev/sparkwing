@@ -5,6 +5,7 @@ package nodehost
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -97,7 +98,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	var award store.ReconciledNode
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
-	f.Host.DebugPolicy, f.Host.SkipPolicy, f.Host.ApprovalPolicy, f.Host.MemoPolicy, f.Host.AdmissionPolicy = nil, nil, nil, nil, nil
+	f.Host.DebugPolicy, f.Host.SkipPolicy, f.Host.ApprovalPolicy, f.Host.AdmissionPolicy = nil, nil, nil, nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 		if award.Node.Ref.NodeID != input.NodeID || len(award.Bearer) == 0 {
 			return ProcessGrant{}, errors.New("native attempt has no adopted award")
@@ -235,7 +236,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 	})}
 	signer := scriptedDataSigner{onUpload: func(ctx context.Context, request blob.UploadIntent) (blob.UploadTicket, error) {
 		ticket, err := f.Tenant.ReserveBlobUpload(ctx, store.UploadReservationRequest{
-			ID: "native-output", Intent: request, ExpiresAt: time.Now().Add(time.Minute),
+			ID: "native-output-" + rand.Text(), Intent: request, ExpiresAt: time.Now().Add(time.Minute),
 		})
 		if err != nil {
 			return blob.UploadTicket{}, err

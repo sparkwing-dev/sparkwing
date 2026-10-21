@@ -7,8 +7,10 @@ content. The host authorizes the storage namespace independently.
 ## The model
 
 `Memo` reuses a successful job's recorded output and artifacts. The key callback
-runs after dependencies settle. Return `MemoKey(parts...)` with every input that
-affects the result, or `NoMemo` to execute without publishing a memo record.
+runs on the executing host after dependencies settle and SkipIf permits the job,
+inside the job's acquired concurrency slot under its actual execution award.
+Return `MemoKey(parts...)` with every input that affects the result, or `NoMemo`
+to execute without publishing a memo record.
 Errors and empty keys fail rather than becoming a cache hit.
 
 ```go
@@ -41,7 +43,9 @@ needs its own key when its inputs differ.
 ## What a cache hit skips
 
 A hit restores the recorded output and artifact references. The host skips the
-job's execution callbacks. Declare file results with
+job's body and execution hooks, then settles it as memoized and releases its
+job groups. A hit still waits for its concurrency slot and briefly occupies a
+machine. Declare file results with
 [`Artifacts`](artifacts.md); `Consumes` stages those files for a dependent job.
 
 ## Opting out per invocation

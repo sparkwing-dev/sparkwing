@@ -29,12 +29,10 @@ func testRetrySourceProbe(t *testing.T, kind store.ReconcileKind) {
 	probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
 	h.Store = probe
 	sourceResult := &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 8}}
+	f.snapshot.Run.Retry = &store.RetrySelection{Mode: "failed", Results: map[string]store.MaterializedResultSource{"job": *sourceResult.Result}}
 	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name == "admission" && kind == store.Materialize {
 			t.Fatal("copied result entered compute admission")
-		}
-		if layer.Name == "memo" {
-			return OwnerLayerResult{Source: sourceResult}, nil
 		}
 		return OwnerLayerResult{}, nil
 	})

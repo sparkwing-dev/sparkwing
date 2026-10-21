@@ -58,19 +58,60 @@ func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput
 	return in, st, deps, &processes
 }
 
-func TestOwnerPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
+func executorPolicyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (NodeInput, *executorStore, ExecutorDependencies, *[]*executorProcess) {
+	t.Helper()
+	in, st, deps, processes := executorFixture(t)
+	job := in.Accepted.Plan.Jobs[0]
+	edit(&job)
+	executorChangeJob(t, &in, st, job)
+	start := deps.Start
+	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		if input.Authority != in.Authority || input.Generation != in.Generation || input.Attempt != st.row.Attempt {
+			t.Error("predicate process lost its execution award")
+		}
+		p, err := start(ctx, input, activity)
+		p.(*executorProcess).plan = in.Accepted.Plan
+		return p, err
+	}
+	return in, st, deps, processes
+}
+
+func executorPolicyHost(t *testing.T, deps ExecutorDependencies, in NodeInput) (*nodeExecutor, runspec.Spec, nodeproto.JobSpec) {
+	t.Helper()
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec runspec.Spec
+	if err := json.Unmarshal(in.Accepted.Spec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	return host.(*nodeExecutor), spec, in.Accepted.Plan.Jobs[0]
+}
+
+func executorPolicyMemoKey(ctx context.Context, host *nodeExecutor, in NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (string, error) {
+	var key string
+	err := host.withProcess(ctx, in, spec, func(session *executorSession, code NodeInput) error {
+		var err error
+		key, err = host.memoKey(ctx, session, code, job)
+		return err
+	})
+	return key, err
+}
+
+func TestExecutorPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+		in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 			job.Closures.SkipIf = []string{"slow", "skip"}
 			budget := int64(7)
 			job.SkipIfBudgetMS = &budget
 		})
 		start := deps.Start
-		deps.Start = func(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
+		deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 			if len(*processes) > 0 && ((*processes)[0].closed != 1 || (*processes)[0].cleaned != 1) {
 				t.Error("next predicate started before expired process joined")
 			}
-			p, err := start(ctx, input)
+			p, err := start(ctx, input, activity)
 			p.(*executorProcess).answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
 				if request.Op != nodeproto.OpEval {
 					return nil, nil
@@ -87,28 +128,25 @@ func TestOwnerPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
 			}
 			return p, err
 		}
-		host, err := NewOwnerEvaluator(deps)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := host.SkipIf(t.Context(), in)
+		host, spec, job := executorPolicyHost(t, deps, in)
+		result, err := host.skipIf(t.Context(), in, spec, job)
 		if err != nil || !result.Skip || !reflect.DeepEqual(result.TimedOut, []int{0}) {
 			t.Fatalf("skip = %+v, error = %v", result, err)
 		}
 	})
 }
 
-func TestOwnerPolicySkipFailuresPreventDispatch(t *testing.T) {
+func TestExecutorPolicySkipFailuresPreventBody(t *testing.T) {
 	for _, mode := range []string{"null", "string", "sdk", "drift", "close", "cleanup", "cancel", "lease", "cancel_and_cleanup"} {
 		t.Run(mode, func(t *testing.T) {
-			in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 				job.Closures.SkipIf = []string{"guard"}
 			})
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(context.Canceled)
 			start := deps.Start
-			deps.Start = func(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
-				process, err := start(ctx, input)
+			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				process, err := start(ctx, input, activity)
 				p := process.(*executorProcess)
 				switch mode {
 				case "drift":
@@ -141,11 +179,8 @@ func TestOwnerPolicySkipFailuresPreventDispatch(t *testing.T) {
 				}
 				return p, err
 			}
-			host, err := NewOwnerEvaluator(deps)
-			if err != nil {
-				t.Fatal(err)
-			}
-			result, err := host.SkipIf(ctx, in)
+			host, spec, job := executorPolicyHost(t, deps, in)
+			result, err := host.skipIf(ctx, in, spec, job)
 			if err == nil || result.Skip || len(result.TimedOut) != 0 || strings.Contains(err.Error(), "private") {
 				t.Fatalf("skip = %+v, error = %v", result, err)
 			}
@@ -159,20 +194,20 @@ func TestOwnerPolicySkipFailuresPreventDispatch(t *testing.T) {
 	}
 }
 
-func TestOwnerPolicySkipShortCircuitsBeforeBody(t *testing.T) {
-	in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+func TestExecutorPolicySkipShortCircuitsBeforeBody(t *testing.T) {
+	in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 		job.Closures.SkipIf = []string{"first", "second", "unreachable"}
 	})
 	var evaluated []string
 	start := deps.Start
-	deps.Start = func(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
-		p, err := start(ctx, input)
+	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		p, err := start(ctx, input, activity)
 		p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 			if request.Op != nodeproto.OpEval {
 				return nil, nil
 			}
 			if request.Job != "" || request.Attempt != 0 {
-				t.Errorf("owner evaluation manufactured an attempt: %+v", request)
+				t.Errorf("predicate evaluation manufactured an attempt: %+v", request)
 			}
 			evaluated = append(evaluated, request.Closure)
 			value := json.RawMessage("false")
@@ -183,11 +218,8 @@ func TestOwnerPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 		}
 		return p, err
 	}
-	host, err := NewOwnerEvaluator(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := host.SkipIf(t.Context(), in)
+	host, spec, job := executorPolicyHost(t, deps, in)
+	result, err := host.skipIf(t.Context(), in, spec, job)
 	if err != nil || !result.Skip || len(result.TimedOut) != 0 {
 		t.Fatalf("skip = %+v, error = %v", result, err)
 	}
@@ -196,26 +228,26 @@ func TestOwnerPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 	}
 	for _, p := range *processes {
 		if p.closed != 1 || p.cleaned != 1 {
-			t.Fatal("owner process leaked")
+			t.Fatal("predicate process leaked")
 		}
 		for _, request := range p.requests {
 			if request.Op == nodeproto.OpRunStep {
-				t.Fatal("owner evaluated a body")
+				t.Fatal("predicate evaluated a body")
 			}
 		}
 	}
 }
 
-func TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
+func TestExecutorPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
 	for _, raw := range []string{`"key"`, `null`, `""`, `42`, `{}`, `false`, `failed_null`} {
 		t.Run(raw, func(t *testing.T) {
-			in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 				job.Memo = &nodeproto.MemoSpec{}
 				job.Closures.MemoKey = "memo"
 			})
 			start := deps.Start
-			deps.Start = func(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
-				p, err := start(ctx, input)
+			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				p, err := start(ctx, input, activity)
 				p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 					if request.Op == nodeproto.OpEval {
 						if request.Closure != "memo" || request.Attempt != 0 {
@@ -230,11 +262,8 @@ func TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
 				}
 				return p, err
 			}
-			host, err := NewOwnerEvaluator(deps)
-			if err != nil {
-				t.Fatal(err)
-			}
-			key, err := host.MemoKey(t.Context(), in)
+			host, spec, job := executorPolicyHost(t, deps, in)
+			key, err := executorPolicyMemoKey(t.Context(), host, in, spec, job)
 			valid := raw == `"key"` || raw == `null`
 			if (err == nil) != valid || raw == `"key"` && key != "key" || raw != `"key"` && key != "" {
 				t.Fatalf("key = %q, error = %v", key, err)
@@ -246,20 +275,20 @@ func TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
 	}
 }
 
-func TestOwnerPolicyProcessesReceiveFreshRouteBindings(t *testing.T) {
-	in, _, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
+func TestExecutorPolicyProcessesReceiveFreshRouteBindings(t *testing.T) {
+	in, _, deps, _ := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 		job.Closures.SkipIf = []string{"first", "second"}
 	})
 	in.RouteBinding.Routes.Bearer = "parent"
 	bindings := []string{"first-child", "second-child"}
 	var issued, started int
-	deps.Bind = func(_ context.Context, input EvaluationInput) (ProcessGrant, error) {
+	deps.Bind = func(_ context.Context, input NodeInput) (ProcessGrant, error) {
 		binding := input.RouteBinding
 		binding.Routes.Bearer = bindings[issued]
 		issued++
 		return ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 	}
-	deps.Start = func(_ context.Context, input EvaluationInput) (ExecutorProcess, error) {
+	deps.Start = func(_ context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		want := bindings[started]
 		started++
 		if input.RouteBinding.Routes.Bearer != want {
@@ -275,29 +304,26 @@ func TestOwnerPolicyProcessesReceiveFreshRouteBindings(t *testing.T) {
 			return nil, nil
 		}}, nil
 	}
-	host, err := NewOwnerEvaluator(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := host.SkipIf(t.Context(), in)
+	host, spec, job := executorPolicyHost(t, deps, in)
+	result, err := host.skipIf(t.Context(), in, spec, job)
 	if err != nil || result.Skip || issued != 2 || started != 2 {
 		t.Fatalf("result = %+v, issued = %d, started = %d, error = %v", result, issued, started, err)
 	}
 }
 
-func TestOwnerPolicyMemoTimeoutAndCleanupDiscardKey(t *testing.T) {
+func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 	for _, mode := range []string{"timeout", "cleanup", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+				in, st, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 					job.Memo = &nodeproto.MemoSpec{}
 					job.Closures.MemoKey = "memo"
 				})
 				ctx, cancel := context.WithCancelCause(t.Context())
 				defer cancel(context.Canceled)
 				start := deps.Start
-				deps.Start = func(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
-					process, err := start(ctx, input)
+				deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+					process, err := start(ctx, input, activity)
 					p := process.(*executorProcess)
 					if mode == "cleanup" {
 						p.cleanupErr = errors.New("private cleanup failure")
@@ -317,13 +343,23 @@ func TestOwnerPolicyMemoTimeoutAndCleanupDiscardKey(t *testing.T) {
 					}
 					return p, err
 				}
-				host, err := NewOwnerEvaluator(deps)
-				if err != nil {
-					t.Fatal(err)
+				host, spec, _ := executorPolicyHost(t, deps, in)
+				spec.Resolved.Settings.Options.NoMemo.Value = true
+				in.Accepted.Spec, _ = json.Marshal(spec)
+				err := host.Execute(ctx, in)
+				if err == nil || strings.Contains(err.Error(), "private") || mode == "cancel" && !errors.Is(err, lease.ErrLeaseLost) {
+					t.Fatalf("memo failure = %v", err)
 				}
-				key, err := host.MemoKey(ctx, in)
-				if key != "" || err == nil || strings.Contains(err.Error(), "private") {
-					t.Fatalf("key = %q, error = %v", key, err)
+				if mode != "cancel" {
+					result := st.changes[len(st.changes)-1].Extra.Result
+					if result == nil || result.Outcome != store.NodeFailed || strings.Contains(result.MaskedError, "private") {
+						t.Fatalf("memo failure became a successful result: %+v", result)
+					}
+				}
+				for _, request := range (*processes)[0].requests {
+					if request.Op == nodeproto.OpRunStep {
+						t.Fatal("body ran after memo failure")
+					}
 				}
 				if (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 {
 					t.Fatal("memo failure leaked its process")
@@ -333,15 +369,15 @@ func TestOwnerPolicyMemoTimeoutAndCleanupDiscardKey(t *testing.T) {
 	}
 }
 
-func TestOwnerPolicyRefusesChangedProcessAuthority(t *testing.T) {
+func TestExecutorPolicyRefusesChangedProcessAuthority(t *testing.T) {
 	for _, mode := range []string{"missing", "same_bearer", "empty_bearer", "run", "job"} {
 		t.Run(mode, func(t *testing.T) {
-			in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
 				job.Closures.SkipIf = []string{"condition"}
 			})
 			in.RouteBinding.Routes.Bearer = "parent"
 			if mode != "missing" {
-				deps.Bind = func(_ context.Context, in EvaluationInput) (ProcessGrant, error) {
+				deps.Bind = func(_ context.Context, in NodeInput) (ProcessGrant, error) {
 					binding := in.RouteBinding
 					binding.Routes.Bearer = "child"
 					switch mode {
@@ -357,11 +393,8 @@ func TestOwnerPolicyRefusesChangedProcessAuthority(t *testing.T) {
 					return ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 				}
 			}
-			host, err := NewOwnerEvaluator(deps)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result, err := host.SkipIf(t.Context(), in); err == nil || result.Skip || len(*processes) != 0 {
+			host, spec, job := executorPolicyHost(t, deps, in)
+			if result, err := host.skipIf(t.Context(), in, spec, job); err == nil || result.Skip || len(*processes) != 0 {
 				t.Fatalf("result = %+v, started = %d, error = %v", result, len(*processes), err)
 			}
 		})

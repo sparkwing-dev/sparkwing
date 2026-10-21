@@ -190,6 +190,12 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
 	_, err := transition(reportCtx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: executorActor(input), To: result.Outcome, Cause: store.CauseReport, SourceAttempt: &input.Attempt, Extra: store.TransitionExtra{Result: &result}})
+	if refused != nil && waitFailure(failure, refused) == nil && ctx.Err() == nil {
+		if result.Outcome == store.NodeSkipped {
+			return err
+		}
+		return errors.Join(failure, err)
+	}
 	return errors.Join(context.Cause(ctx), &apierr.Error{Code: code, Message: result.MaskedError}, err)
 }
 

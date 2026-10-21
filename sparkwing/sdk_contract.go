@@ -52,6 +52,9 @@ func MemoTTL(d time.Duration) MemoOption {
 }
 
 // Memo declares result reuse; missing or corrupt cached bytes produce a miss.
+// The key runs after SkipIf on the executing host under the job's actual award,
+// inside its acquired concurrency slot. A hit settles the job as Memoized and
+// releases its groups without running its body.
 func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode {
 	n.memoKey = key
 	n.memoOptions = memoOptions{}

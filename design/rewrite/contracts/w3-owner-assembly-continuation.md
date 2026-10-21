@@ -8,12 +8,17 @@ still defines the remaining contract and placement work.
 
 ## Implementation and deletion
 
-Invariant: a native owner evaluates SkipIf before approval, reuse or admission.
-`NewNativeHost` now installs the shared evaluator for that layer. The generic
-owner callback supplies the other four policies. Predicate errors prevent
-release. Timeout diagnostics include the predicate index. A true predicate
-proposes a skipped transition after its process is revoked, joined and cleaned.
-The missing C1 approval-success edge remains a loud refusal for approval SkipIf.
+Executable jobs evaluate SkipIf and memo checks in the shared executor on their
+executing host, under the actual award, after concurrency and machine admission.
+The coordinator acquires no job groups for evaluation. Predicate errors fail the
+job before its body runs. Timeout diagnostics include the predicate index. A true
+predicate settles a skipped result after process revocation and joined cleanup,
+then releases job capacity. A job that skips still waits for its slot and briefly
+occupies a machine.
+
+Approval SkipIf remains an admission condition before the human wait. Its
+executing-host placement remains unresolved because approval-only jobs have no
+execution award. The existing approval bypass promise remains in force.
 
 The existing native-host fixture now exercises `OwnerHost.Run`, the real shared
 scheduling projection and decider, self-claim, delegated process execution and
@@ -64,8 +69,8 @@ those corrections. No acceptance cell is added or marked complete.
 
 ## Remaining work and foreign contracts
 
-The native owner still needs debug, approval, memo-materialization and admission
-composition. Production local, trigger and pod callers still use the old host.
+The native owner retains debug, approval and plan-admission policies. Executable
+job memo materialization belongs to the shared executor after job admission. Production local, trigger and pod callers still use the old host.
 Their migration and the remaining old runtime/test deletion stay with W3.
 
 Foreign contract gaps remain the full remote execution snapshot, fenced step

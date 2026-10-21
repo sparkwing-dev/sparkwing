@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,6 +79,23 @@ func TestOwnerExpansion(t *testing.T) {
 			rawPlan, _ := json.Marshal(plan)
 			rawJob, _ := json.Marshal(job)
 			s := newExpansionHostStore(store.RunRow{ID: "run", State: store.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Expansion: store.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
+			var mu sync.Mutex
+			changed := make(chan struct{}, 1)
+			readSnapshot, acceptExpansion := s.readSnapshot, s.acceptExpansion
+			s.readSnapshot = func(ctx context.Context, run string) (store.RunSnapshot, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return readSnapshot(ctx, run)
+			}
+			s.acceptExpansion = func(ctx context.Context, in store.ExpansionSubmission) (store.AcceptedExpansion, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				result, err := acceptExpansion(ctx, in)
+				if err == nil {
+					changed <- struct{}{}
+				}
+				return result, err
+			}
 			if mode == "cycle" {
 				raw, err := json.Marshal(plan.Jobs[1])
 				if err != nil {
@@ -103,7 +121,14 @@ func TestOwnerExpansion(t *testing.T) {
 			}
 			entry := &source.Entry{Engine: resolved}
 			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-			host := OwnerHost{Mask: func(value string) string { return value }, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			host := OwnerHost{Mask: func(value string) string { return value }, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(ctx context.Context, _ store.RunSnapshot) error {
+				select {
+				case <-changed:
+					return nil
+				case <-ctx.Done():
+					return context.Cause(ctx)
+				}
+			}, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}

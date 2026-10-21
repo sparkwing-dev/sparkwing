@@ -43,7 +43,9 @@ job. The host waits for the original request to finish before cleanup. The SDK
 process remains available after acknowledged cancellation. The old eval-kill
 fallback is removed.
 
-Owner reuse probes use `MaterializeOnly` before compute admission. A hit returns
+Owner retry and coalescing probes use `MaterializeOnly` before compute admission.
+Executable-job memo checks run after SkipIf inside the execution slot under the
+actual job award. A hit returns
 without admission. A miss stays available to the selected executor. Neither a
 probe nor an invalid response can deliver an execution award. Holder cancellation
 uses the run owner's scoped transition and leaves holder result rights to C1.

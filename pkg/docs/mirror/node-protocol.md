@@ -242,6 +242,12 @@ recovery uses a separate disruption allowance.
 | `before_run`, `after_run`, `verify` | Null |
 | `generate` | Array of flat job declarations |
 
+Executable-job `skip_if` and `memo_key` closures run on the executing host under
+the actual job award after concurrency and machine admission. The host checks
+SkipIf first, then memo reuse, before invoking the body. A skip or memo hit settles
+the job and releases its groups. Generator evaluations retain their separate
+expansion authority.
+
 Failed evals return `value: null` and a canonical inner `error`. `after_run`
 receives the final step-result shape in `input`, preserving the final failure.
 Successful completion passes no error to the Go hook.

@@ -1,81 +1,92 @@
 package blob
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
+	"math"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-func readMemoBytes(ctx context.Context, bytes Store, authority Authority, team string, hit MemoHit) ([]byte, error) {
+// ReadMemo verifies the output, manifest and every member through an authorized
+// reader. It returns the verified output and manifest for reuse or import.
+// Empty output is valid; callers enforce the output's application schema.
+func ReadMemo(ctx context.Context, get func(context.Context, Digest) (VerifiedReader, error), team string, hit MemoHit) ([]byte, []byte, error) {
 	// safety: empty outputs have an explicit record; an absent result must rerun.
 	if !hit.Output.Set {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
-	output, err := readOutputBytes(ctx, bytes, authority, hit.Output.Value)
-	if err != nil {
-		return nil, err
+	if !hit.Output.Value.Valid() || !hit.Manifest.Set && len(hit.Members) != 0 {
+		return nil, nil, ErrIntegrity
+	}
+	var output bytes.Buffer
+	if _, err := copyMemoBlob(ctx, get, hit.Output.Value, &output, limits.NodeOutputBytes); err != nil {
+		return nil, nil, err
 	}
 	if !hit.Manifest.Set {
-		if len(hit.Members) != 0 {
-			return nil, ErrIntegrity
-		}
-		return output, nil
+		return output.Bytes(), nil, nil
 	}
-	r, err := bytes.Get(ctx, GetRequest{Authority: authority, Digest: hit.Manifest.Value})
-	if err != nil {
-		return nil, err
+	var manifest bytes.Buffer
+	if _, err := copyMemoBlob(ctx, get, hit.Manifest.Value, &manifest, -1); err != nil {
+		return nil, nil, err
 	}
-	body, readErr := io.ReadAll(r)
-	verifiedManifest := r.Verified()
-	closeErr := r.Close()
-	if readErr != nil {
-		return nil, readErr
-	}
-	if closeErr != nil {
-		return nil, closeErr
-	}
-	if !verifiedManifest {
-		return nil, ErrIntegrity
-	}
-	if _, err := DecodeManifest(body, hit.Manifest.Value, team, hit.Members); err != nil {
-		return nil, err
+	if _, err := DecodeManifest(manifest.Bytes(), hit.Manifest.Value, team, hit.Members); err != nil {
+		return nil, nil, err
 	}
 	verified := make(map[Digest]int64)
 	for _, member := range hit.Members {
-		if member.ManifestDigest != hit.Manifest.Value || member.Size < 0 {
-			return nil, ErrIntegrity
-		}
 		size, ok := verified[member.Digest]
 		if !ok {
 			var err error
-			size, err = verifyMemoBlob(ctx, bytes, authority, member.Digest)
+			size, err = copyMemoBlob(ctx, get, member.Digest, io.Discard, member.Size)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			verified[member.Digest] = size
 		}
 		if size != member.Size {
-			return nil, ErrIntegrity
+			return nil, nil, ErrIntegrity
 		}
 	}
-	return output, nil
+	return output.Bytes(), manifest.Bytes(), nil
+}
+
+func readMemoBytes(ctx context.Context, bytes Store, authority Authority, team string, hit MemoHit) ([]byte, error) {
+	output, _, err := ReadMemo(ctx, func(ctx context.Context, digest Digest) (VerifiedReader, error) {
+		return bytes.Get(ctx, GetRequest{Authority: authority, Digest: digest})
+	}, team, hit)
+	return output, err
 }
 
 func verifyMemoBlob(ctx context.Context, bytes Store, authority Authority, digest Digest) (int64, error) {
-	r, err := bytes.Get(ctx, GetRequest{Authority: authority, Digest: digest})
+	return copyMemoBlob(ctx, func(ctx context.Context, digest Digest) (VerifiedReader, error) {
+		return bytes.Get(ctx, GetRequest{Authority: authority, Digest: digest})
+	}, digest, io.Discard, -1)
+}
+
+func copyMemoBlob(ctx context.Context, get func(context.Context, Digest) (VerifiedReader, error), digest Digest, dst io.Writer, limit int64) (size int64, err error) {
+	if err := context.Cause(ctx); err != nil {
+		return 0, err
+	}
+	r, err := get(ctx, digest)
+	if r != nil {
+		defer func() { err = errors.Join(err, r.Close(), context.Cause(ctx)) }()
+	}
 	if err != nil {
 		return 0, err
 	}
-	n, err := io.Copy(io.Discard, r)
-	verified := r.Verified()
-	closeErr := r.Close()
-	if err != nil {
-		return n, err
+	if r == nil {
+		return 0, ErrIntegrity
 	}
-	if closeErr != nil {
-		return n, closeErr
+	var src io.Reader = &contextReader{ctx: ctx, reader: r}
+	if limit >= 0 && limit < math.MaxInt64 {
+		src = io.LimitReader(src, limit+1)
 	}
-	if !verified {
-		return n, ErrIntegrity
+	size, err = io.Copy(dst, src)
+	if err == nil && (!r.Verified() || limit >= 0 && size > limit) {
+		err = ErrIntegrity
 	}
-	return n, nil
+	return size, err
 }

@@ -10,7 +10,7 @@ The author SDK owns declarations, typed input and output access, protocol servin
 - `Checkout` pointer fields distinguish unset from explicit zero or false. `FullHistory=true` overrides Depth as in the retained author semantics. The host resolves absent fields and validates explicit values.
 - A pipeline executable enters through `sparkwing.Main`. Its engine dependency graph is limited to the SDK, protocol and pipe transport. It must not import controller, store, runner orchestration, YAML, or secret-backend implementation packages. The implementation phase moves plan serialization into the SDK and removes the Delete exports below. This contract does not refactor that runtime graph.
 - The Go constructor remains `Job`, returning `*JobNode`, because Go cannot declare a type and function both named `Job`. Customer IDs, records and documentation use job. `Ref.JobID`, `RunContext.NoMemo`, and the `LogRecord` job tag carry that vocabulary.
-- `MemoValue`, `MemoKeyFn`, `MemoKey`, `MemoTTL`, and `NoMemo` concern result reuse. `Cache` concerns files and routes through depcache. Hosts own key scoping and trusted fallback. Empty memo keys fail. A missing or corrupt memo object is a miss. A depcache failure runs cold, an artifact staging failure fails, and a missing output read fails.
+- `MemoValue`, `MemoKeyFn`, `MemoKey`, `MemoTTL`, and `NoMemo` concern result reuse. `Cache` concerns files and routes through depcache. Hosts own key scoping and trusted fallback. Executable-job SkipIf and memo checks run on the executing host under its actual award, inside its acquired concurrency slot. Empty memo keys fail. A missing or corrupt memo object is a miss. A depcache failure runs cold, an artifact staging failure fails, and a missing output read fails.
 - `Artifacts` publishes files. `Consumes` adds a producer dependency and stages only authorized artifacts. Typed output remains `Produces`, `RefTo`, and `StepGet`, with the 16 MiB host limit.
 - Generators run on successful and memoized source outputs. `GenerateFn` receives an expansion plan and reads source output through a typed reference. Each registration receives a stable group ID from source ID plus registration ordinal. `NeedsGenerated` waits for settlement and generated prerequisites. The host accepts at most 256 jobs per generator fan-out and persists the topology. Replay reconstructs code only and must reproduce the accepted spec hash. Failed, skipped, cancelled and superseded sources resolve the barrier without running the callback.
 - Generator contexts and their SDK commands exclude the source job's body environment. Conditions, hooks and step bodies retain their own job's body environment. Replay cannot let source assignments change reconstructed declarations.
@@ -349,7 +349,7 @@ Each row names one exported type or function. Retain means its declared signatur
 | `sparkwing.Job` | `sparkwing/plan.go` | Job registers a Workable or func(context.Context) error under id. |
 | `sparkwing.JobNode` | `sparkwing/plan.go` | JobNode is a Plan entry wrapping a Workable. |
 | `sparkwing.ApprovalTimeoutPolicy` | `sparkwing/plan.go` | ApprovalTimeoutPolicy enumerates the resolution applied to an unanswered approval gate when its Timeout elapses. |
-| `sparkwing.SkipPredicate` | `sparkwing/plan.go` | SkipPredicate is a function evaluated by the host after upstream dependencies complete. |
+| `sparkwing.SkipPredicate` | `sparkwing/plan.go` | SkipPredicate is a function evaluated after upstream dependencies complete. |
 | `sparkwing.BeforeRunFn` | `sparkwing/plan.go` | BeforeRunFn runs once before the first Run attempt. |
 | `sparkwing.AfterRunFn` | `sparkwing/plan.go` | AfterRunFn receives the final Run error after all retries, or nil on success. |
 | `sparkwing.Dep` | `sparkwing/plan.go` | Accepts job, approval and job-group handles as prerequisites. |
@@ -363,7 +363,7 @@ Each row names one exported type or function. Retain means its declared signatur
 | `sparkwing.JobNode.OnFailure` | `sparkwing/plan.go` | OnFailure declares and returns a recovery job that runs when this job fails. |
 | `sparkwing.SkipOption` | `sparkwing/plan.go` | SkipOption configures a SkipIf registration. |
 | `sparkwing.SkipBudget` | `sparkwing/plan.go` | SkipBudget sets the timeout applied to each predicate on the job. |
-| `sparkwing.JobNode.SkipIf` | `sparkwing/plan.go` | SkipIf registers a predicate the host evaluates after this job's dependencies complete. |
+| `sparkwing.JobNode.SkipIf` | `sparkwing/plan.go` | SkipIf registers a predicate evaluated on the executing host after this node's dependencies complete and its concurrency groups are acquired. |
 | `sparkwing.JobNode.BeforeRun` | `sparkwing/plan.go` | BeforeRun registers a hook to run once before the job's Run method on the first attempt. |
 | `sparkwing.JobNode.AfterRun` | `sparkwing/plan.go` | AfterRun registers a hook invoked after Run and all retries finish. |
 | `sparkwing.JobNode.Verify` | `sparkwing/plan.go` | Verify checks a postcondition after each successful action attempt. |

@@ -193,7 +193,7 @@ shell-injection risk; `Exec`, or `Bash` with `.Env()`, avoids it.
 agree on the shape. Reading `os.Getenv`, switching on `runtime.GOOS`, or
 calling `IsLocal()` in the body branches the structure on the host that
 happens to read it. Express the condition where it belongs: a job-level
-`SkipIf`, evaluated at dispatch, or a pipeline guard that gates the whole
+`SkipIf`, evaluated on the executing host, or a pipeline guard that gates the whole
 run.
 
 Don't branch the DAG on the host environment:
@@ -207,9 +207,9 @@ func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.No
 }
 ```
 
-Declare the job unconditionally. Its `SkipIf` callback runs on the
-coordinator after dependencies complete; an environment read there sees
-the coordinator's environment:
+Declare the job unconditionally. After dependencies complete, its `SkipIf`
+callback runs on the executing host under the job's award, inside its concurrency
+slot. An environment read there sees that host's environment:
 
 ```go
 func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.NoInputs, rc sparkwing.RunContext) error {

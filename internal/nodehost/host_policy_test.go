@@ -61,7 +61,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := host.SkipIf(t.Context(), EvaluationInput{
+			result, err := host.approvalSkipIf(t.Context(), EvaluationInput{
 				Accepted: AcceptedRun{RunID: "run", Spec: rawSpec, SpecHash: "spec", Plan: plan, PlanHash: string(planHash)},
 				Engine:   resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "gate", SpecHash: string(jobHash),
 				RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "gate"},

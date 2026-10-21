@@ -6,31 +6,11 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput, spec runspec.Spec, evaluate func(*executorSession, NodeInput) error) (err error) {
-	if admission, ok := ctx.Value(admissionContext{}).(NativeAdmission); ok {
-		row, err := h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
-		if err != nil {
-			return err
-		}
-		actor := store.Actor{}
-		if admission.capacity != nil {
-			actor = admission.capacity.Owner
-		}
-		return admission.withNode(ctx, input.Accepted, row, actor, func(ctx context.Context, _ wingwire.HostResources) error {
-			return h.process(ctx, input, spec, evaluate)
-		})
-	}
-	return h.process(ctx, input, spec, evaluate)
-}
-
-func (h *OwnerEvaluator) process(ctx context.Context, input EvaluationInput, spec runspec.Spec, evaluate func(*executorSession, NodeInput) error) (err error) {
 	var grant ProcessGrant
 	var process ExecutorProcess
 	defer func() {
