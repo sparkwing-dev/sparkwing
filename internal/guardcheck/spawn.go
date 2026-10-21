@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,20 +13,13 @@ import (
 
 func spawnFindings(repo string) ([]string, error) {
 	var problems []string
-	for _, target := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"} {
-		platform, arch, _ := strings.Cut(target, "/")
-		cfg := &packages.Config{Dir: repo, Env: append(os.Environ(), "GOOS="+platform, "GOARCH="+arch, "CGO_ENABLED=0"), Mode: packages.NeedName | packages.NeedFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo}
-		pkgs, err := packages.Load(cfg, "./...")
-		if err != nil {
-			return nil, err
-		}
-		for _, pkg := range pkgs {
-			if len(pkg.Errors) > 0 {
-				return nil, fmt.Errorf("spawn guard (%s): loading %s: %v", platform, pkg.PkgPath, pkg.Errors)
-			}
-			problems = append(problems, packageSpawnFindings(pkg)...)
-		}
+	uncovered, err := loadSpawnPackages(repo, func(pkg *packages.Package) {
+		problems = append(problems, packageSpawnFindings(pkg)...)
+	})
+	if err != nil {
+		return nil, err
 	}
+	problems = append(problems, uncovered...)
 	problems = dedupe(problems)
 	sort.Strings(problems)
 	return problems, nil
@@ -110,7 +102,7 @@ func packageSpawnFindings(pkg *packages.Package) []string {
 			return true
 		})
 	}
-	return problems
+	return append(problems, pipelineEnvironmentFindings(pkg)...)
 }
 
 func rawCommandType(t types.Type) bool {

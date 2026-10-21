@@ -23,12 +23,15 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 )
 
 type confinementChart struct {
 	resources  []confinementResource
+	grants     []confinementGrant
 	identities []string
 	verbs      []string
 	namespaces []string
@@ -56,6 +59,23 @@ func TestConfinementEnrollsRenderedNamespaces(t *testing.T) {
 			t.Errorf("rendered namespace %q excluded from authorization matrix", namespace)
 		}
 	}
+}
+
+type confinementGrant struct {
+	identity   string
+	attributes authorizationv1.SelfSubjectAccessReviewSpec
+}
+
+func (grant confinementGrant) expected() bool {
+	resource := grant.attributes.ResourceAttributes
+	if resource == nil {
+		return false
+	}
+	name := resource.Resource
+	if resource.Subresource != "" {
+		name += "/" + resource.Subresource
+	}
+	return grant.identity == "system:serviceaccount:cloud:cloud-launcher" && chartLauncherGrant(resource.Group, name, resource.Name, resource.Namespace, resource.Verb)
 }
 
 type confinementResource struct {
@@ -245,53 +265,8 @@ func installConfinementChart(t *testing.T, cfg *rest.Config, chart string) confi
 			t.Fatalf("install %s %s/%s: %v", object.GetKind(), object.GetNamespace(), object.GetName(), err)
 		}
 		granted.enrollNamespace(object)
-		// Enroll every rendered resource grant so a new template cannot escape the matrix.
-		if object.GetKind() == "Role" || object.GetKind() == "ClusterRole" {
-			rules, _, err := unstructured.NestedSlice(object.Object, "rules")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, raw := range rules {
-				rule := raw.(map[string]interface{})
-				urls, _, _ := unstructured.NestedStringSlice(rule, "nonResourceURLs")
-				if len(urls) != 0 {
-					t.Fatalf("chart grants unexpected non-resource authority: %v", urls)
-				}
-				verbs, _, _ := unstructured.NestedStringSlice(rule, "verbs")
-				granted.verbs = append(granted.verbs, verbs...)
-				groups, _, _ := unstructured.NestedStringSlice(rule, "apiGroups")
-				resources, _, _ := unstructured.NestedStringSlice(rule, "resources")
-				names, _, _ := unstructured.NestedStringSlice(rule, "resourceNames")
-				names = append(names, "ungranted-name")
-				for _, group := range groups {
-					for _, resource := range resources {
-						for _, name := range names {
-							granted.resources = append(granted.resources, confinementResource{group, resource, name, false})
-						}
-					}
-				}
-			}
-		}
 		if object.GetKind() == "RoleBinding" || object.GetKind() == "ClusterRoleBinding" {
 			bindings = append(bindings, object.DeepCopy())
-			subjects, _, err := unstructured.NestedSlice(object.Object, "subjects")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, raw := range subjects {
-				subject := raw.(map[string]interface{})
-				kind, _, _ := unstructured.NestedString(subject, "kind")
-				name, _, _ := unstructured.NestedString(subject, "name")
-				namespace, _, _ := unstructured.NestedString(subject, "namespace")
-				switch kind {
-				case "ServiceAccount":
-					granted.identities = append(granted.identities, "system:serviceaccount:"+namespace+":"+name)
-				case "User":
-					granted.identities = append(granted.identities, name)
-				default:
-					t.Fatalf("chart grants unexpected %s authority to %s", kind, name)
-				}
-			}
 		}
 
 		installed++
@@ -299,24 +274,18 @@ func installConfinementChart(t *testing.T, cfg *rest.Config, chart string) confi
 	if installed == 0 {
 		t.Fatal("complete chart rendered no resources")
 	}
+	granted.enrollBindings(t, admin, bindings)
 	slices.Sort(granted.verbs)
 	granted.verbs = slices.Compact(granted.verbs)
 	slices.Sort(granted.identities)
 	granted.identities = slices.Compact(granted.identities)
-	waitForChartRBAC(t, cfg, bindings)
+	waitForChartRBAC(t, cfg, granted.grants)
 	return granted
 }
 
-// Chart-derived probes synchronize the authorizer cache; contract expectations
-// remain independent so extra grants still fail the confinement matrix.
-func waitForChartRBAC(t *testing.T, cfg *rest.Config, bindings []*unstructured.Unstructured) {
+// Resolving bindings also enrolls authority from roles the chart does not render.
+func (chart *confinementChart) enrollBindings(t *testing.T, admin kubernetes.Interface, bindings []*unstructured.Unstructured) {
 	t.Helper()
-	type probe struct {
-		identity   string
-		attributes authorizationv1.ResourceAttributes
-	}
-	var probes []probe
-	admin := impersonate(t, cfg, "")
 	for _, binding := range bindings {
 		kind, _, _ := unstructured.NestedString(binding.Object, "roleRef", "kind")
 		name, _, _ := unstructured.NestedString(binding.Object, "roleRef", "name")
@@ -345,32 +314,54 @@ func waitForChartRBAC(t *testing.T, cfg *rest.Config, bindings []*unstructured.U
 			subject := raw.(map[string]interface{})
 			identity, _, _ := unstructured.NestedString(subject, "name")
 			kind, _, _ := unstructured.NestedString(subject, "kind")
-			if kind == "ServiceAccount" {
+			switch kind {
+			case "ServiceAccount":
 				namespace, _, _ := unstructured.NestedString(subject, "namespace")
-				identity = "system:serviceaccount:" + namespace + ":" + identity
-			}
-			for _, rule := range rules {
-				names := rule.ResourceNames
-				if len(names) == 0 {
-					names = []string{"ungranted-name"}
+				if namespace == "" {
+					namespace = binding.GetNamespace()
 				}
+				identity = "system:serviceaccount:" + namespace + ":" + identity
+			case "User":
+			default:
+				t.Fatalf("chart grants unexpected %s authority to %s", kind, identity)
+			}
+			chart.identities = append(chart.identities, identity)
+			for _, rule := range rules {
+				chart.verbs = append(chart.verbs, rule.Verbs...)
+				names := append(slices.Clone(rule.ResourceNames), "ungranted-name")
 				for _, group := range rule.APIGroups {
 					for _, resource := range rule.Resources {
-						for _, verb := range rule.Verbs {
-							for _, name := range names {
-								resource, sub, _ := strings.Cut(resource, "/")
-								probes = append(probes, probe{identity, authorizationv1.ResourceAttributes{Namespace: binding.GetNamespace(), Group: group, Resource: resource, Subresource: sub, Verb: verb, Name: name}})
+						for _, name := range names {
+							chart.resources = append(chart.resources, confinementResource{group, resource, name, false})
+							resource, sub, _ := strings.Cut(resource, "/")
+							for _, verb := range rule.Verbs {
+								// A sentinel name tests denial separately when a role limits resourceNames.
+								if len(rule.ResourceNames) != 0 && !slices.Contains(rule.ResourceNames, name) {
+									continue
+								}
+								chart.grants = append(chart.grants, confinementGrant{identity, authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &authorizationv1.ResourceAttributes{Namespace: binding.GetNamespace(), Group: group, Resource: resource, Subresource: sub, Verb: verb, Name: name}}})
 							}
 						}
+					}
+				}
+				for _, url := range rule.NonResourceURLs {
+					for _, verb := range rule.Verbs {
+						chart.grants = append(chart.grants, confinementGrant{identity, authorizationv1.SelfSubjectAccessReviewSpec{NonResourceAttributes: &authorizationv1.NonResourceAttributes{Path: url, Verb: verb}}})
 					}
 				}
 			}
 		}
 	}
+}
+
+// The inventory and authorizer share probes; the independent contract decides
+// whether each grant is permitted, including grants to pre-existing roles.
+func waitForChartRBAC(t *testing.T, cfg *rest.Config, grants []confinementGrant) {
+	t.Helper()
 	err := wait.PollUntilContextTimeout(t.Context(), 10*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
-		for _, probe := range probes {
-			client := impersonate(t, cfg, probe.identity)
-			review, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &probe.attributes}}, metav1.CreateOptions{})
+		for _, grant := range grants {
+			client := impersonate(t, cfg, grant.identity)
+			review, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authorizationv1.SelfSubjectAccessReview{Spec: grant.attributes}, metav1.CreateOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -382,5 +373,52 @@ func waitForChartRBAC(t *testing.T, cfg *rest.Config, bindings []*unstructured.U
 	})
 	if err != nil {
 		t.Fatalf("complete chart RBAC not ready: %v", err)
+	}
+	for _, grant := range grants {
+		if !grant.expected() {
+			t.Errorf("chart grants unexpected authority to %s: resource=%+v nonResource=%+v", grant.identity, grant.attributes.ResourceAttributes, grant.attributes.NonResourceAttributes)
+		}
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+}
+
+func TestConfinementEnrollsPreexistingRoleGrants(t *testing.T) {
+	admin := fake.NewSimpleClientset(&rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "system:monitoring"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"nodes/metrics"}, Verbs: []string{"get"}},
+			{NonResourceURLs: []string{"/metrics"}, Verbs: []string{"get"}},
+		},
+	})
+	binding := &unstructured.Unstructured{Object: map[string]interface{}{
+		"kind":     "ClusterRoleBinding",
+		"roleRef":  map[string]interface{}{"kind": "ClusterRole", "name": "system:monitoring"},
+		"subjects": []interface{}{map[string]interface{}{"kind": "ServiceAccount", "name": "controller", "namespace": "cloud"}},
+	}}
+	var chart confinementChart
+	chart.enrollBindings(t, admin, []*unstructured.Unstructured{binding})
+	if len(chart.grants) != 2 {
+		t.Fatalf("resolved grants = %d, want resource and non-resource grant", len(chart.grants))
+	}
+	resource := chart.grants[0].attributes.ResourceAttributes
+	if resource == nil || resource.Resource != "nodes" || resource.Subresource != "metrics" {
+		t.Fatalf("resource grant = %+v", resource)
+	}
+	nonResource := chart.grants[1].attributes.NonResourceAttributes
+	if nonResource == nil || nonResource.Path != "/metrics" {
+		t.Fatalf("non-resource grant = %+v", nonResource)
+	}
+	for _, grant := range chart.grants {
+		if grant.identity != "system:serviceaccount:cloud:controller" {
+			t.Errorf("resolved identity = %q", grant.identity)
+		}
+		for _, identity := range []string{"system:serviceaccount:cloud:controller", "system:serviceaccount:cloud:cloud-launcher"} {
+			grant.identity = identity
+			if grant.expected() {
+				t.Errorf("unexpected grant escaped confinement contract: %+v", grant)
+			}
+		}
 	}
 }

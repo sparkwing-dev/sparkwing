@@ -30,13 +30,8 @@ existing exports to the unexport census. The move accepts those package counts
 once and translates the existing depguard and F1 paths. It does not add a
 standing growth exemption. Subsequent changes must keep shrinking these lists.
 
-The typed spawn guard has no allow-list. It loads every root-module package
-for Linux, macOS and Windows on amd64 and arm64 and rejects raw process-constructor references
-(including aliases and function values), `exec.Cmd` value construction and
-`Cmd.Env` access outside `internal/procenv`. Test files are exempt. `procenv`
-`Command` constructors require an explicit environment and copy it; nil selects
-an empty environment. Pipeline callers supply their existing `Build` or delegated
-boundary environment. Trusted CLI, tooling and SDK control processes explicitly
-use `HostCommand` to preserve host inheritance, or supply an explicit host
-snapshot where they already selected one. The guard enforces the creation and environment
-ownership seam; it does not infer the policy provenance of arbitrary slices.
+The typed spawn guard has no allow-list. It rejects raw process constructors,
+`exec.Cmd` value construction and direct `Cmd.Env` access outside `procenv`.
+It inventories production source independently and fails on uncovered build
+profiles. Protected pipeline paths also require `procenv.Build` provenance.
+See [guard scope and accepted residuals](../internal/guardcheck/README).

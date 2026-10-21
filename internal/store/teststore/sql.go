@@ -32,7 +32,7 @@ type poolKey struct {
 }
 
 // OpenExisting opens path with store.Open and records it for SQL. Use it
-// to reopen or migrate a database a test already created.
+// to reopen a compatible database a test already created.
 func OpenExisting(path string, opts ...store.Option) (*store.Store, error) {
 	st, err := store.Open(path, fixtureOptions(opts)...)
 	if err != nil {
