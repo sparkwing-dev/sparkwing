@@ -17,13 +17,23 @@ import (
 func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
 	var waiting error
-	var selected *UnitRef
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		out, waiting, selected = UnitClaim{}, nil, nil
+		out, waiting = UnitClaim{}, nil
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
 		claimant := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+		if demand.Target == nil {
+			chain, err := authorityChainTx(ctx, tx, claimant, false)
+			if err != nil {
+				return err
+			}
+			if capability.CloudLauncher(chain[0].principal.Capability) {
+				if err := lockLauncherQueueTx(ctx, tx); err != nil {
+					return err
+				}
+			}
+		}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{claimant}); err != nil {
 			return err
 		}
@@ -48,24 +58,39 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 			if err != nil {
 				return err
 			}
-			if capability.CloudLauncher(p.Capability) {
-				selected = &queued
-				return nil
-			}
 			unit = &queued
+		}
+		queuedLauncher := demand.Target == nil && capability.CloudLauncher(p.Capability)
+		if queuedLauncher {
+			// Cursor progress survives a refused award without exposing a selected unit between transactions.
+			if _, err := tx.ExecContext(ctx, "SAVEPOINT launcher_award"); err != nil {
+				return err
+			}
 		}
 		out, err = tx.operator.claimUnitTx(ctx, tx, demand, *unit)
 		if err == errRankingHold {
 			waiting, err = err, nil
+			if demand.Target == nil {
+				waiting = notFound("eligible work", "")
+			}
+		}
+		if queuedLauncher {
+			if err != nil {
+				if isPGConflict(err) || errors.Is(err, errAuthorityChanged) {
+					return err
+				}
+				if _, rollback := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT launcher_award"); rollback != nil {
+					return errors.Join(err, rollback)
+				}
+				waiting, err = err, nil
+			}
+			_, released := tx.ExecContext(ctx, "RELEASE SAVEPOINT launcher_award")
+			return released
 		}
 		return err
 	})
-	if err == nil && selected != nil {
-		demand.Target = selected
-		return o.claimUnit(ctx, demand)
-	}
-	if err == nil && waiting != nil {
-		return UnitClaim{}, waiting
+	if err == nil {
+		err = waiting
 	}
 	if err != nil {
 		var unpriced *UnpricedCPUClassError

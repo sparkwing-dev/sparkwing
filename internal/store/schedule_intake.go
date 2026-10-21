@@ -24,14 +24,25 @@ type scheduleAdmission struct {
 	caller   *capability.Authorized
 }
 
-func lockScheduleInstallationTx(ctx context.Context, tx *storeTx, schedule CronSchedule) error {
-	if schedule.GitHubInstallationID <= 0 {
-		return nil
+func (in scheduleAdmission) lock(ctx context.Context, tx *storeTx) error {
+	var authorities []capability.AuthorityRef
+	if in.caller != nil {
+		authorities = append(authorities, in.caller.Principal.Authority)
+	}
+	if in.consent != "" {
+		var saved scheduleConsent
+		if json.Unmarshal([]byte(in.consent), &saved) != nil || saved.Version != 1 {
+			return bindingRefusal()
+		}
+		authorities = append(authorities, saved.Authority)
 	}
 	return acquireLockSet(ctx, tx, func() lockSet {
-		var set lockSet
-		set.add(lockTeam, true, string(schedule.Team))
-		return tx.operator.discoverInstallationLocks(ctx, tx, set, schedule.GitHubInstallationID)
+		set := discoverAuthorityLocks(ctx, tx, authorities)
+		set.add(lockTeam, true, string(in.schedule.Team))
+		if in.schedule.GitHubInstallationID > 0 {
+			set = tx.operator.discoverInstallationLocks(ctx, tx, set, in.schedule.GitHubInstallationID)
+		}
+		return set
 	})
 }
 
@@ -111,7 +122,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	if in.consent != "" {
 		var replay AdmissionResult
 		err := t.s.inTx(ctx, func(tx *storeTx) error {
-			if err := lockScheduleInstallationTx(ctx, tx, schedule); err != nil {
+			if err := in.lock(ctx, tx); err != nil {
 				return err
 			}
 			tx.scheduleAdmission = &in
@@ -171,7 +182,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input}
 	var result AdmissionResult
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockScheduleInstallationTx(ctx, tx, schedule); err != nil {
+		if err := in.lock(ctx, tx); err != nil {
 			return err
 		}
 		tx.scheduleAdmission = &in

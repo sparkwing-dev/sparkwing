@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func appCronRows(t *testing.T, f *appFixture, team string) []store.CronSchedule {
@@ -121,8 +122,12 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	f.app.SetCommit("acme/widgets", "main", next)
 	f.app.SetFile("acme/widgets", next, ".sparkwing/sparkwing.yaml", []byte("pipelines: [invalid"))
 	f.app.FailContents(1)
-	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), ""); code != http.StatusBadGateway {
-		t.Fatalf("GitHub API failure = %d, want 502", code)
+	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), ""); code < 400 {
+		t.Fatalf("GitHub API failure = %d, want processing failure", code)
+	}
+	var pending int
+	if err := teststore.SQL(t, f.store).QueryRow(`SELECT count(*) FROM github_app_deliveries WHERE state='pending'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("GitHub API failure retained %d deliveries, want one pending retry: %v", pending, err)
 	}
 	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("GitHub API failure changed schedule: %+v", rows)
@@ -247,11 +252,11 @@ func TestGitHubAppScheduleResolvesVerifiedDefaultAtFireAndRequiresConsent(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repository := admitted.Request.Request.Git.Repository; repository.Key != "gh:701" || repository.Display != "acme/widgets" {
-		t.Fatalf("scheduled run repository = %+v, want gh:701 displayed as acme/widgets", repository)
+	if repository := admitted.Request.Request.Git.Repository; repository.Key != "gh:701" || repository.Display != "github.com/acme/widgets" {
+		t.Fatalf("scheduled run repository = %+v, want gh:701 displayed as github.com/acme/widgets", repository)
 	}
-	if got := admitted.Request.Provenance.Trust(); got != runspec.TrustVerifiedDefault {
-		t.Fatalf("App schedule provenance trust = %q, want verified default", got)
+	if got := admitted.Request.Provenance.Trust(); got != runspec.TrustSchedule {
+		t.Fatalf("App schedule provenance trust = %q, want verified schedule", got)
 	}
 	if got := admitted.Request.Request.Git.SHA; got != fireSHA {
 		t.Fatalf("fire resolved commit = %q, want %q", got, fireSHA)

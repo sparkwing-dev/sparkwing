@@ -1,9 +1,9 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func TestLauncherClaimProbesBoundedWorkPerTeamAndRotates(t *testing.T) {
+func launcherFairnessFixture(t *testing.T) (*Store, UnitDemand) {
+	t.Helper()
 	s, _ := unitClaimFixture(t)
 	fundUnitClaim(t, s)
 	if _, err := (&Tenant{s: s, team: "b"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100000000, Reference: "claim-fixture-b", CreatedBy: "fixture"}); err != nil {
@@ -26,19 +27,23 @@ func TestLauncherClaimProbesBoundedWorkPerTeamAndRotates(t *testing.T) {
 	launcher.ExpiresAt = &expires
 	authorityPersist(t, s, launcher)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller' WHERE team='a'`)
+	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Team: "b", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Dispatch: runspec.DispatchController}}, assertedProvenance(t, "ci", "", ""))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','run-b',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','controller','execute',?,'account',2,'r30',30)`, request, []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','run-b','job','pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`)
+	demand := UnitDemand{CapabilityPrefix: launcher.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	return s, demand
+}
 
+func TestLauncherClaimProbesBoundedWorkPerTeamAndRotates(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
 	var execution []byte
 	if err := s.db.QueryRow(`SELECT execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&execution); err != nil {
 		t.Fatal(err)
 	}
-	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Team: "b", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Dispatch: runspec.DispatchController}}, assertedProvenance(t, "ci", "", ""))
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','run-b',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','controller','execute',?,'account',2,'r30',30)`, request, []byte(`[]`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('b','run-b','job','pending',1,?,?)`, []byte(`{"id":"job"}`), execution)
 	for i := range launcherProbePerTeam {
 		id := fmt.Sprintf("a%02d", i)
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(`{"id":"`+id+`"}`), []byte(`{"requires":{"set":true,"value":["unavailable"]}}`))
 	}
-	demand := UnitDemand{CapabilityPrefix: launcher.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 	first, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || first.Team != "b" {
 		t.Fatalf("backlogged team delayed another team's claim: claim=%+v err=%v", first, err)
@@ -57,41 +62,42 @@ func TestLauncherClaimProbesBoundedWorkPerTeamAndRotates(t *testing.T) {
 	}
 }
 
-type failSecondClaimProfile struct{ calls int }
-
-func (p *failSecondClaimProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	p.calls++
-	if p.calls == 2 {
-		return match.Profile{}, match.Resources{}, errors.New("transient claim profile failure")
-	}
-	return match.Profile{Capacity: match.Resources{Cores: 8}}, match.Resources{Cores: 8}, nil
-}
-
 func TestLauncherFinalRefusalKeepsRoundRobinProgress(t *testing.T) {
-	s, _ := unitClaimFixture(t)
-	fundUnitClaim(t, s)
-	if _, err := (&Tenant{s: s, team: "b"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100000000, Reference: "claim-fixture-b", CreatedBy: "fixture"}); err != nil {
+	s, demand := launcherFairnessFixture(t)
+	var capabilities int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&capabilities); err != nil {
 		t.Fatal(err)
 	}
-	launcher := authorityRoot("launcher", "")
-	launcher.Subject.Kind = capability.SubjectService
-	launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
-	expires := s.now().Add(time.Hour)
-	launcher.ExpiresAt = &expires
-	authorityPersist(t, s, launcher)
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller' WHERE team='a'`)
-	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Team: "b", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Dispatch: runspec.DispatchController}}, assertedProvenance(t, "ci", "", ""))
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','run-b',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','controller','execute',?,'account',2,'r30',30)`, request, []byte(`[]`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','run-b','job','pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`)
-	demand := UnitDemand{CapabilityPrefix: launcher.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
-	profile := &failSecondClaimProfile{}
-	s.claimProfiles = profile
-	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil || profile.calls != 2 {
-		t.Fatalf("final claim did not fail after selection: calls=%d err=%v", profile.calls, err)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_launcher_award BEFORE UPDATE ON nodes WHEN NEW.claimed_by IS NOT NULL BEGIN SELECT RAISE(ABORT,'award persistence unavailable'); END`)
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil || !strings.Contains(err.Error(), "award persistence unavailable") {
+		t.Fatalf("final claim did not fail after selection: %v", err)
 	}
-	s.claimProfiles = nil
+	for _, table := range []string{"billing_awards", "billable_intervals", "node_attempts"} {
+		rewriteSchemaCount(t, s.db, table, 0)
+	}
+	rewriteSchemaCount(t, s.db, "capabilities", capabilities)
+	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_launcher_award`)
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claim.Team != "b" {
 		t.Fatalf("failed final claim starved another team: claim=%+v err=%v", claim, err)
+	}
+}
+
+func TestLauncherUnpricedBacklogDoesNotDelayAnotherTeam(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	table := CreditRateTable{{Cores: 2, MicroPerSecond: 2}}
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='b'`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":2}}}}`))
+	for i := range launcherProbePerTeam {
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, fmt.Sprintf("unpriced-%03d", i))
+	}
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrUnpricedCPUClass) {
+		t.Fatalf("unpriced work was not refused: %v", err)
+	}
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil || claim.Team != "b" {
+		t.Fatalf("unpriced backlog starved another team: claim=%+v err=%v", claim, err)
 	}
 }

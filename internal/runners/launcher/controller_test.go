@@ -30,17 +30,22 @@ type launcherWireFake struct {
 }
 
 func TestControllerControlSendsFaultedTeamExclusions(t *testing.T) {
+	excluded := []string{TeamNodeValue("cloud", "faulted")}
 	wire := launcherWireFake{claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-		if request.JobNamespace != "cloud" || !slices.Equal(request.ExcludedTeamLabels, []string{TeamNodeValue("cloud", "faulted")}) {
+		if request.JobNamespace != "cloud" || !slices.Equal(request.ExcludedTeamLabels, excluded) {
 			t.Fatalf("excluded node labels = %v in %q", request.ExcludedTeamLabels, request.JobNamespace)
 		}
 		return controllerwire.ClaimResponse{}, nil
 	}}
-	control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+	control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, JobNamespace: "old", ExcludedTeamLabels: []string{"old"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if award, err := control.Claim(t.Context(), "cloud", []string{TeamNodeValue("cloud", "faulted")}); err != nil || award != nil {
+	if award, err := control.Claim(t.Context(), "cloud", excluded); err != nil || award != nil {
+		t.Fatalf("award=%v err=%v", award, err)
+	}
+	excluded = nil
+	if award, err := control.Claim(t.Context(), "cloud", excluded); err != nil || award != nil {
 		t.Fatalf("award=%v err=%v", award, err)
 	}
 }
@@ -91,10 +96,12 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			unit := wireAward(kind)
 			demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{kind}, Labels: []string{"os=linux"}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
+			want := demand
+			want.JobNamespace = "cloud"
 			calls := 0
 			control, err := NewControllerControl(launcherWireFake{claim: func(ctx context.Context, got controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				calls++
-				if ctx != t.Context() || !reflect.DeepEqual(got, demand) {
+				if ctx != t.Context() || !reflect.DeepEqual(got, want) {
 					t.Fatalf("claim changed context or observations: %+v", got)
 				}
 				return controllerwire.ClaimResponse{Claim: &unit}, nil

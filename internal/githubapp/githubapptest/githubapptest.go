@@ -245,7 +245,11 @@ func (g *GitHub) handleRepoByID(w http.ResponseWriter, r *http.Request) {
 	defer g.mu.Unlock()
 	for _, repo := range g.insts[tok.installation].Repos {
 		if repo.ID == id && tok.repos[strings.ToLower(repo.FullName)] {
-			writeJSON(w, http.StatusOK, map[string]any{"id": repo.ID, "full_name": repo.FullName, "owner": repo.Owner})
+			branch := repo.DefaultBranch
+			if branch == "" {
+				branch = "main"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"id": repo.ID, "full_name": repo.FullName, "owner": repo.Owner, "default_branch": branch})
 			return
 		}
 	}

@@ -240,4 +240,13 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 	if err := l.Sync(t.Context()); blocking(err) != nil {
 		t.Fatalf("the next pass crossed the team boundary: %v", err)
 	}
+	if err := kube.CoreV1().Nodes().Delete(t.Context(), "node-a", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); blocking(err) != nil {
+		t.Fatalf("sync after operator cleanup: %v", err)
+	}
+	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+		t.Fatalf("team stayed blocked after returning within its budget: excluded=%v err=%v", control.excluded, err)
+	}
 }

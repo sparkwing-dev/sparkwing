@@ -1164,10 +1164,10 @@ func TestGitHubAppRepositoryIdentitySurvivesRenameAndTransfer(t *testing.T) {
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatal(code)
 	}
-	f.app.SetRepos(7, githubapptest.Repo{ID: 999, FullName: "acme/gadgets"})
+	f.app.SetRepos(7, githubapptest.Repo{ID: 999, FullName: "acme/impostor"})
 	if _, out := f.deliver("repository", map[string]any{
 		"action": "renamed", "installation": map[string]any{"id": 7},
-		"repository": map[string]any{"id": 701, "full_name": "acme/gadgets"},
+		"repository": map[string]any{"id": 701, "full_name": "acme/impostor"},
 	}, ""); out["status"] != "ignored" {
 		t.Fatalf("rename to a different repository id = %v", out)
 	}

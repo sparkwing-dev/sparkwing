@@ -244,7 +244,24 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	return eligible[0].unit, nil
 }
 
+// lockLauncherQueueTx precedes authority locks, following the settings lock tier.
+func lockLauncherQueueTx(ctx context.Context, tx *storeTx) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING`, launcherClaimCursorKey, []byte(`""`)); err != nil {
+		return err
+	}
+	var key string
+	return tx.QueryRowContext(ctx, `SELECT key FROM settings WHERE key=?`+tx.forUpdate(), launcherClaimCursorKey).Scan(&key)
+}
+
 func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, launcherClaimCursorKey).Scan(&raw); err != nil {
+		return UnitRef{}, err
+	}
+	var cursor Team
+	if err := json.Unmarshal(raw, &cursor); err != nil {
+		return UnitRef{}, err
+	}
 	now := tx.now().UnixNano()
 	var ready []string
 	var readyArgs []any
@@ -269,17 +286,6 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return UnitRef{}, err
 	}
-	var raw []byte
-	err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, launcherClaimCursorKey).Scan(&raw)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return UnitRef{}, err
-	}
-	var cursor Team
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &cursor); err != nil {
-			return UnitRef{}, err
-		}
-	}
 	start := 0
 	for i, team := range teams {
 		if team <= cursor {
@@ -303,7 +309,12 @@ func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		var best *queuedClaim
 		for i := range candidates {
 			candidate := &candidates[i]
-			standing, err := unitEligibilityTx(ctx, tx, team, candidate.unit, demand, eligibilityChecks{fit: true, billing: true})
+			standing, err := unitEligibilityTx(ctx, tx, team, candidate.unit, demand, eligibilityChecks{fit: true, billing: true, claim: true})
+			var unpriced *UnpricedCPUClassError
+			if errors.As(err, &unpriced) {
+				best = candidate
+				break
+			}
 			if err != nil {
 				return UnitRef{}, err
 			}

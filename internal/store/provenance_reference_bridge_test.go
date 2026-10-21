@@ -177,7 +177,7 @@ func appReference(t *testing.T, s *Store, ref, sha, pin string) (*Tenant, string
 		t.Fatal(err)
 	}
 	digest := "reference-" + strings.ReplaceAll(ref, "/", "-") + pin
-	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event) VALUES (?,?,?,?)`, digest, "delivery", now.UnixNano(), "push")
+	s.testOnlyExec(t, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event) VALUES (?,?,?,?)`, digest, "delivery", now.UnixNano(), "push")
 	app := runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: now}
 	in := GitHubAppAdmission{Installation: installation, Subscription: &sub, Event: "push", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
