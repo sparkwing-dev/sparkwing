@@ -26,7 +26,9 @@ func dueRefillsFor(t *testing.T, s *Store, team Team) []Refill {
 
 func setRefill(t *testing.T, s *Store, team Team, settings RefillSettings) error {
 	t.Helper()
-	return s.inTx(t.Context(), func(tx *storeTx) error { return setRefillTx(t.Context(), tx, team, settings, "owner") })
+	return s.inTx(t.Context(), func(tx *storeTx) error {
+		return setRefillTx(t.Context(), tx, team, settings, auditAccountActor("owner"))
+	})
 }
 
 func refillFixture(t *testing.T, trusted bool) (*Store, *Tenant, time.Time) {
@@ -447,7 +449,7 @@ func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {
 	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 {
 		t.Fatalf("a failed refill escaped the windows: %+v, %v", st.Refill, err)
 	}
-	rewriteSchemaCount(t, s.db, "business_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
+	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
 	addFunds(t, s, 100, "pi_manual")
 	tenant.s.SetTestClock(t, func() time.Time { return now })
 	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.Failure != "" {
@@ -767,7 +769,7 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 			default:
-				rewriteSchemaExec(t, s.db, "UPDATE teams SET card_added_at='damaged' WHERE name=?", fault)
+				rewriteSchemaExec(t, s.db, "CREATE TRIGGER reject_refill BEFORE INSERT ON credit_checkouts WHEN NEW.team='"+fault+"' BEGIN SELECT RAISE(ABORT,'unavailable'); END")
 			}
 			due, err := s.AsOperator().DueRefills(t.Context())
 			if fault == "database" {

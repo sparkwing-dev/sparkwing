@@ -38,7 +38,7 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 			return err
 		}
 	}
-	return t.teamMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
+	return t.teamMutationTx(ctx, a, "SetAuthorizedTeamSettings", string(t.team), func(tx *storeTx, p capability.Principal) error {
 		previous, err := teamSettingsTx(ctx, tx, t.team)
 		if err != nil {
 			return err
@@ -74,9 +74,13 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 		if err != nil {
 			return err
 		}
-		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: t.team, Kind: "team.settings_changed", SubjectID: id, Actor: p.Capability.Subject.ID, Attrs: map[string]any{
-			"members_can_add_machines": next.MembersCanAddMachines, "previous_members_can_add_machines": previous.MembersCanAddMachines,
-			"claim_ranking": next.ClaimRanking, "previous_claim_ranking": previous.ClaimRanking,
-		}})
+		toAuditRanking := func(ranking []string) []auditClaimTier {
+			out := make([]auditClaimTier, len(ranking))
+			for i, tier := range ranking {
+				out[i] = auditClaimTier(tier)
+			}
+			return out
+		}
+		return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditTeamSettings{ReceiptID: id, MembersCanAddMachines: next.MembersCanAddMachines, PreviousMembersCanAddMachines: previous.MembersCanAddMachines, ClaimRanking: toAuditRanking(next.ClaimRanking), PreviousClaimRanking: toAuditRanking(previous.ClaimRanking)})
 	})
 }

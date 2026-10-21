@@ -46,7 +46,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 14, which drops `card_charges`,
+schema baseline moves to version 20, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -3120,6 +3120,41 @@ Within Sparkwing, `NodeRef` and the credential DTOs `CreateTokenRequest`,
 `RunSnapshot` remains a private host read model in `internal/store`.
 Routes, JSON field names and runtime behavior are unchanged.
 
+## Run deletion and audit retention
+
+Editors may delete only runs they submitted. Owners may delete any run in their
+team. Deletion retains a tombstone and the run's secret and source credential
+release history in the append-only audit log. Team and account deletion also
+retain audit facts. Every deletion and its authorization retain separate facts
+even when a later run reuses the deleted run's ID. SQLite audit tables exclude
+the implicit rowid so replacement cannot bypass their guarded primary key.
+
+The store baseline uses SQLite STRICT tables and stronger relational and row
+constraints on both dialects. Recreate stores from another baseline before
+starting this build. There is no in-place migration.
+
+Audit entries retain account IDs and invitation IDs rather than personal details.
+Each audit kind accepts a closed payload of identifiers, enums, digests and
+generated receipt IDs. Caller keys and names use digests when retained. Free-form
+reasons and messages are excluded. The database stamps each row's recording time
+for retention. Caller occurrence times remain separate and cannot shorten it.
+Deleted accounts render as "deleted account". Operator storage settings expose
+`audit_retention_days` (default 400 days, zero restores the default). The controller
+prunes older audit rows on its existing maintenance loop. The guards enforce
+append-only against application SQL. Database credentials can disable them.
+The team's first successful run remains a durable fact after its audit row
+expires, so retention cannot label a later success as the first.
+
+Operator refund replay receipts persist with the financial state independently
+of audit retention. Replaying a key returns the original result, including its
+balances and `created` value. Changed requests under that key still conflict
+after audit expiry. Refund audits retain identifiers, digests and financial
+facts, with no free-form reason.
+
+Step lifecycle timestamps now use the store clock. Runner start and finish
+timestamps remain separate observations with nanosecond precision. Clock skew
+cannot prevent attempt recovery from closing running steps.
+
 ## Bounded cancellation and derived completion
 
 Cancel requests give active work at most five minutes to drain. A holder that
@@ -3133,6 +3168,6 @@ cancellation was requested.
 
 The internal node API replaces `NodeTransition` with named commands. Store
 mutation methods no longer accept caller wall-clock arguments. The store captures
-database time when each transaction begins. Schema baseline 16 adds stored,
+database time for transaction decisions. Schema baseline 20 includes stored,
 generated cancellation deadlines. Older schema baselines require the declared
 restore workflow.

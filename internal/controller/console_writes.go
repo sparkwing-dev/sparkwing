@@ -8,8 +8,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// ConsoleWriter rechecks a direct operator session in every committing transaction.
-type ConsoleWriter interface {
+// consoleWriteTransactions rechecks a direct operator session in every committing transaction.
+type consoleWriteTransactions interface {
 	ConsoleRefund(context.Context, capability.Authorized, controllerwire.OperatorRefund, string) (store.CreditReversal, error)
 	ConsoleGrantCredit(context.Context, capability.Authorized, store.CreditGrantRequest) (store.CreditGrantResult, error)
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
@@ -23,13 +23,7 @@ type ConsoleWriter interface {
 	ConsoleUnbindGitHubInstallation(context.Context, capability.Authorized, int64) (store.Team, error)
 }
 
-// WithConsoleWriter supplies the operator console's committing transactions.
-func (s *Server) WithConsoleWriter(writer ConsoleWriter) *Server {
-	s.consoleWrites = writer
-	return s
-}
-
-func (s *Server) consoleWriter() (ConsoleWriter, error) {
+func (s *Server) consoleWriter() (consoleWriteTransactions, error) {
 	if s.consoleWrites != nil {
 		return s.consoleWrites, nil
 	}
@@ -37,4 +31,4 @@ func (s *Server) consoleWriter() (ConsoleWriter, error) {
 	return nil, missingEndpointPolicy()
 }
 
-var _ ConsoleWriter = (*store.Console)(nil)
+var _ consoleWriteTransactions = (*store.Console)(nil)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"time"
 
@@ -41,18 +42,8 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 		return CredentialRotation{}, authorityError(apierr.BadRequest, "credential transforms are required")
 	}
 	var result CredentialRotation
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
+	err := t.teamMutationTx(ctx, a, "RotateCredentials", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 		result = CredentialRotation{Skipped: []SecretRotationSkip{}}
-		if err := acquireLockSet(ctx, tx, func() lockSet {
-			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
-			set.add(lockTeam, true, string(t.team))
-			return set
-		}); err != nil {
-			return err
-		}
-		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
-			return err
-		}
 		secrets, err := t.credentialSecretsTx(ctx, tx)
 		if err != nil {
 			return err
@@ -85,7 +76,7 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 			}
 		}
 		result.GitCredentials = len(credentials)
-		return t.credentialAdminTx(ctx, tx, a)
+		return nil
 	})
 	if err != nil {
 		return CredentialRotation{}, err
@@ -119,12 +110,14 @@ func (t *Tenant) credentialGitTx(ctx context.Context, tx *storeTx) (_ []GitCrede
 	return out, rows.Err()
 }
 
-// SourceReleaseAudits reads this tenant's committed source releases newest first.
+// SourceReleaseAudits reads committed releases with digests for caller-supplied identifiers.
 func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capability.SourceReleaseAudit, err error) {
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
-	rows, err := t.s.query(ctx, `SELECT id,team,credential_id,host,repository_key,run_id,node_id,generation,machine_id,owner_account_id,capability_prefix,released_at FROM git_credential_releases WHERE team=? ORDER BY released_at DESC,id DESC LIMIT ?`, t.team, limit)
+	rows, err := t.s.query(ctx, `SELECT id,ts,team,run_id,
+ CASE WHEN account<>'' AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.account) THEN 'deleted account' ELSE account END,
+ attrs FROM audit_events WHERE team=? AND kind='git_credential.released' ORDER BY ts DESC,id DESC LIMIT ?`, t.team, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -133,10 +126,17 @@ func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capabi
 	for rows.Next() {
 		var row capability.SourceReleaseAudit
 		var at int64
-		if err := rows.Scan(&row.ID, &row.Team, &row.CredentialID, &row.Host, &row.RepositoryKey, &row.RunID, &row.NodeID, &row.Generation, &row.MachineID, &row.OwnerAccountID, &row.CapabilityPrefix, &at); err != nil {
+		var body string
+		if err := rows.Scan(&row.ID, &at, &row.Team, &row.RunID, &row.OwnerAccountID, &body); err != nil {
+			return nil, err
+		}
+		var attrs auditSourceRelease
+		if err := json.Unmarshal([]byte(body), &attrs); err != nil {
 			return nil, err
 		}
 		row.ReleasedAt = time.Unix(0, at).UTC()
+		row.CredentialID, row.RepositoryKey, row.NodeID = attrs.CredentialID.String(), attrs.Repository.String(), attrs.NodeID.String()
+		row.MachineID, row.CapabilityPrefix, row.Generation = attrs.MachineID.String(), attrs.CapabilityPrefix.String(), attrs.Generation
 		out = append(out, row)
 	}
 	return out, rows.Err()

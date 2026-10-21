@@ -387,8 +387,16 @@ func (b cancelSnapshotBinding) CheckBinding(ctx context.Context, p capability.Pr
 	return nil
 }
 
+func TestLocalHostSnapshotRejectsMalformedRunningState(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	engineRuntimeClaim(t, engine, capability.UnitNode)
+	if _, err := teststore.SQL(t, engine.Store).Exec(`UPDATE nodes SET status='running',attempt=0`); err == nil {
+		t.Fatal("malformed running state was accepted")
+	}
+}
+
 func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
-	for _, stage := range []string{"store", "state", "handler_cancel", "authentication_cancel"} {
+	for _, stage := range []string{"store", "handler_cancel", "authentication_cancel"} {
 		t.Run(stage, func(t *testing.T) {
 			engine, _ := engineRuntimeStore(t)
 			engineRuntimeClaim(t, engine, capability.UnitNode)
@@ -405,9 +413,6 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			switch stage {
 			case "store":
 				engineSQL(t, engine.Store, `UPDATE nodes SET execution_json=?`, []byte(`!`))
-			case "state":
-				engineSQL(t, engine.Store, `UPDATE nodes SET status='running',attempt=0`)
-				wantCause = "running job has no claim or attempt"
 			case "handler_cancel":
 				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
 				wantCause = "context canceled"

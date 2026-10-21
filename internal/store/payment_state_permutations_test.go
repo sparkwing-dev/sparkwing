@@ -171,7 +171,7 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 		t.Run(strings.Join(order, "-"), func(t *testing.T) {
 			s, tenant, now := providerPaymentFixture(t)
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				return setRefillTx(t.Context(), tx, "a", RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: 15_000}, "owner")
+				return setRefillTx(t.Context(), tx, "a", RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: 15_000}, auditAccountActor("owner"))
 			}); err != nil {
 				t.Fatal(err)
 			}

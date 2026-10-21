@@ -42,7 +42,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 			until := now.Add(time.Duration(random.IntN(3)-1) * time.Minute)
 			row.LeaseExpiresAt = &until
 			if state == NodeRunning {
-				row.Status, row.Attempt = StatusRunning, 1
+				row.Status, row.Attempt, row.StartedAt = StatusRunning, 1, now
 			}
 		case NodeApprovalPending:
 			row.Status = StatusApprovalPending
@@ -56,7 +56,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		if row.ClaimedBy != "" {
 			holder = row.ClaimedBy
 		}
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,ready_at,claimed_by,capability_prefix,generation,attempt,lease_expires_at,finished_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Status, row.Outcome, timeNS(row.ReadyAt), holder, row.CapabilityPrefix, row.Generation, row.Attempt, timeNS(row.LeaseExpiresAt), timeNS(row.FinishedAt), []byte(`{}`), []byte(`{}`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,ready_at,claimed_by,capability_prefix,generation,attempt,lease_expires_at,finished_at,started_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Status, row.Outcome, timeNS(row.ReadyAt), holder, row.CapabilityPrefix, row.Generation, row.Attempt, timeNS(row.LeaseExpiresAt), timeNS(row.FinishedAt), timeNS(row.StartedAt), []byte(`{}`), []byte(`{}`))
 		if run < 2 && row.Status != StatusDone {
 			key := string(state)
 			if state == nodePending {
@@ -100,7 +100,13 @@ func TestTenantPendingTriggersIgnoreForeignQueueProperty(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, id)
 		}
 		status := []string{"pending", "claimed", "done"}[random.IntN(3)]
-		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES (?,?,?,'trigger',1,1,?,?)`, team, id, status, []byte(`[]`), []byte(`[]`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES (?,?,'trigger',1,1,?,?)`, team, id, []byte(`[]`), []byte(`[]`))
+		switch status {
+		case "claimed":
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='claimed',claimed_by='holder',capability_prefix='claim',generation=1,claimed_at=1,lease_expires_at=2 WHERE team=? AND id=?`, team, id)
+		case "done":
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=1 WHERE team=? AND id=?`, team, id)
+		}
 		if status == "pending" {
 			want[team]++
 		}

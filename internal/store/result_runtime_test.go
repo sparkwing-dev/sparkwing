@@ -23,7 +23,7 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	issued, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec})
+	issued, err := issueFixtureAward(t, s, tx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,23 @@ func TestResultStepFencesAttemptsAndAbsorbsTerminalState(t *testing.T) {
 	}
 	if state != "failed" || message != "masked failure" || generation != 7 || ordinal != 2 {
 		t.Fatalf("step = %s %s %d %d", state, message, generation, ordinal)
+	}
+}
+
+func TestResultStepSourceClockDoesNotControlClosure(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	ahead := s.now().Add(24 * time.Hour)
+	report := StepReport{Attempt: attempt, Actor: actor, StepID: "ahead", State: "running", StartedAt: &ahead}
+	if err := tenant.RecordStep(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	report.State = "passed"
+	if err := tenant.RecordStep(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := tenant.ListNodeSteps(t.Context(), attempt.RunID)
+	if err != nil || len(steps) != 1 || steps[0].StartedAt == nil || !steps[0].StartedAt.Equal(ahead) || steps[0].FinishedAt == nil || !steps[0].FinishedAt.Equal(s.now()) {
+		t.Fatalf("step observation = %+v, %v", steps, err)
 	}
 }
 
@@ -228,7 +245,7 @@ func TestRecordStepReturnsClockFailure(t *testing.T) {
 	connection := recordStoreFences(t, s)
 	clockErr := errors.New("clock unavailable during step completion")
 	connection.beforeQuery = func(query string) error {
-		if strings.Contains(query, "SELECT status,error,started_at,finished_at FROM node_steps") {
+		if strings.Contains(query, "SELECT status,error,started_at,source_started_at,source_finished_at FROM node_steps") {
 			s.pinnedClock = nil
 			s.clock = nil
 			connection.beforeQuery = func(query string) error {

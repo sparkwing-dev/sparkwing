@@ -53,7 +53,7 @@ func memberObservationOptions(t *testing.T, st *store.Store, objects blob.Object
 func TestPersistedLogSearchPagesAdvanceThroughCandidateRuns(t *testing.T) {
 	logs, subject, st := committedDashboardLogs(t, []byte("fatal first\nordinary\nfatal second\n"))
 	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,'newer',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
-	engineSQL(t, st, `UPDATE runs SET request_json=replace(CAST(request_json AS TEXT),'"run"','"newer"') WHERE team='a' AND id='newer'`)
+	engineSQL(t, st, `UPDATE runs SET request_json=CAST(replace(CAST(request_json AS TEXT),'"run"','"newer"') AS BLOB) WHERE team='a' AND id='newer'`)
 	reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
 	query := controllerwire.LogSearchQuery{Runs: controllerwire.RunQuery{Limit: 1}, Pattern: "fatal", MaxMatches: 1}
 	first, err := reader.SearchLogs(t.Context(), query)

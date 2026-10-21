@@ -41,7 +41,7 @@ func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
 				// Spend the root's token through the same accounting used by root admission.
 				principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "retrier"}, Capability: capability.Capability{Team: "a"}}
 				intake := store.IntakeRequest{Authority: principal.Authority}
-				engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, `{"admission_key":"capability:retrier","admission_subject":{"kind":"account","id":"retrier"}}`)
+				engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:retrier","admission_subject":{"kind":"account","id":"retrier"}}`))
 				if _, err := admitWithFlood(t.Context(), s, func(ctx context.Context) (bool, error) {
 					_, err := s.admissionFloodRefusal(ctx, nil, intake, principal)
 					return true, err
@@ -51,7 +51,7 @@ func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
 				want := http.StatusTooManyRequests
 				if queue {
 					s.WithFloodPolicy(FloodPolicy{ShedQueueDepth: 1})
-					engineSQL(t, e.Store, `UPDATE triggers SET status='pending' WHERE team='a' AND id='run'`)
+					engineSQL(t, e.Store, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',claim_principal='',lease_expires_at=NULL,claimed_at=NULL,started_at=NULL,finished_at=NULL WHERE team='a' AND id='run'`)
 					want = http.StatusServiceUnavailable
 				}
 				engineClaimHTTP(t, s.Handler(), claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", root.Request.Request.Git), want)

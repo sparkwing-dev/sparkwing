@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -233,6 +234,30 @@ func TestMetadataStepStatesAndTerminalSettlement(t *testing.T) {
 				t.Fatal("terminal writer added step")
 			}
 		})
+	}
+}
+
+func TestMetadataRunnerClockAheadDoesNotBlockRecovery(t *testing.T) {
+	f := newStoreRecoveryFixture(t, true)
+	ahead := time.Now().Add(24 * time.Hour)
+	if err := f.tenant.RecordStep(t.Context(), store.StepReport{Actor: f.holder, Attempt: metadataAttempt(t, f), StepID: "ahead", State: "running", StartedAt: &ahead}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.expireHolder(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	units, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10)
+	if err != nil || len(units) != 1 || !units[0].Requeued {
+		t.Fatalf("recover ahead-clock runner: %+v, %v", units, err)
+	}
+	steps, err := f.tenant.ListNodeSteps(t.Context(), string(f.ref.RunID))
+	if err != nil || len(steps) != 1 || steps[0].Status != store.StepFailed || steps[0].FinishedAt == nil {
+		t.Fatalf("recovered steps = %+v, %v", steps, err)
+	}
+	var started, finished, sourceStarted int64
+	err = f.s.DB().QueryRowContext(t.Context(), storetest.Rebind(f.s, `SELECT started_at,finished_at,source_started_at FROM node_steps WHERE team=? AND run_id=? AND step_id='ahead'`), f.tenant.Team(), f.ref.RunID).Scan(&started, &finished, &sourceStarted)
+	if err != nil || finished < started || finished >= sourceStarted || sourceStarted != ahead.UnixNano() {
+		t.Fatalf("authoritative times %d..%d, source start %d: %v", started, finished, sourceStarted, err)
 	}
 }
 

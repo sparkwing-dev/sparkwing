@@ -13,11 +13,11 @@ func TestStoreDataStoragePolicyDefaultsValidationAndAtomicity(t *testing.T) {
 	if seeded, err := o.SeedRunRetention(ctx, 90); err != nil || !seeded {
 		t.Fatalf("seed=%t: %v", seeded, err)
 	}
-	want := StorageSettings{RunRetentionDays: 90}
+	want := StorageSettings{AuditRetentionDays: 400, RunRetentionDays: 90}
 	if got, err := o.StorageSettings(ctx); err != nil || got != want {
 		t.Fatalf("default=%+v: %v", got, err)
 	}
-	want = StorageSettings{RunRetentionDays: 0, NodeMetricRetentionDays: 7, DatabaseAlarmBytes: 123, DefaultTier: StorageTierPaid}
+	want = StorageSettings{AuditRetentionDays: 400, RunRetentionDays: 0, NodeMetricRetentionDays: 7, DatabaseAlarmBytes: 123, DefaultTier: StorageTierPaid}
 	if err := o.SetStorageSettings(ctx, want); err != nil {
 		t.Fatal(err)
 	}

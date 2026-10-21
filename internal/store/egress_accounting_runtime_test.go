@@ -110,6 +110,7 @@ func TestStoreDataEgressReportsRefuseCorruptionAndOverflow(t *testing.T) {
 	if err != nil || len(rows) != 2 || rows[0].Team != "b" || rows[0].Bytes != 30 || rows[1].Team != "a" || rows[1].Bytes != 18 || rows[1].UpdatedAt != s.now() {
 		t.Fatalf("report=%+v: %v", rows, err)
 	}
+	rewriteSchemaExec(t, s.db, "PRAGMA ignore_check_constraints=ON")
 	for _, amount := range []int64{-1, math.MaxInt64} {
 		rewriteSchemaExec(t, s.db, "UPDATE egress_usage SET bytes=? WHERE team='a' AND replica_id='one'", amount)
 		if _, err := tenant.EgressUsage(t.Context(), "2026-10"); err == nil {

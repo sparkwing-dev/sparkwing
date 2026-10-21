@@ -116,7 +116,7 @@ func TestPostgresAdminTransactionsRetryDeadlockVictims(t *testing.T) {
 			case "console_approval":
 				actor := membershipActor(t, st, owner.Account.ID, tn.Team())
 				console := st.AsConsole(func(id string) bool { return id == owner.Account.ID })
-				a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: actor.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: owner.Account.ID}}}}
+				a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: actor.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: owner.Account.ID}}}}
 				if _, err := st.SetSignUpMode(t.Context(), store.SignUpWaitlist, "review", "operator"); err != nil {
 					t.Fatal(err)
 				}

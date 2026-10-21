@@ -12,10 +12,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -46,7 +49,7 @@ func consoleBoundary() *credentialBoundary {
 		Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "console-session"},
 		Capability: capability.Capability{
 			Digest: sha256.Sum256([]byte(b.raw)), Audience: capability.Controller,
-			Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator-account"},
+			Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator-account"},
 			Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorConsole},
 		},
 	}
@@ -95,6 +98,7 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 					r.Header.Del("Cookie")
 					want = apierr.Unauthenticated
 				case "deployment bearer", "delegated bearer":
+					p.Capability.Subject.Kind = capability.SubjectOperator
 					p.Class, p.Authority.Kind, p.Authority.ID = capability.CredentialBearer, capability.AuthorityCapability, "deployment"
 					p.Capability.Prefix = p.Authority.ID
 					p.Capability.Grants = append(p.Capability.Grants, capability.OperatorTokens, capability.OperatorLimits)
@@ -183,25 +187,29 @@ func TestOperatorHTTPRemovesDeploymentEntryPoints(t *testing.T) {
 func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 	for _, dashboard := range []bool{false, true} {
 		t.Run(map[bool]string{false: "api", true: "dashboard"}[dashboard], func(t *testing.T) {
-			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+			var audit bytes.Buffer
+			st, _, s := credentialMutationServer(t, filepath.Join(t.TempDir(), "state.db"), func(st *store.Store, cipher *secrets.Cipher) *controller.Server {
+				return controller.NewDeployment(st, deploymenttest.Team(t), slog.New(slog.NewJSONHandler(&audit, nil))).WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator-account"})
+			})
+			teststore.SeedTeam(t, st, "customer")
+			if _, err := teststore.Exec(t.Context(), st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator-account','operator@example.test',1,1)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := teststore.Exec(t.Context(), st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','operator-account','reader',1)`); err != nil {
+				t.Fatal(err)
+			}
+			raw, csrf, _, err := st.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator-account"}, "team", time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = st.Close() })
-			teststore.SeedTeam(t, st, "customer")
-			b := consoleBoundary()
-			var audit bytes.Buffer
-			s := controller.New(st, slog.New(slog.NewJSONHandler(&audit, nil))).WithAuthorization(consoleAuthorization(b)).WithConsoleWriter(consoleStoreFake{store: st})
+			f := sessionFlow{raw: raw, csrf: csrf}
 			if dashboard {
 				s.WithDashboard(controller.Dashboard{})
 			}
 			handler := s.Handler()
 			call := func(method, path, body string, status int) []byte {
 				t.Helper()
-				r := httptest.NewRequest(method, path, strings.NewReader(body))
-				r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
-				r.Header.Set("X-CSRF-Token", "session-csrf")
-				r.Header.Set("Content-Type", "application/json")
+				r := f.request(method, path, body)
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, r)
 				if w.Code != status {
@@ -249,7 +257,7 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 			if err != nil || freeze.Frozen {
 				t.Fatalf("freeze = %+v, %v", freeze, err)
 			}
-			events, err := tenant.BusinessEvents(context.Background(), "")
+			events, err := tenant.BusinessEvents(context.Background(), "", 1000, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -269,7 +277,7 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 				}
 			}
 			call("DELETE", "/api/v1/operator/accounts/missing", "", 404)
-			if strings.Contains(audit.String(), b.raw) {
+			if strings.Contains(audit.String(), raw) {
 				t.Fatal("audit log contains a reusable session")
 			}
 			decoder := json.NewDecoder(&audit)
@@ -283,7 +291,7 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 					continue
 				}
 				records++
-				if record["principal_id"] != "operator-account" || record["principal_kind"] != "operator" {
+				if record["principal_id"] != "operator-account" || record["principal_kind"] != "account" {
 					t.Fatalf("audit lost authenticated identity: %+v", record)
 				}
 			}

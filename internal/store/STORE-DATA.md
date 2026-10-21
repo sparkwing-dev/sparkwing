@@ -1,5 +1,74 @@
 # Store data persistence
 
+## Schema and audit invariants
+
+The baseline uses SQLite STRICT tables with INT, REAL, TEXT and BLOB declarations.
+PostgreSQL uses BIGINT, DOUBLE PRECISION, TEXT and BYTEA. Both dialects enforce
+claim and terminal tuples, one open attempt per node, nonnegative resource and
+counter domains, boolean flags, and nonempty concurrency keys. Installations
+are referenced with their tenant. Job receipts reference the exact attempt and
+generation. Sessions, memberships and identities reference an existing account.
+The schema counterexample suites exercise these rules against either dialect.
+
+Step lifecycle timestamps use the store clock. Runner-reported start and finish
+times remain in `source_started_at` and `source_finished_at` for display, with
+nanosecond precision. They are observations and do not participate in lifecycle
+CHECKs or recovery. A runner clock ahead of the controller cannot block closure.
+
+Secret releases, source credential releases and privileged mutations append to
+`audit_events` in the transaction that authorizes them. Audit rows retain plain
+team and run identifiers because deleting a run, team or account must preserve
+the facts. Audit rows are append-only against application code. Triggers reject
+every UPDATE and permit DELETE only for rows older than the operator-set horizon.
+PostgreSQL also rejects TRUNCATE. The same role owns the PostgreSQL tables and runs
+the application, so a holder of the database credentials can disable these guards.
+Separate owner and runtime roles are post-launch hardening. Local SQLite
+append-only holds only against SQL the app issues. SQLite audit rows use
+STRICT, WITHOUT ROWID so replacement cannot bypass their guarded primary key.
+Every run deletion appends a `run.deleted` tombstone with a fresh identity,
+including when a later run reuses the ID.
+
+Human actors and account subjects use account IDs. Console authorization uses
+the credential class and preserves the verified account subject through the
+committing transaction. Non-account claimants are
+identified by capability and holder digests, with no caller-selected actor name.
+Source credential history retains its owner account ID separately from the actor.
+System actors use fixed enums permitted by each payload kind. Invitation
+subjects use invitation IDs. One audit writer accepts a closed, typed payload
+for each kind. Payloads contain identifiers, enums, digests and generated
+receipt IDs. Retained caller names and grant keys use digests. Free-form reasons
+and messages are excluded.
+Readers render a missing account as "deleted account" without rewriting history.
+The account and operational records own personal details and deletion of them.
+
+The operator storage settings API exposes `audit_retention_days`, stored as
+`operator.audit_retention_days`. The default is 400 days. A zero or omitted write
+restores that default. Positive values set the horizon. The existing leased
+controller maintenance pass prunes expired audit rows in bounded batches,
+including facts for deleted teams. It uses the same database-clock cutoff as the
+SQL guards. The database stamps `recorded_at` at insertion, and that timestamp
+controls retention. A caller cannot set it. The separate `ts` occurrence time
+remains available for display, so a backdated occurrence cannot shorten retention.
+All UPDATEs remain refused, including changes to expired rows.
+
+`team_first_success` records the team's first successful run in the
+same transaction as its completion and audit fact. It has no run foreign key,
+so run deletion and audit expiry cannot make a later success the first.
+
+`console_refund_receipts` retains each operator refund's request digest and full
+original result with the financial state. Replaying a key returns that result,
+including its balances and `created` value, after audit retention. A changed
+request under the same key conflicts. The separate expiring audit projection
+contains identifiers, digests and financial facts, with no free-form reason.
+
+Editors may delete only runs they submitted. Owners may delete any run in their team.
+
+`Tenant.BusinessEvents` reads bounded pages in descending timestamp and ID order.
+Its cursor is the last event ID from the preceding page and stays within the
+selected team and kind. The operator team view returns 50 events and a
+`next_cursor` when older events remain. Passing it as `cursor` continues the view.
+
+
 Record writes, reads and memo copies call `blob.RecordNamespace` and
 `blob.AuthorizeEdge` directly. The store's rule adapter and permissive test
 implementation are removed. Store tests use the shared rules with valid sealed

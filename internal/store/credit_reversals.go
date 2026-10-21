@@ -69,7 +69,7 @@ var ErrDisputeConflict = errors.New("credits: the dispute is already held for an
 const OperatorHoldPrefix = "operator-"
 
 // HoldByOperator holds t on actor's word and returns the hold's id. The hold
-// and its business event, naming actor and reason, commit together.
+// and its audit fact, naming actor and hold ID, commit together.
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string) (string, error) {
 	id, err := newCreditID("hold")
 	if err != nil {
@@ -82,7 +82,7 @@ func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string) (stri
 
 func (t *Tenant) hold(ctx context.Context, disputeID, paymentID, reason, actor string) (created bool, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, tx.now(ctx))
+		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, tx.now(ctx), auditActor{system: auditBreakGlass})
 		return err
 	})
 	if err != nil {
@@ -122,15 +122,15 @@ func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, rea
 }
 
 // ReleaseOperatorHolds releases every hold an operator placed on t, and never
-// a payment dispute's. Each release and its business event, naming actor and
-// reason, commit together.
+// a payment dispute's. Each release and its audit fact, naming actor and hold
+// ID, commit together.
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string) (int64, error) {
 	return t.releaseFreezes(ctx, "", true, actor, reason)
 }
 
 func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorOnly bool, actor, reason string) (count int64, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, tx.now(ctx))
+		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, tx.now(ctx), auditActor{system: auditBreakGlass})
 		return err
 	})
 	if err != nil {

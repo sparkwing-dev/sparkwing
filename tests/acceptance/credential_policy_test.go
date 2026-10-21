@@ -160,7 +160,7 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 		p.Capability.Subject.Kind = capability.SubjectOperator
 		p.Capability.Team = ""
 	case "operator_console_session":
-		p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
+		p.Class = capability.CredentialConsole
 	case "local_run_publisher":
 		p.Capability.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "run"}
 		p.Capability.Data = &capability.DataScope{Use: capability.DataPublish, RunID: "run", RepositoryKey: "repo"}

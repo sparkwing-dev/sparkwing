@@ -66,7 +66,7 @@ func TestOwnerReaperLimitRecoversUnstartedWorkAcrossTeams(t *testing.T) {
 		id := "run-" + string(team)
 		maintenanceRun(t, s, id, i+1, RunPending)
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, id)
-		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',7,?,?,?)`, team, id, now.UnixNano(), []byte(`[]`), []byte(`[]`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',7,?,?,?,1)`, team, id, now.UnixNano(), []byte(`[]`), []byte(`[]`))
 	}
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
 	if err != nil {

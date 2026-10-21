@@ -21,6 +21,12 @@ restores a controller that starts and still cannot do its job.
   once that key opens none of the values it samples, and started with no
   key it refuses to create a new one beside sealed values.
   During a key rotation the same is true of `secrets-key.previous`.
+- **The live credential epoch.** Keep `credential-epoch` beside `secrets-key`
+  outside the database backup. Preserve its latest value through a restore.
+  Copying an older epoch back can revive credentials revoked after the backup.
+  A declared restore rotates it and invalidates every earlier bearer token and
+  dashboard session. Keep the epoch with the controller credentials when
+  moving the install to another machine.
 - **The controller's own start-up configuration**: its flags and the
   rest of its credentials directory, including the GitHub App settings
   and the announced service URLs. On Kubernetes that is the Helm values file and the Secrets it
@@ -113,23 +119,25 @@ a partial archive.
 
 An unread backup is a guess. Restore it somewhere harmless and read the
 install back out of it before you rely on it. This is the same drill as
-a real restore, aimed at a scratch directory and a spare port, and it
-changes nothing on the live install.
+a real restore with separate state and credentials, aimed at a scratch
+directory and a spare port. Keep live runners and webhook delivery away
+from the scratch controller.
 
 ```bash
 DEST=/var/backups/sparkwing/<stamp>
 ( cd "$DEST" && sha256sum -c SHA256SUMS )
 
 SCRATCH=$(mktemp -d)
-install -d -m 700 "$SCRATCH/controller-home"
+install -d -m 700 "$SCRATCH/controller-home" "$SCRATCH/credentials"
+cp -p "$DEST/secrets.key" "$SCRATCH/credentials/secrets-key"
+```
+
+For SQLite, copy the saved database:
+
+```bash
 cp -p "$DEST/state.db" "$SCRATCH/controller-home/state.db"
 cp -p "$DEST"/state.db-wal "$SCRATCH/controller-home/" 2>/dev/null || true
 cp -p "$DEST"/state.db-shm "$SCRATCH/controller-home/" 2>/dev/null || true
-install -d -m 700 "$SCRATCH/credentials"
-cp -p "$DEST/secrets.key" "$SCRATCH/credentials/secrets-key"
-
-SPARKWING_HOME="$SCRATCH/controller-home" \
-    sparkwing-controller --addr 127.0.0.1:4456 --credentials-dir "$SCRATCH/credentials"
 ```
 
 For a PostgreSQL backup, restore the archive into a database of its own
@@ -141,7 +149,33 @@ pg_restore --no-owner --no-privileges --exit-on-error \
     --dbname="postgres://.../sparkwing_verify" "$DEST/controller.dump"
 
 (umask 077 && printf %s "postgres://.../sparkwing_verify" > "$SCRATCH/credentials/pg-url")
-sparkwing-controller --addr 127.0.0.1:4456 --store=postgres --credentials-dir "$SCRATCH/credentials"
+```
+
+For a billing-enabled backup, put the matching `stripe-api-key` and
+`stripe-webhook-secret` in the scratch credentials directory before the next
+step. Complete the declared restore against the scratch database before
+starting its controller. Set `STORE=postgres` for the PostgreSQL copy:
+
+```bash
+STORE=sqlite
+export SPARKWING_HOME="$SCRATCH/controller-home"
+sparkwing-controller restore prepare --store "$STORE" --credentials-dir "$SCRATCH/credentials" &&
+    sparkwing-controller restore reconcile --store "$STORE" --credentials-dir "$SCRATCH/credentials" &&
+    sparkwing-controller restore acknowledge --store "$STORE" --credentials-dir "$SCRATCH/credentials"
+```
+
+Stop if any step fails. The pull reads provider facts and grants
+credits only in the scratch database; it does not create or confirm charges.
+Do not copy `billing-token` or connect runners to the scratch controller.
+Keep the scratch listener on loopback, avoid triggering jobs, and use the
+read checks below without the final real-pipeline check.
+
+Create a fresh `bootstrap-admin-token` seed in the scratch credentials
+directory before starting, because restored credentials cannot authenticate:
+
+```bash
+(umask 077 && openssl rand -hex 32 > "$SCRATCH/credentials/bootstrap-admin-token")
+sparkwing-controller --addr 127.0.0.1:4456 --store "$STORE" --credentials-dir "$SCRATCH/credentials"
 ```
 
 The controller prints the schema it opened as its first line:
@@ -182,9 +216,48 @@ pg_restore --no-owner --no-privileges --exit-on-error \
     --dbname="postgres://.../sparkwing_restored" "$DEST/controller.dump"
 ```
 
-Start the controller with its `secrets-key` credential holding the key
-from the same backup directory, and its `pg-url` credential naming the
-restored database. Then run [Verify the install](#verify-the-install).
+Keep the controller stopped through preparation, reconciliation and
+acknowledgment. Point `secrets-key` at the key from the backup and `pg-url`
+at the restored database when using PostgreSQL. Preserve the latest live
+`credential-epoch` instead of copying one from the backup. The credentials
+directory must be writable for epoch rotation; an immutable projected
+credentials mount needs an operator-managed writable location.
+
+Declare the restore before restarting. Use `--store postgres` for PostgreSQL:
+
+```bash
+sparkwing-controller restore prepare --credentials-dir "$CREDS" --store sqlite
+sparkwing-controller restore reconcile --credentials-dir "$CREDS" --store sqlite
+```
+
+Preparation rotates the external epoch, so every pre-restore bearer token
+and dashboard session is refused, including credentials revoked after the
+backup. It also holds schedules. Every preparation, including a retry,
+rotates the epoch again. Issue replacement credentials only after the last
+preparation. Reconciliation pulls provider payments through the same idempotent
+settlement path as webhooks. Cloud reconciliation needs the payment mode's
+provider and webhook credentials. A Checkout reservation created after the
+backup is absent from the restored database. Its provider metadata carries
+routing identity only, so reconciliation fails rather than inventing the
+missing reservation. Stop and repair the reservation with an operator before
+retrying. There is no supported reservation-repair API.
+
+Inspect the restored state and quarantined jobs before acknowledging:
+
+```bash
+sparkwing-controller restore acknowledge --credentials-dir "$CREDS" --store sqlite
+```
+
+Acknowledgment advances every schedule cursor to the database's current
+time and discards due instants through that time, so catch-up cannot replay
+work that ran after the backup. The restore commands acquire the controller
+lock and refuse to run alongside a live controller.
+
+Before starting, replace `bootstrap-admin-token` with a fresh seed in the
+credentials directory. Preparation resets the consumed bootstrap gate, so
+startup provisions that new operator token. Start the controller and reissue
+runner and user tokens. Users must sign in again. Run
+[Verify the install](#verify-the-install) with the newly issued credentials.
 
 Keep `state.db.displaced` and the old database until the verification
 passes. They are the only copy of whatever the install did between the
@@ -196,28 +269,34 @@ Until paid launch the store has one baseline schema and no upgrade path.
 A controller opens a database at its own schema version, creates the
 baseline in an empty one, and refuses any other:
 
+<!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: this store predates the baseline (it records schema version NN, this build creates version 1 and upgrades none); delete <path> (or drop the database) and start again
+sparkwing: store schema version 19 is older than this binary (expects 20); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> (or drop the database) and start again
+
+sparkwing: store schema version 21 is newer than this binary (expects 20); start a binary matching the store, or restore a backup matching this binary into a separate database
 ```
+<!-- END GENERATED SCHEMA ERRORS -->
 
 An upgrade between two builds at the same schema needs nothing beyond
 installing the new binary or image and starting it. Its first line names
 the schema it opened:
 
 ```text
-sparkwing-controller: version vX.Y.Z, runs-store schema 1, commit ...
+sparkwing-controller: version vX.Y.Z, runs-store schema <version>, commit ...
 ```
 
-An upgrade to a build at another schema, including the first build with
-the baseline, discards the database: stop the controller, delete
+A build at a newer schema cannot upgrade the database. Keep the matching
+binary and backup to retain its data. To replace a disposable install, stop
+the controller, delete
 `$SPARKWING_HOME/state.db` with its `-wal` and `-shm` files or drop and
 recreate the PostgreSQL database, then start the new controller. Runs,
 credit history, secrets and credentials go with the database, so add the
 secrets and runner tokens again. A backup taken before the upgrade
 restores only under a controller at the old schema.
 
-*Rollback:* start the previous controller against the backup from
-[Back up](#back-up).
+*Rollback:* keep the newer database intact. Start a matching newer binary,
+or restore the backup taken by the previous binary into a separate database
+and follow [Restore](#restore). An older binary cannot read a newer schema.
 
 ## Verify the install
 
@@ -228,7 +307,7 @@ register one with `sparkwing profiles add` when verifying a
 scratch controller on a spare port.
 
 ```bash
-# The controller answers, and the token still authenticates.
+# The controller answers with a newly issued operator token.
 sparkwing runs list --profile prod --limit 1
 
 # Run history is present, and reaches the most recent run you remember.
@@ -244,18 +323,22 @@ sparkwing secrets list --profile prod
 # database restored without its key, and nothing else catches it.
 sparkwing secrets get --profile prod --secret NAME
 
-# Runner and user credentials survived, so runners reconnect without
-# being added again.
+# Only newly issued runner and user credentials authenticate.
+# Verify a pre-restore token is refused before reconnecting runners.
 sparkwing tokens list --profile prod
 
 # Runners have reconnected.
 sparkwing runners list --profile prod
 ```
 
-Sparkwing Cloud operators also verify the restored credit balance and ledger
-history with the private `sparkwing-ops` tool.
+Sparkwing Cloud operators must pull payments from the provider before
+acknowledging schedule catch-up. The reconcile command scans provider payment
+history, then operators verify the restored balance and ledger. Repeating reconciliation must
+leave the balance unchanged. Payment recovery does not recover usage spent
+after the backup; compare that interval with retained usage records before
+resuming Cloud work.
 
-Finish by running one real pipeline end to end and reading its logs,
+For a live restore, finish by running one real pipeline end to end and reading its logs,
 because that exercises the claim, secret-read, credit-charge and
 log-write paths together in a way no read verb does.
 

@@ -29,7 +29,7 @@ func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 func openRefill(t *testing.T, s *Store, team Team, cents int64, payment string) Refill {
 	t.Helper()
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return setRefillTx(t.Context(), tx, team, RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: cents}, "owner")
+		return setRefillTx(t.Context(), tx, team, RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: cents}, auditAccountActor("owner"))
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	ctx := t.Context()
 	owner := authorityMember(t, s, "operator", RoleReader)
 	console := s.AsConsole(func(id string) bool { return id == "operator" })
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
 	if _, err := console.ConsoleRefund(ctx, a, controllerwire.OperatorRefund{PaymentID: "payment", RefundID: "operator-refund", AmountCents: 400, Reason: "partial"}, "once"); err != nil {
 		t.Fatal(err)
 	}

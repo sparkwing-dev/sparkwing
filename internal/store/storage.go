@@ -72,6 +72,7 @@ func (e *StorageQuotaError) Unwrap() error { return ErrStorageQuota }
 
 // StorageSettings configures leased retention, database alarms and the default team quota.
 type StorageSettings struct {
+	AuditRetentionDays      int64
 	RunRetentionDays        int64
 	NodeMetricRetentionDays int64
 	DatabaseAlarmBytes      int64
@@ -80,9 +81,9 @@ type StorageSettings struct {
 	DefaultTier string
 }
 
-// RetentionOn reports whether run or metric expiration is enabled.
+// RetentionOn reports whether audit, run or metric expiration is enabled.
 func (s StorageSettings) RetentionOn() bool {
-	return s.RunRetentionDays > 0 || s.NodeMetricRetentionDays > 0
+	return s.AuditRetentionDays > 0 || s.RunRetentionDays > 0 || s.NodeMetricRetentionDays > 0
 }
 
 // StorageQuota is one team's allowance. A zero limit is unbounded, so a quota

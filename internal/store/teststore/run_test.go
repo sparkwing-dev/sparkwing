@@ -53,6 +53,22 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	if err != nil || !after.ReadyAt.Equal(*first.ReadyAt) {
 		t.Fatalf("ready seed replay: %+v %v", after, err)
 	}
+	seed.NodeID, seed.Status, seed.StartedAt, seed.AttemptsConsumed = "running", "running", nil, 0
+	if err := teststore.SeedNode(s, t.Context(), seed); err != nil {
+		t.Fatal(err)
+	}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)}
+	running, err := tenant.ReadNode(t.Context(), ref)
+	if err != nil || running.Status != store.StatusRunning || running.StartedAt == nil || running.Attempt != 1 || running.ClaimedBy == "" || running.CapabilityPrefix == "" || running.LeaseExpiresAt == nil || running.Generation != 1 {
+		t.Fatalf("running fixture: %+v %v", running, err)
+	}
+	if err := teststore.SeedNodeFinish(s, t.Context(), store.DefaultTeam, ref, store.NodeResult{Outcome: store.NodeSuccess}); err != nil {
+		t.Fatal(err)
+	}
+	done, err := tenant.ReadNode(t.Context(), ref)
+	if err != nil || done.Status != store.StatusDone || done.ClaimedBy != "" || done.CapabilityPrefix != "" || done.LeaseExpiresAt != nil || done.FinishedAt == nil {
+		t.Fatalf("finished fixture: %+v %v", done, err)
+	}
 	seed.RunID = "missing"
 	if err := teststore.SeedNode(s, t.Context(), seed); err == nil {
 		t.Fatal("missing run silently seeded a job")

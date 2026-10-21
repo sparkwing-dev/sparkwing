@@ -68,3 +68,56 @@ exit: 0
 git diff --check: passed.
 NOT RUN: full suites, PostgreSQL or socket-dependent checks; harness lead owns these.
 No web changes. Xwing candidate context still cannot create its session index lock in this sandbox.
+
+WS15 session 3 verification (after ad07ea0e2)
+Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-WS15
+Integration: MERGE_HEAD and bw-3095-rewrite both a23a6a777b066ec876534899215aa837955cd72f.
+Resolved the working-file conflicts in store.go and tenant_sql_scope_guard_test.go.
+The harness must stage the resolutions and complete the pending merge.
+
+Before regeneration:
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/store -run '^(TestSchemaErrorDocumentation|TestRestore|TestRestored|TestCredentialEpoch|TestSessionCredentialEpoch|TestTenantSQLScope|TestSchemaDocumentationNamesBaseline)' -count=1
+--- FAIL: TestSchemaErrorDocumentation (0.00s)
+    schema_error_test.go:35: schema error examples drifted; run go generate ./internal/store
+exit: 1
+Cause: integration advances the schema from 17 to 20. The existing test catches stale examples.
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing generate ./internal/store
+PASS
+ok github.com/sparkwing-dev/sparkwing/internal/store 0.095s
+exit: 0
+$ bash /home/bombuntu/.xwing/envs/1084/sparkwing/bin/sync-docs.sh
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestSchemaDocumentationNamesBaseline|TestOpenExistingSchemaErrors|TestOpenRefusesAStoreFromAnotherBaseline|TestOlderSchema|TestTenantSQLScope|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok internal/credentials 0.088s
+ok internal/capability 0.080s
+ok internal/store 1.659s
+ok internal/controller 0.476s
+ok internal/crons 1.528s
+ok cmd/sparkwing-controller 0.208s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test -tags rewrite_integration ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestSchemaDocumentationNamesBaseline|TestOpenExistingSchemaErrors|TestOpenRefusesAStoreFromAnotherBaseline|TestOlderSchema|TestTenantSQLScope|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok internal/credentials 0.183s
+ok internal/capability 0.080s
+ok internal/store 2.694s
+ok internal/controller 0.632s
+ok internal/crons 2.642s
+ok cmd/sparkwing-controller 0.290s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing run ./internal/guardcheck /home/bombuntu/.xwing/envs/1084/sparkwing
+Additional environment: GOLANGCI_LINT_CACHE=/home/bombuntu/.xwing/envs/1084/sparkwing/.cache/golangci-lint
+guardcheck: every guard matches its allow-list
+exit: 0
+
+bash -n bin/regen-all.sh: passed.
+shellcheck --severity=warning --shell=bash bin/regen-all.sh: passed.
+bash bin/sync-docs.sh --check: passed.
+git diff --check: passed. Neither conflicted working file contains merge markers.
+NOT RUN: full suites, PostgreSQL, socket-dependent checks, full regen-all; lead owns heavy checks.
+No web changes. No new production Go or SQL; one added shell line connects the existing schema generator to regen-all.
+Xwing env context --session 1084 -o json: could not run (session-index lock path is read-only).
+No candidate installed. No real product HOME used. No staging or commit commands run.
+Temporary directory /tmp/sw-astra-WS15 removed after all checks completed.
