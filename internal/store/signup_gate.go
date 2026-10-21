@@ -287,10 +287,10 @@ func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string,
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
 		return err
 	}
-	return recordAdmissionEventTx(tx, accountID, kind, "", now)
+	return recordAdmissionEventTx(tx, accountID, kind, auditActor{system: auditController}, now)
 }
 
-func recordAdmissionEventTx(tx *storeTx, accountID, via, actor string, now time.Time) error {
+func recordAdmissionEventTx(tx *storeTx, accountID, via string, actor auditActor, now time.Time) error {
 	return tx.operator.recordAudit(tx, auditContext{At: now, Actor: actor}, auditAdmission{AccountID: accountID, Via: auditAdmissionVia(via)})
 }
 
@@ -482,14 +482,14 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.T
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
-	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, now)
+	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, auditActor{system: auditBreakGlass}, now)
 	if err != nil {
 		return Account{}, false, err
 	}
 	return acct, changed, tx.Commit()
 }
 
-func (op *Operator) approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.Time) (Account, bool, error) {
+func (op *Operator) approveOneTx(ctx context.Context, tx *storeTx, id string, actor auditActor, now time.Time) (Account, bool, error) {
 	at := now.UTC().UnixNano()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET waitlisted_at = 0, waitlist_reason = '', updated_at = ? WHERE id = ? AND waitlisted_at <> 0`,

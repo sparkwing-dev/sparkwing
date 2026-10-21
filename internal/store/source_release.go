@@ -81,7 +81,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		return insertSourceReleaseAuditTx(ctx, tx, audit)
+		return insertSourceReleaseAuditTx(ctx, tx, audit, auditPrincipalActor(chain[0].principal))
 	})
 	if err != nil {
 		return GitCredential{}, capability.SourceReleaseAudit{}, err
@@ -187,6 +187,6 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 	return executor, nil
 }
 
-func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit) error {
-	return tx.operator.recordAudit(tx, auditContext{At: audit.ReleasedAt, Team: Team(audit.Team), Actor: audit.OwnerAccountID}, auditSourceRelease{RunID: audit.RunID, CredentialID: digestAudit(audit.CredentialID), Repository: digestAudit(audit.RepositoryKey), NodeID: digestAudit(audit.NodeID), Generation: audit.Generation, MachineID: digestAudit(audit.MachineID), CapabilityPrefix: digestAudit(audit.CapabilityPrefix)})
+func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit, actor auditActor) error {
+	return tx.operator.recordAudit(tx, auditContext{At: audit.ReleasedAt, Team: Team(audit.Team), Actor: actor}, auditSourceRelease{AccountID: audit.OwnerAccountID, RunID: audit.RunID, CredentialID: digestAudit(audit.CredentialID), Repository: digestAudit(audit.RepositoryKey), NodeID: digestAudit(audit.NodeID), Generation: audit.Generation, MachineID: digestAudit(audit.MachineID), CapabilityPrefix: digestAudit(audit.CapabilityPrefix)})
 }

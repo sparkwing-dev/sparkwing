@@ -71,6 +71,23 @@ func TestResultStepFencesAttemptsAndAbsorbsTerminalState(t *testing.T) {
 	}
 }
 
+func TestResultStepSourceClockDoesNotControlClosure(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	ahead := s.now().Add(24 * time.Hour)
+	report := StepReport{Attempt: attempt, Actor: actor, StepID: "ahead", State: "running", StartedAt: &ahead}
+	if err := tenant.RecordStep(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	report.State = "passed"
+	if err := tenant.RecordStep(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := tenant.ListNodeSteps(t.Context(), attempt.RunID)
+	if err != nil || len(steps) != 1 || steps[0].StartedAt == nil || !steps[0].StartedAt.Equal(ahead) || steps[0].FinishedAt == nil || !steps[0].FinishedAt.Equal(s.now()) {
+		t.Fatalf("step observation = %+v, %v", steps, err)
+	}
+}
+
 func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	now := s.now()

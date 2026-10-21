@@ -76,6 +76,6 @@ func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized
 		if _, err = tx.ExecContext(ctx, `UPDATE capabilities SET metered=?,authority_json=? WHERE prefix=? AND team=?`, boolInt(metered), body, prefix, c.Team); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(c.Team), p.Capability.Subject.ID, "runner.metered", prefix)
+		return recordMutationAuditTx(tx, Team(c.Team), auditPrincipalActor(p), "runner.metered", prefix)
 	})
 }

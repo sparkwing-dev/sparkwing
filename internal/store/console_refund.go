@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -17,7 +16,7 @@ import (
 
 // ConsoleRefund records a provider refund and its operator receipt in one transaction.
 func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (CreditReversal, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (CreditReversal, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (CreditReversal, error) {
 		req.PaymentID, req.RefundID = strings.TrimSpace(req.PaymentID), strings.TrimSpace(req.RefundID)
 		reason, err := consoleReason(req.Reason)
 		req.Reason = reason
@@ -41,7 +40,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		identity, err := json.Marshal([]string{actor, key})
+		identity, err := json.Marshal([]string{actor.subject.ID, key})
 		if err != nil {
 			return CreditReversal{}, err
 		}
@@ -55,26 +54,16 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			return CreditReversal{}, err
 		}
 		digest := sha256.Sum256(body)
-		var receipt auditRefund
-		err = tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind='operator.refund_recorded' AND subject_id=?`, t.team, subject).Scan(&body)
+		requestDigest := hex.EncodeToString(digest[:])
+		var previousDigest string
+		err = tx.QueryRowContext(ctx, `SELECT request_digest,result_json FROM console_refund_receipts WHERE team=? AND receipt_id=?`, t.team, subject).Scan(&previousDigest, &body)
 		if err == nil {
-			if err := json.Unmarshal(body, &receipt); err != nil {
-				return CreditReversal{}, err
-			}
-			if receipt.Digest != digest {
+			if previousDigest != requestDigest {
 				return CreditReversal{}, authorityError(apierr.Conflict, "idempotency key names another refund")
 			}
-			result := CreditReversal{Team: t.team, PaidMicro: receipt.PaidMicro, ReversedMicro: receipt.ReversedMicro, BalanceMicro: receipt.BalanceMicro}
-			if receipt.GrantID != "" {
-				var g CreditGrant
-				var at int64
-				if err := tx.QueryRowContext(ctx, `SELECT id,kind,amount_micro,reference,reverses,created_by,created_at FROM credit_grants WHERE team=? AND id=?`, t.team, receipt.GrantID).Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &at); err != nil {
-					return CreditReversal{}, err
-				}
-				g.Team, g.CreatedAt = t.team, time.Unix(0, at)
-				result.Grant = &g
-			}
-			return result, nil
+			var result CreditReversal
+			err := json.Unmarshal(body, &result)
+			return result, err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return CreditReversal{}, err
@@ -111,11 +100,18 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
+		body, err = json.Marshal(result)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO console_refund_receipts(team,receipt_id,request_digest,result_json) VALUES (?,?,?,?)`, t.team, subject, requestDigest, body); err != nil {
+			return CreditReversal{}, err
+		}
 		grantID := ""
 		if result.Grant != nil {
 			grantID = result.Grant.ID
 		}
-		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: actor}, auditRefund{ReceiptID: subject, Digest: digest, GrantID: grantID, PaidMicro: result.PaidMicro, ReversedMicro: result.ReversedMicro, BalanceMicro: result.BalanceMicro, PaymentID: digestAudit(req.PaymentID), RefundID: digestAudit(req.RefundID)}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: actor}, auditRefund{ReceiptID: subject, GrantID: grantID, PaidMicro: result.PaidMicro, ReversedMicro: result.ReversedMicro, BalanceMicro: result.BalanceMicro, PaymentID: digestAudit(req.PaymentID), RefundID: digestAudit(req.RefundID)}); err != nil {
 			return CreditReversal{}, err
 		}
 		return result, nil

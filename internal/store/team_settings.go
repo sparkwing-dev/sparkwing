@@ -81,6 +81,6 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 			}
 			return out
 		}
-		return tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: p.Capability.Subject.ID}, auditTeamSettings{ReceiptID: id, MembersCanAddMachines: next.MembersCanAddMachines, PreviousMembersCanAddMachines: previous.MembersCanAddMachines, ClaimRanking: toAuditRanking(next.ClaimRanking), PreviousClaimRanking: toAuditRanking(previous.ClaimRanking)})
+		return tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: auditPrincipalActor(p)}, auditTeamSettings{ReceiptID: id, MembersCanAddMachines: next.MembersCanAddMachines, PreviousMembersCanAddMachines: previous.MembersCanAddMachines, ClaimRanking: toAuditRanking(next.ClaimRanking), PreviousClaimRanking: toAuditRanking(previous.ClaimRanking)})
 	})
 }

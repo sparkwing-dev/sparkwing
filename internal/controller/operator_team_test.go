@@ -54,7 +54,7 @@ func TestOperatorCreateTeamHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
-	if err != nil || len(events) != 1 || events[0].Actor != "" || events[0].Account != created.AccountID {
+	if err != nil || len(events) != 1 || !strings.HasPrefix(events[0].Actor, "operator:") || events[0].Account != created.AccountID {
 		t.Fatalf("operator audit: %+v %v", events, err)
 	}
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/operator/teams", `{"slug":"support-team"}`, 409)
@@ -81,7 +81,7 @@ func TestOperatorCreateTeamCloudHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
-	if err != nil || len(events) != 1 || events[0].Actor != "" {
+	if err != nil || len(events) != 1 || !strings.HasPrefix(events[0].Actor, "service:") {
 		t.Fatalf("Cloud operator audit: %+v %v", events, err)
 	}
 	account, err := e.Store.AsOperator().Account(t.Context(), events[0].Account)
@@ -90,7 +90,7 @@ func TestOperatorCreateTeamCloudHTTP(t *testing.T) {
 	}
 	engineClaimHTTP(t, h, operator.Capability, "DELETE", "/api/v1/operator/tokens/"+operator.Prefix, "", 204)
 	var actor, attrs string
-	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT actor,attrs FROM audit_events WHERE kind='team.mutated' AND subject_id=?`, string(capability.AuthorityCapability)+":"+operator.Prefix).Scan(&actor, &attrs); err != nil || actor != "" || strings.Contains(attrs, "Jane") {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT actor,attrs FROM audit_events WHERE kind='team.mutated' AND subject_id=?`, string(capability.AuthorityCapability)+":"+operator.Prefix).Scan(&actor, &attrs); err != nil || actor != events[0].Actor || strings.Contains(attrs, "Jane") {
 		t.Fatalf("token revocation retained its display name: actor=%q attrs=%s err=%v", actor, attrs, err)
 	}
 	engineClaimHTTP(t, h, operator.Capability, "POST", "/api/v1/operator/teams", `{"slug":"refused-team"}`, 401)
@@ -184,7 +184,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
-			return err == nil && len(events) == 1 && events[0].Actor == ""
+			return err == nil && len(events) == 1 && strings.HasPrefix(events[0].Actor, "operator:")
 		}
 		var count int
 		if err := teststore.SQL(t, e.Store).QueryRow(`SELECT (SELECT COUNT(*) FROM memberships WHERE team=?)+(SELECT COUNT(*) FROM capabilities WHERE team=?)+(SELECT COUNT(*) FROM audit_events WHERE team=?)`, slug, slug, slug).Scan(&count); err != nil {
@@ -211,7 +211,7 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
-	if err != nil || len(events) != 1 || events[0].Actor != "member" {
+	if err != nil || len(events) != 1 || !strings.HasPrefix(events[0].Actor, "operator:") {
 		t.Fatalf("console audit: %+v %v", events, err)
 	}
 	s.WithOperatorAccounts(nil)

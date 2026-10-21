@@ -154,7 +154,7 @@ func TestConsoleNativeFinanceAndStableWaitlistBatch(t *testing.T) {
 		t.Fatalf("freeze: %+v %v", freeze, err)
 	}
 	if err := s.inTx(ctx, func(tx *storeTx) error {
-		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", tx.now())
+		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", tx.now(), auditActor{system: auditBreakGlass})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -263,7 +263,9 @@ func TestConsoleGlobalAdmissionAuditDeduplicatesAndSurvivesDeletion(t *testing.T
 	s, c, a := consoleFixture(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('victim','victim@example.test',1,1)`)
 	for range 2 {
-		if err := s.inTx(t.Context(), func(tx *storeTx) error { return recordAdmissionEventTx(tx, "victim", "waitlist", "operator", tx.now()) }); err != nil {
+		if err := s.inTx(t.Context(), func(tx *storeTx) error {
+			return recordAdmissionEventTx(tx, "victim", "waitlist", auditActor{system: auditBreakGlass}, tx.now())
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}

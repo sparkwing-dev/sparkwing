@@ -116,7 +116,7 @@ func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capabi
 		limit = 200
 	}
 	rows, err := t.s.query(ctx, `SELECT id,ts,team,run_id,
- CASE WHEN actor_is_account=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.actor) THEN 'deleted account' ELSE actor END,
+ CASE WHEN account<>'' AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.account) THEN 'deleted account' ELSE account END,
  attrs FROM audit_events WHERE team=? AND kind='git_credential.released' ORDER BY ts DESC,id DESC LIMIT ?`, t.team, limit)
 	if err != nil {
 		return nil, err

@@ -9,7 +9,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 19, which drops `card_charges`,
+schema baseline moves to version 20, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -3107,3 +3107,13 @@ prunes older audit rows on its existing maintenance loop. The guards enforce
 append-only against application SQL. Database credentials can disable them.
 The team's first successful run remains a durable fact after its audit row
 expires, so retention cannot label a later success as the first.
+
+Operator refund replay receipts persist with the financial state independently
+of audit retention. Replaying a key returns the original result, including its
+balances and `created` value. Changed requests under that key still conflict
+after audit expiry. Refund audits retain identifiers, digests and financial
+facts, with no free-form reason.
+
+Step lifecycle timestamps now use the store clock. Runner start and finish
+timestamps remain separate observations with nanosecond precision. Clock skew
+cannot prevent attempt recovery from closing running steps.

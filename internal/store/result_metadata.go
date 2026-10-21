@@ -115,45 +115,42 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 
 func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, report StepReport) error {
 	var state, message string
-	var started, finished sql.NullInt64
-	err := tx.QueryRowContext(ctx, "SELECT status,error,started_at,finished_at FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND step_id = ?", team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, report.StepID).Scan(&state, &message, &started, &finished)
+	var started sql.NullInt64
+	var sourceStarted, sourceFinished sql.NullInt64
+	err := tx.QueryRowContext(ctx, "SELECT status,error,started_at,source_started_at,source_finished_at FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND step_id = ?", team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, report.StepID).Scan(&state, &message, &started, &sourceStarted, &sourceFinished)
 	exists := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	start := started
+	sourceStart, sourceEnd := sourceStarted, sourceFinished
 	if report.StartedAt != nil {
-		start = sql.NullInt64{Int64: report.StartedAt.UnixNano(), Valid: true}
+		sourceStart = sql.NullInt64{Int64: report.StartedAt.UnixNano(), Valid: true}
 	}
+	if report.FinishedAt != nil {
+		sourceEnd = sql.NullInt64{Int64: report.FinishedAt.UnixNano(), Valid: true}
+	}
+	// safety: runner clocks are observational; only the store clock controls lifecycle checks.
+	start := started
 	if !start.Valid {
 		start = sql.NullInt64{Int64: tx.now().UnixNano(), Valid: true}
 	}
 	end := sql.NullInt64{}
 	if report.State != "running" {
 		end = sql.NullInt64{Int64: tx.now().UnixNano(), Valid: true}
-		if report.FinishedAt != nil {
-			end.Int64 = report.FinishedAt.UnixNano()
-		}
-	}
-	if end.Valid && end.Int64 < start.Int64 {
-		return authorityError(apierr.BadRequest, "step finish precedes its start")
 	}
 	if report.State == "running" && report.FinishedAt != nil {
 		return authorityError(apierr.BadRequest, "running step cannot have a finish time")
 	}
 	if exists && state != "running" {
-		if report.FinishedAt == nil {
-			end = finished
-		}
-		if state != report.State || message != report.MaskedError || started != start || finished != end {
+		if state != report.State || message != report.MaskedError || sourceStarted != sourceStart || sourceFinished != sourceEnd {
 			return authorityError(apierr.IllegalTransition, "finished step is immutable")
 		}
 		return tx.Commit()
 	}
-	if exists && started != start {
+	if exists && sourceStarted != sourceStart {
 		return authorityError(apierr.Conflict, "step start time is immutable")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO node_steps(team,run_id,node_id,attempt,generation,step_id,status,error,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,attempt,step_id) DO UPDATE SET status = excluded.status,error = excluded.error,finished_at = excluded.finished_at`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, report.StepID, report.State, report.MaskedError, start, end)
+	_, err = tx.ExecContext(ctx, `INSERT INTO node_steps(team,run_id,node_id,attempt,generation,step_id,status,error,started_at,finished_at,source_started_at,source_finished_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,attempt,step_id) DO UPDATE SET status = excluded.status,error = excluded.error,finished_at = excluded.finished_at,source_finished_at = excluded.source_finished_at`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, report.StepID, report.State, report.MaskedError, start, end, sourceStart, sourceEnd)
 	if err != nil {
 		return err
 	}

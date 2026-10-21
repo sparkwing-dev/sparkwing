@@ -26,7 +26,9 @@ func dueRefillsFor(t *testing.T, s *Store, team Team) []Refill {
 
 func setRefill(t *testing.T, s *Store, team Team, settings RefillSettings) error {
 	t.Helper()
-	return s.inTx(t.Context(), func(tx *storeTx) error { return setRefillTx(t.Context(), tx, team, settings, "owner") })
+	return s.inTx(t.Context(), func(tx *storeTx) error {
+		return setRefillTx(t.Context(), tx, team, settings, auditAccountActor("owner"))
+	})
 }
 
 func refillFixture(t *testing.T, trusted bool) (*Store, *Tenant, time.Time) {

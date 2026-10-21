@@ -197,6 +197,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "credit_freezes", Owner: SchemaTenant},
 	{Name: "credit_grants", Owner: SchemaTenant},
 	{Name: "cron_fires", Owner: SchemaTenant},
+	{Name: "console_refund_receipts", Owner: SchemaTenant},
 	{Name: "cron_schedules", Owner: SchemaTenant},
 	{Name: "debug_pauses", Owner: SchemaTenant},
 	{Name: "egress_usage", Owner: SchemaTenant},

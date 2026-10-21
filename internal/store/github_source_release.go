@@ -59,7 +59,7 @@ func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized c
 		if err != nil {
 			return err
 		}
-		if err := insertSourceReleaseAuditTx(ctx, tx, audit); err != nil {
+		if err := insertSourceReleaseAuditTx(ctx, tx, audit, auditPrincipalActor(current.request.Authorization.Principal)); err != nil {
 			return err
 		}
 		credential = source.Credential{Kind: "github_app", Host: "github.com", Secret: token.Token, ExtraRepositories: slices.Clone(current.names[1:])}

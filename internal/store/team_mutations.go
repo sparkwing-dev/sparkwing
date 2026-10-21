@@ -46,10 +46,10 @@ func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability
 	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 		return err
 	}
-	return recordMutationAuditTx(tx, t.team, p.Capability.Subject.ID, operation, subject)
+	return recordMutationAuditTx(tx, t.team, auditPrincipalActor(p), operation, subject)
 }
 
-func recordMutationAuditTx(tx *storeTx, team Team, actor, operation, subject string) error {
+func recordMutationAuditTx(tx *storeTx, team Team, actor auditActor, operation, subject string) error {
 	return tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: team, Actor: actor}, auditMutation{SubjectID: subject, Operation: auditOperation(operation)})
 }
 
@@ -167,7 +167,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, t.team, p.Capability.Subject.ID, "DeleteAuthorizedTeam", string(t.team))
+		return recordMutationAuditTx(tx, t.team, auditPrincipalActor(p), "DeleteAuthorizedTeam", string(t.team))
 	})
 	if err != nil {
 		return TeamDeletion{}, err
@@ -242,7 +242,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
 			return err
 		}
-		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: p.Capability.Subject.ID}, auditRunDeletion{RunID: a.Target.RunID}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: auditPrincipalActor(p)}, auditRunDeletion{RunID: a.Target.RunID}); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, a.Target.RunID)

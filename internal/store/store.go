@@ -975,7 +975,7 @@ type NodeStep struct {
 // ListNodeSteps returns persisted step observations for a tenant run.
 func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
 	rows, err := t.s.query(ctx, `
-SELECT node_id, step_id, attempt, status, error, started_at, finished_at, annotations_json, summary
+SELECT node_id, step_id, attempt, status, error, COALESCE(source_started_at,started_at), COALESCE(source_finished_at,finished_at), annotations_json, summary
 FROM node_steps
 WHERE team = ? AND run_id = ?
 ORDER BY node_id, attempt, started_at, step_id`, string(t.team), runID)
@@ -1425,7 +1425,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 19
+const expectedSchemaVersion = 20
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

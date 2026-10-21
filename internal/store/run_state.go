@@ -279,7 +279,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 				return Applied{}, err
 			}
 			if first == 1 {
-				if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team}, auditFirstSuccess{RunID: row.ID}); err != nil {
+				if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditController}}, auditFirstSuccess{RunID: row.ID}); err != nil {
 					return Applied{}, err
 				}
 			}

@@ -24,7 +24,7 @@ func TestBusinessEventsReadTiesInIDOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range []string{"a", "b", "c", "d", "e"} {
-		if err := tx.operator.recordAudit(tx, auditContext{At: at, Team: DefaultTeam}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: subject}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{At: at, Team: DefaultTeam, Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: subject}); err != nil {
 			t.Fatal(err)
 		}
 	}

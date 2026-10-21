@@ -27,14 +27,14 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 					return holdForWarningTx(t.Context(), tx, "a", "warning-probe", "pi_probe", now.Add(-time.Hour))
 				}
 				if cause == HoldCauseRevoked {
-					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: BillingTrustRevoked, Actor: "console", Reason: "probe"}, now.Add(-time.Hour))
+					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: BillingTrustRevoked, Actor: "console", Reason: "probe"}, now.Add(-time.Hour), auditActor{system: auditBreakGlass})
 					return err
 				}
 				actor := ""
 				if cause == HoldCauseOperator {
 					actor = "console"
 				}
-				_, err := holdCreditFreezeTx(t.Context(), tx, "a", "hold-probe", "", "probe", actor, now.Add(-time.Hour))
+				_, err := holdCreditFreezeTx(t.Context(), tx, "a", "hold-probe", "", "probe", actor, now.Add(-time.Hour), auditActor{system: auditBreakGlass})
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -56,7 +56,7 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 			}
 			*now = now.Add(10 * time.Second)
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				_, err := holdCreditFreezeTx(t.Context(), tx, "a", "second-hold", "", "probe", "console", *now)
+				_, err := holdCreditFreezeTx(t.Context(), tx, "a", "second-hold", "", "probe", "console", *now, auditActor{system: auditBreakGlass})
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -67,12 +67,12 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 			}
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
 				if cause == HoldCauseRevoked {
-					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: BillingTrustAutomatic, Actor: "console", Reason: "release"}, *now)
+					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: BillingTrustAutomatic, Actor: "console", Reason: "release"}, *now, auditActor{system: auditBreakGlass})
 					if err != nil {
 						return err
 					}
 				}
-				_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "", false, false, "console", "probe", *now)
+				_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "", false, false, "console", "probe", *now, auditActor{system: auditBreakGlass})
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -97,7 +97,7 @@ func TestHoldStopsRunningAndUnstartedAwardsTogether(t *testing.T) {
 	demand.Target.NodeID = "unstarted"
 	unstarted, holder := meteredUnitClaim(t, s, demand)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := holdCreditFreezeTx(t.Context(), tx, "a", "multiple-hold", "", "probe", "console", *now)
+		_, err := holdCreditFreezeTx(t.Context(), tx, "a", "multiple-hold", "", "probe", "console", *now, auditActor{system: auditBreakGlass})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestHoldRollbackRestoresRunningAward(t *testing.T) {
 	}
 	abort := errors.New("rollback hold")
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if _, err := holdCreditFreezeTx(t.Context(), tx, "a", "rollback-probe", "", "probe", "console", *now); err != nil {
+		if _, err := holdCreditFreezeTx(t.Context(), tx, "a", "rollback-probe", "", "probe", "console", *now, auditActor{system: auditBreakGlass}); err != nil {
 			return err
 		}
 		return abort

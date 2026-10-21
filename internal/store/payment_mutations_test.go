@@ -40,18 +40,18 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 				ctx := t.Context()
 				switch kind {
 				case "card_setup":
-					return saveCardTx(ctx, tx, tenant.team, Card{Customer: "new-customer", PaymentMethod: "new-method", Fingerprint: "new-card", AddedAt: now.Add(time.Second)}, "provider", now)
+					return saveCardTx(ctx, tx, tenant.team, Card{Customer: "new-customer", PaymentMethod: "new-method", Fingerprint: "new-card", AddedAt: now.Add(time.Second)}, auditActor{system: auditPaymentProvider}, now)
 				case "refund":
-					_, err := reversePaymentTx(ctx, tx, event.PaymentID, "refund", "provider", 100)
+					_, err := reversePaymentTx(ctx, tx, event.PaymentID, "refund", auditActor{system: auditPaymentProvider}, 100)
 					return err
 				case "dispute_open":
-					_, err := holdCreditFreezeTx(ctx, tx, tenant.team, "dispute", event.PaymentID, "disputed", "", now)
+					_, err := holdCreditFreezeTx(ctx, tx, tenant.team, "dispute", event.PaymentID, "disputed", "", now, auditActor{system: auditBreakGlass})
 					return err
 				case "dispute_close":
-					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, false, "provider", "", now)
+					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, false, "provider", "", now, auditActor{system: auditBreakGlass})
 					return err
 				case "warning":
-					_, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: event.Mode, ObjectID: "warning", PaymentID: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, "payment_provider")
+					_, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: event.Mode, ObjectID: "warning", PaymentID: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, auditActor{system: auditPaymentProvider})
 					return err
 				case "queued_refund":
 					changed, err := applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)
@@ -138,14 +138,14 @@ func TestPaymentMutationRefundConservationProperty(t *testing.T) {
 					amount := int64((seed>>uint(i*8))%2000000) + 1
 					reference := fmt.Sprintf("refund-%d", i)
 					mutate := func(tx *storeTx) error {
-						result, err := reversePaymentTx(t.Context(), tx, event.PaymentID, reference, "provider", amount)
+						result, err := reversePaymentTx(t.Context(), tx, event.PaymentID, reference, auditActor{system: auditPaymentProvider}, amount)
 						if err != nil {
 							return err
 						}
 						if result.Team != "a" || result.ReversedMicro < 0 || result.ReversedMicro > paid {
 							return fmt.Errorf("invalid payer or reversal: %+v", result)
 						}
-						_, err = holdCreditFreezeTx(t.Context(), tx, result.Team, reference, event.PaymentID, "disputed", "", s.now())
+						_, err = holdCreditFreezeTx(t.Context(), tx, result.Team, reference, event.PaymentID, "disputed", "", s.now(), auditActor{system: auditBreakGlass})
 						return err
 					}
 					failure := errors.New("receipt refused")

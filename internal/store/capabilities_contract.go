@@ -589,7 +589,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(p.Capability.Team), p.Capability.Subject.ID, "authority.revoked", string(target.Kind)+":"+target.ID)
+		return recordMutationAuditTx(tx, Team(p.Capability.Team), auditPrincipalActor(p), "authority.revoked", string(target.Kind)+":"+target.ID)
 	})
 }
 
@@ -617,7 +617,7 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(p.Capability.Team), p.Capability.Subject.ID, "authority.revoked", string(target.Kind)+":"+target.ID)
+		return recordMutationAuditTx(tx, Team(p.Capability.Team), auditPrincipalActor(p), "authority.revoked", string(target.Kind)+":"+target.ID)
 	})
 }
 

@@ -172,7 +172,7 @@ func standingCapOperatorHold(t *testing.T, s *Store, id string, placed, released
 	t.Helper()
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES (?,'a','review','operator','operator',?)`, id, placed.UnixNano())
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released)
+		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", id, false, noFault, "operator", "checked", released, auditActor{system: auditBreakGlass})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestStandingCapNoFaultReleaseOnlyForOperatorHolds(t *testing.T) {
 	s, _, now := standingCapFixture(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,created_at) VALUES ('dp_1','a','dispute','dispute',?)`, now.UnixNano())
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "dp_1", false, true, "operator", "checked", *now)
+		_, err := releaseCreditFreezesTx(t.Context(), tx, "a", "dp_1", false, true, "operator", "checked", *now, auditActor{system: auditBreakGlass})
 		return err
 	})
 	var open int

@@ -11,8 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, createdBy string, amountMicro int64) (CreditReversal, error) {
+func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference string, actor auditActor, amountMicro int64) (CreditReversal, error) {
 	paymentID, reference = strings.TrimSpace(paymentID), strings.TrimSpace(reference)
+	createdBy := actor.subject.ID
+	if actor.system != "" {
+		createdBy = string(actor.system)
+	}
 	if paymentID == "" || reference == "" {
 		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
 	}
@@ -62,7 +66,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 		if err := l.insertGrant(ctx, grant); err != nil {
 			return CreditReversal{}, err
 		}
-		if err := recordGrantEventTx(tx, grant, auditGrant{}); err != nil {
+		if err := recordGrantEventTx(tx, grant, actor, auditGrant{}); err != nil {
 			return CreditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true
@@ -75,7 +79,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 	return out, nil
 }
 
-func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, paymentID, reason, actor string, now time.Time) (bool, error) {
+func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, paymentID, reason, actor string, now time.Time, provenance auditActor) (bool, error) {
 	disputeID, paymentID = strings.TrimSpace(disputeID), strings.TrimSpace(paymentID)
 	if disputeID == "" {
 		return false, errors.New("credits: a hold names the dispute it is for")
@@ -107,13 +111,13 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
 		return false, err
 	}
-	if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: actor}, auditHold{HoldID: digestAudit(disputeID), PaymentID: digestAudit(paymentID)}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(disputeID), PaymentID: digestAudit(paymentID)}); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, disputeID string, operatorOnly, noFault bool, actor, reason string, now time.Time) (int64, error) {
+func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, disputeID string, operatorOnly, noFault bool, actor, reason string, now time.Time, provenance auditActor) (int64, error) {
 	if team == "" {
 		return 0, errors.New("credits: a release names the team")
 	}
@@ -149,14 +153,14 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 		return 0, err
 	}
 	for _, id := range released {
-		if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: actor}, auditHold{HoldID: digestAudit(id), Released: true, NoFault: noFault}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(id), Released: true, NoFault: noFault}); err != nil {
 			return 0, err
 		}
 	}
 	return int64(len(released)), nil
 }
 
-func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor string, now time.Time) error {
+func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor auditActor, now time.Time) error {
 	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
 		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
 	}

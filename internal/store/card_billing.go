@@ -111,7 +111,7 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	if queued, err := res.RowsAffected(); err != nil || queued == 0 {
 		return err
 	}
-	return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: "payment_provider", At: now}, auditCard{Reference: digestAudit(payment), Operation: BusinessEventCardRefundDue, AmountMicro: amount})
+	return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(payment), Operation: BusinessEventCardRefundDue, AmountMicro: amount})
 }
 
 // A same-payment warning preserves protected credit under a hold; other actionable
@@ -153,7 +153,7 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
 		return err
 	}
-	return tx.operator.recordAudit(tx, auditContext{At: now, Team: team}, auditHold{HoldID: digestAudit(freezeID), PaymentID: digestAudit(paymentIntent), WarningID: digestAudit(warning)})
+	return tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditController}}, auditHold{HoldID: digestAudit(freezeID), PaymentID: digestAudit(paymentIntent), WarningID: digestAudit(warning)})
 }
 
 // PaymentWarning is an early fraud warning on a payment.

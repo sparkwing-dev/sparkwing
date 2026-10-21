@@ -191,6 +191,6 @@ const billingPageLife = 35 * time.Minute
 // SetAuthorizedRefill commits the team's automatic refill settings under current team administration.
 func (t *Tenant) SetAuthorizedRefill(ctx context.Context, a capability.Authorized, s RefillSettings) error {
 	return t.billingMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
-		return setRefillTx(ctx, tx, t.team, s, p.Capability.Subject.ID)
+		return setRefillTx(ctx, tx, t.team, s, auditPrincipalActor(p))
 	})
 }

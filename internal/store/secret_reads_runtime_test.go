@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -90,7 +91,7 @@ func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T
 		}
 		count++
 		body := event.Attrs
-		if body["name_digest"] != digestAudit("KEY").String() || event.Actor != "" || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
+		if body["name_digest"] != digestAudit("KEY").String() || !strings.HasPrefix(event.Actor, string(a.Principal.Capability.Subject.Kind)+":") || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
 			t.Fatalf("audit: %+v", event)
 		}
 	}
@@ -238,5 +239,19 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	a.Target.SecretName = "EXTRA_GENERATED_SECRET"
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("job broadened pipeline declarations: %+v %v", row, err)
+	}
+}
+
+func TestSecretReadRunnerNameCannotImpersonateAccount(t *testing.T) {
+	tenant, a := secretReadStoreFixture(t)
+	name := a.Principal.Capability.Subject.ID
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, 'other@example.test',1,1)`, name)
+	if _, err := tenant.ReadSecret(t.Context(), a); err != nil {
+		t.Fatal(err)
+	}
+	var actor string
+	var account int
+	if err := tenant.s.db.QueryRow(`SELECT actor,actor_is_account FROM audit_events WHERE kind='secret.released'`).Scan(&actor, &account); err != nil || actor == name || actor == "" || account != 0 {
+		t.Fatalf("runner named account attributed as account: actor=%q account=%d err=%v", actor, account, err)
 	}
 }

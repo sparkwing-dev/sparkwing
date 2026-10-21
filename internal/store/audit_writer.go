@@ -7,16 +7,64 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// AuditActorBreakGlass distinguishes in-pod administration from account actions.
+// AuditActorBreakGlass identifies trusted in-pod administration.
 const AuditActorBreakGlass = "sparkwing-controller admin"
+
+type auditSystem string
+
+const (
+	auditController      auditSystem = "controller"
+	auditPaymentProvider auditSystem = "payment_provider"
+	auditBreakGlass      auditSystem = AuditActorBreakGlass
+)
+
+type auditActor struct {
+	subject   capability.Subject
+	authority capability.AuthorityRef
+	holder    string
+	system    auditSystem
+}
+
+func auditPrincipalActor(p capability.Principal) auditActor {
+	return auditActor{subject: p.Capability.Subject, authority: p.Authority, holder: p.Capability.Binding.Holder}
+}
+
+func auditAccountActor(id string) auditActor {
+	return auditActor{subject: capability.Subject{Kind: capability.SubjectAccount, ID: id}}
+}
+
+func (a auditActor) projection() (string, bool, error) {
+	if a.system != "" {
+		if !auditOneOf(a.system, string(auditController), string(auditPaymentProvider), string(auditBreakGlass)) || a.subject != (capability.Subject{}) || a.authority != (capability.AuthorityRef{}) || a.holder != "" {
+			return "", false, fmt.Errorf("%w: invalid audit actor", ErrInvalidInput)
+		}
+		return string(a.system), false, nil
+	}
+	if a.subject.ID == "" {
+		return "", false, fmt.Errorf("%w: missing audit actor", ErrInvalidInput)
+	}
+	if a.subject.Kind == capability.SubjectAccount {
+		if strings.ContainsAny(a.subject.ID, "@\r\n\t ") {
+			return "", false, fmt.Errorf("%w: invalid account actor", ErrInvalidInput)
+		}
+		return a.subject.ID, true, nil
+	}
+	if !auditOneOf(a.subject.Kind, string(capability.SubjectMachine), string(capability.SubjectService), string(capability.SubjectOperator), string(capability.SubjectLocal)) {
+		return "", false, fmt.Errorf("%w: unknown audit actor", ErrInvalidInput)
+	}
+	identity, _ := json.Marshal([]string{string(a.subject.Kind), a.subject.ID, string(a.authority.Kind), a.authority.ID, a.holder})
+	return string(a.subject.Kind) + ":" + digestAudit(string(identity)).String(), false, nil
+}
 
 // Callers supply occurrence time; only the database supplies recording time.
 type auditContext struct {
 	At    time.Time
 	Team  Team
-	Actor string
+	Actor auditActor
 }
 
 type auditDigest struct{ sum [32]byte }
@@ -167,6 +215,7 @@ type auditSecretRelease struct {
 	Holder           auditDigest `json:"holder_digest"`
 }
 type auditSourceRelease struct {
+	AccountID        string      `json:"-"`
 	RunID            string      `json:"-"`
 	CredentialID     auditDigest `json:"credential_digest"`
 	Repository       auditDigest `json:"repository_digest"`
@@ -177,7 +226,6 @@ type auditSourceRelease struct {
 }
 type auditRefund struct {
 	ReceiptID     string      `json:"-"`
-	Digest        [32]byte    `json:"digest"`
 	GrantID       string      `json:"grant_id"`
 	PaidMicro     int64       `json:"paid_micro"`
 	ReversedMicro int64       `json:"reversed_micro"`
@@ -221,8 +269,12 @@ func auditOneOf[T ~string](value T, choices ...string) bool {
 // Releases, mutations and deletion authorizations retain every occurrence.
 // Other facts deduplicate by team, kind and subject in the committing transaction.
 func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayload) error {
-	ev := BusinessEvent{At: c.At, Team: c.Team, Actor: c.Actor}
-	valid, repeat, systemActor := true, false, false
+	actor, accountActor, err := c.Actor.projection()
+	if err != nil {
+		return err
+	}
+	ev := BusinessEvent{At: c.At, Team: c.Team, Actor: actor}
+	valid, repeat := true, false
 	switch p := payload.(type) {
 	case auditAdmission:
 		ev.Kind, ev.SubjectID, ev.Account = BusinessEventAccountAdmitted, p.AccountID, p.AccountID
@@ -242,10 +294,8 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		}
 	case auditCheckout:
 		ev.Kind, ev.SubjectID = string(p.Outcome), p.CheckoutID
-		systemActor = ev.Actor == "payment_provider"
 		valid = auditOneOf(p.Outcome, BusinessEventCheckoutOpened, BusinessEventCheckoutFailed, BusinessEventCheckoutExpired, BusinessEventRefillFailed) && auditOneOf(p.PaymentMode, "", "test", "live")
 	case auditGrant:
-		systemActor = auditOneOf(ev.Actor, "payment_provider", AuditActorBreakGlass)
 		valid = auditOneOf(p.ThreeDS, "", "authenticated", "attempt_acknowledged", "attempted", "failed", "not_supported", "processing", "processing_error", "unknown", "required", "unavailable", "exempted")
 		ev.SubjectID = p.GrantID
 		switch p.Kind {
@@ -260,13 +310,11 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		}
 	case auditHold:
 		ev.Kind, ev.SubjectID = BusinessEventTeamFrozen, p.HoldID.String()
-		systemActor = auditOneOf(ev.Actor, "payment_provider", AuditActorBreakGlass)
 		if p.Released {
 			ev.Kind = BusinessEventTeamUnfrozen
 		}
 	case auditCard:
 		ev.Kind, ev.SubjectID = string(p.Operation), p.Reference.String()
-		systemActor = ev.Actor == "payment_provider"
 		valid = auditOneOf(p.Operation, BusinessEventCardAdded, BusinessEventCardRefused, BusinessEventCardBlocked, BusinessEventCardRefundDue)
 	case auditTrust:
 		ev.Kind, ev.SubjectID = BusinessEventBillingTrustChanged, p.ReceiptID
@@ -291,11 +339,10 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		ev.Kind, ev.SubjectID = BusinessEventRefillSettings, p.ReceiptID
 	case auditRefill:
 		ev.Kind, ev.SubjectID = BusinessEventRefillOpened, p.RefillID
-		systemActor = ev.Actor == "system"
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
 	case auditSourceRelease:
-		ev.Kind, ev.SubjectID, ev.RunID, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, true
+		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
 	case auditRefund:
 		ev.Kind, ev.SubjectID = "operator.refund_recorded", p.ReceiptID
 	default:
@@ -330,9 +377,8 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	if ev.Team == "" {
 		team = nil
 	}
-	accountActor := !strings.ContainsAny(ev.Actor, "@\r\n\t ")
 	_, err = tx.Exec(`INSERT INTO audit_events (id,ts,team,account,kind,subject_id,actor,attrs,run_id,actor_is_account,subject_is_account)
- VALUES (?,?,?,?,?,?,CASE WHEN (? AND EXISTS(SELECT 1 FROM accounts WHERE id=?)) OR ? THEN ? ELSE '' END,?,?,CASE WHEN ? AND EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END) ON CONFLICT DO NOTHING`, id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID, accountActor, ev.Actor, systemActor, ev.Actor, string(attrs), ev.RunID, accountActor, ev.Actor, ev.SubjectID)
+ VALUES (?,?,?,?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END) ON CONFLICT DO NOTHING`, id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID, ev.Actor, string(attrs), ev.RunID, boolInt(accountActor), ev.SubjectID)
 	return err
 }
 

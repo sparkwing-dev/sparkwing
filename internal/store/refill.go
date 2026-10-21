@@ -196,7 +196,7 @@ func (s RefillSettings) validate() error {
 // ErrNoCard refuses turning on refills for a team with no saved card.
 var ErrNoCard = errors.New("card billing: save a card before turning on automatic refill")
 
-func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, actor string) error {
+func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, actor auditActor) error {
 	if err := s.validate(); err != nil {
 		return err
 	}
@@ -335,7 +335,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 		now.Add(refillKeyLife).UnixNano(), CheckoutKindRefill, r.Customer, r.PaymentMethod, r.ReceiptEmail); err != nil {
 		return nil, err
 	}
-	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: "system", At: now}, auditRefill{RefillID: r.ID, AmountCents: r.AmountCents, BalanceMicro: st.BalanceMicro, ThresholdCents: refill.ThresholdCents}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: auditActor{system: auditController}, At: now}, auditRefill{RefillID: r.ID, AmountCents: r.AmountCents, BalanceMicro: st.BalanceMicro, ThresholdCents: refill.ThresholdCents}); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -377,7 +377,7 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 		if err := json.Unmarshal(encoded, &event); err != nil {
 			return err
 		}
-		_, err = tx.operator.applyPaymentStateTx(ctx, tx, event, "payment_provider")
+		_, err = tx.operator.applyPaymentStateTx(ctx, tx, event, auditActor{system: auditPaymentProvider})
 		return err
 	})
 }

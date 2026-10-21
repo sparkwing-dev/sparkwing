@@ -10,6 +10,11 @@ are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
 
+Step lifecycle timestamps use the store clock. Runner-reported start and finish
+times remain in `source_started_at` and `source_finished_at` for display, with
+nanosecond precision. They are observations and do not participate in lifecycle
+CHECKs or recovery. A runner clock ahead of the controller cannot block closure.
+
 Secret releases, source credential releases and privileged mutations append to
 `audit_events` in the transaction that authorizes them. Audit rows retain plain
 team and run identifiers because deleting a run, team or account must preserve
@@ -25,6 +30,7 @@ including when a later run reuses the ID.
 
 Human actors and account subjects use account IDs. Non-account claimants are
 identified by capability and holder digests, with no caller-selected actor name.
+Source credential history retains its owner account ID separately from the actor.
 System actors use fixed enums permitted by each payload kind. Invitation
 subjects use invitation IDs. One audit writer accepts a closed, typed payload
 for each kind. Payloads contain identifiers, enums, digests and generated
@@ -46,6 +52,12 @@ All UPDATEs remain refused, including changes to expired rows.
 `team_first_success` records the team's first successful run in the
 same transaction as its completion and audit fact. It has no run foreign key,
 so run deletion and audit expiry cannot make a later success the first.
+
+`console_refund_receipts` retains each operator refund's request digest and full
+original result with the financial state. Replaying a key returns that result,
+including its balances and `created` value, after audit retention. A changed
+request under the same key conflicts. The separate expiring audit projection
+contains identifiers, digests and financial facts, with no free-form reason.
 
 Editors may delete only runs they submitted. Owners may delete any run in their team.
 

@@ -55,7 +55,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		}
 		if claim {
 			b := p.Capability.Binding
-			if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: p.Capability.Subject.ID}, auditSecretRelease{RunID: b.RunID, Name: digestAudit(out.Name), Pipeline: digestAudit(out.Pipeline), NodeID: digestAudit(b.NodeID), Generation: b.Generation, CapabilityPrefix: digestAudit(p.Capability.Prefix), Holder: digestAudit(b.Holder)}); err != nil {
+			if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: auditPrincipalActor(p)}, auditSecretRelease{RunID: b.RunID, Name: digestAudit(out.Name), Pipeline: digestAudit(out.Pipeline), NodeID: digestAudit(b.NodeID), Generation: b.Generation, CapabilityPrefix: digestAudit(p.Capability.Prefix), Holder: digestAudit(b.Holder)}); err != nil {
 				return err
 			}
 		}

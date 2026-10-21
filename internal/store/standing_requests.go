@@ -92,7 +92,7 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
 			return err
 		}
-		if err := tx.operator.recordAudit(tx, auditContext{Team: t.team, Actor: actor, At: now}, auditStandingRequest{RequestID: id, State: StandingRequestOpen, Tier: auditStanding(tier), Standing: auditStanding(standing.Tier), HistoryTier: auditStanding(standing.History.Tier)}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{Team: t.team, Actor: auditPrincipalActor(p), At: now}, auditStandingRequest{RequestID: id, State: StandingRequestOpen, Tier: auditStanding(tier), Standing: auditStanding(standing.Tier), HistoryTier: auditStanding(standing.History.Tier)}); err != nil {
 			return err
 		}
 		out, err = scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.id=?`, t.team, id))
@@ -128,7 +128,7 @@ func (o *Operator) OpenStandingRequests(ctx context.Context, limit int) (_ []Sta
 	return out, rows.Err()
 }
 
-func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, state, actor, reason string) (StandingRequest, error) {
+func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, state, actor, reason string, provenance auditActor) (StandingRequest, error) {
 	r, err := scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.id=?`, team, id))
 	if errors.Is(err, sql.ErrNoRows) || err == nil && r.State != StandingRequestOpen {
 		return r, ErrStandingRequestClosed
@@ -141,12 +141,12 @@ func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, st
 		return r, err
 	}
 	r.State, r.DecidedBy, r.DecidedAt, r.DecisionReason = state, actor, now, reason
-	return r, tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: now}, auditStandingRequest{RequestID: id, State: auditRequestState(state), Tier: auditStanding(r.Tier)})
+	return r, tx.operator.recordAudit(tx, auditContext{Team: team, Actor: provenance, At: now}, auditStandingRequest{RequestID: id, State: auditRequestState(state), Tier: auditStanding(r.Tier)})
 }
 
 // ConsoleDeclineStandingRequest declines the named open standing request under current operator authority.
 func (c *Console) ConsoleDeclineStandingRequest(ctx context.Context, a capability.Authorized, id, reason string) (StandingRequest, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (StandingRequest, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (StandingRequest, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)
 		if err != nil {
 			return StandingRequest{}, err
@@ -154,6 +154,6 @@ func (c *Console) ConsoleDeclineStandingRequest(ctx context.Context, a capabilit
 		if reason, err = consoleReason(reason); err != nil {
 			return StandingRequest{}, err
 		}
-		return decideStandingRequestTx(ctx, tx, t.team, id, StandingRequestDeclined, actor, reason)
+		return decideStandingRequestTx(ctx, tx, t.team, id, StandingRequestDeclined, actor.subject.ID, reason, actor)
 	})
 }

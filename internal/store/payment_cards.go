@@ -111,5 +111,5 @@ func forgetTeamCardTx(ctx context.Context, tx *storeTx, team Team, fingerprint, 
 	    card_brand = '', card_last4 = '', refill_enabled = 0 WHERE name = ? AND card_fingerprint = ?`, string(team), fingerprint); err != nil {
 		return err
 	}
-	return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: "payment_provider", At: now}, auditCard{Reference: digestAudit(method), Operation: BusinessEventCardBlocked})
+	return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(method), Operation: BusinessEventCardBlocked})
 }

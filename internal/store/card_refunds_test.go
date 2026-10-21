@@ -29,7 +29,7 @@ func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 func openRefill(t *testing.T, s *Store, team Team, cents int64, payment string) Refill {
 	t.Helper()
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return setRefillTx(t.Context(), tx, team, RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: cents}, "owner")
+		return setRefillTx(t.Context(), tx, team, RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: cents}, auditAccountActor("owner"))
 	}); err != nil {
 		t.Fatal(err)
 	}

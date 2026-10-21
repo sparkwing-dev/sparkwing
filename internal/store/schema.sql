@@ -265,6 +265,8 @@ CREATE TABLE node_steps (
     error TEXT NOT NULL DEFAULT '',
     started_at BIGINT NOT NULL,
     finished_at BIGINT,
+    source_started_at BIGINT,
+    source_finished_at BIGINT,
     annotations_json BLOB,
     summary TEXT NOT NULL DEFAULT '',
     team TEXT NOT NULL REFERENCES teams(name),
@@ -1082,6 +1084,14 @@ CREATE TABLE payment_refunds (
     status TEXT NOT NULL CHECK(status IN ('pending','requires_action','succeeded','failed','canceled')),
     updated_at BIGINT NOT NULL,
     PRIMARY KEY (payment_mode, kind, refund_id)
+);
+
+CREATE TABLE console_refund_receipts (
+    team TEXT NOT NULL REFERENCES teams(name),
+    receipt_id TEXT NOT NULL CHECK(length(receipt_id)=64),
+    request_digest TEXT NOT NULL CHECK(length(request_digest)=64),
+    result_json BLOB NOT NULL,
+    PRIMARY KEY(team,receipt_id)
 );
 
 CREATE TABLE payment_cards (

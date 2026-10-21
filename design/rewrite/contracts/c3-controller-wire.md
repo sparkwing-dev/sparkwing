@@ -110,7 +110,10 @@ W2 derives those fields from authorization and current state, compares the sourc
 ordinal with that state, and calls C1 `RecordStep` with the derived
 `AttemptIdentity`. C1 rechecks that identity in the committing transaction.
 `error` is already masked text. Optional start and finish timestamps retain
-nanosecond precision. Success is `StepRecorded{recorded:true}` after persistence.
+nanosecond precision in separate source observation columns. The store records
+its own lifecycle timestamps, so runner clock skew cannot prevent step closure
+or attempt recovery. Temporal CHECKs compare only store-clock timestamps.
+Success is `StepRecorded{recorded:true}` after persistence.
 False, absent or malformed acknowledgements fail. Exact-body retries retain the
 original source ordinal and timestamps. W2's native route/store binding and W3's
 remote executor adapter remain open.

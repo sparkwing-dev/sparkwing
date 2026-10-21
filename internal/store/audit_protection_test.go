@@ -15,7 +15,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a"}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,run_id,actor) SELECT id,ts,team,kind,subject_id,run_id,'forged' FROM audit_events`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: "payment_provider"}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditPaymentProvider}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='checkout.opened'", 2)
 	tenant := &Tenant{s: s, team: "a"}
 	rows, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
-	if err != nil || len(rows) != 1 || rows[0].RunID != "already-deleted-run" || rows[0].Actor != "" {
+	if err != nil || len(rows) != 1 || rows[0].RunID != "already-deleted-run" || rows[0].Actor != string(auditController) {
 		t.Fatalf("retained audit=%+v: %v", rows, err)
 	}
 }
@@ -118,19 +118,19 @@ func TestAuditOwnerRejectsEmails(t *testing.T) {
 	s := authorityStore(t)
 	writers := []func(*storeTx) error{
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
+			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Team: "person@example.test"}, auditTeamCreation{AccountID: "account"})
+			return tx.operator.recordAudit(tx, auditContext{Team: "person@example.test", Actor: auditActor{system: auditController}}, auditTeamCreation{AccountID: "account"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{}, auditRunDeletion{RunID: "person@example.test"})
+			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditRunDeletion{RunID: "person@example.test"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
+			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{}, auditAdmission{AccountID: "account", Via: "person@example.test"})
+			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "account", Via: "person@example.test"})
 		},
 	}
 	for _, write := range writers {

@@ -40,7 +40,7 @@ func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Author
 		if _, err = check(); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(a.Target.Team), p.Capability.Subject.ID, operation, string(grant))
+		return recordMutationAuditTx(tx, Team(a.Target.Team), auditPrincipalActor(p), operation, string(grant))
 	})
 }
 
