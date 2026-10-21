@@ -66,10 +66,14 @@ func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event 
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		envelope.Installation.ID = 0
 	}
+	queueTeam, err := o.githubInstallationTeamTx(ctx, tx, envelope.Installation.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries
 		(digest,delivery_id,received_at,event,body,state,available_at,queue_team)
-		VALUES (?,?,?,?,?,'pending',?,COALESCE((SELECT team FROM github_app_installations WHERE installation_id=?),''))
-		ON CONFLICT DO NOTHING`, digest, deliveryID, now.UnixNano(), event, body, now.UnixNano(), envelope.Installation.ID)
+		VALUES (?,?,?,?,?,'pending',?,?)
+		ON CONFLICT DO NOTHING`, digest, deliveryID, now.UnixNano(), event, body, now.UnixNano(), queueTeam)
 	if err != nil {
 		return err
 	}

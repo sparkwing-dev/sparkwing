@@ -159,7 +159,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	if request.Origin != runspec.OriginSchedule || request.Actor.ID != "pusher" {
 		t.Errorf("scheduled origin/actor = %s/%+v", request.Origin, request.Actor)
 	}
-	if request.Source.Location.RemoteURL != cronTestRepoURL || request.Git.SHA != cronTestSHA || request.Git.Ref != "main" || request.Git.App.Set {
+	if request.Source.Location.RemoteURL != cronTestRepoURL || request.Git.SHA != cronTestSHA || request.Git.Ref != "refs/heads/main" || request.Git.App.Set {
 		t.Errorf("sealed source = %+v %+v", request.Git, request.Source)
 	}
 	if request.RequestedArgs["depth"] != "deep" {
