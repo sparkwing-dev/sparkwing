@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
@@ -54,9 +55,12 @@ func TestRunSourceCredential_MintsTheApprovedRepositoriesByID(t *testing.T) {
 		githubapptest.Repo{ID: 702, FullName: "acme/plans-archive", Private: true},
 		githubapptest.Repo{ID: 703, FullName: "acme/plans", Private: true})
 	tok := f.launchedRun(olga, "run-renamed", "acme", "widgets")
-	var sc controller.SourceCredentialResponse
+	var sc struct {
+		controller.SourceCredentialResponse
+		Error json.RawMessage `json:"error"`
+	}
 	if code := f.call("POST", "/api/v1/runs/run-renamed/source-credential", "Bearer "+tok, nil, &sc); code != http.StatusOK {
-		t.Fatalf("source credential = %d", code)
+		t.Fatalf("source credential = %d: %s", code, sc.Error)
 	}
 	if !reflect.DeepEqual(sc.ExtraRepositories, []string{"acme/plans"}) {
 		t.Fatalf("approved source repositories lost: %v", sc.ExtraRepositories)

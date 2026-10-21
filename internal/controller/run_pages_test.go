@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestPersistedRunPagesUsePublicDetailsAndStableNumberBoundary(t *testing.T) {
@@ -189,7 +190,9 @@ func FuzzRunPageCursorNeverGrantsAuthorityOrDisclosesPrivateInputs(f *testing.F)
 			t.Fatalf("first page: %+v %v", page, err)
 		}
 		engineSQL(t, server.Store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
-		engineSQL(t, server.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'foreign','foreign-run',3,pipeline,status,?,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, []byte(`{invalid private data`))
+		if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'foreign','foreign-run',3,pipeline,status,?,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, []byte(`{invalid private data`)); err != nil {
+			t.Fatal(err)
+		}
 		body, err = base64.RawURLEncoding.DecodeString(page.NextCursor)
 		if err != nil {
 			t.Fatal(err)

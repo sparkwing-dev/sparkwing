@@ -173,6 +173,8 @@ schedule set, advances the generation and records the result together.
 Withdrawals and consent changes advance the generation too. A worker holding an
 older source snapshot cannot restore declarations after a newer publication or
 withdrawal. These checks live in the store and apply across workers.
+Disconnecting the installation during source preparation revokes the pending
+admission and publication. It cannot start a run or change schedules.
 
 A run an App-armed schedule starts seals its repository as `github.com/owner/name`, the same display a push run carries. Once a due instant commits its run, retrying that instant replays the original sealed revision even if the branch moves or GitHub is unavailable. Replay still checks the team's current authority. Only a team's own installations withdraw its App-armed schedules. Replacement applies only to the same installation and repository. A member replacing their own repository schedules cannot withdraw App schedules. When a repository moves to an installation another team binds, the former team's schedules stop when its own installation reports the removal, transfer or deletion.
 

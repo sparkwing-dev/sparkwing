@@ -263,7 +263,7 @@ func githubDeliveryConnectionTx(ctx context.Context, tx *storeTx, digest string)
 	}
 	_, generation, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && generation != receivedGeneration {
-		return bindingRefusal()
+		return errors.Join(bindingRefusal(), ErrGitHubAppAutomationRevoked)
 	}
 	return err
 }

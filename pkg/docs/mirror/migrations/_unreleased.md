@@ -8,6 +8,8 @@ admission refusals, are no longer returned to GitHub. Failed deliveries never re
 the team’s GitHub settings and choose Process again. Credit exhaustion creates
 a run that did not start. Use Run now after funding the team. Clients
 that post signed deliveries must treat 202 as acceptance for later processing.
+Disconnecting an installation revokes work still preparing source for admission
+or schedule publication. Those refused effects leave no receipt to replay.
 
 The store baseline moves to version 21 for the inbox, targeted effect results,
 team queue attribution and idle free-slot tracking. Recreate stores from an

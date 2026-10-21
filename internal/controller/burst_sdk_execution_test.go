@@ -62,7 +62,7 @@ func (burstSDKPipeline) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, _ 
 			return err
 		}
 		return os.WriteFile("burst-result.txt", []byte("artifact from burst SDK\n"), 0o640)
-	}).Artifacts("burst-result.txt").Cache(sw.Dir("modules", sw.KeyFromFile("source-marker.txt")))
+	}).Requires("worker").Artifacts("burst-result.txt").Cache(sw.Dir("modules", sw.KeyFromFile("source-marker.txt")))
 	return nil
 }
 

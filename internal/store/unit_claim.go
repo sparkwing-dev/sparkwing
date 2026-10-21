@@ -153,6 +153,9 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	named := demand
 	named.Kinds = nil
 	named.Target = &unit
+	if err = lockRankedUnitTx(ctx, tx, team, unit); err != nil {
+		return UnitClaim{}, err
+	}
 	if _, err := queuedUnitTx(ctx, tx, p.Capability, named, []capability.UnitKind{unit.Kind}); err != nil {
 		return UnitClaim{}, err
 	}
@@ -161,9 +164,6 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		return UnitClaim{}, err
 	}
 	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
-		return UnitClaim{}, err
-	}
-	if err = lockRankedUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
 	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {

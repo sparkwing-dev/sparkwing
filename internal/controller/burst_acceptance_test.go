@@ -152,9 +152,6 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Requires: []string{"worker"}, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
 	if proof != nil {
 		plan = proof.Plan
-		for i := range plan.Jobs {
-			plan.Jobs[i].Requires = append(plan.Jobs[i].Requires, "worker")
-		}
 	}
 	body, err := json.Marshal(plan)
 	if err != nil {

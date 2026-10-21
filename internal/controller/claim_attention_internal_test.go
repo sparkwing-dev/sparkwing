@@ -38,14 +38,14 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 			t.Fatalf("attention = %q, want %q", got, want)
 		}
 	}
-	expect("node apply needs tool:terraform; no agent in team a has it")
+	expect("node apply needs tool:terraform, sparkwing-4cpu; no agent in team a has them")
 	engineHTTPRoot(t, e, "a", "pi", []capability.Grant{capability.NodesClaim})
-	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform"}}); err != nil {
+	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform", "sparkwing-4cpu"}}); err != nil {
 		t.Fatal(err)
 	}
 	seen := now.Add(-time.Hour)
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, seen.UnixNano())
-	offline := "node apply needs tool:terraform; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
+	offline := "node apply needs tool:terraform, sparkwing-4cpu; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
 	expect(offline)
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, now.UnixNano())
 	expect("")

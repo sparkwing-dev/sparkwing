@@ -204,3 +204,35 @@ func TestGitHubUnappliedPublicationCannotAcquireLaterConsent(t *testing.T) {
 		t.Fatalf("old delivery gained later consent: %v", err)
 	}
 }
+
+func TestGitHubDeliveryLosingConnectionDuringPreparationIsRevoked(t *testing.T) {
+	s, tenant, in := appAdmissionFixture(t, true, "fixture")
+	defer s.Close()
+	ctx := t.Context()
+	op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
+	body := []byte(`{"installation":{"id":7},"after":"unbound-during-fetch"}`)
+	if err := op.EnqueueGitHubDelivery(ctx, "unbound-during-fetch", "push", body, now); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	if err != nil || delivery == nil {
+		t.Fatalf("claim: %v %v", delivery, err)
+	}
+	dc := delivery.Context(ctx)
+	publication, _, err := tenant.PrepareGitHubAppPublication(dc, 7, 701)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.UnbindGitHubAppInstallation(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	in.Request.Git.App.Value.DeliveryKey = fmt.Sprintf("%x", sha256.Sum256(body))
+	if _, err := tenant.AdmitGitHubAppRun(dc, in); !errors.Is(err, ErrGitHubAppAutomationRevoked) {
+		t.Fatalf("connection lost during source fetch was not a revoked admission: %v", err)
+	}
+	rows, requests := publicationRows(in)
+	if _, _, err := tenant.ReplaceGitHubAppSchedules(dc, publication, in.Request.Source.Location.RemoteURL, rows, requests); !errors.Is(err, ErrGitHubAppAutomationRevoked) {
+		t.Fatalf("connection lost during source fetch was not a revoked publication: %v", err)
+	}
+	rewriteSchemaCount(t, s.db, "github_app_delivery_effects", 0)
+}

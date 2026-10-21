@@ -828,7 +828,9 @@ SQL eligibility predicate. It includes readiness, current grants and bindings,
 repository access, trust, all selector terms, exclusions, placement and funding.
 There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
-ordinal. Award rechecks eligibility and reserves the unit and funding atomically.
+ordinal. Award takes the unit's ranking lock before rechecking SQL eligibility,
+then reserves the unit and funding atomically. A committed ask observed after
+that lock can still hold the award for its preferred claimant.
 Runner matching has no CPU or memory fit. Cloud size labels map to credit classes
 in one catalog. Existing AND-between-terms and OR-within-terms semantics remain.
 
@@ -847,7 +849,9 @@ result. Reprocessing returns it without repeating the effect. Empty effect keys
 are refused. Repository publication generations and consent are captured before
 source fetch, checked and advanced in the publishing transaction. Withdrawals
 and consent changes advance that generation. Installation connection generation
-fences remain in force. Failed deliveries never retry automatically.
+fences remain in force. Losing that connection during source preparation is a
+revoked admission or publication, with no receipt for the refused effect.
+Failed deliveries never retry automatically.
 
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `Client.ClaimLaunch`,
 launcher sweep frontiers and probe savepoints are removed. Bootstrap exchange
