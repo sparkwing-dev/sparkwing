@@ -106,7 +106,7 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tn.BusinessEvents(ctx, "")
+	events, err := tn.BusinessEvents(ctx, "", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCreditGranted)
+	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCreditGranted, 1000, "")
 	if err != nil || len(events) != 3 {
 		t.Fatalf("grant events = %+v, %v", events, err)
 	}

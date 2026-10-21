@@ -1275,3 +1275,8 @@ OperatorManager adds ReadOperatorTeam(ctx, team) returning OperatorTeam with
 team and display_name. It uses the existing GET /api/v1/operator/teams/{team}
 route. C2 defines the deployment authorization and identity-only projection.
 The CLI derives node placement through the launcher's shared hash owner.
+
+The operator session's team view includes at most 50 audit events, newest first
+with IDs breaking timestamp ties. `next_cursor` names the last returned event
+when older events remain. `GET /api/v1/operator/teams/{team}?cursor=<next_cursor>`
+continues strictly before it. The cursor must belong to that team's audit.

@@ -249,7 +249,7 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 			if err != nil || freeze.Frozen {
 				t.Fatalf("freeze = %+v, %v", freeze, err)
 			}
-			events, err := tenant.BusinessEvents(context.Background(), "")
+			events, err := tenant.BusinessEvents(context.Background(), "", 1000, "")
 			if err != nil {
 				t.Fatal(err)
 			}

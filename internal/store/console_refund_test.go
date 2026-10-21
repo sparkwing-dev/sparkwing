@@ -90,7 +90,7 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 			t.Fatalf("refund lost its payment reference: %+v", grant)
 		}
 	}
-	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "operator.refund_recorded")
+	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "operator.refund_recorded", 1000, "")
 	if err != nil || len(events) != 1 || events[0].Actor != "operator" || events[0].Attrs["reason"] != "support" {
 		t.Fatalf("audit = %+v: %v", events, err)
 	}

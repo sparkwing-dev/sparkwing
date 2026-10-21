@@ -20,6 +20,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	for _, q := range []string{
 		`UPDATE audit_events SET actor='forged'`,
 		`DELETE FROM audit_events`,
+		`INSERT OR REPLACE INTO audit_events(rowid,id,ts,kind) SELECT rowid,'forged',2,kind FROM audit_events`,
 	} {
 		if _, err := s.db.Exec(q); err == nil {
 			t.Fatalf("audit mutation accepted: %s", q)
@@ -38,7 +39,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='probe.once'", 2)
 	tenant := &Tenant{s: s, team: "a"}
-	rows, err := tenant.BusinessEvents(t.Context(), "secret.released")
+	rows, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
 	if err != nil || len(rows) != 1 || rows[0].RunID != "already-deleted-run" || rows[0].Actor != "" {
 		t.Fatalf("retained audit=%+v: %v", rows, err)
 	}
@@ -74,7 +75,7 @@ func TestEveryRunDeletionLeavesTombstone(t *testing.T) {
 			} else if err := s.AsOperator().deleteTenantRows(t.Context(), "a"); err != nil {
 				t.Fatal(err)
 			}
-			rows, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "run.deleted")
+			rows, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "run.deleted", 1000, "")
 			if err != nil || len(rows) != 1 || rows[0].RunID != "run" {
 				t.Fatalf("tombstone=%+v: %v", rows, err)
 			}
@@ -98,7 +99,7 @@ func TestMemberRemovalRequiresCommittedAudit(t *testing.T) {
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member"}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := tenant.BusinessEvents(t.Context(), "team.mutated")
+	rows, err := tenant.BusinessEvents(t.Context(), "team.mutated", 1000, "")
 	if err != nil || len(rows) != 1 || rows[0].Actor != "owner" || rows[0].SubjectID != "member" || rows[0].Attrs["operation"] != "membership.removed" {
 		t.Fatalf("membership audit=%+v: %v", rows, err)
 	}

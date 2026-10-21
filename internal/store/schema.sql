@@ -1619,9 +1619,9 @@ CREATE INDEX idx_cron_schedules_github_identity ON cron_schedules(team, github_i
 CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);
 
 
-CREATE INDEX idx_audit_events_team_ts ON audit_events(team, ts);
+CREATE INDEX idx_audit_events_team_ts ON audit_events(team, ts, id);
 
-CREATE INDEX idx_audit_events_kind_ts ON audit_events(team,kind, ts);
+CREATE INDEX idx_audit_events_kind_ts ON audit_events(team,kind, ts, id);
 
 CREATE INDEX idx_triggers_team_pending ON triggers(team, status) WHERE status = 'pending';
 

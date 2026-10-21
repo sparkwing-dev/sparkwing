@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +72,7 @@ type operatorTeamJSON struct {
 	Holds        []string            `json:"holds"`
 	HoldCauses   []string            `json:"hold_causes"`
 	Events       []operatorEventJSON `json:"events"`
+	NextCursor   string              `json:"next_cursor,omitempty"`
 }
 
 const operatorEventLimit = 50
@@ -90,7 +90,10 @@ func (s *Server) handleOperatorTeam(w http.ResponseWriter, r *http.Request, auth
 		writeJSON(w, http.StatusOK, controllerwire.OperatorTeam{Team: string(t.Team()), DisplayName: info.DisplayName})
 		return nil
 	}
-	out, err := operatorTeamView(r.Context(), t)
+	out, err := operatorTeamView(r.Context(), t, r.URL.Query().Get("cursor"))
+	if errors.Is(err, store.ErrInvalidInput) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
+	}
 	if err != nil {
 		return err
 	}
@@ -98,13 +101,13 @@ func (s *Server) handleOperatorTeam(w http.ResponseWriter, r *http.Request, auth
 	return nil
 }
 
-func operatorTeamView(ctx context.Context, t *store.Tenant) (operatorTeamJSON, error) {
+func operatorTeamView(ctx context.Context, t *store.Tenant, cursor string) (operatorTeamJSON, error) {
 	info, err := t.Info(ctx)
 	members, merr := t.Members(ctx)
 	credit, cerr := t.CreditState(ctx, creditsBurnWindow)
 	standing, serr := t.BillingStanding(ctx, time.Now())
 	freeze, ferr := t.CreditFreeze(ctx)
-	events, eerr := t.BusinessEvents(ctx, "")
+	events, eerr := t.BusinessEvents(ctx, "", operatorEventLimit+1, cursor)
 	if err := errors.Join(err, merr, cerr, serr, ferr, eerr); err != nil {
 		return operatorTeamJSON{}, err
 	}
@@ -118,7 +121,11 @@ func operatorTeamView(ctx context.Context, t *store.Tenant) (operatorTeamJSON, e
 			out.Owners = append(out.Owners, m.Email)
 		}
 	}
-	for _, ev := range slices.Backward(events[max(len(events)-operatorEventLimit, 0):]) {
+	if len(events) > operatorEventLimit {
+		events = events[:operatorEventLimit]
+		out.NextCursor = events[len(events)-1].ID
+	}
+	for _, ev := range events {
 		out.Events = append(out.Events, operatorEventJSON{At: ev.At.Unix(), Kind: ev.Kind, Actor: ev.Actor, Attrs: ev.Attrs})
 	}
 	return out, nil

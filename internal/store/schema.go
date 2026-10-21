@@ -12,6 +12,7 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 	}
 	var out strings.Builder
 	var previousWord string
+	var tableName string
 	var table bool
 	depth := 0
 	err := scanSQL(neutral, func(token string, kind sqlTokenKind) error {
@@ -19,6 +20,9 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 			word := strings.ToUpper(token)
 			if word == "TABLE" && previousWord == "CREATE" {
 				table = true
+			}
+			if table && previousWord == "TABLE" {
+				tableName = word
 			}
 			switch word {
 			case "PRAGMA", "AUTOINCREMENT", "SERIAL", "BYTEA":
@@ -51,6 +55,10 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 				table = false
 				if dialect == DialectSQLite {
 					token += " STRICT"
+					if tableName == "AUDIT_EVENTS" {
+						// An implicit rowid would bypass the audit ID's replacement guard.
+						token += ", WITHOUT ROWID"
+					}
 				}
 			}
 		} else if token == ";" {

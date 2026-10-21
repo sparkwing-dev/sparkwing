@@ -20,7 +20,7 @@ func TestAccountAdmissionAuditRemainsOutsideTenantQueriesProperty(t *testing.T) 
 		if err := s.DB().QueryRowContext(t.Context(), storetest.Rebind(s, `SELECT COUNT(*) FROM audit_events WHERE account=? AND kind=? AND team IS NULL`), account.Account.ID, store.BusinessEventAccountAdmitted).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("account admission audit: count=%d, %v", count, err)
 		}
-		rows, err := tenant(t, s, account.PersonalTeam).BusinessEvents(t.Context(), "")
+		rows, err := tenant(t, s, account.PersonalTeam).BusinessEvents(t.Context(), "", 1000, "")
 		if err != nil || len(rows) != 1 || rows[0].Kind != store.BusinessEventTeamCreated || rows[0].Team != account.PersonalTeam {
 			t.Fatalf("tenant audit: %+v, %v", rows, err)
 		}

@@ -128,3 +128,44 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 		})
 	}
 }
+
+func TestReusedRunIDRetainsEveryDeletionAuditSQLite(t *testing.T) {
+	assertReusedRunIDRetainsEveryDeletionAudit(t, storetest.NewSQLite(t).Open(t))
+}
+
+func TestReusedRunIDRetainsEveryDeletionAuditPostgres(t *testing.T) {
+	assertReusedRunIDRetainsEveryDeletionAudit(t, storetest.NewPostgres(t).Open(t))
+}
+
+func assertReusedRunIDRetainsEveryDeletionAudit(t *testing.T, s *store.Store) {
+	t.Helper()
+	owner := signIn(t, s, "owner", "owner@example.test")
+	tn := tenant(t, s, owner.PersonalTeam)
+	actor := membershipActor(t, s, owner.Account.ID, tn.Team())
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := capability.LookupRoute("DELETE", "/api/v1/runs/{run}")
+	for range 2 {
+		_, err := s.DB().Exec(storetest.Rebind(s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'reused',1,'p','success',?,'request',1,'gh:1','host','execute',?,'owner',1,2,'r30',30)`), tn.Team(), []byte(`{"version":1}`), []byte(`[]`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := capability.Authorize(t.Context(), s.AsOperator(), route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(tn.Team()), RunID: "reused"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if err := tn.DeleteAuthorizedRun(t.Context(), a); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, kind := range []string{"run.deletion_authorized", "run.deleted"} {
+		events, err := tn.BusinessEvents(t.Context(), kind, 10, "")
+		if err != nil || len(events) != 2 {
+			t.Errorf("%s audit=%+v: %v", kind, events, err)
+		}
+	}
+}

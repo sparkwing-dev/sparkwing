@@ -53,7 +53,7 @@ func TestOperatorCreateTeamHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated)
+	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
 	if err != nil || len(events) != 1 || events[0].Actor != "bootstrap:admin" || events[0].Account != created.AccountID {
 		t.Fatalf("operator audit: %+v %v", events, err)
 	}
@@ -80,7 +80,7 @@ func TestOperatorCreateTeamCloudHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated)
+	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
 	if err != nil || len(events) != 1 || events[0].Actor != "cloud-support" {
 		t.Fatalf("Cloud operator audit: %+v %v", events, err)
 	}
@@ -179,7 +179,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated)
+			events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
 			return err == nil && len(events) == 1 && events[0].Actor == "bootstrap:admin"
 		}
 		var count int
@@ -206,7 +206,7 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated)
+	events, err := tenant.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 1000, "")
 	if err != nil || len(events) != 1 || events[0].Actor != "member" {
 		t.Fatalf("console audit: %+v %v", events, err)
 	}

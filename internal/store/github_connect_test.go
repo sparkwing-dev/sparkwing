@@ -299,7 +299,7 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 		t.Fatalf("reclaim notification: %+v", got)
 	}
 	for _, team := range []*Tenant{old, tenant} {
-		events, err := team.BusinessEvents(t.Context(), "github.installation_reclaimed")
+		events, err := team.BusinessEvents(t.Context(), "github.installation_reclaimed", 1000, "")
 		if err != nil || len(events) != 1 {
 			t.Fatalf("team %s audit: %+v %v", team.team, events, err)
 		}

@@ -79,7 +79,7 @@ func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T
 	if err != nil || row == nil || row.Value != "sealed" || row.Pipeline != "p" {
 		t.Fatalf("read: %+v %v", row, err)
 	}
-	events, err := tenant.BusinessEvents(t.Context(), "secret.released")
+	events, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -79,7 +79,7 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed")
+	events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
 	if err != nil || len(events) != 2 {
 		t.Fatalf("setting audits: %+v %v", events, err)
 	}
@@ -115,7 +115,7 @@ func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 		tenant := &Tenant{s: s, team: "a"}
 		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)})
 		current, readErr := tenant.TeamSettings(t.Context())
-		events, auditErr := tenant.BusinessEvents(t.Context(), "team.settings_changed")
+		events, auditErr := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
 		return err != nil && readErr == nil && current.MembersCanAddMachines && auditErr == nil && len(events) == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {

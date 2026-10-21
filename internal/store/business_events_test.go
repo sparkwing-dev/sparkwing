@@ -2,6 +2,9 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -55,7 +58,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}
 
 	got := map[string][]store.BusinessEvent{}
-	events, err := tn.BusinessEvents(ctx, "")
+	events, err := tn.BusinessEvents(ctx, "", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +163,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		}
 		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunTransition{RunID: admitted.RunID, Actor: actor, Cause: store.RunFinish}}
 	}
-	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded)
+	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,5 +177,58 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 	run, err = tenant.ReadRun(ctx, runID)
 	if err != nil || run.State != store.RunSuccess {
 		t.Fatalf("first-success run = %+v, %v", run, err)
+	}
+}
+
+func TestBusinessEventsPageSQLite(t *testing.T) {
+	assertBusinessEventsPage(t, storetest.NewSQLite(t).Open(t))
+}
+
+func TestBusinessEventsPagePostgres(t *testing.T) {
+	assertBusinessEventsPage(t, storetest.NewPostgres(t).Open(t))
+}
+
+func assertBusinessEventsPage(t *testing.T, st *store.Store) {
+	t.Helper()
+	tn := tenant(t, st, store.DefaultTeam)
+	for i := range 9 {
+		_, err := st.DB().Exec(storetest.Rebind(st, `INSERT INTO audit_events(id,ts,team,kind) VALUES (?,?,?,'page')`), fmt.Sprintf("page-%d", i), i/3, tn.Team())
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.DB().Exec(`INSERT INTO audit_events(id,ts,team,kind) VALUES ('foreign',0,'other','page'),('other-kind',0,'default','other')`); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	cursor := ""
+	for {
+		events, err := tn.BusinessEvents(t.Context(), "page", 2, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) > 2 {
+			t.Fatalf("unbounded page: %d", len(events))
+		}
+		if len(events) == 0 {
+			break
+		}
+		for _, event := range events {
+			ids = append(ids, event.ID)
+		}
+		cursor = events[len(events)-1].ID
+	}
+	if want := []string{"page-8", "page-7", "page-6", "page-5", "page-4", "page-3", "page-2", "page-1", "page-0"}; !slices.Equal(ids, want) {
+		t.Fatalf("paged IDs=%v, want %v", ids, want)
+	}
+	for _, cursor := range []string{"foreign", "other-kind", "missing"} {
+		if _, err := tn.BusinessEvents(t.Context(), "page", 2, cursor); !errors.Is(err, store.ErrInvalidInput) {
+			t.Errorf("cursor %q: %v", cursor, err)
+		}
+	}
+	for _, limit := range []int{-1, 0, 1001} {
+		if _, err := tn.BusinessEvents(t.Context(), "page", limit, ""); !errors.Is(err, store.ErrInvalidInput) {
+			t.Errorf("limit %d: %v", limit, err)
+		}
 	}
 }

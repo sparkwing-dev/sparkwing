@@ -3,6 +3,8 @@ package controller
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -11,8 +13,55 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
+
+func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
+	raw, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "operator"}, tenant.Team(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := e.Server.WithOperatorAccounts([]string{"operator"})
+	h := s.Handler()
+	for i := range 105 {
+		engineSQL(t, e.Store, `INSERT INTO audit_events(id,ts,team,kind,actor) VALUES (?,?,?,'page',?)`, fmt.Sprintf("page-%03d", i), i/3, tenant.Team(), fmt.Sprint(i))
+	}
+	var cursor string
+	for page, want := range []int{50, 50, 5} {
+		r := httptest.NewRequest("GET", "https://controller.test/api/v1/operator/teams/a?cursor="+url.QueryEscape(cursor), nil)
+		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		var view operatorTeamJSON
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &view) != nil || len(view.Events) != want {
+			t.Fatalf("page %d: status=%d body=%s", page, w.Code, w.Body)
+		}
+		if view.Events[0].Actor != fmt.Sprint(104-page*50) || view.Events[0].Kind != "page" {
+			t.Fatalf("unexpected first event: %+v", view.Events[0])
+		}
+		cursor = view.NextCursor
+		if (cursor == "") != (page == 2) {
+			t.Fatalf("page %d cursor=%q", page, cursor)
+		}
+	}
+	r := httptest.NewRequest("GET", "https://controller.test/api/v1/operator/teams/a?cursor=missing", nil)
+	r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid cursor: %d %s", w.Code, w.Body)
+	}
+}
 
 func TestOperatorTeamReadRequiresCurrentDeploymentGrantProperty(t *testing.T) {
 	clock := time.Now().UTC()

@@ -14,8 +14,15 @@ Secret releases, source credential releases and privileged mutations append to
 `audit_events` in the transaction that authorizes them. Audit rows retain plain
 team and run identifiers because deleting a run, team or account must preserve
 the facts. Database triggers reject updates and deletion, including PostgreSQL
-TRUNCATE. A run deletion appends a `run.deleted` tombstone. Editors may delete
-only runs they submitted. Owners may delete any run in their team.
+TRUNCATE. SQLite audit rows use STRICT, WITHOUT ROWID so replacement cannot
+bypass their guarded primary key. Every run deletion appends a `run.deleted`
+tombstone with a fresh identity, including when a later run reuses the ID.
+Editors may delete only runs they submitted. Owners may delete any run in their team.
+
+`Tenant.BusinessEvents` reads bounded pages in descending timestamp and ID order.
+Its cursor is the last event ID from the preceding page and stays within the
+selected team and kind. The operator team view returns 50 events and a
+`next_cursor` when older events remain. Passing it as `cursor` continues the view.
 
 
 Record writes, reads and memo copies call `blob.RecordNamespace` and

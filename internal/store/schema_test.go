@@ -3,6 +3,7 @@ package store_test
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -14,6 +15,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
+
+func TestSchemaDocumentationNamesBaseline(t *testing.T) {
+	for path, claim := range map[string]string{
+		"../../CHANGELOG.md":                   "schema baseline advances to version %d",
+		"../../docs/migrations/_unreleased.md": "schema baseline moves to version %d",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), fmt.Sprintf(claim, store.ExpectedSchemaVersion())) {
+			t.Errorf("%s omits baseline %d", path, store.ExpectedSchemaVersion())
+		}
+	}
+}
 
 // safety: neutral-schema translation must preserve every table, column, key,
 // index and seed row across SQLite and PostgreSQL.

@@ -33,10 +33,9 @@ func (op *Operator) installAuditProtection(ctx context.Context, tx *storeTx) err
 }
 
 func (op *Operator) installRunTombstones(ctx context.Context, tx *storeTx) error {
-	identity := "'run-deleted:' || length(OLD.team) || ':' || OLD.team || ':' || OLD.id"
 	if tx.dialect == DialectPostgres {
 		_, err := tx.ExecContext(ctx, `CREATE FUNCTION record_run_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
-            INSERT INTO audit_events(id,ts,team,kind,subject_id,run_id) VALUES (`+identity+`,(extract(epoch FROM clock_timestamp())*1000000000)::bigint,OLD.team,'run.deleted',OLD.id,OLD.id) ON CONFLICT DO NOTHING;
+            INSERT INTO audit_events(id,ts,team,kind,subject_id,run_id) VALUES ('event:' || gen_random_uuid()::text,(extract(epoch FROM clock_timestamp())*1000000000)::bigint,OLD.team,'run.deleted',OLD.id,OLD.id);
             RETURN OLD; END $$`)
 		if err != nil {
 			return err
@@ -45,6 +44,6 @@ func (op *Operator) installRunTombstones(ctx context.Context, tx *storeTx) error
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `CREATE TRIGGER runs_tombstone AFTER DELETE ON runs BEGIN
-        INSERT INTO audit_events(id,ts,team,kind,subject_id,run_id) VALUES (`+identity+`,CAST(unixepoch('subsec')*1000000000 AS INTEGER),OLD.team,'run.deleted',OLD.id,OLD.id) ON CONFLICT DO NOTHING; END`)
+        INSERT INTO audit_events(id,ts,team,kind,subject_id,run_id) VALUES ('event:' || lower(hex(randomblob(16))),CAST(unixepoch('subsec')*1000000000 AS INTEGER),OLD.team,'run.deleted',OLD.id,OLD.id); END`)
 	return err
 }

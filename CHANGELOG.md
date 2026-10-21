@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **store (Breaking):** The schema baseline advances to version 16, with SQLite STRICT storage and stronger tenant, account, attempt and row constraints. Secret and source credential releases and privileged mutations share an append-only audit log that survives run, team and account deletion. Editors may delete only runs they submitted. See [migration](docs/migrations/_unreleased.md#run-deletion-and-audit-retention).
+- **store (Breaking):** The schema baseline advances to version 17, with SQLite STRICT storage and stronger tenant, account, attempt and row constraints. Secret and source credential releases and privileged mutations share an append-only audit log that survives run, team and account deletion. Editors may delete only runs they submitted. See [migration](docs/migrations/_unreleased.md#run-deletion-and-audit-retention).
 
 - **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
 

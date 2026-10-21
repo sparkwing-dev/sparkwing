@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,9 +37,9 @@ const maxBusinessEventAttrsBytes = 4096
 //
 // SubjectID names the event within its team and kind, and a second event
 // with the same team, kind and subject is dropped for idempotent facts. Release
-// and mutation kinds retain every occurrence. That makes a replayed
-// webhook idempotent, and an empty SubjectID a once-per-team fact, the way
-// [BusinessEventFirstRunSucceeded] is recorded.
+// and mutation kinds, including run.deletion_authorized, retain every occurrence.
+// A replayed webhook is idempotent. An empty SubjectID is a once-per-team fact,
+// the way [BusinessEventFirstRunSucceeded] is recorded.
 type BusinessEvent struct {
 	ID        string
 	At        time.Time
@@ -53,7 +55,8 @@ type BusinessEvent struct {
 // RecordBusinessEvent writes ev inside tx, the transaction making the
 // change it describes. A zero At is now, and Attrs is stored as JSON of at
 // most 4 KiB. An event whose team, kind and subject are already recorded
-// writes nothing.
+// writes nothing, except team.mutated, secret.released, git_credential.released
+// and run.deletion_authorized, which append every occurrence.
 func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	if strings.TrimSpace(ev.Kind) == "" {
 		return fmt.Errorf("%w: a business event names its kind", ErrInvalidInput)
@@ -74,7 +77,7 @@ func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	}
 	var id string
 	switch ev.Kind {
-	case "team.mutated", "secret.released", "git_credential.released":
+	case "team.mutated", "secret.released", "git_credential.released", "run.deletion_authorized":
 		var err error
 		id, err = newCreditID("event")
 		if err != nil {
@@ -101,15 +104,34 @@ func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	return err
 }
 
-// BusinessEvents returns t's events of kind, or of every kind when kind is
-// empty, oldest first.
-func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error) {
+// BusinessEvents returns at most limit events, newest first, with IDs breaking
+// timestamp ties. An empty kind selects every kind. The limit is 1 to 1000.
+// A nonempty beforeID resumes strictly before that event in the same selection.
+func (t *Tenant) BusinessEvents(ctx context.Context, kind string, limit int, beforeID string) (_ []BusinessEvent, err error) {
+	if limit < 1 || limit > 1000 {
+		return nil, fmt.Errorf("%w: event limit is 1 to 1000", ErrInvalidInput)
+	}
 	query := `SELECT id, ts, team, account, kind, subject_id, actor, attrs, run_id FROM audit_events WHERE team = ?`
 	args := []any{string(t.team)}
 	if kind != "" {
 		query, args = query+` AND kind = ?`, append(args, kind)
 	}
-	rows, err := t.s.query(ctx, query+` ORDER BY ts, id`, args...)
+	if beforeID != "" {
+		cursorQuery := `SELECT ts FROM audit_events WHERE team = ? AND id = ?`
+		cursorArgs := []any{string(t.team), beforeID}
+		if kind != "" {
+			cursorQuery, cursorArgs = cursorQuery+` AND kind = ?`, append(cursorArgs, kind)
+		}
+		var ts int64
+		if err := t.s.queryRow(ctx, cursorQuery, cursorArgs...).Scan(&ts); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("%w: event cursor does not match this selection", ErrInvalidInput)
+			}
+			return nil, err
+		}
+		query, args = query+` AND (ts, id) < (?, ?)`, append(args, ts, beforeID)
+	}
+	rows, err := t.s.query(ctx, query+` ORDER BY ts DESC, id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}

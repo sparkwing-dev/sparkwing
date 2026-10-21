@@ -679,8 +679,9 @@ retain their ancestry check. Every effect rolls back after a failed write.
 
 `SchemaTables` is the single table inventory in `schema.go`. Runtime purge,
 tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
-`capabilities` and `sessions` may carry a nullable team. Their bound rows leave
-with that team. Purge removes quota reservations before aggregates and removes
+`capabilities` and `sessions` may carry a nullable team. Audit rows are retained
+after team deletion. Bound capabilities and sessions leave with the team.
+Purge removes quota reservations before aggregates and removes
 runs after their operational rows and restrictive pins. Generated SQLite checks
 compare all surviving rows across repeated purges with adversarial tenant keys.
 They exercise the purge primitive, not deletion-request authorization or billing.
