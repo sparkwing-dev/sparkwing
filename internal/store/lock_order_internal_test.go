@@ -6,9 +6,39 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestConcurrencyFirstArrivalLocksEntryBeforeHolders(t *testing.T) {
+	s, recorder := newRecordingStore(t)
+	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO team_counters(team) VALUES ('a')`)
+	s, _ = unitClaimFixtureStore(t, s)
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',1,?)`, s.now().Add(time.Hour).UnixNano())
+
+	recorder.reset()
+	result, err := (&Tenant{s: s, team: "a"}).AcquireConcurrencySlot(t.Context(), acquireSlotRequest{Key: "new", HolderID: "run/job", RunID: "run", NodeID: "job"})
+	if err != nil || result.Kind != AcquireGranted {
+		t.Fatalf("first arrival = %+v, %v", result, err)
+	}
+	created, locked, holders := -1, -1, -1
+	for i, statement := range recorder.snapshot() {
+		switch {
+		case strings.HasPrefix(statement, "INSERT INTO concurrency_entries"):
+			created = i
+		case created >= 0 && locked < 0 && strings.HasPrefix(statement, "SELECT capacity FROM concurrency_entries"):
+			locked = i
+		case holders < 0 && strings.HasPrefix(statement, "SELECT ") && strings.Contains(statement, "FROM concurrency_holders"):
+			holders = i
+		}
+	}
+	if created < 0 || locked <= created || holders <= locked {
+		t.Fatalf("first-arrival lock order: created=%d locked=%d holders=%d", created, locked, holders)
+	}
+}
 
 func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 	s, recorder := newRecordingStore(t)

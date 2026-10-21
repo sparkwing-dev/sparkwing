@@ -19,9 +19,8 @@ import (
 )
 
 func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
-	now := time.Now()
 	property := func(selection uint8, value string) bool {
-		e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, teststore.WithClock(func() time.Time { return now }))
+		e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 		field := []string{"pipelines", "sources", "allow_repos", "repos", "holder_id", "lease_secs", "capacity"}[selection%7]
 		body, err := json.Marshal(map[string]any{"runner_version": "v1", "kinds": []string{"node"}, "available_cores": 1, field: value})
 		if err != nil {

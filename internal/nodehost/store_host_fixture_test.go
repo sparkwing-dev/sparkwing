@@ -97,9 +97,9 @@ type storeHostFixture struct {
 	Host        OwnerHost
 }
 
-func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.Option) *storeHostFixture {
+func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc) *storeHostFixture {
 	t.Helper()
-	return newStoreHostFixtureOn(t, openStore(t, opts...), plan, runspec.Options{})
+	return newStoreHostFixtureOn(t, openStore(t), plan, runspec.Options{})
 }
 
 func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, options runspec.Options) *storeHostFixture {

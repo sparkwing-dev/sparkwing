@@ -42,15 +42,14 @@ func secretClaim(t *testing.T, f *browserFixture, team store.Team, pipeline stri
 	if err := teststore.SeedNode(f.st, t.Context(), store.Node{RunID: id, NodeID: "job", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `UPDATE nodes SET ready_at=1,queue_started_at=1 WHERE team=? AND run_id=? AND node_id='job'`, team, id); err != nil {
+	if err := teststore.SeedNodeReady(f.st, t.Context(), id, "job"); err != nil {
 		t.Fatal(err)
 	}
 	return "Bearer " + controller.LauncherFixtureClaim(t, f.st, id, "job")
 }
 
 func TestSecrets_EncryptionRoundTrip(t *testing.T) {
-	now := time.Now().Add(-time.Minute)
-	f := newBrowserFixture(t, nil, teststore.WithClock(func() time.Time { return now }))
+	f := newBrowserFixture(t, nil)
 	for _, masked := range []bool{false, true} {
 		name := "VARIABLE"
 		if masked {
@@ -88,8 +87,7 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 
 func checkSecretBindingMutation(t *testing.T, field, private string) {
 	t.Helper()
-	now := time.Now()
-	f := newBrowserFixture(t, nil, teststore.WithClock(func() time.Time { return now }))
+	f := newBrowserFixture(t, nil)
 	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": private, "pipeline": "ci"}); code != http.StatusNoContent {
 		t.Fatalf("write: HTTP %d %s", code, body)
 	}

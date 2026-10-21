@@ -4231,7 +4231,10 @@ only the work binding and authenticated job award. Owners propose releases throu
 ready transitions and `ReleaseEvaluation`. The store commits plan admission with
 permission to release. Each complete group set grants atomically with one arrival.
 A wait holds none of that set, and a policy refusal settles through the existing
-node and run verdict owner. A job never reacquires its parent plan.
+node and run verdict owner. A job never reacquires its parent plan. The ledger
+creates and locks each group entry before locking its holders. A first arrival
+that found no entry follows the same order after inserting or losing an insert
+race. Lease bounds use the transaction clock after that lock is held.
 
 Schema baseline 17 adds `admission_work`. Run/job identity and arrival survive
 owner handoff. Its generation and holder bind a start permit to the actual award.

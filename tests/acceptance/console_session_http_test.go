@@ -12,12 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestConsoleSessionHTTPDirectAccount(t *testing.T) {
-	now := time.Now().UTC()
-	f := newSessionFlow(t, teststore.WithClock(func() time.Time { return now }))
+	f := newSessionFlow(t)
 	f.server.WithOperatorAccounts([]string{"member"}).WithDashboard(controller.Dashboard{})
 	h := f.server.Handler()
 	for _, header := range []bool{false, true} {

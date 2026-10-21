@@ -109,11 +109,11 @@ func newTenancyFixture(t *testing.T, open func(*testing.T, ...store.Option) *sto
 	t.Helper()
 	ctx := context.Background()
 	var srv *controller.Server
-	now := time.Now().UTC()
-	st := open(t, teststore.WithClock(func() time.Time { return now }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	st := open(t, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, deploymenttest.Team(t), nil).WithSecretsCipher(testCipher(t))
 		return srv.StorePolicies(), nil
 	}))
+	now := time.Now().UTC()
 	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
 		t.Fatal(err)
 	}

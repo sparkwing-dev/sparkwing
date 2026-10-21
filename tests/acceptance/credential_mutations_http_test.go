@@ -34,13 +34,13 @@ func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 	return s, cipher
 }
 
-func credentialMutationServer(t *testing.T, path string, build func(*store.Store, *secrets.Cipher) *controller.Server, opts ...store.Option) (*store.Store, *secrets.Cipher, *controller.Server) {
+func credentialMutationServer(t *testing.T, path string, build func(*store.Store, *secrets.Cipher) *controller.Server) (*store.Store, *secrets.Cipher, *controller.Server) {
 	t.Helper()
 	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, server, err := openControllerFixture(path, func(s *store.Store) *controller.Server { return build(s, cipher) }, opts...)
+	s, server, err := openControllerFixture(path, func(s *store.Store) *controller.Server { return build(s, cipher) })
 	if err != nil {
 		t.Fatal(err)
 	}

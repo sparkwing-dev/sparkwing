@@ -103,13 +103,11 @@ func TestCredentialMemberHTTPMembershipAndSessionLifecycle(t *testing.T) {
 }
 
 func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
-	now := time.Now()
-	clock := teststore.WithClock(func() time.Time { return now })
 	property := func(mutation uint8, header []byte, trigger bool) bool {
-		e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, clock)
+		e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 		body := `{"runner_version":"v1","kinds":["node"],"available_cores":1}`
 		if trigger {
-			e, _ = engineRuntimeStore(t, clock)
+			e, _ = engineRuntimeStore(t)
 			e.claimProfiles = engineProfileFake{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root = engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.TriggersClaim})

@@ -7,7 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storeclock"
 )
 
-// WithClock opens a SQLite fixture on clock instead of wall time.
+// WithClock replaces a SQLite fixture's default advancing clock.
 // PostgreSQL keeps database time.
 func WithClock(clock func() time.Time) store.Option {
 	return storeclock.Option(clock).(store.Option)

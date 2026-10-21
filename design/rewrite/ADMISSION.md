@@ -15,7 +15,8 @@ changes authorization fences and start permits, never reservation identity or
 arrival. Queue timeouts apply only while waiting; replaying a retained grant cannot
 time out. An expired reservation starts a new arrival. Supersession cancels the current
 job award even when the reservation predates its claim. The retained transactional
-ledger and policy engine live in `internal/store/concurrency.go`.
+ledger and policy engine live in `internal/store/concurrency.go`. Every acquisition
+creates and locks the group entry before locking holders, including first arrivals.
 
 Every executable job needs an award-bound permit, including jobs without groups.
 The common start transition requires it, and process delegation reads its live

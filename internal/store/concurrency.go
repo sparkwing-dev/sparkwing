@@ -229,21 +229,8 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		return AcquireSlotResponse{}, err
 	}
 
-	// safety: read the clock only after the tx holds the write lock; a
-	// pre-BEGIN timestamp goes stale while waiting and revives expired
-	// holders whose budget was already reassigned.
 	now := tx.now(ctx)
-	if !deadline.IsZero() {
-		req.Lease = slotLease(now, deadline, req.Lease)
-	}
-	if req.Lease <= 0 {
-		return AcquireSlotResponse{}, holderRefusal()
-	}
 	nowNS := now.UnixNano()
-
-	if _, err := reapStaleConcurrencyHoldersTx(ctx, tx, t.team, req.Key); err != nil {
-		return AcquireSlotResponse{}, err
-	}
 
 	driftNote := ""
 	prevCap := 0
@@ -302,6 +289,20 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 				return AcquireSlotResponse{}, err
 			}
 		}
+	}
+
+	// A missing entry locks nothing. Create and lock it before locking holders,
+	// and read fresh time after waiting so expired capacity cannot be revived.
+	now = tx.now(ctx)
+	nowNS = now.UnixNano()
+	if !deadline.IsZero() {
+		req.Lease = slotLease(now, deadline, req.Lease)
+	}
+	if req.Lease <= 0 {
+		return AcquireSlotResponse{}, holderRefusal()
+	}
+	if _, err := reapStaleConcurrencyHoldersTx(ctx, tx, t.team, req.Key); err != nil {
+		return AcquireSlotResponse{}, err
 	}
 
 	var existingLeaseNS int64
