@@ -35,7 +35,7 @@ func (o *Operator) ReadAuthentication(ctx context.Context, lookup capability.Cre
 	}
 	out := capability.AuthenticationSnapshot{}
 	for _, node := range chain {
-		out.Authorities = append(out.Authorities, capability.AuthorityState{Principal: node.principal, MembershipValid: true})
+		out.Authorities = append(out.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
 	out.Binding, err = authenticationBindingTx(ctx, tx, chain[0].principal.Capability)
 	if err != nil {
@@ -61,8 +61,10 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 	}
 	defer rollbackOrLog(tx)
 	var team string
-	// safety: serialize root creation across controller processes.
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+tx.forUpdate(), DefaultTeam, TeamDeletionPending).Scan(&team); err != nil {
+	if err := (&Tenant{s: s, team: DefaultTeam}).lockTeamTx(ctx, tx); err != nil {
+		return capability.AuthenticationSnapshot{}, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`, DefaultTeam, TeamDeletionPending).Scan(&team); err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability}
@@ -89,7 +91,7 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 		return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "invalid local peer authority")
 	}
 	p.Class = capability.CredentialPeer
-	out := capability.AuthenticationSnapshot{Now: tx.now(), Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}}
+	out := capability.AuthenticationSnapshot{Now: tx.now(), Authorities: []capability.AuthorityState{{Principal: p}}}
 	return out, tx.Commit()
 }
 

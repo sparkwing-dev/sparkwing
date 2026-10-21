@@ -205,7 +205,7 @@ func (a *ProcessAuthorities) ReadAuthentication(ctx context.Context, lookup capa
 	if a.live[lookup.Digest] != entry {
 		return capability.AuthenticationSnapshot{}, processUnauthenticated()
 	}
-	leaf := capability.AuthorityState{Principal: principal, MembershipValid: snapshot.Authorities[0].MembershipValid}
+	leaf := capability.AuthorityState{Principal: principal}
 	snapshot.Authorities = append([]capability.AuthorityState{leaf}, snapshot.Authorities...)
 	snapshot.Binding.ProcessAlive = true
 	return snapshot, context.Cause(ctx)

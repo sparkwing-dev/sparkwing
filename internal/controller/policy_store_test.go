@@ -21,6 +21,41 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
+func TestLocalServerAcceptsBearerWithSessionAncestry(t *testing.T) {
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := credentialSessionServerWith(t, func(s *Server) { s.WithSecretsCipher(cipher) })
+	raw, _, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(raw))
+	ref := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+	issued, err := s.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		Kind: capability.ProvisionMember, Authority: &ref, Team: "a",
+		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(s.store, nil).Handler()
+	engineClaimHTTP(t, h, issued.Raw, "GET", "/api/v1/runs/run/jobs", "", http.StatusOK)
+	r := httptest.NewRequest("GET", "/api/v1/runs/run/jobs", nil)
+	r.Header.Set("Authorization", "Session "+raw)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("local session presentation: %d %s", w.Code, w.Body)
+	}
+	if err := s.store.AsOperator().DeleteSession(raw); err != nil {
+		t.Fatal(err)
+	}
+	engineClaimHTTP(t, h, issued.Raw, "GET", "/api/v1/runs/run/jobs", "", http.StatusUnauthorized)
+}
+
 func TestServerPolicyUsesCurrentPersistedAuthority(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	s := e.Store

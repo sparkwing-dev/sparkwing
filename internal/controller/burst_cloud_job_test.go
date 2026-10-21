@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,9 +29,19 @@ import (
 
 func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof) {
 	t.Helper()
-	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})
+	const identity = "system:serviceaccount:sparkwing:sparkwing-launcher"
+	image := "runner@sha256:" + strings.Repeat("a", 64)
+	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: "cloud", Launcher: identity, RunnerImage: image, DockerImage: image})
+	objects := []k8sruntime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}}
+	for i := range policies {
+		objects = append(objects, policies[i], bindings[i])
+	}
+	kube := fake.NewClientset(objects...)
 	kube.PrependReactor("create", "*", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
 		switch object := action.(ktesting.CreateAction).GetObject().(type) {
+		case *authenticationv1.SelfSubjectReview:
+			object.Status.UserInfo.Username = identity
+			return true, object, nil
 		case *batchv1.Job:
 			object.UID = "burst-job-uid"
 		case *corev1.Secret:
@@ -65,7 +76,6 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 			t.Fatal(err)
 		}
 		observed := &burstLauncherWire{Controller: wire}
-		image := "runner@sha256:" + strings.Repeat("a", 64)
 		runtime, err = launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: options.URL, CPUCeiling: 64, MemoryCeiling: 64 << 30}, Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 64}, HTTP: options.HTTP, Bearer: options.Bearer, NewController: func(client.EngineOptions) (launcher.LauncherController, error) { return observed, nil }})
 		if err != nil {
 			t.Fatal(err)

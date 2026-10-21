@@ -12,6 +12,7 @@ bash bin/gen-sdk-docs.sh
 bash bin/gen-api-docs.sh
 bash bin/regen-api-snapshot.sh
 GOWORK=off go test ./pkg/wingwire -run TestWireShapes -update >/dev/null
+GOWORK=off go test ./charts -run '^TestLauncherAdmissionTemplateIsGenerated$' -update >/dev/null
 
 # helm packs source file mtimes into the tarball, so re-vendoring a
 # chart that already matches its source rewrites bytes that carry no change.
@@ -33,4 +34,4 @@ fi
 
 bash bin/sync-docs.sh >/dev/null
 
-echo "regen-all: cli/config/sdk/api docs, protocol schemas, api/openapi.yaml, .apidiff, wingwire shapes, chart vendor, pkg/docs mirror"
+echo "regen-all: cli/config/sdk/api docs, protocol schemas, api/openapi.yaml, .apidiff, wingwire shapes, launcher admission, chart vendor, pkg/docs mirror"

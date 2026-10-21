@@ -6,25 +6,26 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// LauncherSyncReader rechecks launcher ancestry while isolating damaged persisted awards.
+// LauncherSyncReader rechecks launcher ancestry and resolves current awards.
 type LauncherSyncReader interface {
-	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error)
+	ReadLauncherSync(context.Context, capability.AuthorityRef, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 }
 
 var _ LauncherSyncReader = storeLauncherSync{}
 
 func (s *EngineController) syncLauncher(ctx context.Context, a capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-	if err := validateLauncherObservations(body.Observed); err != nil {
+	if _, err := validateLauncherSync(body); err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
 	reader := s.Launcher
 	if reader == nil {
 		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
 	}
-	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, slices.Clone(body.Observed), slices.Clone(body.Preparing))
+	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, body)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
@@ -32,24 +33,24 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	for i := range response.Awards {
 		response.Awards[i].Capability = ""
 	}
-	response.Remove = append([]controllerwire.LauncherJobRef{}, response.Remove...)
-	response.RemoveReservations = append([]controllerwire.LauncherReservationRef{}, response.RemoveReservations...)
+	response.Retired = append([]capability.LeaseRef{}, response.Retired...)
 	return response, nil
 }
 
 type storeLauncherSync struct {
 	store interface {
-		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error)
+		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []controllerwire.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error)
 	}
 }
 
-func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, preparing []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
-	if err := validateLauncherObservations(observed); err != nil {
+func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	observed, err := validateLauncherSync(body)
+	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
 	var reservations []capability.LeaseRef
 	for _, observation := range observed {
-		if observation.ReservationID != "" {
+		if observation.Reservation {
 			reservations = append(reservations, observation.Award)
 		}
 	}
@@ -59,7 +60,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			rejected = append(rejected, observation.Award)
 		}
 	}
-	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observed, reservations, preparing, rejected)
+	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observed, reservations, body.Preparing, rejected, body.Activations)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
@@ -67,18 +68,14 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	for _, award := range awards {
 		current[award.Fence] = award
 	}
-	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}, RemoveReservations: []controllerwire.LauncherReservationRef{}}
+	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Retired: []capability.LeaseRef{}}
 	for _, preparation := range prepared {
 		response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: preparation.Fence, ExpiresAt: preparation.ExpiresAt})
 	}
 	for _, observation := range observed {
 		award, found := current[observation.Award]
 		if found && award.Gone {
-			if observation.ReservationID != "" {
-				response.RemoveReservations = append(response.RemoveReservations, controllerwire.LauncherReservationRef{Award: observation.Award, NodeUID: observation.NodeUID, ReservationID: observation.ReservationID})
-			} else {
-				response.Remove = append(response.Remove, observation.Job)
-			}
+			response.Retired = append(response.Retired, observation.Award)
 			continue
 		}
 		if !found || award.Failure != nil {
@@ -93,26 +90,46 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			unit.Execution = nil
 		}
 		unit.CloudResources = award.CloudResources
+		if err := runners.ValidateAward(*unit, capability.DeliveryBootstrap); err != nil {
+			response.Deferred = append(response.Deferred, observation.Award)
+			continue
+		}
 		response.Awards = append(response.Awards, *unit)
 	}
 	return response, nil
 }
 
-func validateLauncherObservations(observed []controllerwire.LauncherObservation) error {
-	jobs := map[[2]string]bool{}
+func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]controllerwire.LauncherObservation, error) {
+	observed := slices.Clone(body.Observed)
+	for _, demand := range body.Capacity {
+		observed = append(observed, controllerwire.LauncherObservation{Award: demand.Award, Reservation: true})
+	}
+	activated := map[capability.LeaseRef]bool{}
+	for _, activation := range body.Activations {
+		if activated[activation.Award] {
+			return nil, invalidEngineBody("launcher activations must name unique awards")
+		}
+		activated[activation.Award] = true
+		if err := activation.Validate(); err != nil {
+			return nil, err
+		}
+		i := slices.IndexFunc(body.Observed, func(o controllerwire.LauncherObservation) bool {
+			return o.Award == activation.Award && !o.Reservation && !o.Rejected
+		})
+		if i < 0 {
+			return nil, invalidEngineBody("launcher activation requires an execution Job observation")
+		}
+	}
+
 	units := map[capability.LeaseRef]bool{}
 	for _, observation := range observed {
 		if err := observation.Validate(); err != nil {
-			return err
+			return nil, err
 		}
-		job := [2]string{observation.Job.Namespace, observation.Job.Name}
-		if observation.ReservationID == "" && jobs[job] || units[observation.Award] {
-			return invalidEngineBody("launcher observations must name unique Jobs and awards")
-		}
-		if observation.ReservationID == "" {
-			jobs[job] = true
+		if units[observation.Award] {
+			return nil, invalidEngineBody("launcher observations must name unique awards")
 		}
 		units[observation.Award] = true
 	}
-	return nil
+	return observed, nil
 }

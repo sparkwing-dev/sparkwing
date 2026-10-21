@@ -19,8 +19,8 @@ type CredentialWriter interface {
 	WriteSecret(context.Context, capability.Authorized, store.SealedSecret) error
 	RemoveSecret(context.Context, capability.Authorized, string, string) error
 	WriteGitCredential(context.Context, capability.Authorized, store.SealedGitCredential) (store.GitCredential, error)
-	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string) (store.GitCredential, error)
-	RemoveGitCredential(context.Context, capability.Authorized, string) error
+	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string, string) (store.GitCredential, error)
+	RemoveGitCredential(context.Context, capability.Authorized, string, string) error
 }
 
 func (s *Server) credentialWriter(ctx context.Context, team string) (CredentialWriter, error) {

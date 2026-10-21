@@ -205,16 +205,8 @@ func triggerRepository(ctx context.Context, remote string, githubID func(context
 	if err != nil {
 		return runspec.Repository{}, invalid
 	}
-	for _, raw := range []string{u.RawQuery, u.Fragment} {
-		values, err := url.ParseQuery(raw)
-		if err != nil {
-			return runspec.Repository{}, invalid
-		}
-		for name := range values {
-			if envredact.CredentialName(name) {
-				return runspec.Repository{}, invalid
-			}
-		}
+	if err := envredact.ValidateSourceReference(parsed); err != nil {
+		return runspec.Repository{}, invalid
 	}
 	input := runspec.RepoInput{RemoteURL: remote}
 	if strings.EqualFold(u.Hostname(), "github.com") {

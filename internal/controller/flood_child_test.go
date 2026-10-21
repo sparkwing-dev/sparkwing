@@ -105,7 +105,7 @@ func TestRetryRecordsAdmissionIdentitySeparatelyFromSource(t *testing.T) {
 			if err := teststore.SeedRunFinish(e.Store, t.Context(), "a", "run", "failed", "boom"); err != nil {
 				t.Fatal(err)
 			}
-			raw, retrier, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "retrier"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl, capability.RunsRead, capability.RunsWrite}})
+			raw, retrier, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "retrier"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl, capability.RunsRead, capability.RunsWrite}})
 			if err != nil {
 				t.Fatal(err)
 			}

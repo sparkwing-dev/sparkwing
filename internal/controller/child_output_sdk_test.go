@@ -246,6 +246,9 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'stamp','pending',1,?,?)`, run, []byte(`{"id":"stamp"}`), []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
+	if err := teststore.SeedNodeReady(st, t.Context(), run, "stamp"); err != nil {
+		t.Fatal(err)
+	}
 	claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: run, NodeID: "stamp"}, Capacity: match.Resources{Cores: 2}, Available: match.Resources{Cores: 2}})
 	if err != nil {
 		t.Fatal(err)

@@ -56,7 +56,7 @@ func processAuthorityFixture(t *testing.T) (*ProcessAuthorities, *processParent,
 		Prefix: "parent", Digest: sha256.Sum256([]byte("parent-token")), Audience: capability.Controller, Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "machine"},
 		Binding: binding, Grants: []capability.Grant{capability.NodeReport, capability.SecretsRelease}, ExpiresAt: &expires, ReservedPools: []string{"pool"}, Repositories: []string{"repo"},
 	}}
-	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: principal, MembershipValid: true}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
+	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: principal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
 	registry, err := NewProcessAuthorities(ProcessAuthorityDependencies{
 		Parent: parent,
 		Bindings: processBindingFunc(func(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
@@ -64,7 +64,7 @@ func processAuthorityFixture(t *testing.T) (*ProcessAuthorities, *processParent,
 		}),
 		ValidateAuthority: func(chain []capability.AuthorityState, now time.Time) (capability.Principal, error) {
 			for _, state := range chain {
-				if !state.MembershipValid || state.Principal.Capability.RevokedAt != nil || state.Principal.Capability.ExpiresAt != nil && !now.Before(*state.Principal.Capability.ExpiresAt) {
+				if !capability.CredentialAlive(state.Principal.Capability, now) {
 					return capability.Principal{}, executorError(apierr.Unauthenticated, "parent ended")
 				}
 			}
@@ -122,10 +122,10 @@ func TestProcessAuthorityRetainsFreshParentAndExactFence(t *testing.T) {
 	parent.snapshot.Now = parent.snapshot.Now.Add(time.Minute)
 	parent.snapshot.Binding.RunCancelled = true
 	parent.snapshot.Binding.Current.Attempt++
-	parent.snapshot.Authorities[0].MembershipValid = false
+	parent.snapshot.Authorities[0].Principal.Capability.RevokedAt = &parent.snapshot.Now
 	parent.mu.Unlock()
 	second, err := registry.ReadAuthentication(t.Context(), processLookup(issued), evidence)
-	if err != nil || !second.Now.After(first.Now) || !second.Binding.RunCancelled || second.Authorities[0].MembershipValid || second.Authorities[1].MembershipValid || second.Binding.Current.Attempt != spec.Binding.Attempt+1 || second.Authorities[0].Principal.Capability.Binding.Attempt != spec.Binding.Attempt {
+	if err != nil || !second.Now.After(first.Now) || !second.Binding.RunCancelled || capability.CredentialAlive(second.Authorities[1].Principal.Capability, second.Now) || second.Binding.Current.Attempt != spec.Binding.Attempt+1 || second.Authorities[0].Principal.Capability.Binding.Attempt != spec.Binding.Attempt {
 		t.Fatalf("stale ancestry or liveness: %+v %v", second, err)
 	}
 	if parent.lookups[len(parent.lookups)-1] != lookup || !reflect.DeepEqual(parent.evidence[len(parent.evidence)-1], evidence) {
@@ -293,7 +293,7 @@ func TestProcessAuthorityRefusesInvalidDelegationWithoutIssuing(t *testing.T) {
 			case "masks":
 				service.Masks = nil
 			case "ended":
-				parent.snapshot.Authorities[0].MembershipValid = false
+				parent.snapshot.Authorities[0].Principal.Capability.RevokedAt = &parent.snapshot.Now
 			case "read":
 				parent.err = errors.New("parent read refused")
 			case "cancelled":

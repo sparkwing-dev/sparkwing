@@ -8,9 +8,10 @@ import (
 
 // CreateTokenRequest narrows a member credential's grants and optional expiry.
 type CreateTokenRequest struct {
-	Grants    []string              `json:"grants"`
-	ExpiresAt *time.Time            `json:"expires_at,omitempty"`
-	Data      *capability.DataScope `json:"data,omitempty"`
+	AllowTeamAdmin bool                  `json:"allow_team_admin,omitempty"`
+	Grants         []string              `json:"grants"`
+	ExpiresAt      *time.Time            `json:"expires_at,omitempty"`
+	Data           *capability.DataScope `json:"data,omitempty"`
 }
 
 // CreatedToken contains the one-time bearer and its public issuance metadata.

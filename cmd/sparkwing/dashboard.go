@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -76,7 +78,7 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 		}
 	case "sparkwing dashboard start":
 		addr := dashboardAddress(inv)
-		host, port, err := net.SplitHostPort(addr)
+		_, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--addr must be HOST:PORT"}
 		}
@@ -84,8 +86,7 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 		if err != nil || number < 0 || number > 65535 {
 			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--addr requires a port between 0 and 65535"}
 		}
-		ip := net.ParseIP(host)
-		if host != "localhost" && (ip == nil || !ip.IsLoopback()) && !inv.Bool("allow-remote") {
+		if !originguard.LoopbackHost(addr) && !inv.Bool("allow-remote") {
 			return &clisurface.UsageError{Path: inv.Command.Path, Message: "non-loopback --addr requires --allow-remote"}
 		}
 		if inv.Bool("read-only") || inv.Bool("allow-remote") || inv.Has("allow-origin") {

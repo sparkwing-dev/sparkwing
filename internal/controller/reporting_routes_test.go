@@ -65,7 +65,6 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 						Issuance: capability.Delegate, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsControl, capability.TeamAdmin, capability.ApprovalsWrite},
 					},
 				}
-				member := true
 				status, code := 401, apierr.Unauthenticated
 				switch mutation%7 + 1 {
 				case 1:
@@ -86,11 +85,11 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 				case 5:
 					p.Capability.Audience, status, code = capability.NodeHost, 401, apierr.Unauthenticated
 				case 6:
-					member, status, code = false, 401, apierr.Unauthenticated
+					p.Capability.RevokedAt, status, code = &now, 401, apierr.Unauthenticated
 				case 7:
 					p.Capability.ExpiresAt, status, code = &now, 401, apierr.Unauthenticated
 				}
-				facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: member}}}}
+				facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}}}
 				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17", "{invitation}", "invite").Replace(endpoint.Pattern)
 				r := httptest.NewRequest(endpoint.Method, path+"?team=forged&run_id=other&job_id=other&selector="+url.QueryEscape(string(input)), nil)
 				r.Header.Set("Authorization", "Bearer "+raw)

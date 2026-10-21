@@ -26,6 +26,8 @@ import (
 // which the owner confirms before the credential is released.
 type GitCredentialJSON struct {
 	Host        string `json:"host"`
+	Repository  string `json:"repository"`
+	HostWide    bool   `json:"host_wide"`
 	Kind        string `json:"kind"`
 	Username    string `json:"username,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
@@ -40,6 +42,8 @@ type GitCredentialJSON struct {
 
 type gitCredentialPutReq struct {
 	Host       string `json:"host"`
+	Repository string `json:"repository"`
+	HostWide   bool   `json:"host_wide"`
 	Kind       string `json:"kind"`
 	Port       *int   `json:"port,omitempty"`
 	PrivateKey string `json:"private_key,omitempty"`
@@ -73,7 +77,7 @@ const (
 
 func gitCredentialJSON(c store.GitCredential, publicKey string) GitCredentialJSON {
 	return GitCredentialJSON{
-		Host: c.Host, Kind: c.Kind, Username: c.Username, Fingerprint: c.Fingerprint, HostKey: c.KnownHosts,
+		Host: c.Host, Repository: c.Repository, HostWide: c.HostWide, Kind: c.Kind, Username: c.Username, Fingerprint: c.Fingerprint, HostKey: c.KnownHosts,
 		PublicKey: publicKey, Confirmed: c.ConfirmedAt != nil, CreatedBy: c.CreatedBy,
 		CreatedAt: c.CreatedAt.Unix(), UpdatedAt: c.UpdatedAt.Unix(),
 	}
@@ -81,8 +85,8 @@ func gitCredentialJSON(c store.GitCredential, publicKey string) GitCredentialJSO
 
 // safety: the envelope is bound to its team and host, so a row copied to
 // another team or host, or into the secrets table, does not open.
-func gitCredentialBinding(team store.Team, host string) secretBinding {
-	return secretBinding{Purpose: secrets.PurposeGitCredential, Team: team, Name: gitCredentialScope + ":" + host, Scope: gitCredentialScope, Masked: true}
+func gitCredentialBinding(c store.GitCredential) secretBinding {
+	return secretBinding{Purpose: secrets.PurposeGitCredential, Team: c.Team, Name: gitCredentialScope + ":" + c.Host, Scope: c.CredentialScope(), Masked: true}
 }
 
 func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -119,7 +123,10 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, 
 	if !validGitCredentialHost(host) {
 		return invalidEngineBody("host must be a hostname with no scheme, port or path")
 	}
-	cred := store.GitCredential{Team: t.Team(), Host: host, Kind: req.Kind, CreatedBy: a.Principal.Capability.Subject.ID}
+	if req.HostWide == (strings.TrimSpace(req.Repository) != "") {
+		return invalidEngineBody("name one repository or explicitly allow every repository on this host")
+	}
+	cred := store.GitCredential{Team: t.Team(), Host: host, Repository: strings.TrimSpace(req.Repository), HostWide: req.HostWide, Kind: req.Kind, CreatedBy: a.Principal.Capability.Subject.ID}
 	var secret, publicKey string
 	switch req.Kind {
 	case store.GitCredentialSSH:
@@ -190,7 +197,7 @@ func (s *Server) handleConfirmGitCredential(w http.ResponseWriter, r *http.Reque
 		return err
 	}
 	host := r.PathValue("host")
-	c, err := t.ConfirmGitCredentialFor(r.Context(), a, host, strings.TrimSpace(req.Fingerprint))
+	c, err := t.ConfirmGitCredentialFor(r.Context(), a, host, r.URL.Query().Get("repository"), strings.TrimSpace(req.Fingerprint))
 	if err != nil {
 		return credentialWriteError(err)
 	}
@@ -207,7 +214,7 @@ func (s *Server) handleDeleteGitCredential(w http.ResponseWriter, r *http.Reques
 		return err
 	}
 	host := r.PathValue("host")
-	if err := t.RemoveGitCredential(r.Context(), a, host); err != nil {
+	if err := t.RemoveGitCredential(r.Context(), a, host, r.URL.Query().Get("repository")); err != nil {
 		return credentialWriteError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)

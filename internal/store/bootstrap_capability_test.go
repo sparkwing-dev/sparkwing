@@ -2,7 +2,6 @@ package store
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -83,7 +82,6 @@ func TestBootstrapSeedCannotEnterOtherOriginsProperty(t *testing.T) {
 				member := authorityMember(t, s, "owner", RoleOwner)
 				spec = capability.ProvisionSpec{Kind: kind, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}}
 			}
-			s.provisions = provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil })
 			for range 16 {
 				var secret [32]byte
 				for j := range secret {

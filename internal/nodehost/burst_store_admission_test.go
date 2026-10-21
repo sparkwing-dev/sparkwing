@@ -2,8 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -124,13 +122,14 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 			t.Fatal(err)
 		}
 	}
-	session, _, _, err := fixture.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-requester"}, store.DefaultTeam, time.Hour)
+	requester, err := fixture.Store.AsOperator().ResolveAuthority(t.Context(), fixture.Control.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256([]byte(session))
-	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := fixture.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: &authority, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	if requester.Capability.Parent == nil || requester.Capability.Parent.Kind != capability.AuthoritySession {
+		t.Fatal("burst requester has no account session")
+	}
+	issued, err := fixture.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Repositories: []string{"github.com/acme/*"}, Authority: requester.Capability.Parent, RegistrationID: "runner:default:desktop", Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

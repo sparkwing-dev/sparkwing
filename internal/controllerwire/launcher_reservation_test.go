@@ -6,21 +6,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestLauncherObservationRequiresOneCleanupIdentity(t *testing.T) {
-	observation := LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "unit", Holder: "launcher", Generation: 1}, NodeUID: "node", ReservationID: "reservation"}
+func TestLauncherObservationChecksAwardAndState(t *testing.T) {
+	observation := LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "unit", Holder: "launcher", Generation: 1}, Reservation: true}
 	if err := observation.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	observation.Job = LauncherJobRef{Namespace: "cloud", Name: "job", UID: "uid"}
+	observation.Rejected = true
 	if err := observation.Validate(); err == nil {
-		t.Fatal("ambiguous Job and reservation cleanup accepted")
+		t.Fatal("reservation reported Job rejection")
 	}
-	observation.ReservationID = ""
+	observation.Reservation = false
 	if err := observation.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	observation.Job = LauncherJobRef{}
+	observation.Award.Generation = 0
 	if err := observation.Validate(); err == nil {
-		t.Fatal("observation without cleanup identity accepted")
+		t.Fatal("unfenced award accepted")
 	}
 }

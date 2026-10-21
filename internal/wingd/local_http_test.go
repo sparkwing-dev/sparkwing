@@ -41,15 +41,22 @@ func (c localHTTPConnection) PeerIdentity() LocalPeerIdentity { return c.peer }
 func TestLocalHTTPPropagatesVerifiedIdentityAndJoinsRequests(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	uid := uint32(123)
+	owner, err := controllerPeerIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.UID == nil {
+		t.Skip("Unix UID check")
+	}
+	uid := *owner.UID
 	listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 	client, server := net.Pipe()
 	defer client.Close()
-	listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: "linux", UID: &uid}}
+	listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 	entered, stopped := make(chan struct{}), make(chan struct{})
 	services := LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		peer, ok := LocalPeer(r.Context())
-		if !ok || peer.GOOS != "linux" || peer.UID == nil || *peer.UID != uid {
+		if !ok || peer.GOOS != owner.GOOS || peer.UID == nil || *peer.UID != uid {
 			t.Error("request lost verified connection identity")
 		}
 		*peer.UID = 456
@@ -106,11 +113,18 @@ func TestLocalHTTPJoinsHijackedHandlers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		uid := uint32(123)
+		owner, err := controllerPeerIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if owner.UID == nil {
+			t.Skip("Unix UID check")
+		}
+		uid := *owner.UID
 		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 		client, server := net.Pipe()
 		defer client.Close()
-		listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: "linux", UID: &uid}}
+		listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 		entered, exited := make(chan struct{}), make(chan struct{})
 		services := LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			connection, _, err := w.(http.Hijacker).Hijack()
@@ -143,15 +157,23 @@ func TestLocalHTTPJoinsHijackedHandlers(t *testing.T) {
 }
 
 func FuzzLocalHTTPIdentity(f *testing.F) {
-	f.Add(uint32(1000), "local:0")
-	f.Add(uint32(0), "X-Peer-SID: forged")
-	f.Fuzz(func(t *testing.T, uid uint32, asserted string) {
+	f.Add("local:0")
+	f.Add("X-Peer-SID: forged")
+	f.Fuzz(func(t *testing.T, asserted string) {
+		owner, err := controllerPeerIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if owner.UID == nil {
+			t.Skip("Unix UID check")
+		}
+		uid := *owner.UID
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 		client, server := net.Pipe()
 		defer client.Close()
-		listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: "linux", UID: &uid}}
+		listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 		services := LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peer, ok := LocalPeer(r.Context())
 			if !ok || peer.UID == nil || *peer.UID != uid || peer.SID != "" {
@@ -177,4 +199,24 @@ func FuzzLocalHTTPIdentity(f *testing.F) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestLocalHTTPRefusesForeignVerifiedPeer(t *testing.T) {
+	owner, err := controllerPeerIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.UID == nil {
+		t.Skip("Unix UID check")
+	}
+	foreign := *owner.UID + 1
+	peer := LocalPeerIdentity{GOOS: owner.GOOS, UID: &foreign}
+	listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+	client, server := net.Pipe()
+	defer client.Close()
+	listener.connections <- localHTTPConnection{Conn: server, peer: peer}
+	if conn, err := (localAPIListener{listener}).Accept(); err == nil {
+		conn.Close()
+		t.Fatal("foreign verified peer passed local controller ownership")
+	}
 }

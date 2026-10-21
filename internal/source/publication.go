@@ -242,7 +242,7 @@ func bundleObjects(ctx context.Context, client *gitClient, checkout, bundle, loc
 	}
 	args := []string{"rev-list", "--objects"}
 	for _, line := range strings.Split(strings.TrimSpace(heads), "\n") {
-		if sha, _, _ := strings.Cut(line, " "); gitSHA.MatchString(sha) {
+		if sha, _, _ := strings.Cut(line, " "); runspec.IsCommitID(sha) {
 			args = append(args, sha)
 		}
 	}

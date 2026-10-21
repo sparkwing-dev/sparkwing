@@ -206,11 +206,22 @@ func TestSessionMembershipChangesApplyWithoutCachedGrantsProperty(t *testing.T) 
 			}
 			owner := authorityMember(t, s, "owner", RoleOwner)
 			tenant := &Tenant{s: s, team: "a"}
+			previous := RoleEditor
 			for range 4 {
 				role := []Role{RoleReader, RoleEditor, RoleOwner}[random.IntN(3)]
 				if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: account.ID, Role: &role}); err != nil {
 					t.Fatal(err)
 				}
+				if !role.AtLeast(previous) {
+					if _, err := s.AsOperator().LookupSession(t.Context(), raw); err == nil {
+						t.Fatal("demotion retained the old session")
+					}
+					raw, _, _, err = s.AsOperator().CreateAccountSession(t.Context(), account, "a", time.Hour)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				previous = role
 				got, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller}, capability.RequestEvidence{})
 				if err != nil || len(got.Authorities) != 1 {
 					t.Fatalf("membership snapshot: %+v, %v", got, err)

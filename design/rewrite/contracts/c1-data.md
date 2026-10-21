@@ -701,7 +701,7 @@ serialization. No foreign contract changes.
 `Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
 and `RevokeTeamToken` are removed with `TokenFamily`, its constants,
 `TeamTokenFamily`, `Token.Family` and `MachinePrincipal`. Production callers
-already use capability provisioning and management. Member roots use
+already use capability provisioning and management. Member capabilities use
 `Store.ProvisionCapability` under current session authority. Machine roots use
 the registered `ProvisionMachine` origin. Inventory, rotation and revocation
 use the authority-bearing capability methods.
@@ -1326,29 +1326,32 @@ These declarations leave transaction implementation with W1.
   ancestry, current membership and route-specific unit/result/log facts. Binding,
   data-edge and source-release checks also run on the transaction owning the write.
   A source credential is released only after its authorization audit commits.
-- Trusted root provisioning is the root-only Delegate variant. Roots have no
-  revocation parent. `ProvisionSpec.Authority` is their authorizer, whose current
-  rights constrain provisioning. Membership still governs account-root liveness.
+- `ProvisionSpec.Authority` is the authorizer whose current rights constrain
+  provisioning. Machine, service and Actions roots have no revocation parent.
+  Member capabilities retain the issuing session as their parent, so logout
+  ends their authority. Membership also governs account authority at use time.
   Here awards retain the requester's session/token ancestry and current runs.write.
-  Member roots have their own optional expiry. The issuing session is checked at
-  issuance and does not become their lifetime or revocation parent. Current
-  account membership still constrains each subsequent use.
-- `provision_contract.go` declares `ProvisionPolicy.AuthorizeProvision` for trusted
-  bootstrap and verified Actions evidence, and optional additional enrollment policy.
-  It receives the issuing transaction's authority resolver and trusted `ProvisionSpec`.
-  Bootstrap and Actions origins require that verifier. Machine/service enrollment
+  `memberIssuancePolicy` owns the expiry for issuance and rotation. Member tokens
+  default to and expire within 90 days. Explicit `team.admin` tokens retain the
+  tighter 30-day ceiling. Their minting session is a revocation parent only.
+  Idle or absolute session timeout cannot shorten the token's stored or reported
+  expiry. Ancestry projects that session without an expiry only when its child
+  has a validated member-token origin. Logout, admin revocation and membership
+  removal or demotion still end authority through the same ancestry and epoch
+  checks. Ordinary delegation retains its parent-expiry bounds.
+- `provision_contract.go` declares the transaction-owned checks for trusted
+  bootstrap, Actions origin and enrollment. Machine/service enrollment
   uses the existing capability rows and their persisted `CapabilityRecord.Origin`.
   Current team administration, canonical registration selectors, claim-only machine
   grants, deployment-only service grants, repository patterns, unique pools, active
   names and the existing machine cap are checked inside the issuing transaction.
   Team locks serialize machine enrollment. One advisory lock serializes service names.
   Rotation preserves registration and counts overlapping grace roots as one machine.
-  An optional verifier cannot bypass these checks. The store rechecks authorizer scope, expiry, root shape and
-  registered team after verification. Only deployment token authority can set
+  The store rechecks authorizer scope, expiry, root shape and registered team.
+  Only deployment token authority can set
   metering or authorize service issuance. Provisioning never grants console
   authority. Machine enrollment records the account authorizer in `created_by`,
-  which also decides whether a claim is the requester's own machine. Roots retain no
-  revocation parent. The evidence providers remain W2's integration.
+  which also decides whether a claim is the requester's own machine.
 - Claim selection checks every requested kind's grant before one ordered scan.
   Runner selection accepts trigger/node, launcher selection plan/eval/node. The
   named trigger path retains the exact here reservation's trigger.host exception. Unknown,
@@ -1960,6 +1963,13 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
 14. Acquire transaction locks in the frozen class order and lexical order within a class.
     Implementers must review claim, cancellation and financial paths together
     before adding a lock; they must not silently acquire an earlier class late.
+    Authority mutations use `acquireLockSet` to discover every team, membership,
+    authority and installation row before acquiring any of them. The set includes
+    teams referenced by foreign keys, such as audit events. The owner acquires
+    each row once in class order, then repeats discovery under those locks. A
+    changed set restarts the transaction and releases its locks before retrying.
+    Nested authority checks reuse held locks. A late earlier-class lock or lock
+    upgrade fails rather than extending an incomplete set.
 
 ## Scheduling, placement and log contracts
 
@@ -2264,9 +2274,21 @@ delivery and unit separately. `billing_unit` stores `host`, `plan`, `eval`, `job
 with checks for trigger-to-host and node-to-job. Both ledger tables preserve the
 operational kind and financial classification after run or capability pruning.
 
-Authentication reads fresh capability/session ancestry and membership on each
-request. Missing ancestors refuse authentication. `RevokeAuthority` and
-`UpdateMembership` invalidate affected sessions in their committing transactions.
+Authentication reads the complete capability/session ancestry and current
+membership in one snapshot on every request. Revocation, role changes and
+membership epochs take effect at use time. Authentication facts are not cached.
+
+The first authentication of each `(session, team)` records an immutable membership
+epoch in `session_membership_epochs`. Selecting a team cannot replace that epoch.
+Session-derived credentials, including delegated data credentials, retain their
+minting team's context through every ancestor. When ancestry reaches a session,
+it resolves that session in the child's team and checks that team's recorded
+epoch against current membership. The session's active team still controls direct
+session use. Switching it cannot change an existing descendant's team or grants.
+Removal and demotion advance the team's membership epoch in the membership
+transaction. Rejoining or promotion cannot revive descendants of an old session.
+Session timeout validation preserves the session row because live member tokens
+still depend on its explicit revocation state. Retention keeps referenced sessions.
 
 `Store.SettlePayment` accepts C2's opaque verified event and looks up the committed
 checkout by provider session ID and configured test/live mode. The checkout supplies
@@ -2349,8 +2371,8 @@ allowance and rate-table presence. Their unused Store getters are removed.
 | Export | Purpose |
 |---|---|
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
-| `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority and advance its generation atomically. |
-| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with current account authority, invitation withdrawal, minter revocation, session movement and the corresponding generation increment. |
+| `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority atomically. |
+| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with current account authority and session movement. Authority use checks the member's current role and the membership epoch. |
 | `PaymentSettlement`, `Store.SettlePayment` | Deduplicate verified checkout events and commit their derived-team financial result. |
 
 `TestRewriteSchemaCapabilitiesPreserveAuthority` persists full capability envelopes
@@ -4205,3 +4227,22 @@ The private controller regression covers both queue and accepted
 `cancel_others` declarations. Forged box keys and missing machine identity are
 refused; another machine's holder and work remain unchanged. A binding-only
 request also exercises all global, run and box groups of one accepted job.
+
+
+## Launcher execution host sealing
+
+Launcher awards have no `ExecutionHost` when claimed, while waiting for capacity,
+or when a node is merely reserved. Only the launcher's authenticated activation
+of that execution reservation seals `node:<Node UID>` on the live bootstrap
+award. The transaction checks the award's ancestry, unit fence, lease and existing
+host. Replays preserve the host. Another node is refused. Bootstrap exchange
+copies this sealed identity to the execution credential.
+
+Box admission reads only the persisted award identity. A launcher award awaiting
+activation queues without creating a provisional concurrency key or holder.
+An award without launcher ancestry and without a host refuses admission.
+Capacity Pod UIDs and provisional Pod placement never supply a box identity.
+`TestLauncherCapacityWaitDoesNotSealExecutionHost` covers capacity waiting,
+reservation, activation, exchange and subsequent reconciliation through the
+launcher, controller and store. The Actions, account-backed here and unbound
+machine regressions retain their placement identity coverage.

@@ -112,7 +112,7 @@ func TestDiscoveryHTTPRefusesInvalidAuthorityBeforeAvailability(t *testing.T) {
 					case "revoked parent":
 						b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 					case "membership removed":
-						b.snapshot.Authorities[0].MembershipValid = false
+						b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 					case "ended claim":
 						b.snapshot.Binding.FinishedAt = &b.snapshot.Now
 					case "stale generation":

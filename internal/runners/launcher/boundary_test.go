@@ -448,3 +448,29 @@ func TestDeploymentsSharingATeamSlugNeverShareNodes(t *testing.T) {
 		}
 	}
 }
+
+func TestBoundaryDaemonExemptionRequiresAppsAPI(t *testing.T) {
+	for _, apiVersion := range []string{"apps/v1", "", "attacker.example/v1"} {
+		t.Run(apiVersion, func(t *testing.T) {
+			b, kube := boundaryFixture()
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "daemon", Namespace: "system", OwnerReferences: []metav1.OwnerReference{{APIVersion: apiVersion, Kind: "DaemonSet", Controller: ptr(true)}}}, Spec: corev1.PodSpec{NodeName: "node"}}
+			if _, err := kube.CoreV1().Pods("system").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+			if apiVersion == "apps/v1" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if !errors.Is(err, ErrNoDedicatedNode) {
+					t.Fatalf("foreign daemon owner was exempt: %v", err)
+				}
+				node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+				if err != nil || node.Annotations[reservationAnnotation] != "" {
+					t.Fatalf("refused node was reserved: %v", err)
+				}
+			}
+		})
+	}
+}

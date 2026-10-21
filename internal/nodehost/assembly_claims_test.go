@@ -28,7 +28,7 @@ func localClaimsFixture(t testing.TB) (*nodeClaims, *nativeAuthentication, store
 		Issuance: capability.Award, Unit: capability.UnitNode, UnitID: "node", Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect, Grants: []capability.Grant{capability.NodeReport, capability.DataRead}, Data: &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "repo", RunID: "run", NodeID: "job", Generation: 2}, IssuedAt: now.Add(-time.Hour),
 		Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "account", Generation: 2},
 	}}
-	state := &nativeAuthentication{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}, Binding: capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)}}}
+	state := &nativeAuthentication{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}, Binding: capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)}}}
 	lost := false
 	claims := &nodeClaims{services: completeServiceFixture, auth: capability.NewAuthenticator(state), bindings: state, masker: secrets.NewMasker(), current: func(ctx context.Context) (capability.Principal, error) {
 		if lost {
@@ -95,7 +95,7 @@ func FuzzLocalNodeAwardFence(f *testing.F) {
 		case 9:
 			state.snapshot.Binding.RunCancelled = true
 		case 10:
-			state.snapshot.Authorities[0].MembershipValid = false
+			state.snapshot.Authorities[0].Principal.Capability.RevokedAt = &state.snapshot.Now
 		case 11:
 			state.snapshot.Authorities[0].Principal.Capability.RevokedAt = &state.snapshot.Now
 		case 12:

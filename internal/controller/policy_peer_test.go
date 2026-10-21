@@ -23,7 +23,7 @@ func (b *peerBoundary) ReadAuthentication(_ context.Context, lookup capability.C
 		return capability.AuthenticationSnapshot{}, sessionUnavailable()
 	}
 	return capability.AuthenticationSnapshot{Now: time.Now().UTC(), Authorities: []capability.AuthorityState{{
-		MembershipValid: true, Principal: capability.Principal{Class: capability.CredentialPeer, Capability: capability.Capability{
+		Principal: capability.Principal{Class: capability.CredentialPeer, Capability: capability.Capability{
 			Subject: lookup.Peer, Team: "default", Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
 		}},
 	}}}, nil

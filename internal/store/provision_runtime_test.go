@@ -3,12 +3,12 @@ package store
 import (
 	"fmt"
 	"math/rand/v2"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestProvisionMemberCurrentScopesProperty(t *testing.T) {
@@ -30,7 +30,7 @@ func TestProvisionMemberCurrentScopesProperty(t *testing.T) {
 				requested = append(requested, grants[n])
 			}
 			original := slices.Clone(requested)
-			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: requested}
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: requested}
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			permitted := []capability.Grant{capability.RunsRead, capability.LogsRead}
 			if role == RoleEditor || role == RoleOwner {
@@ -60,28 +60,80 @@ func TestProvisionMemberCurrentScopesProperty(t *testing.T) {
 	}
 }
 
-func TestProvisionedMemberRootUsesMembershipWithoutSessionAncestry(t *testing.T) {
-	for _, expiry := range []string{"none", "beyond_session"} {
-		t.Run(expiry, func(t *testing.T) {
-			s := authorityStore(t)
-			member := authorityMember(t, s, "member", RoleEditor)
-			rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, s.now().Add(time.Hour).UnixNano(), member.Authority.ID)
-			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}}
-			if expiry == "beyond_session" {
-				at := s.now().Add(24 * time.Hour)
-				spec.ExpiresAt = &at
+func TestProvisionedMemberTokenOutlivesSessionTimeoutAndDiesOnLogout(t *testing.T) {
+	for _, timeout := range []string{"idle", "absolute"} {
+		t.Run(timeout, func(t *testing.T) {
+			s, account, now := sessionRuntimeStore(t)
+			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+			if err != nil {
+				t.Fatal(err)
 			}
-			root, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
-			if err != nil || root.Raw == "" || root.Capability.Parent != nil || root.Capability.Subject != spec.Subject || !reflect.DeepEqual(root.Capability.ExpiresAt, spec.ExpiresAt) {
-				t.Fatalf("provisioned root: %+v, %v", root.Capability, err)
+			s.csrfCipher = cipher
+			raw, _, session, err := s.AsOperator().CreateAccountSession(t.Context(), account, "a", 7*24*time.Hour)
+			if err != nil {
+				t.Fatal(err)
 			}
-			rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, member.Authority.ID)
-			if _, err := s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest); err != nil {
-				t.Fatalf("session revoke ended independent root: %v", err)
+			member := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)}}
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: account.ID}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}}
+			expected := now.Add(90 * 24 * time.Hour)
+			if timeout == "absolute" {
+				expected = now.Add(60 * 24 * time.Hour)
+				spec.ExpiresAt = &expected
 			}
-			rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
-			if _, err := s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest); err == nil {
-				t.Fatal("removed membership retained root authority")
+			token, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if token.Capability.Parent == nil || *token.Capability.Parent != member.Authority || token.Capability.ExpiresAt == nil || !token.Capability.ExpiresAt.Equal(expected) {
+				t.Fatalf("member token: %+v", token.Capability)
+			}
+			child, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: token.Capability.Prefix}, Audience: capability.Controller, Binding: spec.Binding, Grants: []capability.Grant{capability.RunsRead}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if timeout == "absolute" {
+				created := session.CreatedAt
+				for days := 6; days < 30; days += 6 {
+					*now = created.Add(time.Duration(days) * 24 * time.Hour)
+					session, err = s.AsOperator().LookupSessionAndRenew(t.Context(), raw, 7*24*time.Hour, 30*24*time.Hour)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !session.ExpiresAt.Equal(created.Add(30 * 24 * time.Hour)) {
+					t.Fatal("session never reached its absolute timeout")
+				}
+			}
+			*now = session.ExpiresAt
+			if _, err := s.AsOperator().LookupSession(t.Context(), raw); err == nil {
+				t.Fatal("timed-out session authenticated")
+			}
+			for _, issued := range []capability.Issued{token, child} {
+				if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+					t.Fatalf("session timeout expired token: %v", err)
+				}
+				if err := s.inTx(t.Context(), func(tx *storeTx) error {
+					_, err := tx.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+					return err
+				}); err != nil {
+					t.Fatalf("transaction rejected token after session timeout: %v", err)
+				}
+				snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: issued.Capability.Digest, Audience: capability.Controller}, capability.RequestEvidence{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				principal, err := capability.ValidateAuthority(snapshot.Authorities, snapshot.Now)
+				if err != nil || principal.Capability.ExpiresAt == nil || !principal.Capability.ExpiresAt.Equal(expected) {
+					t.Fatalf("authentication shortened reported expiry: %+v, %v", principal, err)
+				}
+			}
+			if err := s.AsOperator().DeleteSession(raw); err != nil {
+				t.Fatal(err)
+			}
+			for _, issued := range []capability.Issued{token, child} {
+				if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err == nil {
+					t.Fatal("token survived logout")
+				}
 			}
 		})
 	}
@@ -92,7 +144,7 @@ func TestRootProvisioningRechecksAuthorizerAndScope(t *testing.T) {
 	member := authorityMember(t, s, "member", RoleEditor)
 	for _, problem := range []string{"subject", "team", "grants", "metered", "pools", "expired", "revoked"} {
 		t.Run(problem, func(t *testing.T) {
-			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}}
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}}
 			switch problem {
 			case "subject":
 				spec.Subject.ID = "other"

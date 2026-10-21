@@ -41,7 +41,7 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		if c.Billing.ExecutorClass == "cloud" {
+		if c.Billing.ExecutorClass == TierCloud {
 			if err := checkOverflowTx(ctx, tx, Team(c.Team), c.Binding.RunID); err != nil {
 				return err
 			}

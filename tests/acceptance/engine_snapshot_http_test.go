@@ -161,7 +161,7 @@ func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 			case "parent revoked":
 				b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 			case "membership lost":
-				b.snapshot.Authorities[0].MembershipValid = false
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 			case "lease expired":
 				b.snapshot.Binding.LeaseExpiresAt = b.snapshot.Now
 			case "stale generation":

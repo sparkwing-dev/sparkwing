@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 
@@ -9,6 +10,9 @@ import (
 )
 
 var (
+	EngineAcceptedFixturePlan = func(t *testing.T, st *store.Store, team store.Team, runID string, jobs ...string) {
+		engineAcceptedFixturePlan(t, &engineFixture{Store: st}, team, runID, jobs...)
+	}
 	EngineClaimHTTPFixture = engineClaimHTTPFixture
 	EngineClaimHTTP        = engineClaimHTTP
 	ChildIntakeFixture     = childIntakeFixture

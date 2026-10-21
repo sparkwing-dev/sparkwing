@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -53,7 +52,6 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 
 func TestMachineEnrollmentAuthorityProperty(t *testing.T) {
 	s, base := machineEnrollment(t)
-	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	check := func(change uint8, suffix uint16) bool {
 		spec := base
 		spec.Subject.ID = fmt.Sprintf("runner-%d", suffix)
@@ -194,9 +192,7 @@ func TestMachineEnrollmentNamesAreTeamScoped(t *testing.T) {
 	if _, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
-	other := authorityMember(t, s, "other", RoleOwner)
-	rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','other','owner',1)`)
-	rewriteSchemaExec(t, s.db, `UPDATE sessions SET team='b' WHERE hash='other'`)
+	other := authorityMember(t, s, "other", RoleOwner, "b")
 	spec.Authority, spec.Team, spec.RegistrationID = &other.Authority, "b", "runner:b:machine"
 	if _, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
 		t.Fatal(err)

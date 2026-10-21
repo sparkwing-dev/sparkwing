@@ -94,7 +94,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	authority := plan.Seal.Request.AuthorityRef
 	if scenario == "metered_runner" {
-		operator, err := acceptanceBootstrap(ctx, s)
+		operator, err := s.AsOperator().ProvisionCapability(ctx, storeNativeBootstrapSpec())
 		if err != nil {
 			t.Fatal(err)
 		}

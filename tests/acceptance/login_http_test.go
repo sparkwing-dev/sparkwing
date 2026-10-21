@@ -25,7 +25,7 @@ func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
 	digest := sha256.Sum256([]byte(f.raw))
 	origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	issued, err := f.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionMember, Authority: &origin, Team: "team",
+		Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &origin, Team: "team",
 		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
 	})
@@ -94,8 +94,8 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 			t.Fatal("plaintext CSRF column survives")
 		}
 	}
-	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err == nil {
-		t.Fatal("replaced session survived")
+	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err != nil {
+		t.Fatalf("sign-in ended its minting session: %v", err)
 	}
 	r = httptest.NewRequest("GET", "https://controller.test/api/v1/auth/whoami", nil)
 	r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: raw})
@@ -161,9 +161,11 @@ func TestLoginHTTPRefusesDataScopeProperty(t *testing.T) {
 	root := loginCapability(t, f)
 	b := newCredentialBoundary()
 	b.raw = root.Raw
-	b.snapshot.Now = time.Now()
-	p := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Capability: root.Capability}
-	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p, MembershipValid: true}}
+	var err error
+	b.snapshot, err = f.store.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(root.Raw))}, capability.RequestEvidence{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := f.server.WithAuthorization(consoleAuthorization(b)).WithDashboard(controller.Dashboard{}).Handler()
 	property := func(value []byte, publish bool) bool {
 		scope := &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "repo-" + hex.EncodeToString(value), ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
@@ -327,6 +329,51 @@ func TestLoginHTTPNonlocalRequiresSession(t *testing.T) {
 		h.ServeHTTP(w, httptest.NewRequest("POST", "https://controller.test"+path, nil))
 		if w.Code != 404 && w.Code != 405 {
 			t.Fatalf("POST %s: HTTP %d %s", path, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestLoginHTTPReplacesOnlyAnUnrelatedSession(t *testing.T) {
+	for _, ancestor := range []bool{false, true} {
+		f := newSessionFlow(t)
+		root := loginCapability(t, f)
+		prior := f.raw
+		if !ancestor {
+			var err error
+			prior, _, _, err = f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		r := loginRequest(root.Raw, "browser-proof", "/")
+		r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: prior})
+		w := httptest.NewRecorder()
+		f.server.WithDashboard(controller.Dashboard{}).Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("sign-in: %d %s", w.Code, w.Body)
+		}
+		var raw string
+		for _, c := range w.Result().Cookies() {
+			if c.Name == "__Host-sw_session" {
+				raw = c.Value
+			}
+		}
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), raw); err != nil {
+			t.Fatalf("new session is unavailable: %v", err)
+		}
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), prior); (err == nil) != ancestor {
+			t.Fatalf("prior ancestor=%v: %v", ancestor, err)
+		}
+		logout := httptest.NewRecorder()
+		f.server.Handler().ServeHTTP(logout, f.request("POST", "/api/v1/auth/logout", ""))
+		if logout.Code != http.StatusNoContent {
+			t.Fatalf("minting-session logout: %d %s", logout.Code, logout.Body)
+		}
+		if _, err := f.store.AsOperator().LookupSession(t.Context(), raw); err == nil {
+			t.Fatal("minting-session logout left its descendant session live")
+		}
+		if _, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(root.Raw))); err == nil {
+			t.Fatal("minting-session logout left its token live")
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -41,6 +42,7 @@ func childIntakeFixtureWith(t *testing.T, prepare func(*engineFixture)) (*engine
 	req.Request.Source.Ref = req.Request.Git.SHA
 	raw := sealWith(t, req, assertedProvenance(t, "ci", req.Request.Git.Ref, req.Request.Git.SHA))
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, raw)
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	if prepare != nil {
 		prepare(e)
 	}
@@ -86,7 +88,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if err := json.Unmarshal(private.Body.Bytes(), &snapshot); err != nil || snapshot.Run.Request.Request.RequestedArgs["token"] != "s3cret" {
 		t.Fatalf("private snapshot: %s: %v", private.Body, err)
 	}
-	reader, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	reader, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +119,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if lineage.ParentRunID != "run" || lineage.ParentJobID != "job" || child.Request.Request.Git != snapshot.Run.Request.Request.Git || child.Dispatch != "controller" {
 		t.Fatalf("child: %+v", child)
 	}
-	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','sibling','pending',1,?,?)`, []byte(`{"id":"sibling"}`), []byte(`{}`))
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) VALUES ('a','run','sibling','pending',1,?,?,?)`, time.Now().UnixNano(), []byte(`{"id":"sibling"}`), []byte(`{}`))
 	root := engineHTTPRoot(t, e, "a", "sibling-runner", []capability.Grant{capability.NodesClaim})
 	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
 	var sibling controllerwire.ClaimResponse

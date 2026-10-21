@@ -46,7 +46,7 @@ func SealGitCredential(cipher SecretSealer, team Team, row GitCredential) (Seale
 	if cipher == nil {
 		return SealedGitCredential{}, ErrInvalidInput
 	}
-	value, err := cipher.SealBound(secrets.PurposeGitCredential, string(team), "git-credential:"+row.Host, "git-credential", false, true, row.Secret)
+	value, err := cipher.SealBound(secrets.PurposeGitCredential, string(team), "git-credential:"+row.Host, row.CredentialScope(), false, true, row.Secret)
 	if err != nil {
 		return SealedGitCredential{}, err
 	}

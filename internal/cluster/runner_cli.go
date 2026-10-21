@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ import (
 
 // RunnerOptions carries machine settings to the shared runtime composition.
 type RunnerOptions struct {
+	actions          *githubActionsSource
 	Config           userconfig.RunnerConfig
 	ConfigPath       string
 	BoxID            *string
@@ -348,6 +350,7 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 		return issued.Raw, nil
 	}
 	options.Loop.ClaimUntil = *expires
+	options.actions = &githubActionsSource{repository: push.RepositoryKey, token: os.Getenv("GITHUB_TOKEN")}
 	if options.Config.Repos == nil {
 		options.Config.Repos = []string{push.RepositoryKey}
 	}

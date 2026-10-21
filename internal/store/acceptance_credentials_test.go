@@ -22,9 +22,8 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	bootstrap := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
-	bootstrap.Seed = capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	operator, err := acceptanceBootstrap(ctx, s)
+	bootstrap := storeNativeBootstrapSpec()
+	operator, err := s.AsOperator().ProvisionCapability(ctx, bootstrap)
 	if err != nil {
 		return err
 	}
@@ -54,7 +53,7 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return fmt.Errorf("refused provisioning left %d roots, want 2", roots)
 	}
 	if _, err := s.AsOperator().LookupCapability(ctx, operator.Capability.Digest); err == nil {
-		return errors.New("revoked operator remains live")
+		return errors.New("setup administrator remains live after service enrollment")
 	}
 	if _, err := s.AsOperator().LookupCapability(ctx, service.Capability.Digest); err != nil {
 		return fmt.Errorf("service root inherited its authorizer's revocation: %w", err)
@@ -74,6 +73,10 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return errors.New("ended bootstrap seed reopened issuance")
 	}
 	return nil
+}
+
+func storeNativeBootstrapSpec() capability.ProvisionSpec {
+	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
 }
 
 func TestStoreProvisioningOrigins(t *testing.T) {

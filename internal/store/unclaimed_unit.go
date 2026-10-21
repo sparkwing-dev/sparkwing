@@ -57,7 +57,7 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 	}
 	if run.Dispatch == string(runspec.DispatchController) {
 		ref := UnitRef{Kind: unit.Kind, RunID: run.ID, NodeID: unit.NodeID}
-		standings, err := unitStandingsTx(ctx, tx, team, ref)
+		standings, err := unitStandingsTx(ctx, tx, team, ref, run.Request.Request)
 		if err != nil || slices.ContainsFunc(standings, func(e eligibility) bool { return e.ok() && !e.unobserved }) {
 			return &unit, err
 		}
@@ -75,8 +75,8 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 }
 
 // safety: notices judge the live observations the ranking scans; an unpolled launcher only informs credit standing.
-func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) ([]eligibility, error) {
-	polls, err := placementRunnersTx(ctx, tx, team, time.Minute, true)
+func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request) ([]eligibility, error) {
+	polls, err := placementRunnersTx(ctx, tx, team, claimLiveness(ctx, request), true)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) 
 		}
 		standings = append(standings, standing)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix LIMIT ?`, "", tx.now().UnixNano(), limits.RankingObservations)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", tx.now().UnixNano(), tx.now().UnixNano(), limits.RankingObservations)
 	if err != nil {
 		return nil, err
 	}

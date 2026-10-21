@@ -564,8 +564,8 @@ credential expiry or give eval units a job-attempt grace exception.
 
 ## Authentication and billing bounds
 
-C2 reads fresh authority and membership snapshots on every request. Binding
-liveness and credential expiry are checked for each request.
+Authentication reads fresh authority, ancestry, membership and binding liveness
+on every request. There is no cache lifetime setting.
 
 `limits.WorkBillingMinimum` and `HostBillingMinimum` are the numerical owners
 for the separate job and host minimums. Both are sixty seconds. Plan and eval

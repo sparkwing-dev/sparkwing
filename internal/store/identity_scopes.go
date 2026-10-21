@@ -22,9 +22,3 @@ var roleScopes = map[Role][]string{
 
 // ScopesForRole returns an independent copy of the role's scopes, or none for an unknown role.
 func ScopesForRole(role Role) []string { return slices.Clone(roleScopes[role]) }
-
-// CLITokenScopes excludes team administration even when the member is an owner.
-// The returned slice is independent of the membership policy.
-func CLITokenScopes(role Role) []string {
-	return slices.DeleteFunc(ScopesForRole(role), func(s string) bool { return s == ScopeTeamAdmin })
-}

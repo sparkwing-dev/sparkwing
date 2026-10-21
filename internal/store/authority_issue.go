@@ -378,18 +378,18 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err != nil {
 		return capability.Capability{}, err
 	}
-	start := capability.BillingAtAward
-	executor := "runner"
+	facts, err := claimantFactsTx(ctx, tx, chain, sealed.Request)
+	if err != nil {
+		return capability.Capability{}, err
+	}
+	start, executor := capability.BillingAtAward, facts.ExecutorClass
 	if cloudLauncher {
 		start = capability.BillingAtStart
-		executor = "cloud"
 	}
-	if parent.Capability.Subject.Kind == capability.SubjectLocal {
-		executor = "local"
+	if here {
+		executor = TierHere
 	}
-	if here || parent.Capability.Purpose == capability.PurposeHere {
-		executor = "here"
-	}
+
 	c.RootMetered = meteredPlacement(claimant.Capability, parent.Capability)
 	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: c.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
 	return c, nil
@@ -558,14 +558,27 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	if seed != "" {
 		raw = seed
 	}
-	c.Prefix = raw[:16]
+	c.Prefix = raw[:CredentialPrefixLength]
 	c.Digest = sha256.Sum256([]byte(raw))
 	c.IssuedAt = tx.now()
 	var origin *CapabilityOrigin
 	if len(provision) > 0 && provision[0] != nil {
 		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal}
+		var err error
+		origin.Requirement, err = provisionRequirementTx(ctx, tx, *provision[0])
+		if err != nil {
+			return capability.Issued{}, err
+		}
+	}
+	if len(provision) > 0 && provision[0] != nil && provision[0].Kind == capability.ProvisionActions {
+		if err := consumeActionsExchangeTx(ctx, tx, *provision[0]); err != nil {
+			return capability.Issued{}, err
+		}
 	}
 	if err := tx.operator.persistCapabilityTx(ctx, tx, c, origin); err != nil {
+		return capability.Issued{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE capabilities SET here_proof_public_key=? WHERE prefix=? AND COALESCE(team,'')=?", capability.HereProofPublicKey(raw), c.Prefix, c.Team); err != nil {
 		return capability.Issued{}, err
 	}
 	return capability.Issued{Raw: raw, Capability: c}, nil

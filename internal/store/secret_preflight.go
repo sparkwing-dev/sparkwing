@@ -9,10 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// EventKindSecretPreflightRefused records the plan a run's required secrets
+// eventKindSecretPreflightRefused records the plan a run's required secrets
 // refused, with which scope each is missing from and the command that sets
 // it. It is read through the run's events, which only the team reads.
-const EventKindSecretPreflightRefused = "secret_preflight_refused"
+const eventKindSecretPreflightRefused = "secret_preflight_refused"
 
 // SecretPreflightError refuses a plan that declares a required secret its run
 // cannot read. Its text names only those declared secrets and where a team
@@ -90,10 +90,10 @@ func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request Pl
 			return err
 		}
 		var existing int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE team=? AND run_id=? AND node_id=? AND kind=?`, team, refused.RunID, PlanNodeID, EventKindSecretPreflightRefused).Scan(&existing); err != nil || existing != 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE team=? AND run_id=? AND node_id=? AND kind=?`, team, refused.RunID, PlanNodeID, eventKindSecretPreflightRefused).Scan(&existing); err != nil || existing != 0 {
 			return err
 		}
-		if _, err := appendEventTx(ctx, tx, team, refused.RunID, PlanNodeID, EventKindSecretPreflightRefused, map[string]string{"message": refused.Detail()}, tx.now()); err != nil {
+		if _, err := appendEventTx(ctx, tx, team, refused.RunID, PlanNodeID, eventKindSecretPreflightRefused, map[string]string{"message": refused.Detail()}, tx.now()); err != nil {
 			return err
 		}
 		return planAuthorityTx(ctx, tx, team, request)

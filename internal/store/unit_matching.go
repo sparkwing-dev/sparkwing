@@ -194,7 +194,7 @@ func authenticatedClaimProfile(c capability.Capability, profile match.Profile, h
 	profile.Name, profile.ReservedPools, profile.Class = c.Subject.ID, slices.Clone(c.ReservedPools), ""
 	switch {
 	case capability.CloudLauncher(c):
-		profile.Class, profile.Location = match.ClassCloud, "cloud"
+		profile.Class, profile.Location = match.ClassCloud, TierCloud
 	case here || c.Subject.Kind == capability.SubjectLocal:
 		profile.Class, profile.Location = match.ClassCoordinator, "local"
 	case c.Subject.Kind == capability.SubjectMachine:

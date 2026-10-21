@@ -185,15 +185,19 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 	var ids, withdrawn []string
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		ids, withdrawn = ids[:0], withdrawn[:0]
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set.add(lockTeam, true, string(t.team))
+			return set
+		}); err != nil {
+			return err
+		}
 		p, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
 		if err != nil {
 			return err
 		}
 		if filepath.IsAbs(repo) && (p.Capability.Subject.Kind != capability.SubjectLocal || t.team != DefaultTeam) {
 			return bindingRefusal()
-		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
-			return err
 		}
 		existing, err := t.scheduleRowsTx(ctx, tx)
 		if err != nil {
@@ -420,10 +424,14 @@ func (t *Tenant) DeleteAuthorizedSchedules(ctx context.Context, a capability.Aut
 		if a.Target.Team != string(t.team) {
 			return bindingRefusal()
 		}
-		if _, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set.add(lockTeam, true, string(t.team))
+			return set
+		}); err != nil {
 			return err
 		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if _, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil {
 			return err
 		}
 		rows, err := t.scheduleRowsTx(ctx, tx)

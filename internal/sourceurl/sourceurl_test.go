@@ -7,6 +7,8 @@ import (
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 )
 
 func TestValidateCloneURLAcceptsHTTPSAndGitSSH(t *testing.T) {
@@ -78,7 +80,7 @@ func TestValidateCloneURLRejectsUnsafeInputs(t *testing.T) {
 }
 
 func TestRedactStripsUserinfo(t *testing.T) {
-	got := Redact("https://user:secret@example.com/repo.git")
+	got := envredact.RedactValue("https://user:secret@example.com/repo.git")
 	want := "https://redacted@example.com/repo.git"
 	if got != want {
 		t.Fatalf("Redact = %q, want %q", got, want)
@@ -273,7 +275,7 @@ func TestSetHostPolicyRunsAfterTheBuiltInChecks(t *testing.T) {
 
 func TestRedactSCPUser(t *testing.T) {
 	for _, user := range []string{"git", "token_example_123"} {
-		got := Redact(user + "@github.com:acme/repo.git")
+		got := envredact.RedactValue(user + "@github.com:acme/repo.git")
 		if got != "redacted@github.com:acme/repo.git" {
 			t.Fatalf("Redact SCP URL = %q", got)
 		}

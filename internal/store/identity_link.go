@@ -135,7 +135,14 @@ func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.
 		claim.Provider != ProviderGoogle && claim.Provider != ProviderGitHub || !claim.ExpiresAt.After(now) {
 		return identityLinkInvalid()
 	}
-	if err := lockAccountTx(ctx, tx, claim.AccountID); err != nil {
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		if _, err := accountTx(ctx, tx, claim.AccountID); err != nil {
+			return lockSet{err: err}
+		}
+		set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{claim.Authority})
+		set.add(lockAccount, true, claim.AccountID)
+		return set
+	}); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return identityLinkInvalid()
 		}
@@ -257,26 +264,11 @@ func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, ac
 }
 
 func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
-	if tx.dialect == DialectSQLite {
-		res, err := tx.ExecContext(ctx, `UPDATE accounts SET id = id WHERE id = ?`, accountID)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return ErrNotFound
-		}
-		return nil
-	}
-	var id string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id = ?`+tx.forUpdate(), accountID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	return err
+	return acquireLockSet(ctx, tx, func() lockSet {
+		var set lockSet
+		set.add(lockAccount, true, accountID)
+		return set
+	})
 }
 
 func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expires time.Time) (bool, error) {

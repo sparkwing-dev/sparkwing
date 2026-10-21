@@ -23,7 +23,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						root := authorityRoot("actions", "a")
 						root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}
 						root.Repositories = []string{"gh:1"}
-						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow"}}
+						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 						authorityPersist(t, s, root)
 						demand.CapabilityPrefix = root.Prefix
 						if descendant {
@@ -84,7 +84,7 @@ func TestPushAwardRefusesScopeEscape(t *testing.T) {
 	root := authorityRoot("actions", "a")
 	root.Grants = []capability.Grant{capability.TriggersClaim}
 	root.Repositories = []string{"gh:1"}
-	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow"}}
+	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, root)
 	writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureOtherSHA})
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET claimed_by='actions',generation=1,lease_expires_at=?`, s.now().Add(time.Hour).UnixNano())
@@ -105,7 +105,7 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		root := authorityRoot("actions", "a")
 		root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}
 		root.Repositories = []string{"gh:1"}
-		root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow"}}
+		root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 		authorityPersist(t, s, root)
 		git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA}
 		writePushRun(t, s, git)

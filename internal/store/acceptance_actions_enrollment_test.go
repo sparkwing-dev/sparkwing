@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -13,15 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
-
-type storeActionsProof struct{}
-
-func (storeActionsProof) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	if spec.Kind != capability.ProvisionActions || spec.RegistrationID != "github:42:7" {
-		return errors.New("unverified Actions proof")
-	}
-	return nil
-}
 
 func checkStoreActionsEnrollment(t *testing.T) (err error) {
 	ctx := t.Context()
@@ -50,7 +40,7 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	spec := capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(team), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: "1000"}}, Repositories: []string{"gh:42"}, ExpiresAt: new(time.Now().Add(30 * time.Minute))}
+	spec := capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(team), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "Acme/Widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: new(time.Now().Add(30 * time.Minute))}
 	issued, err := s.AsOperator().ProvisionCapability(ctx, spec)
 	if err != nil {
 		return err

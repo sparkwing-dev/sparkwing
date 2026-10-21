@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // Kinds of [GitCredential].
@@ -14,8 +16,7 @@ const (
 	GitCredentialHTTPS = "https"
 )
 
-// MaxGitCredentialsPerTeam bounds a team's stored git credentials, one per
-// host.
+// MaxGitCredentialsPerTeam bounds repository credentials and explicit host-wide grants.
 const MaxGitCredentialsPerTeam = 50
 
 // ErrGitCredentialLimit refuses a team's credential past
@@ -26,16 +27,17 @@ var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git cred
 // than the one the credential pinned.
 var ErrFingerprintMismatch = errors.New("store: the fingerprint is not the host key this credential pinned")
 
-// GitCredential is one team's credential for one host. Secret is the value
-// as stored, which the controller seals; nothing returns it to a caller but
-// a release.
+// GitCredential is a sealed repository credential or an explicit host-wide grant.
+// Only an authorized release returns its Secret.
 type GitCredential struct {
-	ID       string
-	Team     Team
-	Host     string
-	Kind     string
-	Username string
-	Secret   string
+	Repository string
+	HostWide   bool
+	ID         string
+	Team       Team
+	Host       string
+	Kind       string
+	Username   string
+	Secret     string
 	// KnownHosts is the pinned known_hosts entry of an ssh credential, and
 	// Fingerprint its SHA256 fingerprint.
 	KnownHosts  string
@@ -54,7 +56,7 @@ type GitCredential struct {
 // was lost, finished, released or superseded by a later generation.
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 
-const gitCredentialCols = `id, team, host, kind, username, secret, known_hosts, fingerprint,
+const gitCredentialCols = `id, team, host, repository_key, host_wide, kind, username, secret, known_hosts, fingerprint,
 	confirmed_at, created_by, created_at, updated_at`
 
 func scanGitCredential(row interface{ Scan(...any) error }) (GitCredential, error) {
@@ -62,7 +64,7 @@ func scanGitCredential(row interface{ Scan(...any) error }) (GitCredential, erro
 	var team string
 	var confirmed sql.NullInt64
 	var created, updated int64
-	if err := row.Scan(&c.ID, &team, &c.Host, &c.Kind, &c.Username, &c.Secret, &c.KnownHosts, &c.Fingerprint,
+	if err := row.Scan(&c.ID, &team, &c.Host, &c.Repository, &c.HostWide, &c.Kind, &c.Username, &c.Secret, &c.KnownHosts, &c.Fingerprint,
 		&confirmed, &c.CreatedBy, &created, &updated); err != nil {
 		return GitCredential{}, err
 	}
@@ -77,12 +79,20 @@ func scanGitCredential(row interface{ Scan(...any) error }) (GitCredential, erro
 }
 
 func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCredential, now time.Time) (GitCredential, error) {
+	if c.HostWide == (c.Repository != "") {
+		return GitCredential{}, ErrInvalidInput
+	}
+	if c.Repository != "" {
+		if err := runspec.ValidateRepoUse(runspec.RepoKey(c.Repository), runspec.RepoMachineStore); err != nil {
+			return GitCredential{}, ErrInvalidInput
+		}
+	}
 	if c.Host == "" || c.Secret == "" || (c.Kind != GitCredentialSSH && c.Kind != GitCredentialHTTPS) {
 		return GitCredential{}, ErrInvalidInput
 	}
 	at := now.UTC().UnixNano()
 	prev, err := scanGitCredential(tx.QueryRowContext(ctx,
-		`SELECT `+gitCredentialCols+` FROM git_credentials WHERE team = ? AND host = ?`, string(t.team), c.Host))
+		`SELECT `+gitCredentialCols+` FROM git_credentials WHERE team = ? AND host = ? AND repository_key = ?`, string(t.team), c.Host, c.Repository))
 	replacing := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return GitCredential{}, err
@@ -112,15 +122,15 @@ func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCrede
 	created := at
 	if replacing {
 		created = prev.CreatedAt.UnixNano()
-		if _, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team = ? AND host = ?`,
-			string(t.team), c.Host); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team = ? AND host = ? AND repository_key = ?`,
+			string(t.team), c.Host, c.Repository); err != nil {
 			return GitCredential{}, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO git_credentials (`+gitCredentialCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, string(t.team), c.Host, c.Kind, c.Username, c.Secret, c.KnownHosts, c.Fingerprint,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, string(t.team), c.Host, c.Repository, c.HostWide, c.Kind, c.Username, c.Secret, c.KnownHosts, c.Fingerprint,
 		confirmed, c.CreatedBy, created, at); err != nil {
 		return GitCredential{}, err
 	}
@@ -132,10 +142,10 @@ func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCrede
 	return out, nil
 }
 
-// GitCredentialForHost reads the team's credential for host, or ErrNotFound.
-func (t *Tenant) GitCredentialForHost(ctx context.Context, host string) (GitCredential, error) {
+// GitCredentialForRepository reads the exact repository grant, falling back to an explicit host-wide grant.
+func (t *Tenant) GitCredentialForRepository(ctx context.Context, repository, host string) (GitCredential, error) {
 	c, err := scanGitCredential(t.s.queryRow(ctx,
-		`SELECT `+gitCredentialCols+` FROM git_credentials WHERE team = ? AND host = ?`, string(t.team), host))
+		`SELECT `+gitCredentialCols+` FROM git_credentials WHERE team = ? AND host = ? AND (repository_key = ? OR host_wide = 1) ORDER BY host_wide LIMIT 1`, string(t.team), host, repository))
 	if errors.Is(err, sql.ErrNoRows) {
 		return GitCredential{}, notFound("git credential", host)
 	}
@@ -159,4 +169,12 @@ func (t *Tenant) GitCredentials(ctx context.Context) (_ []GitCredential, err err
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// CredentialScope binds the ciphertext to its repository or explicit host-wide grant.
+func (c GitCredential) CredentialScope() string {
+	if c.HostWide {
+		return "git-credential:host:" + c.Host
+	}
+	return "git-credential:repo:" + c.Repository
 }

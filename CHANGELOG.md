@@ -20,9 +20,18 @@ unlock.
 
 ## [Unreleased]
 
+- **launcher:** Seal box-scoped concurrency to the reserved execution node at authenticated Job activation. Capacity requests and their Pod identities cannot select a box.
+
 - **controller (Breaking):** Remove `--trigger-dedupe-window` and chart `controller.triggerDedupeWindow`. Identical API submissions create separate runs unless the caller supplies an idempotency key. Explicit keys and GitHub delivery IDs keep their persistent replay behavior.
 - **admission (Breaking):** Remove the `jev` admission mode and its adviser configuration. Use `classic`, `off`, `auto` or `custom` for deterministic machine admission. Queue status drops the adviser counters.
 - **runner:** Remove the persistent plan cache. Each new planning attempt invokes the SDK. An accepted plan remains stored for resume.
+- **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
+
+- **auth:** Switching teams preserves each session's original membership fence, so removal and a later rejoin cannot revive an old session's access.
+- **github:** A verified current GitHub administrator can reclaim an App installation for their active team. Both teams receive an audit event, and the former team's owners receive an email notification. Its former subscriptions, automation consent and schedules are withdrawn.
+- **charts:** Runner bundle 0.1.17 and full chart 0.3.2 ship the launcher's generated admission policy, including Kubernetes' default failure tolerations.
+
+- **auth:** Token sign-in preserves an existing minting session when the token depends on it, so replacing the browser cookie leaves the new session usable. Explicit logout of the minting session still ends its tokens and descendant sessions. Session renewal acquires membership and ancestry locks in the shared lock order.
 
 - **go api (Breaking):** Move the store, controller, controller client, cipher tests and storage backends under `internal/`. External Go imports of their former `pkg/` paths are removed. HTTP credential DTOs and `NodeRef` live in `internal/controllerwire`; JSON contracts are unchanged. Use the author SDK, public wire packages or the documented HTTP API. See [migration](docs/migrations/_unreleased.md#controller-and-store-packages-are-internal).
 
@@ -303,6 +312,10 @@ unlock.
 - **store (Breaking):** Secret calls require an explicit tenant
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
+
+- **controller (Breaking):** Member tokens expire within 90 days and end with their minting session. Administration requires `--allow-team-admin` and expires within 30 days. Personal runners recheck their enrollment authority, and removing then re-adding a member cannot revive old credentials. Shared runners remain team-owned after their registrar leaves. Invitations recheck their inviter at acceptance
+- **credentials (Breaking):** Stored git credentials name a repository, with host-wide access requiring an explicit administrator choice. Actions runners use the workflow token for checkout. Each Actions workflow run attempt exchanges its identity once. Source URLs reject credentials in queries and fragments
+- **launcher (Breaking):** Claim, exchange, hosting and sync use one award validator. Direct launches verify admission policy, tolerations must match exactly, and only `apps/v1` DaemonSets receive the daemon exemption
 
 - **store (Breaking):** Named job claims and renewal use current capability authority
   Removed `ClaimNamedNode`, `NamedClaimOptions`, `HeartbeatNodeClaim`, `HeartbeatNodeClaimWithCredits` and the two legacy HTTP routes. Use `ClaimUnit`, `ReconcileNode` and `RenewUnit`. See [migration guide](docs/migrations/_unreleased.md#named-job-claims-and-renewal).

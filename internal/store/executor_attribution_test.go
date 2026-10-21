@@ -22,7 +22,7 @@ func TestAttemptExecutorComesFromClaimAncestryProperty(t *testing.T) {
 					wantKind, wantName, wantLocation := "agent", root.Subject.ID, "local"
 					if actions {
 						run := fmt.Sprint(random.Uint64())
-						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: run}}
+						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: run, WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 						root.Repositories = []string{"gh:1"}
 						writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA})
 						rewriteSchemaExec(t, s.db, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES ('a',1,7,'acme/widgets','owner',1,'gh:1')`)

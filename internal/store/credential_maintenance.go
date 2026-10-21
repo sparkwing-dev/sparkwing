@@ -43,7 +43,11 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 	var result CredentialRotation
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		result = CredentialRotation{Skipped: []SecretRotationSkip{}}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set.add(lockTeam, true, string(t.team))
+			return set
+		}); err != nil {
 			return err
 		}
 		if err := t.credentialAdminTx(ctx, tx, a); err != nil {

@@ -34,7 +34,7 @@ func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[stri
 	if err != nil {
 		return nil, nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND bind_kind='none' AND parent_id IS NULL AND revoked_at IS NULL ORDER BY subject_id,prefix`, t.team)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND bind_kind='none' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY subject_id,prefix`, t.team, tx.now().UnixNano(), tx.now().UnixNano())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -55,9 +55,6 @@ func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[stri
 		c, err := loadCapabilityTx(ctx, tx, prefix)
 		if err != nil {
 			return nil, nil, err
-		}
-		if c.ExpiresAt != nil && !c.ExpiresAt.After(tx.now()) {
-			continue
 		}
 		for _, pool := range c.ReservedPools {
 			if !slices.Contains(runners[pool], c.Subject.ID) {

@@ -28,9 +28,12 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	}
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		return err
+	}
+	if issued.Capability.Parent == nil || *issued.Capability.Parent != authority {
+		return errors.New("member credential lost its issuing session ancestry")
 	}
 	child, err := s.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, Audience: capability.Controller, Binding: issued.Capability.Binding, Grants: issued.Capability.Grants})
 	if err != nil {
@@ -68,7 +71,7 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if rotation.Issued.Raw == "" || rotation.Previous.CreatedBy != member.Account.ID || rotation.Issued.Capability.Parent != nil {
+	if rotation.Issued.Raw == "" || rotation.Previous.CreatedBy != member.Account.ID || rotation.Issued.Capability.Parent == nil || *rotation.Issued.Capability.Parent != authority {
 		return errors.New("rotation lost original ownership or ancestry")
 	}
 	if err := reopen(); err != nil {
@@ -88,7 +91,7 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if next.Issued.Raw == "" {
+	if next.Issued.Raw == "" || next.Issued.Capability.Parent == nil || *next.Issued.Capability.Parent != authority {
 		return errors.New("reopening lost root provisioning origin")
 	}
 	if err := tenant.RevokeAuthority(ctx, store.Actor{Authority: authority}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}); err != nil {

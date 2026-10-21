@@ -49,7 +49,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubRunners(gh.Config(ghAudience)).
 			WithDashboard(controller.Dashboard{})
-		configureGitHubClaims(srv, st)
+		configureGitHubClaims(t, srv, st)
 		policies := srv.StorePolicies()
 		policies.ClaimProfiles = githubClaimEnvironment{}
 		return policies, nil

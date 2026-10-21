@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,7 +92,7 @@ func TestCapabilityInventoryOwnershipProperty(t *testing.T) {
 		c.Subject.ID = []string{"member", "other"}[rng.IntN(2)]
 		c.Audience = []capability.Audience{capability.Controller, capability.NodeHost}[rng.IntN(2)]
 		if rng.IntN(3) == 0 {
-			c.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow"}}
+			c.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 		}
 		if rng.IntN(4) == 0 {
 			c.RevokedAt = new(s.now().Add(-time.Minute))
@@ -225,7 +224,7 @@ func inventoryMemberRoot(t *testing.T, s *Store, actor Actor) capability.Issued 
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: p.Capability.Team, Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &actor.Authority, Team: p.Capability.Team, Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,14 +353,6 @@ func TestCapabilityRotationRegisteredOrigins(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
-			calls := 0
-			s.provisions = provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, got capability.ProvisionSpec) error {
-				calls++
-				if got.RegistrationID != spec.RegistrationID {
-					return errors.New("changed registration")
-				}
-				return nil
-			})
 			old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
@@ -376,13 +367,6 @@ func TestCapabilityRotationRegisteredOrigins(t *testing.T) {
 			rotation, err := s.rotateCapability(t.Context(), Team(spec.Team), a, time.Hour, nil)
 			if err != nil || !sameRotationScope(old.Capability, rotation.Issued.Capability) {
 				t.Fatalf("registered rotation: %+v %v", rotation, err)
-			}
-			wantCalls := 2
-			if kind == capability.ProvisionBootstrap {
-				wantCalls = 1
-			}
-			if calls != wantCalls {
-				t.Fatalf("origin checks %d want %d", calls, wantCalls)
 			}
 			var origin *CapabilityOrigin
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -426,7 +410,9 @@ func TestCapabilityRotationDeadlinesAndAncestryProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}); err != nil {
+			t.Fatalf("rotation ended predecessor before grace: %v", err)
+		}
 		end := start.Add(grace)
 		for _, at := range []time.Time{start, end.Add(-time.Nanosecond), end, end.Add(time.Nanosecond)} {
 			now = at
@@ -442,10 +428,9 @@ func TestCapabilityRotationDeadlinesAndAncestryProperty(t *testing.T) {
 }
 
 func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
-	for _, problem := range []string{"parent_expiry", "origin_policy", "registration", "missing_origin", "scheduled_revoke"} {
+	for _, problem := range []string{"parent_expiry", "registration", "missing_origin"} {
 		t.Run(problem, func(t *testing.T) {
 			s, spec := provisionOrigin(t, capability.ProvisionMachine)
-			s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 			old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
@@ -460,9 +445,6 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 				}
 			}
 			if problem == "origin_policy" {
-				s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error {
-					return errors.New("origin refused")
-				})
 			}
 			if problem == "missing_origin" || problem == "registration" {
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -487,13 +469,6 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 			}
 			if problem == "scheduled_revoke" {
 				expires = old.Capability.ExpiresAt
-				s.provisions = provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, _ capability.ProvisionSpec) error {
-					tx, ok := resolver.(*storeTx)
-					if !ok {
-						return errors.New("wrong resolver")
-					}
-					return tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix})
-				})
 			}
 			a := inventoryAuthorization(t, s, actor, "a", old.Capability.Prefix)
 			var before int
@@ -617,7 +592,6 @@ func TestCapabilityRotationRetainsMeteredMachine(t *testing.T) {
 	authorityPersist(t, s, operator)
 	spec.Authority = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}
 	spec.Metered = true
-	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -644,29 +618,6 @@ func TestCapabilityRevocationRefusesAlreadyEnded(t *testing.T) {
 	}
 }
 
-func TestCapabilityRotationCannotOutliveTarget(t *testing.T) {
-	s, spec := provisionOrigin(t, capability.ProvisionMachine)
-	now := time.Unix(1700000000, 0).UTC()
-	s.clock = func() time.Time { return now }
-	spec.ExpiresAt = new(now.Add(time.Hour))
-	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
-	old, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	actor := Actor{Authority: *spec.Authority}
-	a := inventoryAuthorization(t, s, actor, "a", old.Capability.Prefix)
-	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error {
-		now = now.Add(2 * time.Hour)
-		return nil
-	})
-	rotation, err := (&Tenant{s: s, team: "a"}).RotateCapability(t.Context(), a, time.Hour, new(now.Add(3*time.Hour)))
-	if err == nil || rotation.Issued.Raw != "" {
-		t.Fatal("target expiry during origin validation committed a replacement")
-	}
-	rewriteSchemaCount(t, s.db, "capabilities", 1)
-}
-
 func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
 	s := authorityStore(t)
 	member := authorityMember(t, s, "member", RoleEditor)
@@ -675,7 +626,7 @@ func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	expiry := s.now().Add(time.Hour).Truncate(time.Second)
-	old, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	old, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +661,7 @@ func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	expiry := s.now().Add(time.Hour).Truncate(time.Second)
-	old, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
+	old, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +678,7 @@ func adminRotationToken(t *testing.T, s *Store, owner Actor, expiry time.Time) c
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &owner.Authority, Team: "a", Subject: p.Capability.Subject, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, ExpiresAt: &expiry})
 	if err != nil {
 		t.Fatal(err)
 	}

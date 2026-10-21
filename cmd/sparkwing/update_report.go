@@ -15,6 +15,8 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -217,7 +219,7 @@ func installedReleaseProvenance(ctx context.Context, identity updateIdentity) (v
 	if identity.Dirty != nil && *identity.Dirty || !isResolvableModuleVersion(identity.Version) {
 		return false, true, "local CLI build cannot be compared as a published release"
 	}
-	if !validUpdateRevision(identity.Revision) || identity.Dirty == nil {
+	if !runspec.IsCommitID(identity.Revision) || identity.Dirty == nil {
 		return false, false, "installed CLI release provenance is unavailable"
 	}
 	revision, err := updateLookupRevision(ctx, identity.Version)
@@ -241,7 +243,7 @@ func reconcilePublishedVersion(ctx context.Context, identity updateIdentity, rel
 func publishedVersionRevision(ctx context.Context, identity updateIdentity, releaseVersion string) (string, error) {
 	if identity.Version == "" || !pseudoVersionRE.MatchString(identity.Version) ||
 		!validUpdateVersion(releaseVersion) ||
-		!validUpdateRevision(identity.Revision) ||
+		!runspec.IsCommitID(identity.Revision) ||
 		identity.Dirty == nil || *identity.Dirty {
 		return "", errors.New("artifact is not a clean Go pseudo-version")
 	}
@@ -255,7 +257,7 @@ func publishedVersionRevision(ctx context.Context, identity updateIdentity, rele
 func reconcilePublishedVersionAtRevision(identity updateIdentity, releaseVersion, revision string) (updateIdentity, bool) {
 	if identity.Version == "" || !pseudoVersionRE.MatchString(identity.Version) ||
 		!validUpdateVersion(releaseVersion) ||
-		!validUpdateRevision(identity.Revision) ||
+		!runspec.IsCommitID(identity.Revision) ||
 		identity.Dirty == nil || *identity.Dirty || identity.Revision != revision {
 		return identity, false
 	}
@@ -329,7 +331,7 @@ func lookupUpdateRevision(ctx context.Context, version string) (string, error) {
 		return "", err
 	}
 	for i := 0; i < 3; i++ {
-		if !validUpdateRevision(ref.Object.SHA) {
+		if !runspec.IsCommitID(ref.Object.SHA) {
 			return "", errors.New("release tag has no valid commit identity")
 		}
 		if ref.Object.Type == "commit" {
@@ -344,18 +346,6 @@ func lookupUpdateRevision(ctx context.Context, version string) (string, error) {
 		}
 	}
 	return "", errors.New("release tag indirection exceeds the metadata lookup limit")
-}
-
-func validUpdateRevision(value string) bool {
-	if len(value) != 40 {
-		return false
-	}
-	for _, r := range value {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 type sdkUpdateIdentity struct {

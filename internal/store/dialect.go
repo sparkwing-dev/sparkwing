@@ -134,6 +134,8 @@ func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
 
 type storeTx struct {
 	operator             *Operator
+	authorityLocks       []rowLock
+	insertedAuthorities  []capability.AuthorityRef
 	finishedLocalSecrets []localSecretKey
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission

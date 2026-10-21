@@ -46,7 +46,7 @@ func (c *sourceCipher) SealBound(secrets.Purpose, string, string, string, bool, 
 
 func (c *sourceCipher) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	c.opens++
-	if team != "team" || name != "git-credential:git.example" || scope != "git-credential" || shared || !masked || envelope != "private-envelope" {
+	if team != "team" || name != "git-credential:git.example" || scope != "git-credential:host:git.example" || shared || !masked || envelope != "private-envelope" {
 		return "", errors.New("private-cipher-binding")
 	}
 	return "private-source-secret", c.err
@@ -59,7 +59,7 @@ func sourceHTTPFixture(t *testing.T, b *credentialBoundary) (*sourceTransactions
 	p.Capability.Repositories = []string{"host:git.example/org/repo"}
 	p.Capability.Data = &capability.DataScope{RepositoryKey: p.Capability.Repositories[0]}
 	tx := &sourceTransactions{
-		credential: store.GitCredential{ID: "credential", Team: "team", Host: "git.example", Kind: store.GitCredentialHTTPS, Username: "git", Secret: "private-envelope", ConfirmedAt: &b.snapshot.Now},
+		credential: store.GitCredential{HostWide: true, ID: "credential", Team: "team", Host: "git.example", Kind: store.GitCredentialHTTPS, Username: "git", Secret: "private-envelope", ConfirmedAt: &b.snapshot.Now},
 		audit:      capability.SourceReleaseAudit{ID: "committed-audit", Team: "team", CredentialID: "credential", Host: "git.example", RepositoryKey: p.Capability.Repositories[0], RunID: p.Capability.Binding.RunID, NodeID: p.Capability.Binding.NodeID, Generation: p.Capability.Binding.Generation, CapabilityPrefix: p.Capability.Prefix, MachineID: "machine", ReleasedAt: b.snapshot.Now},
 	}
 	cipher := &sourceCipher{}

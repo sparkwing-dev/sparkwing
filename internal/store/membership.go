@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"slices"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -15,13 +14,22 @@ type MembershipUpdate struct {
 	Role      *Role
 }
 
-// UpdateMembership preserves the last owner and invalidates cached membership authority atomically.
+// UpdateMembership preserves the last owner and fences removed or demoted membership authority atomically.
 func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error {
 	if change.AccountID == "" || (change.Role != nil && !change.Role.Valid()) {
 		return ErrInvalidInput
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{actor.Authority})
+			set.add(lockTeam, true, string(t.team))
+			set.add(lockAccount, true, change.AccountID)
+			set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{string(t.team), change.AccountID}}, write: true, optional: true})
+			if change.Role == nil {
+				set = tx.operator.discoverAccountSessionLocks(ctx, tx, set, change.AccountID)
+			}
+			return set
+		}); err != nil {
 			return err
 		}
 		p, err := resolveActorTx(ctx, tx, actor)
@@ -54,6 +62,11 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 				return err
 			}
 		}
+		if change.Role == nil || !change.Role.AtLeast(current) {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO membership_epochs(team,account_id,epoch) VALUES (?,?,1) ON CONFLICT(team,account_id) DO UPDATE SET epoch=membership_epochs.epoch+1`, t.team, change.AccountID); err != nil {
+				return err
+			}
+		}
 		if change.Role == nil {
 			_, err = tx.ExecContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
 		} else {
@@ -62,63 +75,11 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 		if err != nil {
 			return err
 		}
-		var keep Role
 		if change.Role == nil {
 			if err := t.moveSessionsOffTeamTx(ctx, tx, change.AccountID, tx.now()); err != nil {
 				return err
 			}
-		} else {
-			keep = *change.Role
-		}
-		if err := t.withdrawInvitationsIssuedByTx(ctx, tx, change.AccountID, keep, tx.now()); err != nil {
-			return err
-		}
-		if change.Role == nil || keep == RoleReader {
-			if err := t.revokeCapabilitiesMintedByTx(ctx, tx, change.AccountID); err != nil {
-				return err
-			}
-		}
-		if err := tx.operator.advanceAuthGenerationsTx(ctx, tx, nil, &t.team); err != nil {
-			return err
 		}
 		return nil
 	})
-}
-
-// safety: accepting an invitation grants the role it names without asking
-// about its inviter again, so an invitation for more than the inviter now
-// holds goes with that authority; an empty keep withdraws every one.
-func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx, accountID string, keep Role, now time.Time) error {
-	var above []any
-	for _, r := range []Role{RoleReader, RoleEditor, RoleOwner} {
-		if r.rank() > keep.rank() {
-			above = append(above, string(r))
-		}
-	}
-	if accountID == "" || len(above) == 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE invitations SET withdrawn_at = ?
-		WHERE team = ? AND invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL
-		  AND role IN (`+placeholders(len(above))+`)`,
-		append([]any{now.UTC().UnixNano(), string(t.team), accountID}, above...)...)
-	return err
-}
-
-func (t *Tenant) revokeCapabilitiesMintedByTx(ctx context.Context, tx *storeTx, accountID string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND created_by=? AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, t.team, accountID, tx.now().UnixNano())
-	if err != nil {
-		return err
-	}
-	prefixes, err := scanPrefixes(rows)
-	if err != nil {
-		return err
-	}
-	for _, prefix := range prefixes {
-		if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
-			return err
-		}
-	}
-	return nil
 }

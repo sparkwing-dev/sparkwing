@@ -45,7 +45,7 @@ func authenticationFixture() (*authenticationReader, capability.Presentation, ca
 		Parent:  &root.Authority, IssuedAt: now.Add(-time.Minute), ExpiresAt: &expires,
 	}}
 	reader := &authenticationReader{snapshot: capability.AuthenticationSnapshot{
-		Now: now, Authorities: []capability.AuthorityState{{Principal: claim, MembershipValid: true}, {Principal: root, MembershipValid: true}},
+		Now: now, Authorities: []capability.AuthorityState{{Principal: claim}, {Principal: root}},
 		Binding: capability.BindingState{Current: claim.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)},
 	}}
 	route, _ := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/transition")
@@ -68,10 +68,14 @@ func TestAuthenticationAncestry(t *testing.T) {
 		"parent expired": func(r *authenticationReader) {
 			r.snapshot.Authorities[1].Principal.Capability.ExpiresAt = &r.snapshot.Now
 		},
-		"membership removed":        func(r *authenticationReader) { r.snapshot.Authorities[0].MembershipValid = false },
-		"parent membership removed": func(r *authenticationReader) { r.snapshot.Authorities[1].MembershipValid = false },
-		"missing parent":            func(r *authenticationReader) { r.snapshot.Authorities = r.snapshot.Authorities[:1] },
-		"wrong parent":              func(r *authenticationReader) { r.snapshot.Authorities[1].Principal.Authority.ID = "other" },
+		"membership removed": func(r *authenticationReader) {
+			r.snapshot.Authorities[0].Principal.Capability.RevokedAt = &r.snapshot.Now
+		},
+		"parent membership removed": func(r *authenticationReader) {
+			r.snapshot.Authorities[1].Principal.Capability.RevokedAt = &r.snapshot.Now
+		},
+		"missing parent": func(r *authenticationReader) { r.snapshot.Authorities = r.snapshot.Authorities[:1] },
+		"wrong parent":   func(r *authenticationReader) { r.snapshot.Authorities[1].Principal.Authority.ID = "other" },
 		"cycle": func(r *authenticationReader) {
 			r.snapshot.Authorities[1].Principal.Capability.Parent = &r.snapshot.Authorities[0].Principal.Authority
 		},
@@ -121,8 +125,13 @@ func TestAuthenticationTerminalExceptions(t *testing.T) {
 	}
 	authenticator := capability.NewAuthenticator(r)
 	auth, err := authenticator.Authenticate(t.Context(), p, route)
-	if err != nil || len(auth.Live) != 2 || !auth.Live[0].ResultReplay {
+	if err != nil || len(auth.Live) != 2 {
 		t.Fatalf("replay = %+v, %v", auth, err)
+	}
+	for _, live := range auth.Live {
+		if !live.ResultReplay {
+			t.Fatalf("non-replay terminal access = %+v", live)
+		}
 	}
 	p.Evidence.ResultDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	_, err = authenticator.Authenticate(t.Context(), p, route)
@@ -194,7 +203,7 @@ func TestAuthenticationSessionLookupIncludesControllerAudience(t *testing.T) {
 			if class == capability.CredentialConsole {
 				principal.Capability.Subject.Kind = capability.SubjectOperator
 			}
-			reader.snapshot.Authorities = []capability.AuthorityState{{Principal: principal, MembershipValid: true}}
+			reader.snapshot.Authorities = []capability.AuthorityState{{Principal: principal}}
 			route, ok := capability.LookupRoute("GET", "/api/v1/runs")
 			if !ok {
 				t.Fatal("run collection policy is absent")
@@ -219,7 +228,7 @@ func TestAuthenticationSessionMatchesOnlyItsCommittedRowProperty(t *testing.T) {
 		if wrong {
 			stored[0] ^= 1
 		}
-		reader.snapshot.Authorities = []capability.AuthorityState{{MembershipValid: true, Principal: capability.Principal{
+		reader.snapshot.Authorities = []capability.AuthorityState{{Principal: capability.Principal{
 			Class: capability.CredentialSession, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(stored[:])},
 			Capability: capability.Capability{Digest: digest, Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}},
 		}}}
@@ -228,5 +237,31 @@ func TestAuthenticationSessionMatchesOnlyItsCommittedRowProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTriggerAuthorityUsesSupportedJobBindings(t *testing.T) {
+	reader, presentation, _ := authenticationFixture()
+	p := reader.snapshot.Authorities[0].Principal
+	p.Capability.Unit, p.Capability.Purpose = capability.UnitTrigger, capability.PurposeTrigger
+	p.Capability.Binding.Kind, p.Capability.Binding.NodeID, p.Capability.Binding.Attempt = capability.BindingTrigger, "", 0
+	p.Capability.Grants = []capability.Grant{capability.NodeResult, capability.NodeReport, capability.LogTail}
+	for _, suffix := range []string{"transition", "metrics", "usage", "activity", "steps/start", "steps/finish", "steps/skip", "steps/annotations", "steps/summary", "logs", "log-segments", "log-manifest"} {
+		route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/"+suffix)
+		if !ok {
+			t.Fatalf("missing route %s", suffix)
+		}
+		auth := capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path}
+		for i := range route.Access {
+			auth.Live = append(auth.Live, capability.LiveAccess{RuleIndex: i})
+		}
+		authorized, err := capability.Authorize(t.Context(), allowAuthenticationBinding{}, route, auth, presentation.Evidence.Target)
+		if suffix == "transition" || suffix == "metrics" || suffix == "usage" {
+			if err != nil || authorized.Access.Binding != capability.BindRunOfTrigger {
+				t.Fatalf("trigger %s: binding=%s err=%v", suffix, authorized.Access.Binding, err)
+			}
+		} else {
+			requireAuthenticationCode(t, err, apierr.Forbidden)
+		}
 	}
 }

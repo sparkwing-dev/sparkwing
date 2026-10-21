@@ -211,7 +211,7 @@ func TestAuthenticationRejectsMalformedPresentationsBeforeLookup(t *testing.T) {
 func TestAuthenticationPeerAndReadFailures(t *testing.T) {
 	r, _, route := authenticationFixture()
 	peer := capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}
-	r.snapshot.Authorities = []capability.AuthorityState{{MembershipValid: true, Principal: capability.Principal{
+	r.snapshot.Authorities = []capability.AuthorityState{{Principal: capability.Principal{
 		Class: capability.CredentialPeer, Capability: capability.Capability{Subject: peer, Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}},
 	}}}
 	p := capability.Presentation{Class: capability.CredentialPeer, Peer: peer}

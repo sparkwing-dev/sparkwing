@@ -273,3 +273,31 @@ func TestBindingTokenRequiresTheAccountOwner(t *testing.T) {
 		}
 	}
 }
+
+func TestBoundDelegateRevocationRequiresTheAccountOwner(t *testing.T) {
+	s := authorityStore(t)
+	owner := authorityMember(t, s, "owner", RoleEditor)
+	other := authorityMember(t, s, "other", RoleEditor)
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','published-run',1,'ci','running',?,'sealed',1,'gh:1','host','publish',?,'account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"ci","writer":"account/fixture"}}`), []byte(`[]`))
+	child := authorityRoot("publication", "a")
+	child.Parent = &owner.Authority
+	child.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}
+	child.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "published-run"}
+	authorityPersist(t, s, child)
+	tenant := &Tenant{s: s, team: "a"}
+	target := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
+	if err := tenant.RevokeAuthority(t.Context(), other, target); err == nil {
+		t.Fatal("foreign account revoked bound delegate")
+	}
+	current, err := s.AsOperator().ResolveAuthority(t.Context(), target)
+	if err != nil || current.Capability.RevokedAt != nil {
+		t.Fatalf("foreign revocation changed delegate: %+v %v", current, err)
+	}
+	if err := tenant.RevokeAuthority(t.Context(), owner, target); err != nil {
+		t.Fatalf("owner cleanup: %v", err)
+	}
+	var revoked int
+	if err := s.queryRow(t.Context(), `SELECT count(*) FROM capabilities WHERE prefix=? AND revoked_at IS NOT NULL`, child.Prefix).Scan(&revoked); err != nil || revoked != 1 {
+		t.Fatalf("delegate revocation: %d %v", revoked, err)
+	}
+}

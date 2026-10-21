@@ -45,7 +45,7 @@ func newActionsExchangeFixture(t testing.TB) *actionsExchangeFixture {
 		"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
 		"repository": "acme/widgets", "repository_id": "42", "repository_owner_id": "7",
 		"ref": "refs/heads/main", "sha": strings.Repeat("a", 40), "event_name": "push",
-		"workflow_ref": "acme/widgets/.github/workflows/ci.yaml@refs/heads/main", "run_id": "1000",
+		"workflow_ref": "acme/widgets/.github/workflows/ci.yaml@refs/heads/main", "run_id": "1000", "run_attempt": "1",
 	}
 	f.lookup = func(_ context.Context, team store.Team, id int64) (store.GitHubRunnerBinding, error) {
 		return store.GitHubRunnerBinding{Team: team, RepositoryID: id, RepositoryOwnerID: 7, Repository: "acme/widgets"}, nil
@@ -107,7 +107,7 @@ func TestActionsIssuanceHTTPUsesVerifiedOrigin(t *testing.T) {
 				t.Fatalf("issuer=%+v lookups=%d", f.issuer, f.calls)
 			}
 			spec := f.issuer.provisions[0]
-			want := capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1000"}}
+			want := capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/ci.yaml@refs/heads/main"}}
 			if spec.Kind != capability.ProvisionActions || spec.Team != "team" || spec.Subject.Kind != capability.SubjectMachine || spec.Subject.ID == "" || spec.RegistrationID == "" || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 || !reflect.DeepEqual(spec.Repositories, []string{"gh:42"}) || !reflect.DeepEqual(spec.Binding, want) || !reflect.DeepEqual(spec.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 				t.Fatalf("spec=%+v", spec)
 			}
@@ -301,12 +301,6 @@ func TestActionsIssuanceHTTPBindingCannotCrossTeamRepositoryOrOwner(t *testing.T
 	}
 }
 
-type actionsProvisionPolicy func(capability.ProvisionSpec) error
-
-func (f actionsProvisionPolicy) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	return f(spec)
-}
-
 func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -336,7 +330,7 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	principal, err := st.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(result.Token)))
-	if err != nil || principal.Capability.Parent != nil || principal.Capability.Binding.Push == nil || principal.Capability.Binding.Push.RepositoryKey != "gh:42" || principal.Capability.Binding.Push.WorkflowRunID != "1000" || principal.Capability.Subject.ID != "github:42:7:1000" || principal.Capability.ExpiresAt == nil || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) <= 0 || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) > time.Hour || !reflect.DeepEqual(principal.Capability.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
+	if err != nil || principal.Capability.Parent != nil || principal.Capability.Binding.Push == nil || principal.Capability.Binding.Push.RepositoryKey != "gh:42" || principal.Capability.Binding.Push.WorkflowRunID != "1000" || principal.Capability.Subject.ID != "github:42:7:1000:1" || principal.Capability.ExpiresAt == nil || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) <= 0 || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) > time.Hour || !reflect.DeepEqual(principal.Capability.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 		t.Fatalf("persisted root=%+v err=%v", principal, err)
 	}
 	for path, status := range map[string]int{"/api/v1/auth/whoami": 200, "/api/v1/pipelines/build/sizing": 403} {

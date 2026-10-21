@@ -91,7 +91,7 @@ func contractSymbols(t *testing.T, directory string) map[string]string {
 func TestCurrentContractSymbolInventories(t *testing.T) {
 	const root = "../../"
 	packages := map[string]map[string]string{}
-	for _, name := range []string{"settings", "nodehost", "store", "capability"} {
+	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire"} {
 		packages[name] = contractSymbols(t, root+"internal/"+name)
 	}
 	path := root + "design/rewrite/contracts/c4-surface-config.md"
@@ -159,6 +159,16 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 	}
 	inventory, _, _ = strings.Cut(inventory, "| Other package API |")
 	checkContractInventory(t, inventory, "capability", packages)
+	data, err = os.ReadFile(root + "design/rewrite/contracts/c3-controller-wire.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inventory, ok = strings.Cut(string(data), "| Export | Contract |\n")
+	if !ok {
+		t.Fatal("missing controller wire inventory")
+	}
+	inventory, _, _ = strings.Cut(inventory, "| `controller.ExpansionForStore`")
+	checkContractInventory(t, inventory, "controllerwire", packages)
 }
 
 func checkContractInventory(t *testing.T, inventory, defaultOwner string, packages map[string]map[string]string) {

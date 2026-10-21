@@ -151,10 +151,7 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	}
 	var inventory []string
 	for _, pod := range pods.Items {
-		daemon := slices.ContainsFunc(pod.OwnerReferences, func(o metav1.OwnerReference) bool {
-			return o.Kind == "DaemonSet" && o.Controller != nil && *o.Controller
-		})
-		if !daemon {
+		if !daemonPod(pod) {
 			continue
 		}
 		for _, container := range append(slices.Clone(pod.Spec.InitContainers), pod.Spec.Containers...) {
@@ -338,7 +335,7 @@ func probeSecurity() *corev1.SecurityContext {
 // namespace whose names match up to the last '-', so canaries named only
 // sw-boundary-<random> made the peer inherit the control's allow-all ingress.
 func boundaryName(role string) string {
-	return "sw-boundary-" + role + "-" + strings.ToLower(rand.Text())
+	return boundaryPrefix + role + "-" + strings.ToLower(rand.Text())
 }
 
 func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation, nonce string) *corev1.Pod {
@@ -461,7 +458,7 @@ func (p *productionBoundary) stopProbes(ctx context.Context, r CloudNodeReservat
 	}
 	for _, pod := range pods.Items {
 		var held CloudNodeReservation
-		if pod.Spec.NodeName == r.NodeName && strings.HasPrefix(pod.Name, "sw-boundary-") && json.Unmarshal([]byte(pod.Annotations[reservationAnnotation]), &held) == nil && held == r {
+		if pod.Spec.NodeName == r.NodeName && strings.HasPrefix(pod.Name, boundaryPrefix) && json.Unmarshal([]byte(pod.Annotations[reservationAnnotation]), &held) == nil && held == r {
 			if err = p.deletePod(ctx, &pod); err != nil {
 				return err
 			}
@@ -473,7 +470,7 @@ func (p *productionBoundary) stopProbes(ctx context.Context, r CloudNodeReservat
 	}
 	for _, policy := range policies.Items {
 		var held CloudNodeReservation
-		if strings.HasPrefix(policy.Name, "sw-boundary-") && json.Unmarshal([]byte(policy.Annotations[reservationAnnotation]), &held) == nil && held == r {
+		if strings.HasPrefix(policy.Name, boundaryPrefix) && json.Unmarshal([]byte(policy.Annotations[reservationAnnotation]), &held) == nil && held == r {
 			err = p.kube.NetworkingV1().NetworkPolicies(p.cfg.Namespace).Delete(ctx, policy.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &policy.UID}})
 			if err != nil && !apierrors.IsNotFound(err) {
 				return err

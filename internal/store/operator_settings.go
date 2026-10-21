@@ -11,6 +11,15 @@ import (
 
 func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Authorized, grant capability.Grant, write func(*storeTx, capability.Principal) error) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			if a.Target.Team != "" {
+				set.add(lockTeam, true, a.Target.Team)
+			}
+			return set
+		}); err != nil {
+			return err
+		}
 		check := func() (capability.Principal, error) {
 			p, err := resolveProvisionAuthorityTx(ctx, tx, a.Principal.Authority, capability.ProofForConsole(a.Principal))
 			if err != nil {

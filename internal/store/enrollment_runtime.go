@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -28,11 +29,11 @@ func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Prin
 	if c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingNone || c.Unit != "" || slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
 		return nil
 	}
-	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: c}}}, runspec.Request{})
 	if err != nil {
 		return err
 	}
-	if record.Origin == nil || !record.Origin.Personal {
+	if !facts.Personal {
 		return authorityError(apierr.Forbidden, "shared runner management requires team administration")
 	}
 	return nil
@@ -47,9 +48,6 @@ func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		allow, err := sourceurl.ParseRepoAllowlist(spec.Repositories)
 		if err != nil || !slices.Equal(allow.Patterns(), spec.Repositories) {
 			return authorityError(apierr.BadRequest, "enrollment requires canonical repository patterns")
-		}
-		if err := (&Tenant{s: tx.store, team: Team(spec.Team)}).lockTeamTx(ctx, tx); err != nil {
-			return err
 		}
 		allowed = []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.ClaimsLaunch}
 		if slices.Contains(spec.Grants, capability.ClaimsLaunch) && (spec.Personal || len(spec.ReservedPools) == 0 || len(spec.Grants) != 1 || spec.Metered) {
@@ -84,7 +82,7 @@ func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.Pro
 }
 
 func checkEnrollmentNamesTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,subject_id,revoked_at FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind=? AND audience='controller' AND bind_kind='none' AND unit_kind IS NULL AND parent_id IS NULL AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?)`, spec.Team, spec.Subject.Kind, tx.now().UnixNano(), tx.now().UnixNano())
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,subject_id,revoked_at FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind=? AND audience='controller' AND bind_kind='none' AND unit_kind IS NULL AND parent_id IS NULL AND `+liveCredentialSQL("")+``, spec.Team, spec.Subject.Kind, tx.now().UnixNano(), tx.now().UnixNano())
 	if err != nil {
 		return err
 	}

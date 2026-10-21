@@ -268,35 +268,35 @@ budgets remain context deadlines and exhaust as `blob.ErrBudget`.
 
 ClaimedUnit includes accepted engine, source generation and owner/attempt/parent
 expiry deadlines. Its sealed request carries Source.Location. CloudJobAward consumes
-that immutable source projection. SyncLauncher returns held awards and stale Job
-identities without raw bearers. `LauncherObservation.Award` is the existing
-`capability.LeaseRef` tuple of kind, ID, holder and generation. This is the
-awarded unit's generation; an eval uses its own lease generation, separately
-from the immutable source generation. The observed Job carries namespace, name
-and UID, and `node_uid` identifies its reserved node instance. Observations
-cannot replace the stored fence or authorize a cleanup by themselves.
-A reservation-only observation carries the same award LeaseRef, `node_uid` and
-`reservation_id`, and omits `job`. It cannot also carry a Job reference.
-`LauncherSyncResponse.RemoveReservations` returns `LauncherReservationRef` values
-with that exact award, NodeUID and ReservationID. The store proves the original
-bootstrap award belongs to the authenticated launcher's ancestry, even after
-expiry, cancellation, exchange or a later generation. Unknown, forged and foreign
-award fences refuse the whole response. A live award remains in `Awards`.
-The launcher persists the award and reservation on the node. Sync observes
-reservations even when no Job was created. It releases only the matching retired
-reservation after proving the named Job absent and every non-DaemonSet pod gone.
-Parent credential expiry alone never authorizes release. An unexpiring service
-root is valid when the award's execution deadline is bounded.
-`LauncherSyncResponse.Remove` is a list of `LauncherJobRef`, carrying the exact
-namespace, name and UID required as a Kubernetes deletion precondition. A name
-alone cannot identify an instance after replacement. Every transport, decoding
-or validation error returns an empty sync result, so a partial decode cannot
-expose private bearer material. The old unfenced
-unit-ID/Job-name observation and string cleanup list are removed. W8 must retain
-award annotations and the actual Kubernetes Job UID, submit observations and
-delete with the UID precondition before releasing its reservation. W1/W2 must
-compare the reported award with stored ownership and reconcile only the
-authenticated launcher's awards. Store and launcher component tests exercise these paths. Native Kubernetes enforcement remains an acceptance obligation.
+that immutable source projection. `LauncherObservation.Award` is the existing
+`capability.LeaseRef` tuple of kind, ID, holder and generation. An eval uses its own
+lease generation, separately from the immutable source generation. Observations
+carry that fence, a reservation-only marker, and a Job rejection marker.
+`LauncherCapacityObservation` carries only the award fence in the separate
+`LauncherSyncRequest.Capacity` list. It cannot name an execution host.
+`LauncherSyncRequest.Activations` carries `LauncherActivation` with the award
+fence, execution Node UID and reservation ID. The authenticated launcher sends it
+only after verifying its reserved node and suspended Job, before unsuspending
+that Job. The store seals the host on the live bootstrap award at this point.
+Ordinary Job, reservation and capacity observations never seal a host. A capacity
+observation cannot also activate the same award in one request. Kubernetes Job
+and cleanup identities remain local to the launcher.
+
+`LauncherSyncResponse` returns live `Awards` and `Retired` award LeaseRefs without
+raw bearers. The store proves reservation observations belong to the authenticated
+launcher's ancestry, even after expiry, cancellation, exchange or a later
+generation. Unknown, forged and foreign reservation fences refuse the whole
+response. Returned fences cannot select a Kubernetes cleanup target.
+
+The launcher reconstructs Job and node observations from Kubernetes and matches
+each response to the complete observed award fence. Job and node UIDs remain
+local deletion preconditions. An orphaned reservation is released only after its
+Job is absent and every non-DaemonSet pod is gone. Parent credential expiry alone
+never authorizes release. An unexpiring service root is valid when the award's
+execution deadline is bounded. Every transport, decoding or validation error
+returns an empty sync result, so a partial decode cannot expose private bearer
+material. Store and launcher component tests exercise these paths. Native
+Kubernetes enforcement remains an acceptance obligation.
 Exchange presents the bootstrap in the authenticated
 transport and returns the exchanged ClaimedUnit once. The controller never mints
 replacement bootstraps from an observed Kubernetes Job. Lost bootstrap delivery
@@ -345,7 +345,7 @@ one envelope and use `apierr.DecodeInner`.
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
 | `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
-| `LauncherObservation`, `LauncherJobRef`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and UID-preconditioned Kubernetes cleanup identities. |
+| `LauncherObservation`, `LauncherCapacityObservation`, `LauncherActivation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
 | `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body or structured failure and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |
@@ -356,7 +356,7 @@ one envelope and use `apierr.DecodeInner`.
 | `controller.IntakeForStore` | Carries tagged session/capability authority into C1 `IntakeRequest`. |
 | `controller.EngineController` | Shared server adapter for lifecycle, claims, renewals and reads. |
 | `client.EngineOptions`, `NewEngineClient` | Authenticated HTTP transport, including api.sock dialing. `Launcher` explicitly selects the deployment launcher claim route. |
-| `nodehost.RemoteOwnerStore` | Consumes the shared wire through C1 reconciler and expansion interfaces. |
+| `nodehost.RemoteHostStore` | Consumes the shared wire through C1 reconciler and expansion interfaces. |
 
 The expansion adapter derives the source and actor from the authenticated
 route/binding. It compares the immutable source generation and preserves
@@ -985,8 +985,8 @@ client and is absent from the hosted controller.
 ## W9 launcher preparation transport
 
 `LauncherSyncRequest.Preparing` is an optional `[]LeaseRef` serialized as
-`preparing`. `LauncherSyncResponse.Prepared` is an optional `[]LeaseRef`
-serialized as `prepared`. Each acknowledgement names an exact still-unexchanged
+`preparing`. `LauncherSyncResponse.Prepared` is an optional `[]LauncherPreparation`
+serialized as `prepared`. Each preparation includes its committed expiry. Each acknowledgement names an exact still-unexchanged
 bootstrap lease renewed by the authenticated launcher root. Observed Jobs and
 reservations keep their existing decision correlation. Ended own awards remain
 eligible for cleanup decisions when they receive no preparation acknowledgement.

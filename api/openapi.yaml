@@ -498,6 +498,10 @@ components:
           type: string
         sha:
           type: string
+        workflow_ref:
+          type: string
+        workflow_run_attempt:
+          type: string
         workflow_run_id:
           type: string
       required:
@@ -505,6 +509,8 @@ components:
         - ref
         - sha
         - workflow_run_id
+        - workflow_run_attempt
+        - workflow_ref
       type: object
       x-sparkwing-go-type: capability.PushScope
     internal.capability.RecordedResult:
@@ -971,6 +977,8 @@ components:
     internal.controllerwire.CreateTokenRequest:
       additionalProperties: true
       properties:
+        allow_team_admin:
+          type: boolean
         data:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.DataScope'
@@ -1952,37 +1960,41 @@ components:
         - cause
       type: object
       x-sparkwing-go-type: controllerwire.JobTransitionRequest
-    internal.controllerwire.LauncherJobRef:
-      additionalProperties: true
-      properties:
-        name:
-          type: string
-        namespace:
-          type: string
-        uid:
-          type: string
-      required:
-        - namespace
-        - name
-        - uid
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherJobRef
-    internal.controllerwire.LauncherObservation:
+    internal.controllerwire.LauncherActivation:
       additionalProperties: true
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
-        job:
-          $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
         node_uid:
           type: string
-        rejected:
-          type: boolean
         reservation_id:
           type: string
       required:
         - award
         - node_uid
+        - reservation_id
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherActivation
+    internal.controllerwire.LauncherCapacityObservation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+      required:
+        - award
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherCapacityObservation
+    internal.controllerwire.LauncherObservation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        rejected:
+          type: boolean
+        reservation:
+          type: boolean
+      required:
+        - award
       type: object
       x-sparkwing-go-type: controllerwire.LauncherObservation
     internal.controllerwire.LauncherPreparation:
@@ -2007,24 +2019,21 @@ components:
         - expires_at
       type: object
       x-sparkwing-go-type: controllerwire.LauncherPreparation
-    internal.controllerwire.LauncherReservationRef:
-      additionalProperties: true
-      properties:
-        award:
-          $ref: '#/components/schemas/internal.capability.LeaseRef'
-        node_uid:
-          type: string
-        reservation_id:
-          type: string
-      required:
-        - award
-        - node_uid
-        - reservation_id
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherReservationRef
     internal.controllerwire.LauncherSyncRequest:
       additionalProperties: true
       properties:
+        activations:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LauncherActivation'
+              type: array
+            - type: "null"
+        capacity:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LauncherCapacityObservation'
+              type: array
+            - type: "null"
         observed:
           anyOf:
             - items:
@@ -2062,22 +2071,15 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.LauncherPreparation'
               type: array
             - type: "null"
-        remove:
+        retired:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
-              type: array
-            - type: "null"
-        remove_reservations:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.controllerwire.LauncherReservationRef'
+                $ref: '#/components/schemas/internal.capability.LeaseRef'
               type: array
             - type: "null"
       required:
         - awards
-        - remove
-        - remove_reservations
+        - retired
       type: object
       x-sparkwing-go-type: controllerwire.LauncherSyncResponse
     internal.controllerwire.LockView:
@@ -11506,11 +11508,6 @@ paths:
               - node.report
             binding: ownNode
             liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
-            liveness: reporting
           - credential: local_run_publisher
             grants:
               - data.write
@@ -11558,11 +11555,6 @@ paths:
             grants:
               - node.report
             binding: ownNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
             liveness: reporting
           - credential: awarded_or_delegated_claim
             grants:
@@ -11945,11 +11937,6 @@ paths:
               - log.tail
             binding: ownNode
             liveness: logTail
-          - credential: awarded_or_delegated_claim
-            grants:
-              - log.tail
-            binding: runOfTrigger
-            liveness: logTail
           - credential: local_run_publisher
             grants:
               - data.write
@@ -11990,11 +11977,6 @@ paths:
             grants:
               - log.tail
             binding: ownNode
-            liveness: logTail
-          - credential: awarded_or_delegated_claim
-            grants:
-              - log.tail
-            binding: runOfTrigger
             liveness: logTail
           - credential: local_run_publisher
             grants:
@@ -12125,11 +12107,6 @@ paths:
             grants:
               - node.report
             binding: ownNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
             liveness: reporting
           - credential: local_run_publisher
             grants:
@@ -12545,11 +12522,6 @@ paths:
               - node.report
             binding: ownNode
             liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
-            liveness: reporting
           - credential: local_run_publisher
             grants:
               - data.write
@@ -12600,11 +12572,6 @@ paths:
             grants:
               - node.report
             binding: ownNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
             liveness: reporting
           - credential: local_run_publisher
             grants:
@@ -12657,11 +12624,6 @@ paths:
               - node.report
             binding: ownNode
             liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
-            liveness: reporting
           - credential: local_run_publisher
             grants:
               - data.write
@@ -12713,11 +12675,6 @@ paths:
               - node.report
             binding: ownNode
             liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
-            liveness: reporting
           - credential: local_run_publisher
             grants:
               - data.write
@@ -12757,11 +12714,6 @@ paths:
             grants:
               - node.report
             binding: ownNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
             liveness: reporting
           - credential: local_run_publisher
             grants:
@@ -12803,11 +12755,6 @@ paths:
             grants:
               - node.report
             binding: ownNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: runOfTrigger
             liveness: reporting
           - credential: awarded_or_delegated_claim
             grants:

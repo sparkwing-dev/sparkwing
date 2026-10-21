@@ -19,7 +19,7 @@ func sourceGitCredentialFixture(t *testing.T) (*Tenant, capability.Authorized, c
 func TestSourceGitCredentialConfirmationAndReplacement(t *testing.T) {
 	tenant, admin, source := sourceGitCredentialFixture(t)
 	ctx := t.Context()
-	row := GitCredential{Host: "github.com", Kind: GitCredentialSSH, Secret: "sealed-key", KnownHosts: "github.com ssh-ed25519 AAAA", Fingerprint: "SHA256:one"}
+	row := GitCredential{HostWide: true, Host: "github.com", Kind: GitCredentialSSH, Secret: "sealed-key", KnownHosts: "github.com ssh-ed25519 AAAA", Fingerprint: "SHA256:one"}
 	stored, err := tenant.WriteGitCredential(ctx, admin, sealedGitFixture(t, tenant, row))
 	if err != nil || stored.ConfirmedAt != nil || stored.Team != tenant.team {
 		t.Fatalf("unconfirmed credential: %+v, %v", stored, err)
@@ -27,16 +27,16 @@ func TestSourceGitCredentialConfirmationAndReplacement(t *testing.T) {
 	if c, audit, err := tenant.ReleaseSourceCredential(ctx, source); err == nil || c.ID != "" || audit.ID != "" {
 		t.Fatalf("unconfirmed release: %+v, %+v, %v", c, audit, err)
 	}
-	if _, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, "SHA256:other"); !errors.Is(err, ErrFingerprintMismatch) {
+	if _, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, "", "SHA256:other"); !errors.Is(err, ErrFingerprintMismatch) {
 		t.Fatalf("wrong fingerprint: %v", err)
 	}
-	confirmed, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, row.Fingerprint)
+	confirmed, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, "", row.Fingerprint)
 	if err != nil || confirmed.ConfirmedAt == nil {
 		t.Fatalf("confirmation: %+v, %v", confirmed, err)
 	}
 	at := tenant.s.now().Add(time.Nanosecond)
 	tenant.s.clock = func() time.Time { return at }
-	replayed, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, row.Fingerprint)
+	replayed, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, "", row.Fingerprint)
 	if err != nil || !replayed.ConfirmedAt.Equal(*confirmed.ConfirmedAt) || !replayed.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		t.Fatalf("confirmation replay: %+v, %v", replayed, err)
 	}
@@ -64,7 +64,7 @@ func TestSourceGitCredentialConfirmationAndReplacement(t *testing.T) {
 func TestSourceGitCredentialHTTPSDeletionAndTenant(t *testing.T) {
 	tenant, admin, source := sourceGitCredentialFixture(t)
 	ctx := t.Context()
-	row, err := tenant.WriteGitCredential(ctx, admin, sealedGitFixture(t, tenant, GitCredential{Host: "github.com", Kind: GitCredentialHTTPS, Secret: "sealed-token"}))
+	row, err := tenant.WriteGitCredential(ctx, admin, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "github.com", Kind: GitCredentialHTTPS, Secret: "sealed-token"}))
 	if err != nil || row.ConfirmedAt == nil {
 		t.Fatalf("HTTPS confirmation: %+v, %v", row, err)
 	}
@@ -72,13 +72,13 @@ func TestSourceGitCredentialHTTPSDeletionAndTenant(t *testing.T) {
 	if c, audit, err := foreign.ReleaseSourceCredential(ctx, source); err == nil || c.ID != "" || audit.ID != "" {
 		t.Fatalf("foreign release: %+v, %+v, %v", c, audit, err)
 	}
-	if err := foreign.RemoveGitCredential(ctx, admin, row.Host); err == nil {
+	if err := foreign.RemoveGitCredential(ctx, admin, row.Host, ""); err == nil {
 		t.Fatal("foreign credential deleted")
 	}
 	if c, _, err := tenant.ReleaseSourceCredential(ctx, source); err != nil || c.ID != row.ID {
 		t.Fatalf("HTTPS release: %+v, %v", c, err)
 	}
-	if err := tenant.RemoveGitCredential(ctx, admin, row.Host); err != nil {
+	if err := tenant.RemoveGitCredential(ctx, admin, row.Host, ""); err != nil {
 		t.Fatal(err)
 	}
 	if c, audit, err := tenant.ReleaseSourceCredential(ctx, source); !errors.Is(err, ErrNotFound) || c.ID != "" || audit.ID != "" {
@@ -91,5 +91,39 @@ func TestSourceGitCredentialHTTPSDeletionAndTenant(t *testing.T) {
 	rows, err = foreign.SourceReleaseAudits(ctx, 10)
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("foreign audits: %+v, %v", rows, err)
+	}
+}
+
+func TestSourceGitCredentialRepositoryScopeAndHostOptIn(t *testing.T) {
+	tenant, admin, source := sourceGitCredentialFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM git_credentials WHERE team=?`, tenant.team)
+	row := GitCredential{Host: "github.com", Kind: GitCredentialHTTPS, Secret: "repo-token", Repository: "gh:999"}
+	if _, err := tenant.WriteGitCredential(t.Context(), admin, sealedGitFixture(t, tenant, row)); err != nil {
+		t.Fatal(err)
+	}
+	if c, audit, err := tenant.ReleaseSourceCredential(t.Context(), source); err == nil || c.ID != "" || audit.ID != "" {
+		t.Fatalf("other repository credential released: %+v %+v %v", c, audit, err)
+	}
+	repo := source.Principal.Capability.Data.RepositoryKey
+	row.Repository = repo
+	exact, err := tenant.WriteGitCredential(t.Context(), admin, sealedGitFixture(t, tenant, row))
+	if err != nil {
+		t.Fatal(err)
+	}
+	released, _, err := tenant.ReleaseSourceCredential(t.Context(), source)
+	if err != nil || released.ID != exact.ID {
+		t.Fatalf("exact repository: %+v %v", released, err)
+	}
+	row.Repository = ""
+	if _, err := tenant.WriteGitCredential(t.Context(), admin, sealedGitFixture(t, tenant, row)); err == nil {
+		t.Fatal("implicit host grant accepted")
+	}
+	row.HostWide = true
+	if _, err := tenant.WriteGitCredential(t.Context(), admin, sealedGitFixture(t, tenant, row)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tenant.GitCredentialForRepository(t.Context(), repo, row.Host)
+	if err != nil || got.ID != exact.ID {
+		t.Fatalf("host grant shadowed repository grant: %+v %v", got, err)
 	}
 }

@@ -108,7 +108,7 @@ func TestRootProvisioningHTTPRefusals(t *testing.T) {
 				if service {
 					b = issuanceSession()
 				}
-				b.snapshot.Authorities[0].MembershipValid, code = false, apierr.Unauthenticated
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
 			case "grant":
 				p.Capability.Grants = nil
 			case "non-admin":

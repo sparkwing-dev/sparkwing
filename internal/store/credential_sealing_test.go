@@ -19,7 +19,7 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 		if err := tenant.WriteSecret(t.Context(), a, SealedSecret{team: tenant.team, row: Secret{Name: "KEY", Value: plain}}); err == nil {
 			t.Fatal("plaintext secret stored")
 		}
-		if _, err := tenant.WriteGitCredential(t.Context(), a, SealedGitCredential{team: tenant.team, row: GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: plain}}); err == nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), a, SealedGitCredential{team: tenant.team, row: GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialHTTPS, Secret: plain}}); err == nil {
 			t.Fatal("plaintext git credential stored")
 		}
 		secret, err := SealSecret(cipher, tenant.team, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: plain, Masked: i%2 == 0, Shared: i%3 == 0})
@@ -39,7 +39,7 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 		if err != nil || stored.Value == plain || openSecretFixture(t, tenant, stored) != plain {
 			t.Fatalf("sealed round trip: %v", err)
 		}
-		git, err := SealGitCredential(cipher, tenant.team, GitCredential{Host: fmt.Sprintf("git-%d.test", i), Kind: GitCredentialHTTPS, Secret: plain})
+		git, err := SealGitCredential(cipher, tenant.team, GitCredential{HostWide: true, Host: fmt.Sprintf("git-%d.test", i), Kind: GitCredentialHTTPS, Secret: plain})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 		if err != nil || storedGit.Secret == plain {
 			t.Fatalf("sealed source credential: %v", err)
 		}
-		opened, err := cipher.OpenBound(secrets.PurposeGitCredential, string(tenant.team), "git-credential:"+storedGit.Host, "git-credential", false, true, storedGit.Secret)
+		opened, err := cipher.OpenBound(secrets.PurposeGitCredential, string(tenant.team), "git-credential:"+storedGit.Host, storedGit.CredentialScope(), false, true, storedGit.Secret)
 		if err != nil || opened != plain {
 			t.Fatalf("source round trip: %v", err)
 		}

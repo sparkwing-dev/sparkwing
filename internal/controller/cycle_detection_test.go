@@ -218,7 +218,7 @@ func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {
 
 func registerChildRepository(t *testing.T, e *engineFixture, id int64) {
 	t.Helper()
-	_, owner, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "child-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}})
+	_, owner, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "child-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,8 +44,12 @@ func (l localAPIListener) Accept() (net.Conn, error) {
 	}
 	peer, ok := connection.(APIConn)
 	if ok {
-		identity := peer.PeerIdentity()
-		_, err = LocalSubject(identity, identity)
+		owner, ownerErr := controllerPeerIdentity()
+		if ownerErr != nil {
+			err = ownerErr
+		} else {
+			_, err = LocalSubject(peer.PeerIdentity(), owner)
+		}
 	}
 	if !ok || err != nil {
 		connection.Close()

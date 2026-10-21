@@ -264,6 +264,20 @@ func intakeDigest(request IntakeRequest, snapshot admittedSnapshot) (runspec.Has
 }
 
 func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest) (capability.Principal, error) {
+	// The here proof adds a second authority leaf; discover both before locking either.
+	if prefix := capability.HereProofPrefix(request.OriginMachine); prefix != "" {
+		machine := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+		if _, err := discoverAuthorityChainTx(ctx, tx, machine); err == nil {
+			if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{request.Authority, machine}); err != nil {
+				return capability.Principal{}, err
+			}
+		} else {
+			var denied *apierr.Error
+			if !errors.As(err, &denied) {
+				return capability.Principal{}, err
+			}
+		}
+	}
 	p, err := tx.ResolveAuthority(ctx, request.Authority)
 	if err != nil {
 		return p, err
@@ -557,9 +571,9 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	if prefix == "" || p.Capability.Subject.Kind != capability.SubjectAccount {
 		return "", nil
 	}
-	var digest, owner string
-	err := tx.QueryRowContext(ctx, `SELECT digest,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&digest, &owner)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, digest, idempotencyKey, tx.now()) {
+	var hereKey, owner string
+	err := tx.QueryRowContext(ctx, `SELECT here_proof_public_key,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&hereKey, &owner)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.now()) {
 		return "", nil
 	}
 	if err != nil {
@@ -574,8 +588,8 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 		return "", err
 	}
 	c := machine.Capability
-	personal, err := personalRootTx(ctx, tx, []authorityNode{{principal: machine}})
-	if err != nil || !personal || c.Team != string(team) || c.Binding.Kind != capability.BindingNone || owner == "" || owner != p.Capability.Subject.ID {
+	facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: machine}}, runspec.Request{})
+	if err != nil || !facts.Personal || c.Team != string(team) || c.Binding.Kind != capability.BindingNone || owner == "" || owner != p.Capability.Subject.ID {
 		return "", err
 	}
 	return c.Subject.ID, nil

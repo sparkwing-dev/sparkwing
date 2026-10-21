@@ -123,7 +123,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	input.Git.Repository.Display = "https://example.test/acme/repo"
 	digest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: bundle, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("upload source snapshot: %v", err)
 	}
 	input.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
@@ -176,7 +176,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		t.Fatalf("sealed burst plan: %+v %v", accepted, err)
 	}
 	if _, err := owner.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeReady), Cause: string(store.CauseRelease)}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("owner releases job: %v", err)
 	}
 	laterClaimants := []controllerwire.Controller{cloud}
 	if !saturated {
@@ -383,7 +383,7 @@ func burstAcceptancePersonalMachine(t *testing.T, s *serverFixture) string {
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	issued, err := s.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:burst-desktop", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "burst-desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"example.test/acme/*"}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("enroll personal machine: %v", err)
 	}
 	return issued.Raw
 }

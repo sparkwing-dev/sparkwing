@@ -79,6 +79,7 @@ function detailLine(row: GitCredential): string {
     ? fmtDateTime(unixSecondsISO(row.updated_at))
     : "";
   return [
+    row.host_wide ? "All repositories on this host" : row.repository,
     row.kind === "https" ? `user ${row.username || defaultHTTPSUsername}` : "",
     when ? `updated ${when}` : "",
     row.created_by ? `by ${row.created_by}` : "",
@@ -123,7 +124,7 @@ function GitCredentials({ me, caps }: { me: Me; caps: Capabilities | null }) {
     }
     setBusy(row.host);
     try {
-      await deleteGitCredential(row.host);
+      await deleteGitCredential(row.host, row.repository);
       if (stored?.host === row.host) setStored(null);
       toast(`Deleted the credential for ${row.host}`, "success");
       await load();
@@ -138,7 +139,7 @@ function GitCredentials({ me, caps }: { me: Me; caps: Capabilities | null }) {
     if (!row.fingerprint) return;
     setBusy(`confirm:${row.host}`);
     try {
-      await confirmGitCredential(row.host, row.fingerprint);
+      await confirmGitCredential(row.host, row.fingerprint, row.repository);
       toast(`Confirmed the host key of ${row.host}`, "success");
       await load();
     } catch (err) {
@@ -153,7 +154,7 @@ function GitCredentials({ me, caps }: { me: Me; caps: Capabilities | null }) {
       <div className="mb-6 space-y-2 text-sm text-[var(--muted)]">
         <p>
           Runs clone private repositories with the credential stored for the
-          repository&apos;s host. {recipientsHelp} Prefer a read-only deploy key
+          repository. {recipientsHelp} Prefer a read-only deploy key
           scoped to one repository.
         </p>
         {appEnabled ? <GitHubAppNote className="text-sm" /> : null}
@@ -162,7 +163,7 @@ function GitCredentials({ me, caps }: { me: Me; caps: Capabilities | null }) {
       {owner ? (
         <Panel
           title="Add or replace a credential"
-          hint="One credential per host. Saving for a host that has one replaces it."
+          hint="One credential per repository. Host-wide access requires an explicit grant."
         >
           <CredentialForm
             idPrefix="new"
@@ -192,7 +193,7 @@ function GitCredentials({ me, caps }: { me: Me; caps: Capabilities | null }) {
           <ul>
             {rows.map((row) => (
               <CredentialRow
-                key={row.host}
+                key={`${row.host}:${row.repository}`}
                 row={row}
                 owner={owner}
                 appEnabled={appEnabled}
@@ -382,7 +383,7 @@ function CredentialForm({
 
   const problem = draftProblem(draft);
   const replaces =
-    !fixedHost && draft.host ? existingCredential(rows, draft.host) : undefined;
+    !fixedHost && draft.host ? existingCredential(rows, draft.host, draft.repository) : undefined;
   const set = (patch: Partial<GitCredentialDraft>) =>
     setDraft((d) => ({ ...d, ...patch }));
   const id = (name: string) => `${idPrefix}-${name}`;
@@ -429,6 +430,14 @@ function CredentialForm({
           ) : null}
         </div>
       )}
+      <div>
+        <label htmlFor={id("repository")} className={labelClass}>Repository key</label>
+        <input id={id("repository")} className={`${inputClass} w-full font-mono`} placeholder="gh:12345 or git:gitlab.com/team/repo" value={draft.repository} disabled={fixedHost || draft.host_wide} onChange={(e) => set({repository:e.target.value})} />
+        <label className="mt-2 flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={draft.host_wide} disabled={fixedHost} onChange={(e) => set({host_wide:e.target.checked, repository:""})} />
+          Allow every repository on this host
+        </label>
+      </div>
       <fieldset className="flex flex-wrap gap-4 text-sm">
         <legend className={labelClass}>Kind</legend>
         <label className="flex items-center gap-1.5">

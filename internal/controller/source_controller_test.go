@@ -51,11 +51,11 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			envelope, err := cipher.SealBound(secrets.PurposeGitCredential, "a", "git-credential:github.com", "git-credential", false, true, "ephemeral-secret")
+			envelope, err := cipher.SealBound(secrets.PurposeGitCredential, "a", "git-credential:github.com", "git-credential:host:github.com", false, true, "ephemeral-secret")
 			if err != nil {
 				t.Fatal(err)
 			}
-			engineSQL(t, e.Store, `INSERT INTO git_credentials(id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES ('credential','a','github.com','https',?,1,1,1)`, envelope)
+			engineSQL(t, e.Store, `INSERT INTO git_credentials(host_wide,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (1,'credential','a','github.com','https',?,1,1,1)`, envelope)
 			p := a.Principal.Capability
 			issued, err := e.Store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: a.Principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.SourceRead}, Binding: p.Binding, Repositories: p.Repositories, Data: p.Data, ExpiresAt: p.ExpiresAt})
 			if err != nil {

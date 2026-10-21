@@ -192,3 +192,16 @@ func TestGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 
 // A proxy may spell the default port in Host while the browser's Origin omits
 // it, and the other way round; both are the dashboard's own origin.
+
+func TestLoopbackHostUsesCanonicalLocalNames(t *testing.T) {
+	for _, host := range []string{"LOCALHOST", "localhost.", "API.Localhost.:1234", "[::1]:1234", "127.9.8.7:1234"} {
+		if !LoopbackHost(host) {
+			t.Fatalf("local host %q refused", host)
+		}
+	}
+	for _, host := range []string{"localhost.example.com", "example.com:1234", "0.0.0.0"} {
+		if LoopbackHost(host) {
+			t.Fatalf("remote host %q accepted", host)
+		}
+	}
+}

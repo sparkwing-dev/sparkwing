@@ -97,7 +97,7 @@ func ValidateAuthority(chain []AuthorityState, now time.Time) (Principal, error)
 	for i, state := range chain {
 		p, c := state.Principal, state.Principal.Capability
 		local := p.Class == CredentialPeer || p.Class == CredentialAnonymous
-		if !state.MembershipValid || !validIdentity(p) || !credentialAlive(c, now) ||
+		if !validIdentity(p) || !CredentialAlive(c, now) ||
 			local && (len(chain) != 1 || c.Parent != nil) || !local && seen[p.Authority] {
 			return Principal{}, unauthenticated()
 		}
@@ -154,7 +154,8 @@ func validIdentity(p Principal) bool {
 	return false
 }
 
-func credentialAlive(c Capability, now time.Time) bool {
+// CredentialAlive includes expiry, rotation grace and the binding deadline.
+func CredentialAlive(c Capability, now time.Time) bool {
 	return !c.IssuedAt.After(now) &&
 		(c.ExpiresAt == nil || now.Before(*c.ExpiresAt)) &&
 		(c.RevokedAt == nil || now.Before(*c.RevokedAt)) &&

@@ -16,6 +16,17 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).readAuthorityNodeTx":            "a global capability prefix or session hash identifies authority before its authenticated team and immutable membership epoch can be resolved",
+	"(*Operator).recordSessionMembershipsTx":     "sign-in discovers all current memberships of its authenticated session before recording each through a tenant handle",
+	"(*Operator).lookupSessionTx":                "a global session digest identifies the one session being validated and renewed before its team is known",
+	"(*Operator).setupAuthorityRefsTx":           "bootstrap completion discovers the deployment seed and its complete descendant graph across teams before locking them",
+	"(*Operator).acquireRowLock":                 "the complete ordered lock set contains verified global authority hashes and installation IDs whose tenant is discovered by the mutation",
+	"(*Operator).discoverAccountTeams":           "account session creation discovers every current membership before acquiring the complete ordered team and account lock set",
+	"(*Operator).discoverAccountSessionLocks":    "account mutations discover every session and its selected team before locking account ancestry",
+	"(*Operator).discoverDeletionAuthorityLocks": "account and team deletion discover globally selected credentials and their teams before revoking exact rows",
+	"(*Operator).discoverDeletionAccountLocks":   "account deletion discovers all memberships that account mutations can update before locking them",
+	"(*Operator).discoverAccountDeletionLocks":   "deleting one deployment account discovers all affected memberships and ledger teams before taking the complete lock set",
+
 	"(*Operator).ListRuns":                  "the operator lists runs across all tenants",
 	"(*Operator).GetLatestRun":              "the operator locates the latest pipeline run across tenants",
 	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
@@ -31,7 +42,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).retainedStorageTeams":      "storage billing discovers every live tenant holding retained records or blobs",
 	"(*Operator).deleteRetentionRunsTx":     "leased retention discovers finished runs across tenants before deleting exact tenant run keys",
 	"(*Operator).deleteRetentionEffectsTx":  "leased retention discovers settled effects across tenants before deleting exact tenant effect keys",
-	"(*Operator).finishBootstrapSetupTx":    "bootstrap completion resolves the deployment administrator capability whose tenant is null",
 	"(*Operator).SearchTeams":               "the operator console searches every tenant and its owners by deployment search text",
 	"(*Operator).nodeRunActiveSQL":          "the shared predicate correlates a node with its own run; its enclosing statement supplies the tenant scope",
 	"(*Operator).paidGrantForPaymentTx":     "a verified provider payment identity resolves its paid grant before its tenant is known",
@@ -41,7 +51,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
 	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
-	"(*Operator).revokeSetupAuthorityTx":    "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
 	"(*Operator).RecordBusinessEvent":          "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
@@ -54,7 +63,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).RecordsPaymentParent":          "a verified provider event names provider identities before its tenant is known",
 	"(*Operator).OpenStandingRequests":          "the operator console queue lists every team's open standing requests",
 	"(*Operator).loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
-	"(*Operator).SetRunnerMetered":              "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",
 	"(*Operator).persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
 	"(*Operator).deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
 
@@ -64,11 +72,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).deleteRetentionRecordsTx":   "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
 
 	"(*Operator).ReconcileControllerRuns":   "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
-	"(*Operator).readAuthorityTx":           "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
 	"(*Operator).authenticationAuthorityTx": "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"(*Operator).revokeAuthorityTx":         "the authorized revocation path names its exact capability or session by global identity",
-	"(*Operator).advanceAuthGenerationsTx":  "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
-	"(*Operator).lockAuthorityTx":           "globally unique capability prefixes and session hashes are locked before authority resolution reads their teams",
 	"(*Operator).lockUnitsTx":               "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
 	"(*Operator).claimUnitTx":               "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"(*Operator).loadMatchingRunTx":         "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
@@ -90,7 +95,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).runOwnerTx":                "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Operator).SampleSealedSecrets":       "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Operator).unlinkAccountIdentityTx":   "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
-	"(*Operator).lookupSession":             "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
 	"(*Operator).DeleteSession":             "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Operator).mintCSRFKey":               "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Operator).resolveSignInTx":           "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
@@ -102,8 +106,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).acceptAccountInvitationTx": "finds an invitation by its id before the team is known; the accepting write then names that team",
 	"(*Operator).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
-	"(*Operator).lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
-		"account deletion counts their owners",
+
 	"(*Operator).relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
 		"belonged to the deployment and acted in each of its teams",
 	"(*Operator).grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +

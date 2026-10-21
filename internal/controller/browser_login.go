@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"html/template"
 	"net/http"
@@ -150,12 +152,22 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request, _ cap
 	return nil
 }
 
-// safety: the browser's earlier session would otherwise stay live after its cookie is overwritten, with nothing
-// left to end it.
 func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 	prior := sessionCookie(r, s.cookiesSecure())
 	if prior == "" || prior == newSessionID {
 		return
+	}
+	snapshot, err := s.operator.ReadAuthentication(r.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Audience: capability.Controller, Digest: sha256.Sum256([]byte(newSessionID))}, capability.RequestEvidence{})
+	if err != nil {
+		s.logger.Warn("sign-in could not read the new session's ancestry", "err", err)
+		return
+	}
+	digest := sha256.Sum256([]byte(prior))
+	for _, state := range snapshot.Authorities {
+		// Ending the minting session would also end the token used to sign in.
+		if state.Principal.Authority == (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) {
+			return
+		}
 	}
 	if err := s.operator.DeleteSession(prior); err != nil {
 		s.logger.Warn("sign-in could not end the browser's earlier session", "err", err)

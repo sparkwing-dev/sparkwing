@@ -219,7 +219,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		switch r.Method + " " + r.URL.Path {
 		case "POST " + prefix + "/authentication":
 			snapshot := capability.AuthenticationSnapshot{
-				Now: now, Authorities: []capability.AuthorityState{{Principal: principal, MembershipValid: true}},
+				Now: now, Authorities: []capability.AuthorityState{{Principal: principal}},
 				Binding: capability.BindingState{Current: binding, LeaseExpiresAt: now.Add(time.Hour)},
 			}
 			if kind == capability.UnitEval {
@@ -247,7 +247,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
-	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", "box", false, procenv.SubmitAccept{}), unit
+	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", "box", false, procenv.SubmitAccept{}, nil), unit
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
@@ -564,7 +564,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				body, err := json.Marshal(response)
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 			})}}
-			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", "box", compute, procenv.SubmitAccept{})
+			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", "box", compute, procenv.SubmitAccept{}, nil)
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: connection.URL, HTTP: connection.HTTP, Bearer: fixedBearer(unit.Capability)})
 			if err != nil {
 				t.Fatal(err)

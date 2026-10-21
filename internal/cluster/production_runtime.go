@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -52,7 +53,7 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", boxID, options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept)}
+			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", boxID, options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept, options.actions)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
 				return runners.RuntimeConfig{}, err
@@ -81,7 +82,7 @@ func ProductionRuntime(version string) Runtime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, boxID, false, procenv.SubmitAcceptAll())}, nil, nil
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, boxID, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
 			},
 		},
 	}
@@ -92,7 +93,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 }
 
 // safety: a Cloud Job serves one claim and is then discarded, and a requester's own machine is its operator, so both accept every submittable name.
-func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules, boxID string, admission bool, accept procenv.SubmitAccept) runners.Hosting {
+func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules, boxID string, admission bool, accept procenv.SubmitAccept, actions *githubActionsSource) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services nodehost.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
@@ -146,6 +147,9 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		access, err := client.NewSourceAccess(options, unit.RunID, spec)
 		if err != nil {
 			return services, principal, err
+		}
+		if actions != nil {
+			access = actions.bind(access)
 		}
 		submitted := accept
 		if unit.OwnerMachine {
@@ -230,4 +234,24 @@ func (h *productionHost) Host(ctx context.Context, unit controllerwire.ClaimedUn
 	h.active.Add(1)
 	defer h.active.Add(-1)
 	return h.UnitHost.Host(ctx, unit)
+}
+
+type githubActionsSource struct {
+	source.Access
+	repository, token string
+}
+
+func (s *githubActionsSource) bind(access source.Access) source.Access {
+	return &githubActionsSource{Access: access, repository: s.repository, token: s.token}
+}
+
+func (s *githubActionsSource) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
+	if err := context.Cause(ctx); err != nil {
+		return source.Credential{}, err
+	}
+	host, err := sourceurl.Host(spec.RemoteURL)
+	if string(spec.RepoKey) != s.repository || err != nil || host != "github.com" || s.token == "" {
+		return source.Credential{}, errors.New("Actions source requires this repository's GITHUB_TOKEN")
+	}
+	return source.Credential{Kind: "https", Host: "github.com", Username: "x-access-token", Secret: s.token}, nil
 }

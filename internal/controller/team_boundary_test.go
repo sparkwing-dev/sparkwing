@@ -128,7 +128,7 @@ func newTenancyFixture(t *testing.T, open func(*testing.T, ...store.Option) *sto
 	f.readerA = f.member(alice, "carol", store.RoleReader)
 	f.editorA = f.member(alice, "dave", store.RoleEditor)
 
-	raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "b-everything"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(everyMemberGrant), ExpiresAt: teststore.CredentialExpiry(now, 0)})
+	raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "b-everything"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(everyMemberGrant), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,12 +16,5 @@ func TestRoleScopeResultsCannotChangePolicy(t *testing.T) {
 		if !slices.Equal(ScopesForRole(role), before) {
 			t.Fatalf("caller changed %s policy", role)
 		}
-		cli := CLITokenScopes(role)
-		if slices.Contains(cli, ScopeTeamAdmin) || slices.Contains(cli, "admin") {
-			t.Fatalf("CLI administrative authority: %v", cli)
-		}
-		if !slices.Equal(ScopesForRole(role), before) {
-			t.Fatalf("CLI filtering changed %s membership policy", role)
-		}
 	}
 }

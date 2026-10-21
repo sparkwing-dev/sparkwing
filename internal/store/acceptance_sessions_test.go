@@ -92,6 +92,17 @@ func checkStoreSessions(t *testing.T) (err error) {
 	if err := tenant.UpdateMembership(ctx, owner, store.MembershipUpdate{AccountID: memberAccount.ID, Role: &role}); err != nil {
 		return err
 	}
+	if _, err := s.AsOperator().ReadAuthentication(ctx, lookup, capability.RequestEvidence{}); err == nil {
+		return errors.New("demoted session still authenticates by digest")
+	}
+	if _, err := s.AsOperator().LookupSession(ctx, raw); err == nil {
+		return errors.New("demoted session still authenticates by presentation")
+	}
+	raw, _, _, err = s.AsOperator().CreateAccountSession(ctx, memberAccount, team, time.Hour)
+	if err != nil {
+		return err
+	}
+	lookup.Digest = sha256.Sum256([]byte(raw))
 	read, err = s.AsOperator().ReadAuthentication(ctx, lookup, capability.RequestEvidence{})
 	if err != nil {
 		return err

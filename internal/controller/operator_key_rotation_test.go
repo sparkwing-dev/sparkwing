@@ -71,12 +71,16 @@ func newKeyRotationFixture(t *testing.T, open func(*testing.T, ...store.Option) 
 	f.teams = []store.Team{teamA, teamB}
 	f.owner = session(t, st, alice, teamA)
 	now := time.Now()
-	for _, team := range f.teams {
+	for i, team := range f.teams {
 		if err := teststore.SeedSecret(st, team, store.Secret{Name: "TOKEN", Pipeline: "build", Masked: true, Principal: "seed", Value: seal(t, f.old, secrets.PurposeSecret, team, "TOKEN", "build", "secret-"+string(team))}, now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO git_credentials(id,team,host,kind,secret,created_at,updated_at) VALUES ($1,$2,'git.example','https',$3,1,1)`,
-			"gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", "git-credential", "git-"+string(team))); err != nil {
+		repository, scope := "", "git-credential:host:git.example"
+		if i == 1 {
+			repository, scope = "git:git.example/acme/tools", "git-credential:repo:git:git.example/acme/tools"
+		}
+		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO git_credentials(host_wide,repository_key,id,team,host,kind,secret,created_at,updated_at) VALUES ($1,$2,$3,$4,'git.example','https',$5,1,1)`,
+			repository == "", repository, "gc-"+string(team), team, seal(t, f.old, secrets.PurposeGitCredential, team, "git-credential:git.example", scope, "git-"+string(team))); err != nil {
 			t.Fatal(err)
 		}
 		seedRun(t, st, forTeam(t, st, team), "run-"+string(team), "build")
@@ -113,7 +117,7 @@ func (f *keyRotationFixture) rotate(t *testing.T, h http.Handler, auth string, q
 func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secretsOpen, git, env int, csrf bool) {
 	t.Helper()
 	ctx := context.Background()
-	for _, team := range f.teams {
+	for i, team := range f.teams {
 		var secret, cred, run string
 		if err := teststore.SQL(t, f.st).QueryRowContext(ctx, `SELECT value FROM secrets WHERE team=$1 AND name='TOKEN'`, team).Scan(&secret); err != nil {
 			t.Fatal(err)
@@ -127,7 +131,11 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 		if v, err := c.OpenBound(secrets.PurposeSecret, string(team), "TOKEN", "build", false, true, secret); err == nil && v == "secret-"+string(team) {
 			secretsOpen++
 		}
-		if v, err := c.OpenBound(secrets.PurposeGitCredential, string(team), "git-credential:git.example", "git-credential", false, true, cred); err == nil && v == "git-"+string(team) {
+		scope := "git-credential:host:git.example"
+		if i == 1 {
+			scope = "git-credential:repo:git:git.example/acme/tools"
+		}
+		if v, err := c.OpenBound(secrets.PurposeGitCredential, string(team), "git-credential:git.example", scope, false, true, cred); err == nil && v == "git-"+string(team) {
 			git++
 		}
 		if v, err := c.OpenBound(secrets.PurposeRunEnvironment, string(team), "run-"+string(team), "run-environment", false, true, run); err == nil && v == "env-"+string(team) {

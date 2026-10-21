@@ -50,6 +50,8 @@ func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 		var acquired []storeLockKey
 		for _, call := range recorder.snapshotCalls() {
 			switch {
+			case call.statement == "SELECT account_id FROM memberships WHERE team=? AND account_id=?":
+				acquired = append(acquired, storeLockKey{tier: lockMembership, keys: [3]string{fmt.Sprint(call.args[0].Value), fmt.Sprint(call.args[1].Value)}})
 			case call.statement == "SELECT prefix FROM capabilities WHERE prefix=?", call.statement == "SELECT hash FROM sessions WHERE hash=?":
 				kind := capability.AuthorityCapability
 				if strings.Contains(call.statement, "sessions") {
@@ -67,7 +69,7 @@ func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 				acquired = append(acquired, storeLockKey{tier: lockNode})
 			}
 		}
-		if len(acquired) != len(depths)+4 || !slices.IsSortedFunc(acquired, compareStoreLocks) {
+		if len(acquired) != len(depths)+5 || !slices.IsSortedFunc(acquired, compareStoreLocks) {
 			t.Fatalf("acquisitions violate canonical order: %+v", acquired)
 		}
 	}

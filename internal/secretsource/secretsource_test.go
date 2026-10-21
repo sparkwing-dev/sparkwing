@@ -260,3 +260,14 @@ func TestFactory_ControllerSource_ErrorsOmitURLCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestControllerSourceMalformedURLDoesNotLeakQueryCredential(t *testing.T) {
+	resolver, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController, URL: "https://example.test/%zz?token=private-query-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = resolver.Resolve(t.Context(), "NAME")
+	if err == nil || strings.Contains(err.Error(), "private-query-token") {
+		t.Fatalf("URL parse failure leaked query credentials: %v", err)
+	}
+}

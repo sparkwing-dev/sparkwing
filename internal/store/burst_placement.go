@@ -22,11 +22,11 @@ func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string,
 	for _, step := range b.Preferences {
 		target := step.Target
 		switch target {
-		case "here":
+		case TierHere:
 			target = "class=coordinator"
 		case "machines":
 			target = "name="
-		case "cloud":
+		case TierCloud:
 			target = "class=cloud"
 		}
 		prefers := []string{target}
@@ -49,7 +49,7 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 	if err != nil || account == "" {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, team, account, tx.now().UnixNano())
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, tx.now().UnixNano(), tx.now().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -66,11 +66,15 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 	}
 	var names []string
 	for prefix, name := range candidates {
-		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
+		c, err := loadCapabilityTx(ctx, tx, prefix)
 		if err != nil {
 			return nil, err
 		}
-		if record.Origin != nil && record.Origin.Personal {
+		facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: c}}}, runspec.Request{})
+		if err != nil {
+			return nil, err
+		}
+		if facts.Personal {
 			names = append(names, name)
 		}
 	}
@@ -79,20 +83,11 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 
 func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityNode, run string) error {
 	root := chain[len(chain)-1].principal.Capability
-	if root.Subject.Kind != capability.SubjectMachine || root.Parent != nil {
-		return nil
-	}
-	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
-	if err != nil {
+	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+	if err != nil || !facts.Personal {
 		return err
 	}
-	if record.Origin == nil || !record.Origin.Personal {
-		return nil
-	}
-	var owner string
-	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&owner); err != nil {
-		return err
-	}
+	owner := facts.OwnerAccount
 	if automated, err := automatedLineageTx(ctx, tx, Team(root.Team), run); err != nil || automated {
 		return errors.Join(err, authorityError(apierr.Forbidden, "personal machines take only their owner's manual runs"))
 	}
@@ -124,24 +119,20 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 	if err != nil || burst == nil {
 		return err
 	}
-	here, cloud := false, false
+	facts, err := claimantFactsTx(ctx, tx, chain, seal.Request)
+	if err != nil {
+		return err
+	}
+	here := false
 	for _, ancestor := range chain {
 		a := ancestor.principal.Capability
 		here = here || a.Purpose == capability.PurposeHere && a.Binding.RunID == unit.RunID
-		cloud = cloud || capability.CloudLauncher(a)
 	}
 	root := chain[len(chain)-1].principal.Capability
-	eligible := here || cloud
-	if root.Subject.Kind == capability.SubjectMachine && root.Parent == nil {
-		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
-		if err != nil {
+	cloud, eligible := facts.Cloud, here || facts.Cloud || facts.Personal
+	if facts.Personal {
+		if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
 			return err
-		}
-		eligible = record.Origin != nil && record.Origin.Personal
-		if eligible {
-			if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
-				return err
-			}
 		}
 	}
 	if !eligible {
@@ -152,7 +143,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 	}
 	profile := authenticatedClaimProfile(root, match.Profile{}, here)
 	if cloud {
-		if !slices.ContainsFunc(burst.Preferences, func(step runspec.PlacementStep) bool { return step.Target == "cloud" }) {
+		if !slices.ContainsFunc(burst.Preferences, func(step runspec.PlacementStep) bool { return step.Target == TierCloud }) {
 			return authorityError(apierr.Forbidden, "Cloud is outside the sealed burst preference set")
 		}
 		profile.Class = match.ClassCloud

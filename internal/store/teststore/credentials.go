@@ -20,16 +20,18 @@ func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.P
 	if _, err := st.AsOperator().EnsureBootstrapCapability(ctx, bootstrap); err != nil {
 		return "", nil, err
 	}
-	root, err := st.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(seed)))
+	snapshot, err := st.AsOperator().ReadAuthentication(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(seed))}, capability.RequestEvidence{})
 	if err != nil {
 		return "", nil, err
 	}
+	root := snapshot.Authorities[0].Principal
 	if spec.Kind == capability.ProvisionBootstrap {
 		return seed, &root.Capability, nil
 	}
 	ref := root.Authority
 	if spec.Kind == capability.ProvisionMember {
-		if err := seedCredentialMember(ctx, st, spec.Team, spec.Subject.ID); err != nil {
+		spec.AllowTeamAdmin = true
+		if err := seedCredentialMember(ctx, st, spec.Team, spec.Subject.ID, snapshot.Now); err != nil {
 			return "", nil, err
 		}
 		digest := sha256.Sum256([]byte("fixture-session:" + spec.Team + ":" + spec.Subject.ID))
@@ -43,16 +45,16 @@ func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.P
 	return issued.Raw, &issued.Capability, nil
 }
 
-func seedCredentialMember(ctx context.Context, st *store.Store, team, account string) error {
+func seedCredentialMember(ctx context.Context, st *store.Store, team, account string, now time.Time) error {
 	digest := sha256.Sum256([]byte("fixture-session:" + team + ":" + account))
-	now := time.Now()
 	queries := []struct {
 		q    string
 		args []any
 	}{
 		{`INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1) ON CONFLICT(id) DO NOTHING`, []any{account, account + "@fixture.invalid"}},
 		{`INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,'owner',1) ON CONFLICT(team,account_id) DO NOTHING`, []any{team, account}},
-		{`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,?,?) ON CONFLICT(hash) DO NOTHING`, []any{hex.EncodeToString(digest[:]), account, "runs.read,runs.write,runs.control,team.admin", now.Add(time.Hour).UnixNano(), team, account}},
+		{`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,?,?,?,?) ON CONFLICT(hash) DO NOTHING`, []any{hex.EncodeToString(digest[:]), account, "runs.read,runs.write,runs.control,team.admin", now.UnixNano(), now.Add(time.Hour).UnixNano(), team, account}},
+		{`INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,COALESCE((SELECT epoch FROM membership_epochs WHERE team=? AND account_id=?),0)) ON CONFLICT(session_hash,team) DO NOTHING`, []any{hex.EncodeToString(digest[:]), team, team, account}},
 	}
 	for _, query := range queries {
 		q := query.q

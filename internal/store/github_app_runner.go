@@ -19,8 +19,8 @@ type GitHubAppRunner string
 // GitHubAppRunnerAnywhere leaves App runs to the team's claim ranking; cloud, github-actions and "pool=<name>" pin them.
 const (
 	GitHubAppRunnerAnywhere GitHubAppRunner = "anywhere"
-	GitHubAppRunnerCloud    GitHubAppRunner = "cloud"
-	GitHubAppRunnerActions  GitHubAppRunner = "github-actions"
+	GitHubAppRunnerCloud    GitHubAppRunner = TierCloud
+	GitHubAppRunnerActions  GitHubAppRunner = TierActions
 )
 
 // ParseGitHubAppRunner accepts anywhere (the default), cloud, github-actions or pool=<name>.

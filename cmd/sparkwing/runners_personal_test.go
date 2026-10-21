@@ -81,7 +81,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				}
 				digest := sha256.Sum256([]byte(session))
 				authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-				issued, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "personal-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+				issued, err := state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "personal-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
 				if err != nil {
 					t.Fatal(err)
 				}

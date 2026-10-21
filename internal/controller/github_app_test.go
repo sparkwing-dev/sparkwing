@@ -74,7 +74,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 		for _, opt := range opts {
 			srv = opt(srv)
 		}
-		configureGitHubClaims(srv, st)
+		configureGitHubClaims(t, srv, st)
 		return srv
 	}
 	var primary *controller.Server
@@ -342,7 +342,7 @@ func TestGitHubAppExistingPickerOnlyBindsListedInstallations(t *testing.T) {
 	}
 }
 
-func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *testing.T) {
+func TestGitHubAppExistingPickerRefusesForeignIdentityAndReclaimsBoundInstallation(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	bob := f.ghUser(502, "bob")
@@ -360,12 +360,15 @@ func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *te
 	if !strings.Contains(available.page, "acme (Organization)") || strings.Contains(available.page, "bob") {
 		t.Fatalf("listed installation shows binding state: %s", available.page)
 	}
-	code, refused := f.pick(olga, start, available.authorization, 7)
-	if code != http.StatusConflict {
-		t.Fatalf("bound selection = %d, want 409", code)
+	code, body := f.pick(olga, start, available.authorization, 7)
+	if code != http.StatusCreated {
+		t.Fatalf("verified administrator reclaim = %d: %s", code, body)
 	}
-	if msg := strings.ToLower(refused); strings.Contains(msg, "bob") || strings.Contains(msg, "another team") {
-		t.Fatalf("conflict names another team: %s", refused)
+	if ids := f.installations(bob); len(ids) != 0 {
+		t.Fatalf("former team's installations = %v, want none", ids)
+	}
+	if ids := f.installations(olga); !slices.Equal(ids, []int64{7}) {
+		t.Fatalf("reclaiming team's installations = %v, want [7]", ids)
 	}
 }
 
@@ -503,11 +506,14 @@ func TestGitHubAppInstallationBelongsToOneTeam(t *testing.T) {
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
 	s := f.start(bob)
-	if code := f.finish(bob, s, s.Verifier, 502, 7, acmeAdmin); code != http.StatusConflict {
-		t.Fatalf("second team's connect of a bound installation = %d, want 409", code)
+	if code := f.finish(bob, s, s.Verifier, 502, 7, acmeAdmin); code != http.StatusCreated {
+		t.Fatalf("verified administrator reclaim = %d, want 201", code)
 	}
-	if ids := f.installations(bob); len(ids) != 0 {
-		t.Fatalf("bob's team holds %v", ids)
+	if ids := f.installations(olga); len(ids) != 0 {
+		t.Fatalf("former team's installations = %v, want none", ids)
+	}
+	if ids := f.installations(bob); !slices.Equal(ids, []int64{7}) {
+		t.Fatalf("reclaiming team's installations = %v, want [7]", ids)
 	}
 	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
 		t.Fatalf("operator unbind = %d", code)

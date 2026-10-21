@@ -24,7 +24,7 @@ func TestProcessAuthority(t *testing.T) {
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}
 	binding := capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 3, Attempt: 2}
 	parentPrincipal := capability.Principal{Authority: ref, Class: capability.CredentialBearer, Capability: capability.Capability{Prefix: ref.ID, Digest: sha256.Sum256([]byte("controller-parent")), Audience: capability.Controller, Team: "team", Binding: binding, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: &expires}}
-	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: parentPrincipal, MembershipValid: true}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
+	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: parentPrincipal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
 	validateCalls := 0
 	authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{
 		Parent: parent, Bindings: processBindingFunc(func(_ context.Context, principal capability.Principal, _ capability.BindingRule, target capability.Target) error {
@@ -33,9 +33,9 @@ func TestProcessAuthority(t *testing.T) {
 			}
 			return nil
 		}),
-		ValidateAuthority: func(chain []capability.AuthorityState, _ time.Time) (capability.Principal, error) {
+		ValidateAuthority: func(chain []capability.AuthorityState, now time.Time) (capability.Principal, error) {
 			for _, state := range chain {
-				if !state.MembershipValid {
+				if !capability.CredentialAlive(state.Principal.Capability, now) {
 					return capability.Principal{}, errors.New("parent membership ended")
 				}
 			}
@@ -95,9 +95,9 @@ func TestProcessAuthority(t *testing.T) {
 	if err := call(foreign); err == nil || writes != 1 {
 		t.Fatal("another attempt reached the process service")
 	}
-	parent.snapshot.Authorities[0].MembershipValid = false
+	parent.snapshot.Authorities[0].Principal.Capability.RevokedAt = &parent.snapshot.Now
 	snapshot, err = authorities.ReadAuthentication(t.Context(), processLookup, capability.RequestEvidence{})
-	if err != nil || snapshot.Authorities[0].MembershipValid || snapshot.Authorities[1].MembershipValid {
+	if err != nil || capability.CredentialAlive(snapshot.Authorities[1].Principal.Capability, snapshot.Now) {
 		t.Fatal("process snapshot hid parent membership loss")
 	}
 	if err := authorities.CheckBinding(t.Context(), auth.Principal, capability.BindOwnNode, capability.Target{}); err == nil {
@@ -114,7 +114,7 @@ func TestProcessAuthority(t *testing.T) {
 	}
 	for _, mode := range []string{"success", "retry", "binding_refused", "bind_error", "start_error"} {
 		t.Run("executor_"+mode, func(t *testing.T) {
-			parent.snapshot.Authorities[0].MembershipValid = true
+			parent.snapshot.Authorities[0].Principal.Capability.RevokedAt = nil
 			var trace []string
 			var processes []*scriptedSDK
 			var issued []capability.Issued

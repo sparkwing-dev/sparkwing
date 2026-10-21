@@ -122,10 +122,10 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
-	uid := uint32(123)
+	peer, _ := localControllerIdentity(t)
 	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 		client, host := net.Pipe()
-		listener.connections <- localScheduleConnection{Conn: host, peer: wingd.LocalPeerIdentity{GOOS: "linux", UID: &uid}}
+		listener.connections <- localScheduleConnection{Conn: host, peer: peer}
 		return client, nil
 	}}
 	t.Cleanup(func() {
@@ -327,11 +327,11 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	} else {
 		pipe := &localScheduleListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 		listener = pipe
+		peer, _ := localControllerIdentity(t)
 		transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			client, host := net.Pipe()
-			uid := uint32(123)
 			select {
-			case pipe.connections <- localScheduleConnection{Conn: host, peer: wingd.LocalPeerIdentity{GOOS: "linux", UID: &uid}}:
+			case pipe.connections <- localScheduleConnection{Conn: host, peer: peer}:
 				return client, nil
 			case <-ctx.Done():
 				client.Close()

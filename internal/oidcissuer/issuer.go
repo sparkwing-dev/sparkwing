@@ -19,12 +19,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 )
 
 const (
@@ -105,21 +106,13 @@ func ValidateIssuerURL(raw string) error {
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("oidcissuer: issuer %q is not an absolute URL", raw)
 	}
-	if u.Scheme != "https" && (u.Scheme != "http" || !loopback(u.Hostname())) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !originguard.LoopbackHost(u.Host)) {
 		return fmt.Errorf("oidcissuer: issuer %q must use https", raw)
 	}
 	if u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return fmt.Errorf("oidcissuer: issuer %q must be a bare origin such as https://api.example.com", raw)
 	}
 	return nil
-}
-
-func loopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // URL is the issuer, the value of every token's iss claim.

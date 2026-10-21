@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
@@ -47,10 +46,10 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 					ctx, cancel := context.WithCancel(t.Context())
 					done := make(chan error, 1)
 					go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
-					uid := uint32(123)
+					peer, _ := localControllerIdentity(t)
 					transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 						local, remote := net.Pipe()
-						listener.connections <- localScheduleConnection{Conn: remote, peer: wingd.LocalPeerIdentity{GOOS: "linux", UID: &uid}}
+						listener.connections <- localScheduleConnection{Conn: remote, peer: peer}
 						return local, nil
 					}}
 					t.Cleanup(func() {

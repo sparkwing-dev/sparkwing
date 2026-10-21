@@ -32,7 +32,8 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	}
 	_, demand := unitClaimFixtureStore(t, s)
 	f := &RankingFixture{Store: s, Self: demand.CapabilityPrefix, ReadyAt: s.now()}
-	f.now = f.ReadyAt
+	// Claimants must exist before the polls that establish availability at readiness.
+	f.now = f.ReadyAt.Add(-time.Minute)
 	s.pinnedClock = func() time.Time { return f.now }
 	t.Cleanup(func() { s.pinnedClock = nil })
 	f.Owner = rankingMember(t, s, "owner", RoleOwner)
@@ -43,7 +44,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	f.Second = f.personalMachine(t, f.Member, "desktop")
 	actions := authorityRoot("actions", "a")
 	actions.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
-	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: rankingSHA, WorkflowRunID: "77"}}
+	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: rankingSHA, WorkflowRunID: "77", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, actions)
 	f.Actions = actions.Prefix
 	launcher := authorityRoot("launcher", "")
@@ -54,6 +55,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	if funded {
 		fundUnitClaim(t, s)
 	}
+	f.At(0)
 	f.Request(t, func(*runspec.Request) {})
 	s.testOnlyExec(t, `UPDATE runs SET dispatch='controller',created_principal='owner',created_subject_kind='account',git_branch='refs/heads/main',git_sha=?`, rankingSHA)
 	s.testOnlyExec(t, `UPDATE triggers SET unit_kind='plan',available_at=?`, f.ReadyAt.UnixNano())
@@ -66,6 +68,7 @@ func rankingMember(t *testing.T, s *Store, id string, role Role) Actor {
 	s.testOnlyExec(t, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.test")
 	s.testOnlyExec(t, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)`, id, role)
 	s.testOnlyExec(t, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)`, id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
+	s.testOnlyExec(t, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, id)
 	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 

@@ -63,13 +63,6 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 
 type runnerStorePolicyW8 struct{}
 
-func (runnerStorePolicyW8) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	if spec.RegistrationID != "runner-store-fixture" && spec.RegistrationID != "runner:default:runner" && spec.RegistrationID != "service:"+spec.Subject.ID {
-		return errors.New("unregistered fixture origin")
-	}
-	return nil
-}
-
 func (runnerStorePolicyW8) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
 	capacity := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
 	return match.Profile{Capacity: capacity}, capacity, nil
@@ -190,6 +183,7 @@ func revokeStoredRunnerW8(t *testing.T, s *store.Store, target capability.Author
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('runner-admin','runner-admin@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','runner-admin','owner',1)`,
 		`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('runner-admin','runner-admin','runs.read,team.admin',1,4102444800000000000,'default','runner-admin')`,
+		`INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('runner-admin','default',0)`,
 	} {
 		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), query); err != nil {
 			t.Fatal(err)

@@ -203,13 +203,7 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 		if pod.Spec.NodeName != node {
 			continue
 		}
-		daemon := false
-		for _, owner := range pod.OwnerReferences {
-			if owner.Kind == "DaemonSet" && owner.Controller != nil && *owner.Controller {
-				daemon = true
-			}
-		}
-		if daemon {
+		if daemonPod(pod) {
 			continue
 		}
 		if team != "" && pod.Namespace == b.Namespace && strings.HasPrefix(pod.Name, capacityPrefix) && len(pod.OwnerReferences) == 0 && pod.Labels[capacityLabel] == "true" && pod.Labels[TeamLabel] == TeamNodeValue(b.Namespace, team) {
@@ -264,3 +258,12 @@ func nodeReady(node corev1.Node) bool {
 
 // TeamNodeValue is the collision-resistant value infrastructure must place on the team's dedicated nodes.
 func TeamNodeValue(namespace, team string) string { return labelHash(namespace + "/" + team) }
+
+func daemonPod(pod corev1.Pod) bool {
+	for _, owner := range pod.OwnerReferences {
+		if owner.APIVersion == "apps/v1" && owner.Kind == "DaemonSet" && owner.Controller != nil && *owner.Controller {
+			return true
+		}
+	}
+	return false
+}

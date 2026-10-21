@@ -103,20 +103,20 @@ func (f *credentialMutationFake) WriteGitCredential(ctx context.Context, a capab
 	return f.Tenant.WriteGitCredential(ctx, a, row)
 }
 
-func (f *credentialMutationFake) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (store.GitCredential, error) {
+func (f *credentialMutationFake) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, repository, fingerprint string) (store.GitCredential, error) {
 	if err := f.record(a); err != nil {
 		return store.GitCredential{}, err
 	}
 	a.Principal.Authority = f.authority
-	return f.Tenant.ConfirmGitCredentialFor(ctx, a, host, fingerprint)
+	return f.Tenant.ConfirmGitCredentialFor(ctx, a, host, repository, fingerprint)
 }
 
-func (f *credentialMutationFake) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error {
+func (f *credentialMutationFake) RemoveGitCredential(ctx context.Context, a capability.Authorized, host, repository string) error {
 	if err := f.record(a); err != nil {
 		return err
 	}
 	a.Principal.Authority = f.authority
-	return f.Tenant.RemoveGitCredential(ctx, a, host)
+	return f.Tenant.RemoveGitCredential(ctx, a, host, repository)
 }
 
 func mutationServerConfig(t testing.TB, s *store.Store, cipher controller.Cipher, b *credentialBoundary) *controller.Server {
@@ -199,36 +199,36 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreignStored, err := foreign.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, "foreign"), teststore.SealGitCredential(t, foreign.Team(), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: "foreign-value"}))
+	foreignStored, err := foreign.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, "foreign"), teststore.SealGitCredential(t, foreign.Team(), store.GitCredential{HostWide: true, Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: "foreign-value"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	property := func(value, selector string) bool {
 		digest := sha256.Sum256([]byte(value))
 		token := "private-" + hex.EncodeToString(digest[:])
-		body, err := json.Marshal(map[string]string{"host": "Git.Invalid", "kind": "https", "token": token})
+		body, err := json.Marshal(map[string]any{"host_wide": true, "host": "Git.Invalid", "kind": "https", "token": token})
 		if err != nil {
 			t.Fatal(err)
 		}
 		query := url.Values{"team": {selector}, "host": {selector}, "run": {selector}}
 		w := authorityHTTP(h, b, "POST", "/api/v1/team/git-credentials?"+query.Encode(), string(body))
-		row, err := target.GitCredentialForHost(t.Context(), "git.invalid")
+		row, err := target.GitCredentialForRepository(t.Context(), "", "git.invalid")
 		var public controller.GitCredentialJSON
 		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || json.Unmarshal(w.Body.Bytes(), &public) != nil || !public.Confirmed || public.Host != "git.invalid" || public.CreatedBy != "account" || err != nil || strings.Contains(w.Body.String(), token) || strings.Contains(w.Body.String(), row.Secret) {
 			return false
 		}
-		plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential", false, true, row.Secret)
+		plain, err := cipher.OpenBound(secrets.PurposeGitCredential, "team", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, row.Secret)
 		if err != nil || plain != token || row.Username != "x-access-token" {
 			return false
 		}
-		if _, err := cipher.OpenBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential", false, true, row.Secret); err == nil {
+		if _, err := cipher.OpenBound(secrets.PurposeGitCredential, "foreign", "git-credential:git.invalid", "git-credential:host:git.invalid", false, true, row.Secret); err == nil {
 			return false
 		}
 		w = authorityHTTP(h, b, "DELETE", "/api/v1/team/git-credentials/git.invalid?"+query.Encode(), "")
-		if _, err := target.GitCredentialForHost(t.Context(), "git.invalid"); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
+		if _, err := target.GitCredentialForRepository(t.Context(), "", "git.invalid"); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
 			return false
 		}
-		other, err := foreign.GitCredentialForHost(t.Context(), "git.invalid")
+		other, err := foreign.GitCredentialForRepository(t.Context(), "", "git.invalid")
 		return err == nil && other.Secret == foreignStored.Secret
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
@@ -239,7 +239,7 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 var credentialMutationRequests = []struct{ method, path, body string }{
 	{"POST", "/api/v1/secrets", `{"name":"KEY","value":"private credential"}`},
 	{"DELETE", "/api/v1/secrets/KEY", ""},
-	{"POST", "/api/v1/team/git-credentials", `{"host":"git.invalid","kind":"https","token":"private-credential"}`},
+	{"POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"git.invalid","kind":"https","token":"private-credential"}`},
 	{"POST", "/api/v1/team/git-credentials/git.invalid/confirm", `{"fingerprint":"SHA256:pin"}`},
 	{"DELETE", "/api/v1/team/git-credentials/git.invalid", ""},
 }
@@ -259,7 +259,7 @@ func TestCredentialMutationsHTTPRefuseUnrelatedAuthorityBeforeStorage(t *testing
 				case "expired":
 					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].MembershipValid, code = false, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
 				case "read only":
 					p.Capability.Grants = []capability.Grant{capability.RunsRead}
 				case "machine":
@@ -376,7 +376,7 @@ func TestCredentialMutationsHTTPConfirmationUsesTenantAndPin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), teststore.SealGitCredential(t, tenant.Team(), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialSSH, Secret: "private-ssh-key", Fingerprint: "SHA256:pin"})); err != nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), teststore.SealGitCredential(t, tenant.Team(), store.GitCredential{HostWide: true, Host: "git.invalid", Kind: store.GitCredentialSSH, Secret: "private-ssh-key", Fingerprint: "SHA256:pin"})); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -395,7 +395,7 @@ func TestCredentialMutationsHTTPConfirmationUsesTenantAndPin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := foreign.GitCredentialForHost(t.Context(), "git.invalid")
+	row, err := foreign.GitCredentialForRepository(t.Context(), "", "git.invalid")
 	if err != nil || row.ConfirmedAt != nil {
 		t.Fatalf("foreign row changed: %+v %v", row, err)
 	}
@@ -512,7 +512,7 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 	if row, err := tenant.GetSecretRow("KEY", ""); !errors.Is(err, store.ErrNotFound) || row != nil {
 		t.Fatalf("stored failed secret: %+v %v", row, err)
 	}
-	if row, err := tenant.GitCredentialForHost(t.Context(), "git.invalid"); !errors.Is(err, store.ErrNotFound) || row.ID != "" {
+	if row, err := tenant.GitCredentialForRepository(t.Context(), "", "git.invalid"); !errors.Is(err, store.ErrNotFound) || row.ID != "" {
 		t.Fatalf("stored failed credential: %+v %v", row, err)
 	}
 }
@@ -528,6 +528,10 @@ func credentialSeedAuthority(t testing.TB, s *store.Store, team store.Team) capa
 	digest := sha256.Sum256([]byte("credential-fixture:" + team))
 	hash := hex.EncodeToString(digest[:])
 	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'account','',?,?,?,'account') ON CONFLICT(hash) DO NOTHING`, hash, time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), team); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,0) ON CONFLICT DO NOTHING`, hash, team); err != nil {
 		t.Fatal(err)
 	}
 

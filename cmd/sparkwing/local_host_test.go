@@ -121,7 +121,7 @@ func TestLocalQueueBindsAuthenticatedStorageBeforeOpeningProcessTransport(t *tes
 		switch r.URL.Path {
 		case "/api/v1/runs/run/local-host/authentication":
 			authenticated++
-			snapshot := capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}, Binding: capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)}}
+			snapshot := capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}, Binding: capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)}}
 			if err := json.NewEncoder(response).Encode(localhostwire.LocalAuthentication{Snapshot: snapshot, Digests: [][32]byte{p.Capability.Digest}}); err != nil {
 				t.Fatal(err)
 			}

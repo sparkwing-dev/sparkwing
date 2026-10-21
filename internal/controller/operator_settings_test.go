@@ -136,7 +136,7 @@ func (f *operatorAuthorityFixture) ReadAuthentication(_ context.Context, lookup 
 	if lookup.Digest != sha256.Sum256([]byte(f.raw)) {
 		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated}
 	}
-	return capability.AuthenticationSnapshot{Now: time.Now(), Authorities: []capability.AuthorityState{{Principal: f.principal, MembershipValid: true}}}, nil
+	return capability.AuthenticationSnapshot{Now: time.Now(), Authorities: []capability.AuthorityState{{Principal: f.principal}}}, nil
 }
 
 func (*operatorAuthorityFixture) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {

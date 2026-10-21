@@ -28,8 +28,9 @@ func awardExecutionHost(chain []authorityNode, sealed runspec.SealedRequest, her
 	return ""
 }
 
-// Launcher placement is known after reservation and before the pod may exchange its bootstrap.
-func (s *Store) sealLauncherHost(ctx context.Context, authority capability.AuthorityRef, observation controllerwire.LauncherObservation) error {
+// Only authenticated activation of a reserved execution node seals launcher placement.
+// Capacity demand and reservation observations never supply an execution host.
+func (s *Store) sealLauncherHost(ctx context.Context, authority capability.AuthorityRef, observation controllerwire.LauncherActivation) error {
 	if _, err := decodeAwardUnit(observation.Award.Kind, observation.Award.ID); err != nil {
 		return nil
 	}

@@ -307,7 +307,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 					t.Fatalf("owner expansion is not issuable: %v", err)
 				}
 				b.snapshot.Binding.Expansion.Lease = *child.Capability.Binding.Expansion
-				b.snapshot.Authorities = []capability.AuthorityState{b.snapshot.Authorities[0], {Principal: owner, MembershipValid: true}, b.snapshot.Authorities[1]}
+				b.snapshot.Authorities = []capability.AuthorityState{b.snapshot.Authorities[0], {Principal: owner}, b.snapshot.Authorities[1]}
 			case "anonymous":
 				b.raw = ""
 				status, code = 401, apierr.Unauthenticated

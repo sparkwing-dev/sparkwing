@@ -120,7 +120,7 @@ func TestCreditReadsRefuseUnrelatedAuthority(t *testing.T) {
 				case "expired":
 					p.Capability.ExpiresAt = &b.snapshot.Now
 				case "membership removed":
-					b.snapshot.Authorities[0].MembershipValid = false
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 				case "wrong audience":
 					b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 					p.Capability.Digest = sha256.Sum256([]byte(b.raw))

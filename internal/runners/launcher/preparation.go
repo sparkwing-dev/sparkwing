@@ -19,7 +19,7 @@ func (c *ControllerControl) Prepare(ctx context.Context, fences []capability.Lea
 	if err != nil {
 		return time.Time{}, err
 	}
-	if len(response.Deferred)+len(response.Awards)+len(response.Remove)+len(response.RemoveReservations) != 0 {
+	if len(response.Deferred)+len(response.Awards)+len(response.Retired) != 0 {
 		return time.Time{}, errors.New("preparation returned unobserved Cloud decisions")
 	}
 	remaining := make(map[capability.LeaseRef]bool, len(fences))

@@ -66,7 +66,7 @@ func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *control
 	}
 	digest := sha256.Sum256([]byte(sessID))
 	issued, err := st.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
+		Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Team: string(store.DefaultTeam),
 		Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone},
 	})

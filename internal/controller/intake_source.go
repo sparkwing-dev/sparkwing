@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -52,7 +53,7 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 		if !valid || parsed.Port() != "" {
 			return invalidEngineBody("GitHub source must name owner/repository")
 		}
-		id, err := s.intakeGitHubRepositoryID(ctx, team, repo.Slug())
+		id, err := s.intakeGitHubRepositoryID(ctx, team, repo.Slug(), request.Git.Repository.Key)
 		if err != nil {
 			return err
 		}
@@ -141,7 +142,7 @@ func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID str
 	return "", refused
 }
 
-func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string) (int64, error) {
+func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string, supplied runspec.RepoKey) (int64, error) {
 	if team == "" || s.operator == nil {
 		return 0, missingEndpointPolicy()
 	}
@@ -159,7 +160,11 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		}
 		return repo.ID, nil
 	}
-	credential, err := s.intakeStoredCredential(ctx, store.Team(team), "github.com", store.GitCredentialHTTPS)
+	repository := ""
+	if strings.HasPrefix(string(supplied), "gh:") {
+		repository = string(supplied)
+	}
+	credential, err := s.intakeStoredCredential(ctx, store.Team(team), repository, "github.com", store.GitCredentialHTTPS)
 	if err != nil {
 		return 0, err
 	}
@@ -167,7 +172,14 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 	if credential.Kind == store.GitCredentialHTTPS {
 		token = credential.Secret
 	}
-	return sourceurl.GitHubRepositoryID(ctx, "https://github.com/"+slug, token)
+	id, err := sourceurl.GitHubRepositoryID(ctx, "https://github.com/"+slug, token)
+	if err != nil {
+		return 0, err
+	}
+	if repository != "" && repository != "gh:"+strconv.FormatInt(id, 10) {
+		return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source does not match repository identity")
+	}
+	return id, nil
 }
 
 func parseIntakeRemote(remote string) (*url.URL, error) {
@@ -182,11 +194,8 @@ func parseIntakeRemote(remote string) (*url.URL, error) {
 		parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" && parsed.Scheme != "git" {
 		return nil, invalidEngineBody("source remote must be a credential-free repository URL")
 	}
-	if parsed.User != nil {
-		_, password := parsed.User.Password()
-		if parsed.Scheme != "ssh" || password {
-			return nil, invalidEngineBody("source remote must not contain credentials")
-		}
+	if err := envredact.ValidateSourceReference(parsedRemote); err != nil {
+		return nil, invalidEngineBody(err.Error())
 	}
 	return parsed, nil
 }

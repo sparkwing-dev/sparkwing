@@ -255,7 +255,7 @@ func FuzzProductionBoundaryRefusesConflictingDestinations(f *testing.F) {
 		case 0:
 			api = config.ControllerURL
 		case 1:
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "daemon", Namespace: "kube-system", OwnerReferences: []metav1.OwnerReference{{Kind: "DaemonSet", Controller: ptr(true)}}}, Spec: corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "daemon", Ports: []corev1.ContainerPort{{ContainerPort: port, Protocol: corev1.ProtocolTCP}}}}}, Status: corev1.PodStatus{PodIP: "10.0.0.1"}}
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "daemon", Namespace: "kube-system", OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "DaemonSet", Controller: ptr(true)}}}, Spec: corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "daemon", Ports: []corev1.ContainerPort{{ContainerPort: port, Protocol: corev1.ProtocolTCP}}}}}, Status: corev1.PodStatus{PodIP: "10.0.0.1"}}
 			if _, err := kube.CoreV1().Pods("kube-system").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}

@@ -18,6 +18,15 @@ type capacityFence struct {
 }
 
 func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, key string, fence capacityFence) error {
+	if err := checkCapacityUnitTx(ctx, tx, team, fence); err != nil {
+		return err
+	}
+	b := fence.binding
+	_, err := declaredCapacityGroupTx(ctx, tx, team, b.RunID, b.NodeID, key, fence.actor.Authority)
+	return err
+}
+
+func checkCapacityUnitTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {
 	b := fence.binding
 	if b.RunID == "" || b.Generation < 0 {
 		return holderRefusal()
@@ -49,8 +58,7 @@ func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, key strin
 			return holderRefusal()
 		}
 	}
-	_, err := declaredCapacityGroupTx(ctx, tx, team, b.RunID, b.NodeID, key, fence.actor.Authority)
-	return err
+	return nil
 }
 
 func checkCapacityMutationTx(ctx context.Context, tx *storeTx, team Team, key, id string, fence *capacityFence) error {

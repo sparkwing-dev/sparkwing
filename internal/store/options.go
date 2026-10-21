@@ -17,7 +17,6 @@ type Option struct {
 // Policies holds dependencies selected once, before Open publishes the store.
 type Policies struct {
 	Intake         IntakePolicy
-	Provision      ProvisionPolicy
 	Console        func(capability.Principal, time.Time) bool
 	ClaimProfiles  ClaimProfileResolver
 	PlanSecrets    PlanSecretOpener
@@ -35,9 +34,6 @@ func WithPolicies(factory func(*Store) (Policies, error)) Option {
 func (s *Store) configurePolicies(policies Policies) {
 	if policies.Intake != nil {
 		s.intakePolicy = policies.Intake
-	}
-	if policies.Provision != nil {
-		s.provisions = policies.Provision
 	}
 	if policies.Console != nil {
 		s.consolePolicy = policies.Console

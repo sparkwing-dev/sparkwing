@@ -147,14 +147,9 @@ func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.La
 			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher sync returned private bearer material"}
 		}
 	}
-	for _, job := range result.Remove {
-		if err := job.Validate(); err != nil {
-			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher cleanup requires a complete Job instance"}
-		}
-	}
-	for _, reservation := range result.RemoveReservations {
-		if err := reservation.Validate(); err != nil {
-			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher cleanup requires a complete reservation fence"}
+	for _, fence := range result.Retired {
+		if err := (controllerwire.LauncherObservation{Award: fence}).Validate(); err != nil {
+			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher retirement requires a complete award fence"}
 		}
 	}
 	return result, nil

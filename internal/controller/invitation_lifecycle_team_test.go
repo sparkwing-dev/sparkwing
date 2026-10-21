@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -10,23 +11,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// Accepting an invitation grants the role it names, so an invitation outlives
-// its inviter's authority only up to what the inviter still holds: removal
-// and account deletion withdraw everything they issued, and a demotion
-// withdraws what now ranks above them.
+// Every invitation requires the inviter's current team.admin grant at acceptance.
 func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 	cases := []struct {
 		change      string
 		invitedRole string
 		wantGranted bool
 	}{
+		{"retained", "owner", true},
+		{"retained", "editor", true},
+		{"retained", "reader", true},
 		{"removed", "owner", false},
 		{"removed", "reader", false},
 		{"demoted to reader", "owner", false},
 		{"demoted to reader", "editor", false},
-		{"demoted to reader", "reader", true},
+		{"demoted to reader", "reader", false},
 		{"demoted to editor", "owner", false},
-		{"demoted to editor", "editor", true},
+		{"demoted to editor", "editor", false},
 		{"deleted", "editor", false},
 	}
 	for _, c := range cases {
@@ -60,6 +61,8 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 				}
 
 				switch c.change {
+				case "retained":
+					code = http.StatusNoContent
 				case "removed":
 					code, raw = f.do(http.MethodDelete, "/api/v1/team/members/"+erin.ID, f.ownerA, nil)
 				case "demoted to reader":
@@ -78,7 +81,17 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 
 				code, raw = f.do(http.MethodPost, "/api/v1/invitations/"+created.ID+"/accept",
 					session(t, f.st, mallory, malloryTeam), nil)
+				wantCode := http.StatusConflict
+				if c.wantGranted {
+					wantCode = http.StatusNoContent
+				}
+				if code != wantCode {
+					t.Fatalf("accept invitation: %d %s, want %d", code, raw, wantCode)
+				}
 				role, err := f.teamA.MemberRole(ctx, mallory.ID)
+				if !c.wantGranted && !errors.Is(err, store.ErrNotMember) {
+					t.Fatalf("refused invitation changed membership: role=%q err=%v", role, err)
+				}
 				granted := err == nil && role == store.Role(c.invitedRole)
 				if granted != c.wantGranted {
 					t.Errorf("after erin was %s, mallory accepting a %s invitation = %d %s; member role %q (%v), want granted=%v",

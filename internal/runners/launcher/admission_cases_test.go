@@ -221,6 +221,15 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		}), reason: "runs privileged"},
 		{name: "probe_host_pid", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
+		{name: "extra_toleration", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Operator: corev1.TolerationOpExists})
+		}), reason: "own team's nodes"},
+		{name: "toleration_seconds", user: testJobController, object: pod(func(p *corev1.Pod) {
+			toleration := p.Spec.Tolerations[1]
+			toleration.Effect = corev1.TaintEffectNoExecute
+			toleration.TolerationSeconds = ptr(int64(30))
+			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
+		}), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
 		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "own team's nodes"},
 		{name: "injected_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels["escape"] = "true" }), reason: "launcher's labels"},
@@ -421,4 +430,56 @@ func TestAdmissionPolicyCEL(t *testing.T) {
 			refused(t, err, c.reason)
 		})
 	}
+}
+
+func TestAdmissionPolicyNodeFailureTolerations(t *testing.T) {
+	f := newAdmissionFixture(t)
+	job := f.resources.Job.DeepCopy()
+	job.UID = "job-uid"
+	for name, pod := range map[string]*corev1.Pod{"job": jobPod(job), "capacity": f.capacity(t), "probe": f.measure()} {
+		for _, seconds := range []int64{0, 300, 600} {
+			t.Run(name+"/"+time.Duration(seconds*int64(time.Second)).String(), func(t *testing.T) {
+				p := pod.DeepCopy()
+				p.Spec.Tolerations = append(p.Spec.Tolerations,
+					corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(seconds)},
+					corev1.Toleration{Key: corev1.TaintNodeUnreachable, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(seconds)})
+				identity := testLauncher
+				if name == "job" {
+					identity = testJobController
+				}
+				if err := celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: identity, object: p}); err != nil {
+					t.Fatalf("API node-failure tolerations refused: %v", err)
+				}
+			})
+		}
+	}
+	for name, mutate := range map[string]func(*corev1.Toleration){
+		"wildcard_key":     func(t *corev1.Toleration) { t.Key = "" },
+		"wrong_effect":     func(t *corev1.Toleration) { t.Effect = corev1.TaintEffectNoSchedule },
+		"wildcard_effect":  func(t *corev1.Toleration) { t.Effect = "" },
+		"wrong_operator":   func(t *corev1.Toleration) { t.Operator = corev1.TolerationOpEqual },
+		"nonempty_value":   func(t *corev1.Toleration) { t.Value = "other" },
+		"negative_seconds": func(t *corev1.Toleration) { t.TolerationSeconds = ptr(int64(-1)) },
+		"absent_seconds":   func(t *corev1.Toleration) { t.TolerationSeconds = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := jobPod(job)
+			toleration := corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))}
+			mutate(&toleration)
+			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
+			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "own team's nodes")
+		})
+	}
+	for name, index := range map[string]int{"duplicate_cpu": 0, "duplicate_team": 1, "duplicate_failure": 2} {
+		t.Run(name, func(t *testing.T) {
+			p := jobPod(job)
+			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
+			p.Spec.Tolerations = append(p.Spec.Tolerations, p.Spec.Tolerations[index])
+			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "own team's nodes")
+		})
+	}
+	t.Run("job_template", func(t *testing.T) {
+		job.Spec.Template.Spec.Tolerations = append(job.Spec.Template.Spec.Tolerations, corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
+		refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testLauncher, object: job}), "own team's nodes")
+	})
 }

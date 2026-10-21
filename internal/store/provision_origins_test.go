@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -11,12 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-type provisionPolicyFunc func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error
-
-func (f provisionPolicyFunc) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	return f(ctx, resolver, spec)
-}
-
 func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capability.ProvisionSpec) {
 	t.Helper()
 	s := authorityStore(t)
@@ -24,8 +17,7 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 	spec := capability.ProvisionSpec{Kind: kind, RegistrationID: "enrollment", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: &expires}
 	switch kind {
 	case capability.ProvisionBootstrap:
-		spec.Team, spec.Subject = "", capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}
-		spec.Grants = []capability.Grant{capability.OperatorTokens}
+		spec = bootstrapSpec([32]byte{1})
 	case capability.ProvisionMachine:
 		owner := authorityMember(t, s, "owner", RoleOwner)
 		spec.Authority = &owner.Authority
@@ -48,30 +40,13 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 	return s, spec
 }
 
-func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
+func TestProvisionOriginsUseNativeVerification(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
-			if kind == capability.ProvisionBootstrap || kind == capability.ProvisionActions {
-				if issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
-					t.Fatal("unverified origin minted a bearer")
-				}
-			}
-			calls := 0
-			s.provisions = provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, got capability.ProvisionSpec) error {
-				calls++
-				if got.Kind != kind || got.RegistrationID != spec.RegistrationID {
-					t.Fatal("origin policy lost registration identity")
-				}
-				if got.Authority != nil {
-					_, err := resolver.ResolveAuthority(ctx, *got.Authority)
-					return err
-				}
-				return nil
-			})
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
-			if err != nil || issued.Raw == "" || issued.Capability.Parent != nil || calls != 1 {
-				t.Fatalf("provision: %+v, %v, policy calls %d", issued.Capability, err, calls)
+			if err != nil || issued.Raw == "" || issued.Capability.Parent != nil {
+				t.Fatalf("native origin: %+v, %v", issued.Capability, err)
 			}
 			if _, err := s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
 				t.Fatal(err)
@@ -82,7 +57,6 @@ func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
 
 func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 	s, spec := provisionOrigin(t, capability.ProvisionMachine)
-	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -97,34 +71,21 @@ func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
 	}
 }
 
-func TestProvisionRechecksAuthorityAfterOriginPolicy(t *testing.T) {
-	for _, problem := range []string{"revoked", "membership", "expired", "policy", "commit"} {
+func TestProvisionRefusesEndedAuthorizer(t *testing.T) {
+	for _, problem := range []string{"revoked", "membership", "expired"} {
 		t.Run(problem, func(t *testing.T) {
 			s, spec := provisionOrigin(t, capability.ProvisionMachine)
-			now := s.now()
-			s.clock = func() time.Time { return now }
-			s.provisions = provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, _ capability.ProvisionSpec) error {
-				tx := resolver.(*storeTx)
-				switch problem {
-				case "revoked":
-					_, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
-					return err
-				case "membership":
-					_, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team='a' AND account_id='owner'`)
-					return err
-				case "expired":
-					now = now.Add(2 * time.Hour)
-				case "policy":
-					return errors.New("enrollment is not approved")
-				case "commit":
-					_, err := tx.ExecContext(ctx, `CREATE TRIGGER refuse_root BEFORE INSERT ON capabilities BEGIN SELECT RAISE(ABORT,'refused'); END`)
-					return err
-				}
-				return nil
-			})
+			switch problem {
+			case "revoked":
+				rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
+			case "membership":
+				rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE team='a' AND account_id='owner'`)
+			case "expired":
+				s.clock = func() time.Time { return time.Now().Add(2 * time.Hour) }
+			}
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 			if err == nil || issued.Raw != "" {
-				t.Fatal("failed verification or persistence returned a bearer")
+				t.Fatal("ended authorizer minted a bearer")
 			}
 			rewriteSchemaCount(t, s.db, "capabilities", 0)
 		})
@@ -133,7 +94,6 @@ func TestProvisionRechecksAuthorityAfterOriginPolicy(t *testing.T) {
 
 func TestProvisionOriginAuthorityProperty(t *testing.T) {
 	s, base := provisionOrigin(t, capability.ProvisionMachine)
-	s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 	random := rand.New(rand.NewPCG(42, 91))
 	for i := range 128 {
 		spec := base
@@ -169,7 +129,6 @@ func TestProvisionRootCannotAcquireAnExecutionFence(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, base := provisionOrigin(t, kind)
-			s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 			random := rand.New(rand.NewPCG(17, 83))
 			for range 64 {
 				spec := base
@@ -209,7 +168,6 @@ func TestProvisionRejectsUnregisteredAndDeletingTeams(t *testing.T) {
 	for _, problem := range []string{"missing", "deleting"} {
 		t.Run(problem, func(t *testing.T) {
 			s, spec := provisionOrigin(t, capability.ProvisionActions)
-			s.provisions = provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil })
 			if problem == "missing" {
 				spec.Team = "missing"
 			} else {

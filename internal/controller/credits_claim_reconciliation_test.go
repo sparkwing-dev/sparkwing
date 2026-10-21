@@ -29,6 +29,7 @@ func creditClaimFixture(t *testing.T, cores float64, rates store.CreditRateTable
 	PaidCreditsFixture(t, e.Store, tenant, 2000)
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%g}}}}`, cores)))
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	if rates != nil {
 		if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 			t.Fatal(err)

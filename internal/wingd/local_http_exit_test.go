@@ -21,8 +21,15 @@ func TestLocalHTTPListenerFailureCancelsAndJoinsRequests(t *testing.T) {
 					listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 					client, server := net.Pipe()
 					defer client.Close()
-					uid := uint32(123)
-					listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: "linux", UID: &uid}}
+					owner, err := controllerPeerIdentity()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if owner.UID == nil {
+						t.Skip("Unix UID check")
+					}
+					uid := *owner.UID
+					listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 					entered, exited := make(chan struct{}), make(chan struct{})
 					handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer close(exited)

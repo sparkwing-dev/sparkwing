@@ -11,10 +11,12 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -32,7 +34,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 			allowed = append(allowed, capability.TeamAdmin)
 		}
 		grant := []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead, capability.ApprovalsWrite, capability.TeamAdmin, capability.NodesClaim}[selection%7]
-		body, err := json.Marshal(credentialRequest{Grants: []capability.Grant{grant}})
+		body, err := json.Marshal(credentialRequest{Grants: []capability.Grant{grant}, AllowTeamAdmin: grant == capability.TeamAdmin})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +55,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 			return false
 		}
 		principal, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Capability)))
-		return err == nil && principal.Capability.Parent == nil && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
+		return err == nil && principal.Capability.Parent != nil && principal.Capability.Parent.Kind == capability.AuthoritySession && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 42}); err != nil {
 		t.Fatal(err)
@@ -79,8 +81,8 @@ func TestCredentialMemberHTTPMembershipAndSessionLifecycle(t *testing.T) {
 			case "session revoked":
 				digest := sha256.Sum256([]byte(session))
 				engineSQL(t, s.store, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, hex.EncodeToString(digest[:]))
-				if w := credentialRequestHTTP(t, h, issued.Capability, `{"grants":["runs.read"]}`, true); w.Code != 201 {
-					t.Fatalf("delegation: %d %s", w.Code, w.Body)
+				if w := credentialRequestHTTP(t, h, issued.Capability, `{"grants":["runs.read"]}`, true); w.Code != 401 {
+					t.Fatalf("revoked session descendant: %d %s", w.Code, w.Body)
 				}
 			case "removed":
 				engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
@@ -206,21 +208,34 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 }
 
 func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
-	s, session := credentialSessionServer(t)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, session := credentialSessionServer(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{SessionKeys: cipher}, nil
+	}))
+	session, _, _, err = s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := s.Handler()
-	mint := func() string {
-		w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
+	mint := func(raw string) string {
+		w := credentialRequestHTTP(t, h, raw, `{"grants":["runs.read"]}`, false)
 		var issued credentialResponse
 		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &issued) != nil || issued.Capability == "" {
 			t.Fatalf("issuance: %d %s", w.Code, w.Body)
 		}
 		return issued.Capability
 	}
-	own := mint()
+	own := mint(session)
 	engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','reader',1)`)
-	engineSQL(t, s.store, `UPDATE sessions SET team='b'`)
-	foreign := mint()
+	foreignSession, _, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "b", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := mint(foreignSession)
 	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','private-job','pending',?,?)`, []byte(`{"id":"private-job"}`), []byte(`{}`))
 	property := func(encoded uint16, hint []byte) bool {
 		path := "/api/v1/runs/run/jobs"

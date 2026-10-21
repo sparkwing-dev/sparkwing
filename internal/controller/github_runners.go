@@ -18,18 +18,6 @@ const GitHubActionsLabel = "github-actions"
 // the base repository's privileges to input a fork controls, so those jobs get no credential.
 var githubRunnerEvents = map[string]bool{"push": true, "workflow_dispatch": true, "schedule": true}
 
-func githubCommit(sha string) bool {
-	if len(sha) != 40 && len(sha) != 64 {
-		return false
-	}
-	for _, c := range sha {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
 type githubRunnerConfig struct {
 	registry func(context.Context, store.Team) (GitHubRunnerRegistry, error)
 	once     sync.Once
@@ -128,6 +116,8 @@ jobs:
           grep ' sparkwing-runner-linux-amd64$' SHA256SUMS | sha256sum -c -
           install -m 0755 sparkwing-runner-linux-amd64 "$RUNNER_TEMP/sparkwing-runner"
       - name: Run this repository's Sparkwing work
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           "$RUNNER_TEMP/sparkwing-runner" warm --github-actions \
             --team ` + team + ` \

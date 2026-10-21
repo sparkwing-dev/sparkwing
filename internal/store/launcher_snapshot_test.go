@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"testing/quick"
@@ -62,7 +63,7 @@ func TestLauncherSnapshotRetainsCurrentAwardThroughExchange(t *testing.T) {
 			s, demand, claim, _ := launcherSnapshotFixture(t, kind)
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 			for exchange := range 2 {
-				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil)
+				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
 				if err != nil || len(awards) != 1 {
 					t.Fatalf("awards=%+v, %v", awards, err)
 				}
@@ -133,7 +134,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				if _, err := s.db.ExecContext(t.Context(), query, args...); err != nil {
 					t.Fatal(err)
 				}
-				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil)
+				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET status='running',finished_at=NULL,cancel_requested_at=NULL WHERE id='run'`)
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
 				status := "claimed"
@@ -160,7 +161,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 			if err := quick.Check(check, &quick.Config{MaxCount: 100}); err != nil {
 				t.Fatal(err)
 			}
-			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil)
+			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
 			if err != nil || len(awards) != 1 {
 				t.Fatalf("property damaged live award: %+v, %v", awards, err)
 			}
@@ -175,23 +176,23 @@ func TestLauncherSnapshotAuthority(t *testing.T) {
 	other.Subject.ID = "launcher"
 	other.Grants = []capability.Grant{capability.ClaimsLaunch}
 	authorityPersist(t, s, other)
-	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: other.Prefix}, nil, nil, nil, nil)
+	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: other.Prefix}, nil, nil, nil, nil, nil)
 	if err != nil || len(awards) != 0 {
 		t.Fatalf("foreign awards=%+v, %v", awards, err)
 	}
 	for _, ref := range []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: "runner"}, {Kind: capability.AuthoritySession, ID: "missing"}, {}} {
-		if rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil); err == nil || rows != nil {
+		if rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil); err == nil || rows != nil {
 			t.Fatalf("invalid authority returned awards: %+v, %v", rows, err)
 		}
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=? WHERE prefix=?`, now.UnixNano(), ref.ID)
-	if rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil); err == nil || rows != nil {
+	if rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil); err == nil || rows != nil {
 		t.Fatal("revoked launcher retained snapshot authority")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	rows, _, err := s.AsOperator().ReconcileLauncherAwards(ctx, ref, nil, nil, nil, nil)
+	rows, _, err := s.AsOperator().ReconcileLauncherAwards(ctx, ref, nil, nil, nil, nil, nil)
 	if err == nil || rows != nil {
 		t.Fatal("cancelled read exposed a partial snapshot")
 	}
@@ -206,12 +207,12 @@ func TestLauncherSnapshotDelegationRetainsRootOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}
-	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil)
+	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
 	if err != nil || len(awards) != 1 || *awards[0].Capability.Parent != root {
 		t.Fatalf("delegated launcher lost root-owned award: %+v, %v", awards, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, root.ID)
-	if rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil); err == nil || rows != nil {
+	if rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil); err == nil || rows != nil {
 		t.Fatal("revoked ancestor retained delegated snapshot authority")
 	}
 }
@@ -221,7 +222,7 @@ func TestLauncherSnapshotIsolatesIntegrityButRejectsStorageFailures(t *testing.T
 		t.Run(query, func(t *testing.T) {
 			s, demand, _, _ := launcherSnapshotFixture(t, capability.UnitNode)
 			rewriteSchemaExec(t, s.db, query)
-			rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil)
+			rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil, nil)
 			if query == `DROP TABLE eval_units` {
 				if err == nil || rows != nil {
 					t.Fatalf("storage failure returned snapshot: %+v, %v", rows, err)
@@ -296,7 +297,7 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 		if refused {
 			reservations = append([]capability.LeaseRef{original}, reservations...)
 		}
-		awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, reservations, nil, nil)
+		awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, reservations, nil, nil, nil)
 		if refused {
 			return err != nil && awards == nil
 		}
@@ -311,6 +312,34 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 	}
 }
 
+func TestLauncherPreparationRefusesEvalWithoutLease(t *testing.T) {
+	s, demand, claim, _ := launcherSnapshotFixture(t, capability.UnitEval)
+	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
+	if err != nil || len(awards) != 1 {
+		t.Fatalf("initial award: %v", err)
+	}
+	c := awards[0].Capability
+	c.Binding.Expansion = nil
+	body, err := json.Marshal(CapabilityRecord{Version: 1, Value: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET authority_json=?,eval_unit_generation=NULL WHERE prefix=?`, body, c.Prefix)
+	fence := capability.LeaseRef{Kind: c.Unit, ID: c.UnitID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+	awards, prepared, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, []capability.LeaseRef{fence}, nil, nil)
+	if err != nil || len(prepared) != 0 || len(awards) != 1 || awards[0].Failure == nil {
+		t.Fatalf("source generation was accepted as an eval lease: awards=%+v prepared=%+v err=%v", awards, prepared, err)
+	}
+	var expires int64
+	if err := s.db.QueryRowContext(t.Context(), `SELECT lease_expires_at FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if expires != claim.Award.LeaseExpiresAt.UnixNano() {
+		t.Fatal("invalid eval lease changed persisted preparation")
+	}
+}
+
 func TestLauncherSnapshotCorruptAwardDoesNotHideHealthySibling(t *testing.T) {
 	s, demand, _, _ := launcherSnapshotFixture(t, capability.UnitNode)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,'sibling','pending',1,spec_json,execution_json FROM nodes WHERE node_id='job'`)
@@ -319,7 +348,7 @@ func TestLauncherSnapshotCorruptAwardDoesNotHideHealthySibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json='{' WHERE node_id='job'`)
-	rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil)
+	rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil, nil)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("snapshot=%+v, %v", rows, err)
 	}

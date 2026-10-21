@@ -17,9 +17,10 @@ type CredentialIssuer interface {
 }
 
 type credentialRequest struct {
-	Grants    []capability.Grant    `json:"grants"`
-	ExpiresAt *time.Time            `json:"expires_at,omitempty"`
-	Data      *capability.DataScope `json:"data,omitempty"`
+	AllowTeamAdmin bool                  `json:"allow_team_admin,omitempty"`
+	Grants         []capability.Grant    `json:"grants"`
+	ExpiresAt      *time.Time            `json:"expires_at,omitempty"`
+	Data           *capability.DataScope `json:"data,omitempty"`
 }
 
 type credentialResponse struct {
@@ -53,7 +54,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	var err error
 	if p.DirectAccountSession() && request.Data == nil {
 		issued, err = s.credentialIssuer.ProvisionCapability(r.Context(), capability.ProvisionSpec{
-			Kind: capability.ProvisionMember, Authority: &p.Authority, Subject: p.Capability.Subject,
+			Kind: capability.ProvisionMember, AllowTeamAdmin: request.AllowTeamAdmin, Authority: &p.Authority, Subject: p.Capability.Subject,
 			Team: a.Target.Team, Grants: request.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: request.ExpiresAt,
 		})
 	} else {

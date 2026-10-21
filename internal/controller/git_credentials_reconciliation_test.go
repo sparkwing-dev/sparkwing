@@ -64,7 +64,7 @@ func (f *gitReleaseFixture) request(method, path, body string, status int) *http
 
 func (f *gitReleaseFixture) put(token string) {
 	f.t.Helper()
-	w := f.request("POST", "/api/v1/team/git-credentials", `{"host":"gitlab.example.com","kind":"https","token":"`+token+`"}`, 200)
+	w := f.request("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"gitlab.example.com","kind":"https","token":"`+token+`"}`, 200)
 	if strings.Contains(w.Body.String(), token) {
 		f.t.Fatal("write response disclosed credential")
 	}
@@ -72,7 +72,19 @@ func (f *gitReleaseFixture) put(token string) {
 
 func (f *gitReleaseFixture) registerRunner(personal bool) {
 	f.t.Helper()
-	registerFixtureRunner(f.t, f.s.store, personal)
+	registerFixtureRunner(f.t, f.s.store, false)
+	if personal {
+		w := f.request("POST", "/api/v1/runners", `{"name":"personal-source","repos":["gitlab.example.com/acme/*"],"personal":true}`, 201)
+		var issued credentialResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil {
+			f.t.Fatal(err)
+		}
+		var requirement string
+		if err := teststore.SQL(f.t, f.s.store).QueryRow(`SELECT json_extract(authority_json,'$.origin.requirement') FROM capabilities WHERE prefix=?`, issued.Prefix).Scan(&requirement); err != nil {
+			f.t.Fatal(err)
+		}
+		engineSQL(f.t, f.s.store, `UPDATE capabilities SET authority_json=json_set(authority_json,'$.origin.personal',json('true'),'$.origin.requirement',json(?)) WHERE prefix='runner'`, requirement)
+	}
 }
 
 func registerFixtureRunner(t *testing.T, s *store.Store, personal bool) {
@@ -150,7 +162,7 @@ func TestTeamGitCredentialSSHIsUnusableUntilConfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := string(pem.EncodeToMemory(block))
-	body, err := json.Marshal(map[string]string{"host": "GitLab.Example.com", "kind": "ssh", "private_key": key})
+	body, err := json.Marshal(map[string]any{"host_wide": true, "host": "GitLab.Example.com", "kind": "ssh", "private_key": key})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,14 +269,14 @@ func TestTeamGitCredentialIsOwnerManagedAndWriteOnly(t *testing.T) {
 			t.Fatalf("credential listing=%s", w.Body)
 		}
 		if role != "owner" {
-			f.request("POST", "/api/v1/team/git-credentials", `{"host":"gitlab.example.com","kind":"https","token":"changed"}`, 403)
+			f.request("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"gitlab.example.com","kind":"https","token":"changed"}`, 403)
 			f.request("POST", "/api/v1/team/git-credentials/gitlab.example.com/confirm", `{"fingerprint":"wrong"}`, 403)
 			f.request("DELETE", "/api/v1/team/git-credentials/gitlab.example.com", "", 403)
 		}
 	}
 	engineSQL(t, f.s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='member'`)
-	f.request("POST", "/api/v1/team/git-credentials", `{"host":"gitlab.example.com","kind":"ssh","private_key":"not a key"}`, 400)
-	f.request("POST", "/api/v1/team/git-credentials", `{"host":"https://gitlab.example.com","kind":"https","token":"x"}`, 400)
+	f.request("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"gitlab.example.com","kind":"ssh","private_key":"not a key"}`, 400)
+	f.request("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"https://gitlab.example.com","kind":"https","token":"x"}`, 400)
 	f.registerRunner(false)
 	if got := f.release(200); got.Secret != "private-git-secret" {
 		t.Fatal("refused mutation changed credential")
@@ -273,13 +285,13 @@ func TestTeamGitCredentialIsOwnerManagedAndWriteOnly(t *testing.T) {
 
 func TestTeamGitCredentialNeedsASecretsKey(t *testing.T) {
 	f := newGitReleaseFixture(t)
-	w := f.request("POST", "/api/v1/tokens", `{"grants":["team.admin"]}`, 201)
+	w := f.request("POST", "/api/v1/tokens", `{"grants":["team.admin"],"allow_team_admin":true}`, 201)
 	var member credentialResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &member); err != nil {
 		t.Fatal(err)
 	}
 	f.s.WithSecretsCipher(nil)
-	w = engineClaimHTTP(t, f.s.Handler(), member.Capability, "POST", "/api/v1/team/git-credentials", `{"host":"gitlab.example.com","kind":"https","token":"private-token"}`, 503)
+	w = engineClaimHTTP(t, f.s.Handler(), member.Capability, "POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"gitlab.example.com","kind":"https","token":"private-token"}`, 503)
 	var failure apierr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != apierr.Unavailable || strings.Contains(w.Body.String(), "private-token") {
 		t.Fatalf("missing key=%s: %v", w.Body, err)

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -267,7 +269,7 @@ func (s *worktreeSnapshot) remoteCommits(ctx context.Context, remote string) []s
 	}
 	var advertised strings.Builder
 	for _, line := range strings.Split(string(out), "\n") {
-		if sha, _, ok := strings.Cut(line, "\t"); ok && len(sha) == 40 {
+		if sha, _, ok := strings.Cut(line, "\t"); ok && runspec.IsCommitID(sha) {
 			advertised.WriteString(sha + "\n")
 		}
 	}

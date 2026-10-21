@@ -49,7 +49,7 @@ func newCredentialBoundary() *credentialBoundary {
 		Issuance: capability.Award, Unit: capability.UnitNode, UnitID: "unit", Purpose: capability.PurposeWork, Parent: &root.Authority, ExpiresAt: &expires,
 	}}
 	return &credentialBoundary{raw: raw, snapshot: capability.AuthenticationSnapshot{
-		Now: now, Authorities: []capability.AuthorityState{{Principal: claim, MembershipValid: true}, {Principal: root, MembershipValid: true}},
+		Now: now, Authorities: []capability.AuthorityState{{Principal: claim}, {Principal: root}},
 		Binding: capability.BindingState{Current: claim.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)},
 	}}
 }
@@ -169,7 +169,9 @@ func TestCredentialHTTPAuthenticationBoundary(t *testing.T) {
 		{"revoked parent", func(b *credentialBoundary) {
 			b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 		}, 401, apierr.Unauthenticated},
-		{"membership removed", func(b *credentialBoundary) { b.snapshot.Authorities[0].MembershipValid = false }, 401, apierr.Unauthenticated},
+		{"membership removed", func(b *credentialBoundary) {
+			b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
+		}, 401, apierr.Unauthenticated},
 		{"missing grant", func(b *credentialBoundary) { b.snapshot.Authorities[0].Principal.Capability.Grants = nil }, 403, apierr.Forbidden},
 		{"other team", func(b *credentialBoundary) { b.snapshot.Authorities[0].Principal.Capability.Team = "other" }, 403, apierr.Forbidden},
 		{"ended claim", func(b *credentialBoundary) { b.snapshot.Binding.FinishedAt = &b.snapshot.Now }, 401, apierr.Unauthenticated},

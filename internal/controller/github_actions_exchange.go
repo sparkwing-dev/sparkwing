@@ -54,7 +54,7 @@ func (s *Server) verifyActionsExchange(r *http.Request) error {
 	}
 	team := store.NormalizeTeam(store.Team(request.Team))
 	branch, isBranch := strings.CutPrefix(claims.Ref, "refs/heads/")
-	if team == "" || !githubRunnerEvents[claims.EventName] || !isBranch || branch == "" || !githubCommit(claims.SHA) || claims.RunID == "" || claims.WorkflowRef == "" {
+	if team == "" || !githubRunnerEvents[claims.EventName] || !isBranch || branch == "" || !runspec.IsCommitID(claims.SHA) || claims.RunID == "" || claims.RunAttempt == "" || !strings.HasPrefix(claims.WorkflowRef, claims.Repository+"/.github/workflows/") || !strings.HasSuffix(claims.WorkflowRef, "@"+claims.Ref) {
 		return actionsExchangeRefusal()
 	}
 	spec, err := s.actionsProvision(r.Context(), team, claims)
@@ -95,13 +95,16 @@ func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims g
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
 	expires := time.Now().UTC().Truncate(time.Millisecond).Add(limits.GitHubRunnerCredentialTTL)
+	if ceiling := claims.ExpiresAt.Add(limits.GitHubRunnerCredentialTTL); !claims.ExpiresAt.IsZero() && ceiling.Before(expires) {
+		expires = ceiling
+	}
 	registration := "github:" + strconv.FormatInt(claims.RepositoryID, 10) + ":" + strconv.FormatInt(claims.RepositoryOwnerID, 10)
 	return capability.ProvisionSpec{
 		Kind: capability.ProvisionActions, Team: string(team), RegistrationID: registration,
-		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: registration + ":" + claims.RunID},
+		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: registration + ":" + claims.RunID + ":" + claims.RunAttempt},
 		Grants:  []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: &expires,
 		Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{
-			RepositoryKey: string(repository.Key), Ref: claims.Ref, SHA: claims.SHA, WorkflowRunID: claims.RunID,
+			RepositoryKey: string(repository.Key), Ref: claims.Ref, SHA: claims.SHA, WorkflowRunID: claims.RunID, WorkflowRunAttempt: claims.RunAttempt, WorkflowRef: claims.WorkflowRef,
 		}}, Repositories: []string{string(repository.Key)},
 	}, nil
 }

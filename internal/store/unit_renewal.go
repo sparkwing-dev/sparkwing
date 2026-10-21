@@ -60,7 +60,7 @@ func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (L
 		if beat.CancelRequested {
 			return nil
 		}
-		return computeUnitBillingTx(ctx, tx, tenant.team, unit, actor.Generation, 0, executing || c.Billing != nil && c.Billing.ExecutorClass == "cloud")
+		return computeUnitBillingTx(ctx, tx, tenant.team, unit, actor.Generation, 0, executing || c.Billing != nil && c.Billing.ExecutorClass == TierCloud)
 	})
 	if err != nil {
 		return LeaseBeat{}, err

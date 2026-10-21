@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,10 +19,15 @@ type authorizationConnector struct{ conn *authorizationConnection }
 func (c authorizationConnector) Connect(context.Context) (driver.Conn, error) { return c.conn, nil }
 func (c authorizationConnector) Driver() driver.Driver                        { return &modernsqlite.Driver{} }
 
+type authorizationLock struct {
+	query string
+	args  []driver.NamedValue
+}
+
 type authorizationConnection struct {
 	driver.Conn
 	options  driver.TxOptions
-	locks    int
+	locks    []authorizationLock
 	rowsOpen bool
 }
 
@@ -39,7 +45,7 @@ func (c *authorizationConnection) QueryContext(ctx context.Context, query string
 			if c.options.ReadOnly {
 				return nil, errors.New("row lock in read-only authorization transaction")
 			}
-			c.locks++
+			c.locks = append(c.locks, authorizationLock{query: query, args: append([]driver.NamedValue(nil), args...)})
 			query = strings.TrimSuffix(query, suffix)
 		}
 	}
@@ -106,12 +112,20 @@ func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testi
 	if !recording.options.ReadOnly || recording.options.Isolation != driver.IsolationLevel(sql.LevelRepeatableRead) {
 		t.Fatalf("authorization snapshot options=%+v", recording.options)
 	}
+	if len(recording.locks) != 0 {
+		t.Fatalf("authorization snapshot acquired locks: %+v", recording.locks)
+	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		return tx.CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: "a"})
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if recording.options.ReadOnly || recording.locks != 2 {
-		t.Fatalf("mutation did not lock both ancestors: options=%+v locks=%d", recording.options, recording.locks)
+	want := []authorizationLock{
+		{query: "SELECT name FROM teams WHERE name=$1 FOR SHARE", args: []driver.NamedValue{{Ordinal: 1, Value: "a"}}},
+		{query: "SELECT prefix FROM capabilities WHERE prefix=$1 FOR NO KEY UPDATE", args: []driver.NamedValue{{Ordinal: 1, Value: child.Prefix}}},
+		{query: "SELECT prefix FROM capabilities WHERE prefix=$1 FOR NO KEY UPDATE", args: []driver.NamedValue{{Ordinal: 1, Value: root.Prefix}}},
+	}
+	if recording.options.ReadOnly || !reflect.DeepEqual(recording.locks, want) {
+		t.Fatalf("mutation locks: options=%+v got=%+v want=%+v", recording.options, recording.locks, want)
 	}
 }

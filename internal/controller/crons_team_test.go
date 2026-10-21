@@ -30,7 +30,7 @@ func teamTenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 
 func teamToken(t *testing.T, st *store.Store, tenant *store.Tenant, scopes ...string) string {
 	t.Helper()
-	raw, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member-of-" + string(tenant.Team())}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(scopes), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
+	raw, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member-of-" + string(tenant.Team())}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(scopes), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
 	if err != nil {
 		t.Fatalf("CreateToken for %s: %v", tenant.Team(), err)
 	}

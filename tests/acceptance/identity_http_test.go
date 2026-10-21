@@ -143,7 +143,7 @@ func TestIdentityHTTPRefusesInvalidCredentials(t *testing.T) {
 			case "parent revoked":
 				b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 			case "membership removed":
-				b.snapshot.Authorities[0].MembershipValid = false
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 			case "wrong audience":
 				b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 				b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))

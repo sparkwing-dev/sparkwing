@@ -398,3 +398,29 @@ func TestRankingAwardDeadlineAdmitsOnlyTheWindowWinner(t *testing.T) {
 	wantNone(t, f, f.Personal, capability.UnitPlan)
 	wantAward(t, f, f.Actions, capability.UnitPlan, "")
 }
+
+func TestRankingNoticeUsesTheClaimLivenessHorizon(t *testing.T) {
+	for _, horizon := range []time.Duration{5 * time.Second, 2 * time.Minute} {
+		t.Run(horizon.String(), func(t *testing.T) {
+			f := rankingFixture(t, true)
+			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET status='done'`); err != nil {
+				t.Fatal(err)
+			}
+			f.Poll(t, f.Self)
+			f.At(30 * time.Second)
+			tenant, err := f.Store.ForTeam(t.Context(), "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := store.WithClaimPlacement(t.Context(), store.ClaimPlacement{Liveness: horizon})
+			view, err := tenant.ReadRunView(ctx, "run")
+			if err != nil || view.Waiting == nil {
+				t.Fatalf("read waiting: %+v %v", view.Waiting, err)
+			}
+			wantOnline := horizon > 30*time.Second
+			if gotOnline := view.Waiting.NoEligible == ""; gotOnline != wantOnline {
+				t.Fatalf("horizon %v notice %q; online=%t", horizon, view.Waiting.NoEligible, wantOnline)
+			}
+		})
+	}
+}

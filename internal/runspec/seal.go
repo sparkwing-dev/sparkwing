@@ -3,11 +3,10 @@ package runspec
 import (
 	"errors"
 	"maps"
-	"net/url"
-	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 )
 
 // SealRequest snapshots authorized intake values without resolving their precedence.
@@ -32,24 +31,9 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	if request.Mode == IntakeExecute && (!IsCommitID(request.Git.SHA) || !IsCommitID(request.Source.Ref)) {
 		return SealedRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "executable intake requires resolved execution and code commits"}
 	}
-	for _, ref := range []string{request.Source.RequestedRef, request.Source.Ref} {
-		if !strings.Contains(ref, "://") {
-			continue
-		}
-		source, err := url.Parse(ref)
-		if err != nil {
-			return SealedRequest{}, errors.New("invalid source reference")
-		}
-		if source.User != nil {
-			_, password := source.User.Password()
-			if password || source.Scheme != "ssh" {
-				return SealedRequest{}, errors.New("source reference must not embed credentials")
-			}
-		}
-		for name := range source.Query() {
-			if envredact.CredentialName(name) {
-				return SealedRequest{}, errors.New("source reference must not embed credentials")
-			}
+	for _, ref := range []string{request.Source.RequestedRef, request.Source.Ref, request.Source.Location.RemoteURL} {
+		if err := envredact.ValidateSourceReference(ref); err != nil {
+			return SealedRequest{}, err
 		}
 	}
 	if app := request.Git.App; app.Set && app.Value.DefaultBranch != "" {

@@ -92,7 +92,7 @@ func (t *Tenant) RemoveRunForTest(ctx context.Context, id string) error {
 func (t *Tenant) MemberCapabilityForTest(test testing.TB, actor string, at time.Time) capability.Issued {
 	test.Helper()
 	a := t.mutationFixtureAuthority(test, actor, capability.RunsWrite, at)
-	issued, err := t.s.AsOperator().ProvisionCapability(test.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &a.Principal.Authority, Team: string(t.team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: actor}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
+	issued, err := t.s.AsOperator().ProvisionCapability(test.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &a.Principal.Authority, Team: string(t.team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: actor}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
 	if err != nil {
 		test.Fatal(err)
 	}

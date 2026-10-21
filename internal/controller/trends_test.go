@@ -238,7 +238,7 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
-			raw, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+			raw, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 			if err != nil {
 				t.Fatal(err)
 			}

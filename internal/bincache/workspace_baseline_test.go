@@ -12,15 +12,17 @@ func TestWorkspaceBaselineResolve(t *testing.T) {
 		want  WorkspaceBaseline
 	}{
 		"a remote-tracking ref and a commit": {
-			input: WorkspaceBaseline{Ref: "origin/main", SHA: strings.ToUpper(sha)},
+			input: WorkspaceBaseline{Ref: "origin/main", SHA: sha},
 			want:  WorkspaceBaseline{Ref: "origin/main", SHA: sha},
 		},
-		"no ref":          {input: WorkspaceBaseline{SHA: sha}},
-		"no commit":       {input: WorkspaceBaseline{Ref: "origin/main"}},
-		"a local branch":  {input: WorkspaceBaseline{Ref: "main", SHA: sha}},
-		"a parent escape": {input: WorkspaceBaseline{Ref: "origin/../../evil", SHA: sha}},
-		"a git option":    {input: WorkspaceBaseline{Ref: "--upload-pack=evil/x", SHA: sha}},
-		"a lock file":     {input: WorkspaceBaseline{Ref: "origin/main.lock", SHA: sha}},
+		"no ref":              {input: WorkspaceBaseline{SHA: sha}},
+		"no commit":           {input: WorkspaceBaseline{Ref: "origin/main"}},
+		"uppercase commit":    {input: WorkspaceBaseline{Ref: "origin/main", SHA: strings.ToUpper(sha)}},
+		"intermediate length": {input: WorkspaceBaseline{Ref: "origin/main", SHA: strings.Repeat("a", 48)}},
+		"a local branch":      {input: WorkspaceBaseline{Ref: "main", SHA: sha}},
+		"a parent escape":     {input: WorkspaceBaseline{Ref: "origin/../../evil", SHA: sha}},
+		"a git option":        {input: WorkspaceBaseline{Ref: "--upload-pack=evil/x", SHA: sha}},
+		"a lock file":         {input: WorkspaceBaseline{Ref: "origin/main.lock", SHA: sha}},
 		"a revision, not a commit": {
 			input: WorkspaceBaseline{Ref: "origin/main", SHA: "HEAD~1"},
 		},

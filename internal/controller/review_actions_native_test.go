@@ -42,7 +42,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 		"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
 		"repository": "acme/repo", "repository_id": "42", "repository_owner_id": "7",
 		"ref": "refs/heads/main", "sha": strings.Repeat("a", 40), "event_name": "push",
-		"workflow_ref": "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main", "run_id": "1000",
+		"workflow_ref": "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main", "run_id": "1000", "run_attempt": "1",
 	}
 	sign := func() string {
 		token, err := signer.Sign(claims)
@@ -72,6 +72,9 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 	if c.Parent != nil || c.Team != "a" || c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingPush || c.Binding.Push == nil || c.Binding.Push.RepositoryKey != "gh:42" || c.Binding.Push.Ref != "refs/heads/main" || c.Binding.Push.SHA != strings.Repeat("a", 40) || c.Binding.Push.WorkflowRunID != "1000" || c.RootMetered || c.ExpiresAt == nil {
 		t.Fatalf("Actions root lost verified scope: %+v", c)
 	}
+	exchange(token, 403)
+	claims["run_attempt"] = "2"
+	exchange(sign(), 201)
 	claims["repository_owner_id"] = "8"
 	exchange(sign(), 403)
 	parts := strings.Split(token, ".")
@@ -90,7 +93,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 		t.Fatalf("transaction accepted stale binding facts: %v", err)
 	}
 	var count int
-	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("issuance count=%d %v", count, err)
 	}
 }
@@ -104,7 +107,7 @@ func TestActionsExpiryFitsStoreClockProperty(t *testing.T) {
 		var databaseNow time.Time
 		clock.pin(func() time.Time { return databaseNow })
 
-		spec, err := server.actionsProvision(t.Context(), "a", githuboidc.Claims{RepositoryID: 42, RepositoryOwnerID: 7, Ref: "refs/heads/main", SHA: fmt.Sprintf("%040x", input), RunID: fmt.Sprint(input)})
+		spec, err := server.actionsProvision(t.Context(), "a", githuboidc.Claims{RepositoryID: 42, RepositoryOwnerID: 7, Ref: "refs/heads/main", SHA: fmt.Sprintf("%040x", input), RunID: fmt.Sprint(input), RunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"})
 		if err != nil {
 			t.Log(err)
 			return false

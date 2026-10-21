@@ -96,7 +96,6 @@ type Store struct {
 	intakePolicy     IntakePolicy
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
-	provisions       ProvisionPolicy
 	consolePolicy    consolePolicy
 	clock            func() time.Time
 	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
@@ -297,7 +296,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 		db.SetConnMaxIdleTime(5 * time.Minute)
 	}
 
-	s := &Store{db: db, dialect: dialect, provisions: nativeProvisionPolicy{}}
+	s := &Store{db: db, dialect: dialect}
 	for _, opt := range opts {
 		if opt.apply != nil {
 			opt.apply(s)
@@ -1423,7 +1422,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 14
+const expectedSchemaVersion = 15
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

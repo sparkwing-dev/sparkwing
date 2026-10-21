@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
@@ -508,7 +510,7 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	if err != nil {
 		return "", err
 	}
-	if len(commit.SHA) != 40 {
+	if !runspec.IsCommitID(commit.SHA) {
 		return "", errors.New("githubapp: ref did not resolve to a commit")
 	}
 	return commit.SHA, nil
@@ -548,7 +550,7 @@ func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owne
 	if err := c.getJSON(ctx, root+"/commits/"+url.PathEscape(meta.DefaultBranch), auth, &head); err != nil {
 		return RepositoryFileSnapshot{}, err
 	}
-	if len(head.SHA) != 40 {
+	if !runspec.IsCommitID(head.SHA) {
 		return RepositoryFileSnapshot{}, errors.New("githubapp: default branch did not resolve to a commit")
 	}
 	out := RepositoryFileSnapshot{RepositoryID: meta.ID, DefaultBranch: meta.DefaultBranch, HeadSHA: head.SHA}

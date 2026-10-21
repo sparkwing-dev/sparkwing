@@ -158,11 +158,11 @@ func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	ctx := t.Context()
 	teststore.SeedTeam(t, f.st, "other")
-	own, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
+	own, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "other", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "other"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
+	other, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "other", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "other"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}

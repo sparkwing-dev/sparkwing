@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+var errLauncherHostPending = errors.New("launcher execution host awaits activation")
 
 // AdmitCapacity derives all capacity inputs from the accepted unit and its live owner award.
 // Repeated calls retain holders, resolve waiters and acquire remaining groups in key order.
@@ -31,6 +34,16 @@ func (t *Tenant) AdmitCapacity(ctx context.Context, binding CapacityBinding, act
 		keys := make([]string, 0, len(groups))
 		for _, group := range groups {
 			key, err := capacityKeyTx(ctx, tx, actor.Authority, binding.RunID, group.Scope, group.Group)
+			if errors.Is(err, errLauncherHostPending) {
+				if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, nil, fence); err != nil {
+					return err
+				}
+				if err := checkCapacityUnitTx(ctx, tx, t.team, fence); err != nil {
+					return err
+				}
+				result = AcquireSlotResponse{Kind: AcquireQueued}
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -129,6 +142,13 @@ func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.Author
 		c := chain[0].principal.Capability
 		if c.Unit != "" && c.ExecutionHost != "" {
 			return runspec.ConcurrencyKey(scope, c.ExecutionHost, group), nil
+		}
+		if c.Unit != "" {
+			for _, node := range chain {
+				if capability.Launcher(node.principal.Capability) {
+					return "", errLauncherHostPending
+				}
+			}
 		}
 	}
 	return "", bindingRefusal()

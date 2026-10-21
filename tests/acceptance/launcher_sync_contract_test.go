@@ -13,12 +13,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func TestSurfaceLauncherSyncAwardAndJobInstance(t *testing.T) {
-	previous := controllerwire.LauncherJobRef{Namespace: "ci", Name: "job-1", UID: "previous-instance"}
-	current := controllerwire.LauncherJobRef{Namespace: "ci", Name: "job-1", UID: "current-instance"}
-	input := controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{{
-		Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "stable-unit", Holder: "launcher", Generation: 7}, Job: current, NodeUID: "node-instance",
-	}}}
+func TestSurfaceLauncherSyncAwardRetirement(t *testing.T) {
+	fence := capability.LeaseRef{Kind: capability.UnitNode, ID: "stable-unit", Holder: "launcher", Generation: 7}
+	input := controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{{Award: fence}}}
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
@@ -27,16 +24,16 @@ func TestSurfaceLauncherSyncAwardAndJobInstance(t *testing.T) {
 				}
 				var got controllerwire.LauncherSyncRequest
 				if err := json.NewDecoder(req.Body).Decode(&got); err != nil || !reflect.DeepEqual(got, input) {
-					t.Fatalf("award or Job instance changed: %+v %v", got, err)
+					t.Fatalf("award fence changed: %+v %v", got, err)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"awards":[],"remove_reservations":[],"remove":[{"namespace":"ci","name":"job-1","uid":"previous-instance"}]}`))}, nil
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"awards":[],"retired":[{"kind":"node","id":"stable-unit","holder":"launcher","generation":7}]}`))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			result, err := controller.SyncLauncher(t.Context(), input)
-			if err != nil || !reflect.DeepEqual(result.Remove, []controllerwire.LauncherJobRef{previous}) || result.Remove[0] == current {
-				t.Fatalf("cleanup lost its Job-instance precondition: %+v %v", result, err)
+			if err != nil || !reflect.DeepEqual(result.Retired, []capability.LeaseRef{fence}) {
+				t.Fatalf("retirement lost its award fence: %+v %v", result, err)
 			}
 		})
 	}

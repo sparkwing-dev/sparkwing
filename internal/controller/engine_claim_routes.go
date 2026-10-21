@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *Server) claimEndpoints() []Endpoint {
@@ -21,7 +20,7 @@ func (s *Server) claimEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/claims/exchange", Authentication: capability.AuthCapability, Decode: authorityTarget, ResolveTarget: ownUnitTarget, Handle: e.handleExchange},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: e.handleRenewal},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/reconcile", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-			ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+			ctx := s.placementContext(r.Context())
 			return e.handleReconcile(w, r.WithContext(ctx), a)
 		}},
 	}
@@ -87,7 +86,7 @@ func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter
 		if !ok {
 			return nil
 		}
-		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+		ctx := s.placementContext(r.Context())
 		response, err := engine.Claim(ctx, a, body)
 		if response.Claim != nil {
 			s.recordQueueActivity(time.Now())

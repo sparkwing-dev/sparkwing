@@ -281,6 +281,13 @@ CREATE TABLE sessions (
     CHECK(team IS NOT NULL OR (account_id <> '' AND capability_prefix = ''))
 );
 
+CREATE TABLE session_membership_epochs (
+    session_hash TEXT NOT NULL REFERENCES sessions(hash) ON DELETE CASCADE,
+    team TEXT NOT NULL REFERENCES teams(name) ON DELETE CASCADE,
+    epoch BIGINT NOT NULL CHECK(epoch >= 0),
+    PRIMARY KEY (session_hash, team)
+);
+
 CREATE TABLE run_control_requests (
     team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,
@@ -579,6 +586,13 @@ CREATE TABLE memberships (
     PRIMARY KEY (team, account_id)
 );
 
+CREATE TABLE membership_epochs (
+    team TEXT NOT NULL REFERENCES teams(name),
+    account_id TEXT NOT NULL,
+    epoch BIGINT NOT NULL CHECK(epoch > 0),
+    PRIMARY KEY (team, account_id)
+);
+
 CREATE TABLE invitations (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
@@ -591,6 +605,14 @@ CREATE TABLE invitations (
     accepted_by TEXT NOT NULL DEFAULT '',
     withdrawn_at BIGINT,
     emailed_at BIGINT
+);
+
+CREATE TABLE github_actions_exchanges (
+    team TEXT NOT NULL REFERENCES teams(name),
+    repository_key TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    run_attempt TEXT NOT NULL,
+    PRIMARY KEY (team, repository_key, run_id, run_attempt)
 );
 
 CREATE TABLE github_runner_bindings (
@@ -828,6 +850,8 @@ CREATE TABLE git_credentials (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
     host TEXT NOT NULL,
+    repository_key TEXT NOT NULL DEFAULT '',
+    host_wide BIGINT NOT NULL DEFAULT 0 CHECK(host_wide IN (0,1)),
     kind TEXT NOT NULL CHECK(kind IN ('ssh','https')),
     username TEXT NOT NULL DEFAULT '',
     secret TEXT NOT NULL,
@@ -836,7 +860,8 @@ CREATE TABLE git_credentials (
     confirmed_at BIGINT,
     created_by TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL
+    updated_at BIGINT NOT NULL,
+    CHECK ((host_wide=0 AND repository_key<>'') OR (host_wide=1 AND repository_key=''))
 );
 
 CREATE TABLE git_credential_releases (
@@ -1104,6 +1129,7 @@ CREATE TABLE eval_units (
 -- safety: parent ancestry may cross teams for launcher awards; bindings still name a tenant run.
 CREATE TABLE capabilities (
     digest TEXT NOT NULL PRIMARY KEY,
+    here_proof_public_key TEXT NOT NULL DEFAULT '',
     prefix TEXT NOT NULL UNIQUE,
     team TEXT REFERENCES teams(name),
     subject_kind TEXT NOT NULL CHECK(subject_kind IN ('account','machine','service','operator','local','anonymous')),
@@ -1510,7 +1536,8 @@ CREATE UNIQUE INDEX idx_standing_requests_open ON standing_requests(team) WHERE 
 
 CREATE INDEX idx_standing_requests_team ON standing_requests(team, requested_at);
 
-CREATE UNIQUE INDEX idx_git_credentials_team_host ON git_credentials(team, host);
+CREATE UNIQUE INDEX idx_git_credentials_team_repo ON git_credentials(team, repository_key) WHERE host_wide=0;
+CREATE UNIQUE INDEX idx_git_credentials_team_host ON git_credentials(team, host) WHERE host_wide=1;
 
 CREATE INDEX idx_git_credential_releases_team ON git_credential_releases(team, released_at);
 

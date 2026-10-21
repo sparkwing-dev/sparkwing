@@ -213,8 +213,10 @@ and returns empty grants and charges as arrays.
 
 `PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
 `reader`. `DELETE` on that path removes the membership. The store rechecks the
-authenticated authority and updates the membership generation in the same
-transaction. A missing member returns `not_found`. A last-owner change returns
+authenticated authority and commits the role change or removal in the same
+transaction. Removal ends the member's existing authority for that team,
+including delegated data credentials. Rejoining does not reactivate it; sign in
+again to use the new membership. A missing member returns `not_found`. A last-owner change returns
 `conflict`. Browser mutations require CSRF proof. Revocation stops descendants'
 new controller operations, including those parented to a session. Previously
 issued external credentials and signed URLs keep their documented lifetimes.
@@ -310,8 +312,20 @@ Shared runners require current team administration for enrollment, token
 rotation and revocation. Members enroll their own personal machines through
 `sparkwing runners add --personal --session-stdin` with an independent account
 session. The team setting `members_can_add_machines` defaults to true. When it
-is false, personal enrollment requires administration too. Existing machines
-keep their owner-only claim scope until explicitly revoked.
+is false, personal enrollment requires administration too. A personal runner
+records the membership epoch, grant and setting that authorized enrollment.
+Every use checks them again. Removing and re-adding the member cannot revive
+an old credential. Shared runners belong to the team and survive the
+registrar's demotion or removal. Revoke a departing registrar's shared runners if they still control the machines or bearer credentials.
+
+Member tokens default to and expire within 90 days. They retain their reported
+expiry when the minting session reaches its idle or absolute timeout. Logout,
+admin revocation, membership removal or demotion ends them immediately.
+Rejoining or promotion cannot revive them. `team.admin` requires
+`--allow-team-admin` (`allow_team_admin` in the API) and expires within 30 days.
+Omitted expiry uses the applicable ceiling. A requested expiry beyond that
+ceiling is refused, including during rotation.
+Invitation acceptance checks that the inviter still holds team administration.
 
 `GET /api/v1/team/settings` returns `members_can_add_machines` and
 `claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
@@ -393,9 +407,17 @@ deletion failure returns `503` and leaves the cookies in place.
 
 A session renewal extends expiry by seven days, but never past 30 days from
 creation. Ordinary policy reads and writes check that lifetime without
-renewing. The renewal endpoint refuses an over-age or future-created session
-and removes its row. An embedder changes the cap with
+renewing. The renewal endpoint refuses an over-age session and retains its row
+while member tokens depend on its revocation state.
+Future-created sessions are refused before renewal and remain unchanged.
+An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
+
+Token sign-in ends the browser's prior session unless that session is an ancestor
+of the submitted token. The minting session is retained because revoking it would
+also end the token and the new session. Explicit logout of the minting session
+ends its tokens and descendant sessions. Logging out a descendant ends only
+that descendant's authority.
 
 <!-- design:begin -->
 
@@ -407,7 +429,7 @@ not identify a human, runner or administrator. The issuer records the subject,
 team, exact grants, binding and lifetime.
 
 The lookup key is SHA-256 of the complete reference token. Metadata carries a
-public `prefix` for selection and audit. Creation and rotation return the raw
+16-character public `prefix` for selection and audit. Creation and rotation return the raw
 bearer once. Metadata lists contain no bearer.
 
 Credentials travel in memory, a private file read by the process, or the private
@@ -608,6 +630,9 @@ payment operation. It grants no general team or operator power.
 
 GitHub Actions enrollment uses `GET` and `POST /api/v1/runners/github` and
 `DELETE /api/v1/runners/github/{repository}`. The dashboard uses these paths.
+Each repository, workflow run and run attempt can exchange its GitHub identity
+once. Run the Sparkwing runner in one job per attempt. Actions credentials cannot
+be rotated. A new workflow attempt receives its own credential.
 Runner metering uses the console-only
 `POST /api/v1/operator/runners/{runner}/metered`, selecting an enrolled root's
 capability prefix.
@@ -626,7 +651,7 @@ runner enrollment or operator-console authority.
 
 A live seed can be reused while setup is unfinished. Issuing the first real
 deployment administrator closes the gate, revokes the seed and its descendants,
-and advances revocation generation in one transaction. Remove the mounted seed
+in one transaction. Remove the mounted seed
 after that handoff. A seed left mounted after its handoff only logs a warning
 at startup, because its digest matches the one that bootstrapped the store; a
 different seed still stops startup. An empty input provisions nothing. Private

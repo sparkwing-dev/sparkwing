@@ -26,39 +26,36 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		ExpiresAt: spec.ExpiresAt, ReservedPools: slices.Clone(spec.ReservedPools), Trust: spec.Trust,
 		Repositories: slices.Clone(spec.Repositories), Data: spec.Data, RootMetered: spec.Metered,
 	}
-	if tx.rotatingRoot != nil && !sameRotationScope(*tx.rotatingRoot, c) {
-		return capability.Capability{}, bindingRefusal()
-	}
+
 	if spec.Kind == capability.ProvisionBootstrap && tx.rotatingRoot == nil {
 		if err := checkBootstrapGateTx(ctx, tx); err != nil {
 			return capability.Capability{}, err
 		}
 	}
-	if err := checkProvisionOriginTx(ctx, tx, spec, false); err != nil {
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		var leaves []capability.AuthorityRef
+		if spec.Authority != nil {
+			leaves = append(leaves, *spec.Authority)
+		}
+		set := discoverAuthorityLocks(ctx, tx, leaves)
+		if spec.Team != "" {
+			set.add(lockTeam, spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionActions, spec.Team)
+		}
+		if spec.Kind == capability.ProvisionService {
+			set = discoverSetupAuthorityLocks(ctx, tx, set)
+		}
+		return set
+	}); err != nil {
 		return capability.Capability{}, err
 	}
-	if spec.Kind == capability.ProvisionActions {
-		if err := (&Tenant{s: tx.store, team: Team(spec.Team)}).lockTeamTx(ctx, tx); err != nil {
-			return capability.Capability{}, err
-		}
+	if err := checkProvisionOriginTx(ctx, tx, spec); err != nil {
+		return capability.Capability{}, err
 	}
 	if spec.Kind != capability.ProvisionMember && spec.Kind != capability.ProvisionTeamAdmin && !(tx.rotatingRoot != nil && spec.Kind == capability.ProvisionBootstrap) {
-		enrollment := spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService
-		if tx.store.provisions == nil && !enrollment && !(spec.Kind == capability.ProvisionBootstrap && spec.Seed != "") {
-			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
-		}
-		if tx.store.provisions != nil {
-			if err := tx.store.provisions.AuthorizeProvision(ctx, tx, spec); err != nil {
-				return capability.Capability{}, err
-			}
-		}
-		if enrollment {
+		if spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService {
 			if err := authorizeEnrollmentTx(ctx, tx, spec); err != nil {
 				return capability.Capability{}, err
 			}
-		}
-		if err := checkProvisionOriginTx(ctx, tx, spec, true); err != nil {
-			return capability.Capability{}, err
 		}
 	}
 	if spec.Kind == capability.ProvisionActions {
@@ -66,10 +63,20 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 			return capability.Capability{}, err
 		}
 	}
+	if spec.Kind == capability.ProvisionMember || spec.Kind == capability.ProvisionTeamAdmin && tx.rotatingRoot != nil {
+		var err error
+		c, err = memberIssuancePolicy(ctx, tx, spec, c)
+		if err != nil {
+			return capability.Capability{}, err
+		}
+	}
+	if tx.rotatingRoot != nil && !sameRotationScope(*tx.rotatingRoot, c) {
+		return capability.Capability{}, bindingRefusal()
+	}
 	return c, nil
 }
 
-func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec, lockRegistry bool) error {
+func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.now()) {
 		return authorityError(apierr.Forbidden, "root expiry has passed")
 	}
@@ -119,6 +126,9 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 		return nil
 	case capability.ProvisionBootstrap:
+		if tx.rotatingRoot == nil && (spec.Seed == "" || spec.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}) || spec.ExpiresAt != nil || spec.Metered || !slices.Equal(spec.Grants, []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore})) {
+			return bindingRefusal()
+		}
 		if tx.rotatingRoot != nil {
 			if !deployment {
 				return bindingRefusal()
@@ -153,10 +163,8 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 			return bindingRefusal()
 		}
 	case capability.ProvisionActions:
-		push := spec.Binding.Push
-		if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingPush || push == nil || push.RepositoryKey == "" || push.Ref == "" || push.SHA == "" || push.WorkflowRunID == "" || spec.ExpiresAt == nil || !slices.Equal(spec.Repositories, []string{push.RepositoryKey}) {
-			return bindingRefusal()
-		}
+		// Verified repository and workflow facts are checked by checkActionsEnrollmentTx.
+
 	default:
 		return authorityError(apierr.BadRequest, "unknown root origin")
 	}
@@ -173,11 +181,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if spec.Team != "" {
 		var team string
 		var membersCanAddMachines bool
-		lock := ""
-		if lockRegistry {
-			lock = tx.forShare()
-		}
-		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+lock, spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
+		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`, spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrUnknownTeam
 		}
@@ -199,7 +203,7 @@ func checkMemberProvision(ctx context.Context, tx *storeTx, spec capability.Prov
 	allowed := c.Grants
 	if tx.rotatingRoot != nil {
 		var role Role
-		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), spec.Team, spec.Subject.ID).Scan(&role); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, spec.Team, spec.Subject.ID).Scan(&role); err != nil {
 			return err
 		}
 		if !role.Valid() {

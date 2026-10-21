@@ -171,7 +171,7 @@ func runAnywhereAdmin(t *testing.T, f cloudDispatch) string {
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := f.state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ranking-admin"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := f.state.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ranking-admin"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

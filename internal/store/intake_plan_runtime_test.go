@@ -179,7 +179,7 @@ func TestAdmissionRefusalsCommitNothing(t *testing.T) {
 			case "push_mismatch":
 				root := authorityRoot("push", "a")
 				root.Grants = []capability.Grant{capability.RunsWrite}
-				root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "different", WorkflowRunID: "workflow"}}
+				root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "different", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 				authorityPersist(t, tenant.s, root)
 				request.Authority.ID = "push"
 			}

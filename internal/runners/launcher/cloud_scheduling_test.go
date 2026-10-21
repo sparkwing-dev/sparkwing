@@ -22,6 +22,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		case 0:
 			award.Binding.Kind = CloudPlan
 			award.Binding.NodeID = ""
+			award.Binding.Attempt = 0
 		case 1:
 			award.Binding.Kind = CloudEval
 			award.Binding.SourceNodeID = award.Binding.NodeID

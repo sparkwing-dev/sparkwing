@@ -90,7 +90,7 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return err
 	}
-	ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+	ctx := s.placementContext(r.Context())
 	var snapshot store.RunSnapshot
 	if a.Access.Credential == capability.CredentialLocalPeer {
 		publication, err := tenant.ReadLocalPublication(ctx, a.Target.RunID)
@@ -115,7 +115,7 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 		return err
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
-		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+		ctx := s.placementContext(r.Context())
 		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
 		if err != nil {
 			return engineLookupError(err)

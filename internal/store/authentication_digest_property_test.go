@@ -20,7 +20,7 @@ func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
 		member := authorityMember(t, s, "member", RoleOwner)
 		expires := now.Add(time.Duration(1+random.IntN(3600)) * time.Second)
 		issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-			Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a",
+			Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &member.Authority, Team: "a",
 			Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"},
 			Binding: capability.Binding{Kind: capability.BindingNone},
 			Grants:  []capability.Grant{capability.RunsRead}, ExpiresAt: &expires,
@@ -53,7 +53,7 @@ func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
 		}
 		lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Digest: issued.Capability.Digest, Audience: capability.Controller}
 		snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
-		if err != nil || len(snapshot.Authorities) != 1 || snapshot.Authorities[0].Principal.Capability.Prefix != issued.Capability.Prefix {
+		if err != nil || len(snapshot.Authorities) != 2 || snapshot.Authorities[0].Principal.Capability.Prefix != issued.Capability.Prefix {
 			t.Fatalf("complete digest: %+v, %v", snapshot, err)
 		}
 		err = s.db.QueryRow(query, issued.Capability.Prefix).Scan(&after.Body, &after.Expires, &after.Used)

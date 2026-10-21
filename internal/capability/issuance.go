@@ -168,8 +168,7 @@ type ExchangeSpec struct {
 	BootstrapPrefix string
 }
 
-// ProvisionKind names non-capability authority which can originate a root through Store.Issue.
-// Root provisioning is the trusted root-only Delegate case, not a fourth issuance kind.
+// ProvisionKind names origins that Store.Issue rechecks before issuing authority.
 type ProvisionKind string
 
 const (
@@ -181,8 +180,9 @@ const (
 	ProvisionActions   ProvisionKind = "github_actions_binding"
 )
 
-// ProvisionSpec is trusted root-issuance input whose origin Store.Issue rechecks in its transaction.
+// ProvisionSpec is trusted issuance input whose origin Store.Issue rechecks in its transaction.
 type ProvisionSpec struct {
+	AllowTeamAdmin bool
 	Personal       bool
 	Seed           string `json:"-"`
 	Kind           ProvisionKind
@@ -202,7 +202,7 @@ type ProvisionSpec struct {
 }
 
 // IssueRequest requires exactly one variant matching Kind, inside the caller's transaction.
-// Provision is the root-only Delegate case and cannot be combined with DelegateSpec.
+// Provision cannot be combined with DelegateSpec.
 type IssueRequest struct {
 	Kind      IssuanceKind
 	Provision *ProvisionSpec
@@ -214,8 +214,7 @@ type IssueRequest struct {
 // ValidateDelegation rejects any widening before persistence or in-memory nodehost admission.
 func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) error {
 	p := parent.Capability
-	if p.RevokedAt != nil && !now.Before(*p.RevokedAt) || p.ExpiresAt != nil && !now.Before(*p.ExpiresAt) ||
-		p.Binding.Deadline != nil && !now.Before(*p.Binding.Deadline) {
+	if !CredentialAlive(p, now) {
 		return unauthenticated()
 	}
 	if child.Parent.ID == "" || child.Parent != parent.Authority {

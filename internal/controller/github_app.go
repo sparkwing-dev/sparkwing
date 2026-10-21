@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
@@ -372,13 +374,17 @@ func (s *Server) bindGitHubAppInstallation(ctx context.Context, writer GitHubCon
 	bound, err := writer.BindAuthorizedGitHubInstallation(ctx, p, store.GitHubAppInstallation{
 		InstallationID: inst.ID, AccountID: inst.Account.ID, AccountLogin: inst.Account.Login,
 		AccountType: inst.Account.Type, Suspended: inst.SuspendedAt != nil,
-		ConnectedBy: p.Principal.Capability.Subject.ID, GitHubUserID: githubUser,
+		ConnectedBy: p.Principal.Capability.Subject.ID, GitHubUserID: githubUser, Reclaim: true,
 	})
 	if errors.Is(err, store.ErrInstallationBoundElsewhere) {
 		return store.GitHubAppInstallation{}, refuse(http.StatusConflict, "", errGitHubInstallationUnavailable.Error())
 	}
 	if err != nil {
 		return store.GitHubAppInstallation{}, identityRefusal("github app bind", err)
+	}
+	if bound.Reclaimed != nil {
+		text := fmt.Sprintf("GitHub App installation %d (%s) was moved from Sparkwing team %s to team %s by a verified current GitHub administrator. Its subscriptions, automation consent and schedules were withdrawn from your team. A team owner who administers the GitHub account can reconnect it.", inst.ID, inst.Account.Login, bound.Reclaimed.Team, bound.Team)
+		s.mailRecipients(ctx, bound.Reclaimed.OwnerEmails, "GitHub App installation moved to another team", text, strings.TrimRight(s.dashboardURL, "/")+"/team/github")
 	}
 	s.logger.Info("github app installation connected", "team", string(p.Target.Team), "installation_id", inst.ID,
 		"account", inst.Account.Login, "account_type", inst.Account.Type, "by", p.Principal.Capability.Subject.ID, "github_user", githubUser)
@@ -780,7 +786,7 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant,
 	if !app.Set || !provenance.Verified() {
 		return githubCheckUpdate{}, false, nil
 	}
-	if app.Value.InstallationID <= 0 || provenance.RepositoryID() != app.Value.RepositoryID || !githubCommit(provenance.SHA()) {
+	if app.Value.InstallationID <= 0 || provenance.RepositoryID() != app.Value.RepositoryID || !runspec.IsCommitID(provenance.SHA()) {
 		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
 	}
 	status := string(effect.State)

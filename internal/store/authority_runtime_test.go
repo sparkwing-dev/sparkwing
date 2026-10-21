@@ -71,10 +71,9 @@ func TestAuthorityResolutionRechecksCrossTeamAncestor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Capability.Team != "a" || got.Capability.Parent == nil || *got.Capability.Parent != *child.Parent {
-		t.Fatalf("ancestry = %#v", got)
+	if got.Capability.Parent == nil || got.Capability.Parent.ID != root.Prefix {
+		t.Fatalf("ancestry = %#v", got.Capability.Parent)
 	}
-
 	actor := Actor{Authority: *child.Parent, CapabilityPrefix: root.Prefix}
 	if err := s.AsOperator().RevokeAuthority(t.Context(), actor, *child.Parent); err != nil {
 		t.Fatal(err)
@@ -82,20 +81,18 @@ func TestAuthorityResolutionRechecksCrossTeamAncestor(t *testing.T) {
 	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
 		t.Fatal("revoked ancestor stayed live")
 	}
-	var generation int64
-	if err := s.db.QueryRow("SELECT revocation_generation FROM capabilities WHERE prefix = 'launcher'").Scan(&generation); err != nil {
-		t.Fatal(err)
-	}
-	if generation != 1 {
-		t.Fatalf("generation = %d", generation)
-	}
 }
 
-func authorityMember(t *testing.T, s *Store, id string, role Role) Actor {
+func authorityMember(t *testing.T, s *Store, id string, role Role, teams ...Team) Actor {
 	t.Helper()
+	team := Team("a")
+	if len(teams) != 0 {
+		team = teams[0]
+	}
 	rewriteSchemaExec(t, s.db, "INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, ?, 1, 1)", id, id+"@example.test")
-	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)", id, role)
-	rewriteSchemaExec(t, s.db, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
+	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,?,1)", team, id, role)
+	rewriteSchemaExec(t, s.db, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,?,?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), team, id)
+	rewriteSchemaExec(t, s.db, "INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,0)", id, team)
 	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 
@@ -105,22 +102,24 @@ func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
 	member := authorityMember(t, s, "member", RoleEditor)
 	child := authorityRoot("child", "a")
 	child.Parent = &member.Authority
+	child.Grants = []capability.Grant{capability.RunsWrite}
 	authorityPersist(t, s, child)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}
-	_, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
+	before, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(before.Capability.Grants, capability.RunsWrite) {
+		t.Fatal("editor descendant lacked run write authority before demotion")
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	role := RoleReader
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.AsOperator().ResolveAuthority(t.Context(), ref)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
+		t.Fatal("demoted member retained descendant authority")
 	}
-
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "owner", Role: &role}); !errors.Is(err, ErrLastOwner) {
 		t.Fatalf("last owner demotion: %v", err)
 	}

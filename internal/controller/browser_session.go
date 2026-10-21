@@ -80,11 +80,17 @@ func clearSessionCookies(w http.ResponseWriter, secure bool) {
 }
 
 func sessionCookie(r *http.Request, secure bool) string {
-	c, err := r.Cookie(cookieName(sessionCookieName, secure))
-	if err != nil {
-		return ""
+	var value string
+	for _, c := range r.Cookies() {
+		if c.Name != cookieName(sessionCookieName, secure) {
+			continue
+		}
+		if value != "" || c.Value == "" {
+			return ""
+		}
+		value = c.Value
 	}
-	return c.Value
+	return value
 }
 
 func newCSRFToken() (string, error) {

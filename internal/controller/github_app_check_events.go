@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -78,7 +80,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		githubAppIgnored(w, "the "+event+" belongs to another App")
 		return
 	}
-	if !githubCommit(sha) {
+	if !runspec.IsCommitID(sha) {
 		githubAppIgnored(w, "the "+event+" names no head commit")
 		return
 	}

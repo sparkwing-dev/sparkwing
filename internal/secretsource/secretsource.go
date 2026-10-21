@@ -20,6 +20,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
@@ -83,13 +84,13 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	if base == "" {
 		return "", false, fmt.Errorf("secrets backend: url is empty")
 	}
-	shown := redactURL(base)
 	endpoint := base + "/api/v1/secrets/" + url.PathEscape(name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		// safety: a parse error quotes the raw URL, credentials included.
-		return "", false, fmt.Errorf("secrets backend %s: invalid url", shown)
+		return "", false, fmt.Errorf("secrets backend: invalid url")
 	}
+	shown := envredact.RedactValue(base)
 	if tok := r.spec.ResolvedToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
@@ -97,6 +98,10 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := r.client.Do(req)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return "", false, fmt.Errorf("secrets backend %s: %w", shown, err)
 	}
 	defer resp.Body.Close()
@@ -122,16 +127,6 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 		return "", false, fmt.Errorf("secrets backend %s: decode response: %w", shown, err)
 	}
 	return body.Value, body.Masked, nil
-}
-
-// safety: errors name the backend URL, so its userinfo is dropped first.
-func redactURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "(invalid url)"
-	}
-	u.User = nil
-	return u.String()
 }
 
 type fileResolver struct {

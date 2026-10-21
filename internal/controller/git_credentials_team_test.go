@@ -76,7 +76,7 @@ func (f *credFixture) releases(who signedIn) []releaseRow {
 func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 	f := newCredFixture(t)
 	f.connect(f.olga, 501, 7, acmeAdmin)
-	if _, code := f.put(f.olga, map[string]any{"host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
+	if _, code := f.put(f.olga, map[string]any{"host_wide": true, "host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
 		t.Fatalf("put = %d", code)
 	}
 	covered, _ := f.nodeClaim(f.olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
@@ -97,7 +97,7 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 func TestTeamGitCredentialsNeverReachAPersonalMachine(t *testing.T) {
 	f := newCredFixture(t)
 	f.connect(f.olga, 501, 7, acmeAdmin)
-	if _, code := f.put(f.olga, map[string]any{"host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
+	if _, code := f.put(f.olga, map[string]any{"host_wide": true, "host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
 		t.Fatalf("put = %d", code)
 	}
 	for _, tc := range []struct {

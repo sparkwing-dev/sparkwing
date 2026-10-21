@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -24,8 +25,13 @@ func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capabilit
 	return match.Profile{Location: env.location, Capacity: capacity, OS: "linux", Arch: "amd64"}, capacity, nil
 }
 
-func configureGitHubClaims(s *controller.Server, st *store.Store) *controller.Server {
-	return s.WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: githubClaimEnvironment{}}))
+func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) *controller.Server {
+	t.Helper()
+	versions, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: githubClaimEnvironment{}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}}))
 }
 
 func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {
@@ -60,6 +66,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {
 		t.Fatal(err)
 	}
+	controller.EngineAcceptedFixturePlan(t, st, store.Team(team), run, "compile")
 	kind := capability.UnitTrigger
 	if dispatch == runspec.DispatchController {
 		kind = capability.UnitPlan

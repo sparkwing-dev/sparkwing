@@ -29,8 +29,18 @@ type GitHubAppInstallation struct {
 	// GitHubUserID the GitHub user that account proved it was.
 	ConnectedBy  string
 	GitHubUserID int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Reclaim is provider-verified current administration supplied by the connection flow.
+	Reclaim bool
+	// Reclaimed carries the committed transfer notice; it is never exposed to clients.
+	Reclaimed *GitHubInstallationReclaim `json:"-"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// GitHubInstallationReclaim names the former team and its verified notice recipients.
+type GitHubInstallationReclaim struct {
+	Team        Team
+	OwnerEmails []string
 }
 
 // GitHubAppTrigger subscribes one pipeline to one repository's events
@@ -171,47 +181,60 @@ func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation i
 // GitHub's uninstall notice and the operator's move both name only the
 // installation.
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error) {
-	in, err := o.GitHubAppInstallationTeam(ctx, installation)
-	if err != nil {
-		return "", err
-	}
-	t, err := o.s.forTeam(ctx, in.Team)
-	if err != nil {
-		return "", err
-	}
-	return in.Team, o.s.inTx(ctx, func(tx *storeTx) error {
+	var team Team
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
+		}); err != nil {
+			return err
+		}
+		owner, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		team = Team(owner)
+		t := &Tenant{s: o.s, team: team}
 		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
 	})
+	return team, err
 }
 
 // SetGitHubAppInstallationSuspended records GitHub's suspension of
 // installation. An unbound installation is ErrNotFound.
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error {
-	in, err := o.GitHubAppInstallationTeam(ctx, installation)
-	if err != nil {
-		return err
-	}
 	flag := 0
 	if suspended {
 		flag = 1
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-		WHERE team = ? AND installation_id = ?`, flag, now.UTC().UnixNano(), string(in.Team), installation); err != nil {
-		return err
-	}
-	if suspended {
-		if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-			now.UnixNano(), string(in.Team), installation); err != nil {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
+		}); err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
+			WHERE team = ? AND installation_id = ?`, flag, now.UTC().UnixNano(), team, installation); err != nil {
+			return err
+		}
+		if suspended {
+			if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
+				now.UnixNano(), team, installation); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, tag_patterns, on_pull_request,
@@ -596,9 +619,6 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 
 func (o *Operator) githubInstallationTeamTx(ctx context.Context, tx *storeTx, installation int64) (Team, error) {
 	var team Team
-	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`+tx.forUpdate(), installation).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
+	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
 	return team, err
 }

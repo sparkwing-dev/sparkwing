@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestMembershipRevokesOnlyTheAffectedMintersCredentialsProperty(t *testing.T) {
+func TestMembershipRevalidatesOnlyTheAffectedPersonalCredentialsProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(817, 719))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
@@ -33,7 +33,23 @@ func TestMembershipRevokesOnlyTheAffectedMintersCredentialsProperty(t *testing.T
 					deadline := time.Now().Add(time.Hour)
 					c.RevokedAt = &deadline
 				}
-				authorityPersist(t, s, c)
+				if entry.prefix == "mine" {
+					rewriteSchemaExec(t, s.db, `UPDATE teams SET members_can_add_machines=1 WHERE name='a'`)
+					tx, err := s.beginTx(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					origin := &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:mine", Personal: true, Requirement: &authorityRequirement{Account: "member", Grant: capability.RunsWrite, MembersCanAddMachines: true}}
+					if err := tx.operator.persistCapabilityTx(t.Context(), tx, c, origin); err != nil {
+						_ = tx.Rollback()
+						t.Fatal(err)
+					}
+					if err := tx.Commit(); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					authorityPersist(t, s, c)
+				}
 				rewriteSchemaExec(t, s.db, "UPDATE capabilities SET created_by=? WHERE prefix=?", entry.creator, entry.prefix)
 			}
 			child := authorityRoot("child", "a")
@@ -62,13 +78,7 @@ func TestMembershipRevokesOnlyTheAffectedMintersCredentialsProperty(t *testing.T
 					t.Fatalf("prefix=%s ended=%v error=%v", prefix, ended, err)
 				}
 			}
-			var generation int
-			if err := s.db.QueryRow("SELECT revocation_generation FROM capabilities WHERE prefix='mine'").Scan(&generation); err != nil {
-				t.Fatal(err)
-			}
-			if generation != map[bool]int{false: 0, true: 1}[role == nil || keep == RoleReader] {
-				t.Fatalf("root generation=%d", generation)
-			}
+
 		})
 	}
 }
@@ -80,11 +90,11 @@ func TestMembershipCredentialFailureRollsBackEveryEffect(t *testing.T) {
 	c := authorityRoot("machine", "a")
 	authorityPersist(t, s, c)
 	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET created_by='member' WHERE prefix='machine'")
-	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_revocation BEFORE UPDATE ON capabilities BEGIN SELECT RAISE(ABORT,'refuse revocation'); END`)
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_epoch BEFORE INSERT ON membership_epochs BEGIN SELECT RAISE(ABORT,'refuse epoch change'); END`)
 	before := append(purgeRows(t, s, "a", true), purgeRows(t, s, "a", false)...)
 	err := (&Tenant{s: s, team: "a"}).UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member"})
 	if err == nil {
-		t.Fatal("revocation failure committed membership removal")
+		t.Fatal("epoch failure committed membership removal")
 	}
 	after := append(purgeRows(t, s, "a", true), purgeRows(t, s, "a", false)...)
 	if !slices.Equal(before, after) {
@@ -92,29 +102,43 @@ func TestMembershipCredentialFailureRollsBackEveryEffect(t *testing.T) {
 	}
 }
 
-func TestMembershipDowngradeWithdrawsHigherInvitations(t *testing.T) {
+func TestMembershipDowngradeRechecksInviterAuthority(t *testing.T) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	_ = authorityMember(t, s, "member", RoleOwner)
 	tenant := &Tenant{s: s, team: "a"}
+	invitations := map[string]string{}
 	for _, role := range []Role{RoleReader, RoleEditor} {
-		if _, err := tenant.InviteForTest(t, t.Context(), "member", string(role)+"@example.com", role, time.Now()); err != nil {
+		invitation, err := tenant.InviteForTest(t, t.Context(), "member", string(role)+"@example.com", role, time.Now())
+		if err != nil {
 			t.Fatal(err)
 		}
+		invitations[string(role)] = invitation.ID
+		invitee := authorityMember(t, s, string(role), RoleReader)
+		rewriteSchemaExec(t, s.db, `UPDATE accounts SET email=?,email_verified=1 WHERE id=?`, string(role)+"@example.com", role)
+		rewriteSchemaExec(t, s.db, `UPDATE memberships SET team='b' WHERE account_id=?`, role)
+		rewriteSchemaExec(t, s.db, `UPDATE sessions SET team='b' WHERE hash=?`, invitee.Authority.ID)
+		rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'b',0)`, invitee.Authority.ID)
 	}
 	owner.Authority = tenant.mutationFixtureAuthority(t, "owner", capability.TeamAdmin, time.Now()).Principal.Authority
 	role := RoleReader
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
 		t.Fatal(err)
 	}
-	for _, role := range []Role{RoleReader, RoleEditor} {
-		var withdrawn bool
-		if err := s.db.QueryRow("SELECT withdrawn_at IS NOT NULL FROM invitations WHERE team='a' AND role=?", role).Scan(&withdrawn); err != nil {
+	before := append(purgeRows(t, s, "a", true), purgeRows(t, s, "a", false)...)
+	for account, invitation := range invitations {
+		principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: account})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if withdrawn != (role == RoleEditor) {
-			t.Fatalf("role=%s withdrawn=%v", role, withdrawn)
+		authorized := capability.Authorized{Principal: principal, Target: capability.Target{AccountID: account}, Access: capability.AccessRule{Credential: capability.CredentialAccount, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), authorized, invitation); !errors.Is(err, ErrInvitationClosed) {
+			t.Fatalf("%s invitation accepted after inviter demotion: %v", account, err)
 		}
+	}
+	after := append(purgeRows(t, s, "a", true), purgeRows(t, s, "a", false)...)
+	if !slices.Equal(before, after) {
+		t.Fatal("refused invitation changed memberships or invitation state")
 	}
 }
 
@@ -129,12 +153,14 @@ func TestMembershipRemovalKeepsAccountSessionsScopedAndParentsBoundProperty(t *t
 			var grants []capability.Grant
 			if random.IntN(2) == 0 {
 				rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','reader',1)")
+				rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('member','b',0)`)
 				team, grants = "b", []capability.Grant{capability.RunsRead, capability.LogsRead}
 			}
 			parent := authorityRoot("parent", "a")
 			parent.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "member"}
 			authorityPersist(t, s, parent)
 			rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id,capability_prefix) VALUES ('backed','member','runs.read',1,?,'a','member','parent')`, time.Now().Add(time.Hour).UnixNano())
+			rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('backed','a',0)`)
 			if err := (&Tenant{s: s, team: "a"}).UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member"}); err != nil {
 				t.Fatal(err)
 			}

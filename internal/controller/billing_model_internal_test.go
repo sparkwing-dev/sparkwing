@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -49,6 +50,7 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	for _, id := range []string{"one", "two", "three"} {
 		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), rawExecution)
 	}
+	engineAcceptedFixturePlan(t, e, "a", "run", "one", "two", "three")
 	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -80,12 +82,14 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint) VALUES ('b',1,1,'customer-b','method-b','fp-b')`)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','funded-b','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
-			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','later',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at+1,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
-			engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT 'b','later',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 			for _, id := range []string{"one", "two", "three"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
 			}
-			engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','later','job','pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='one'`)
+			engineAcceptedFixturePlan(t, e, "a", "run", "one", "two", "three")
+			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash) SELECT 'b','later',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at+1,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash FROM runs WHERE id='run'`)
+			engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT 'b','later',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
+			engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) SELECT 'b','later','job','pending',1,queue_started_at,?,execution_json FROM nodes WHERE team='a' AND node_id='one'`, []byte(`{"id":"job"}`))
+			engineAcceptedFixturePlan(t, e, "b", "later", "job")
 			rates := store.CreditRateTable{{Cores: 4, MicroPerSecond: 1}, {Cores: 16, MicroPerSecond: 4}}
 			if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 				t.Fatal(err)
@@ -106,8 +110,15 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
-			if response.Claim == nil || response.Claim.RunID != "later" {
+			if response.Claim == nil || response.Claim.RunID != "later" || response.Claim.JobID != "job" {
 				t.Fatalf("standing-limited team blocked eligible work: %s", w.Body)
+			}
+			claim := response.Claim
+			var plan nodeproto.PlanDoc
+			if claim.Request.RunID != "later" || claim.Request.Request.Team != "b" || claim.Accepted == nil ||
+				claim.Accepted.Spec.Request.RunID != "later" || claim.Accepted.Spec.Request.Request.Team != "b" ||
+				json.Unmarshal(claim.Accepted.Plan, &plan) != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "job" {
+				t.Fatalf("award carries another run's execution inputs: %s", w.Body)
 			}
 		})
 	}
@@ -120,6 +131,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	for _, id := range []string{"one", "two"} {
 		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":16}}}}`))
 	}
+	engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
 	rates := store.CreditRateTable{{Cores: 16, MicroPerSecond: 1}}
 	if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatal(err)

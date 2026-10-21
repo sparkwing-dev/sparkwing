@@ -8,6 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
+// CredentialPrefixLength is the persisted bearer lookup prefix length.
+const CredentialPrefixLength = 16
+
 // SubjectKind keeps accountability independent of token spelling and placement.
 type SubjectKind string
 
@@ -57,10 +60,12 @@ type LeaseRef struct {
 
 // PushScope confines an Actions exchange without manufacturing App branch trust.
 type PushScope struct {
-	RepositoryKey string `json:"repo_key"`
-	Ref           string `json:"ref"`
-	SHA           string `json:"sha"`
-	WorkflowRunID string `json:"workflow_run_id"`
+	RepositoryKey      string `json:"repo_key"`
+	Ref                string `json:"ref"`
+	SHA                string `json:"sha"`
+	WorkflowRunID      string `json:"workflow_run_id"`
+	WorkflowRunAttempt string `json:"workflow_run_attempt"`
+	WorkflowRef        string `json:"workflow_ref"`
 }
 
 // Binding is server-derived; incoming fence headers cannot replace any field.

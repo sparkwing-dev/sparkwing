@@ -21,12 +21,13 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 	}
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "job", UID: "old-job-uid"}, NodeUID: "node-uid"}
+	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +48,7 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 	}
 	for exchange := range 2 {
 		response := request(observation)
-		if len(response.Awards) != 1 || len(response.Remove) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != observation.Award.ID || response.Awards[0].Binding.Generation != claim.Award.Generation || response.Awards[0].Delivery != capability.DeliveryBootstrap || response.Awards[0].Execution == nil {
+		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != observation.Award.ID || response.Awards[0].Binding.Generation != claim.Award.Generation || response.Awards[0].Delivery != capability.DeliveryBootstrap || response.Awards[0].Execution == nil {
 			t.Fatalf("current award not retained: %+v", response)
 		}
 		if exchange == 0 {
@@ -69,14 +70,14 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 			forged.Award.Kind = capability.UnitPlan
 		}
 		response := request(forged)
-		return len(response.Awards) == 0 && len(response.Remove) == 1 && response.Remove[0] == forged.Job
+		return len(response.Awards) == 0 && len(response.Retired) == 1 && response.Retired[0] == forged.Award
 	}
 	if err := quick.Check(check, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=1 WHERE id='run'`)
 	response := request(observation)
-	if len(response.Awards) != 0 || len(response.Remove) != 1 || response.Remove[0] != observation.Job {
+	if len(response.Awards) != 0 || len(response.Retired) != 1 || response.Retired[0] != observation.Award {
 		t.Fatalf("cancelled award retained: %+v", response)
 	}
 	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
@@ -89,18 +90,11 @@ func TestEngineLauncherSyncRejectsAmbiguousJobObservations(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"}}}
-	first := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "run", Holder: "launcher", Generation: 1}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "job", UID: "uid"}, NodeUID: "node"}
-	for _, sameJob := range []bool{true, false} {
-		second := first
-		if sameJob {
-			second.Award.Generation++
-		} else {
-			second.Job.Name += "-second"
-			second.Job.UID += "-second"
-		}
-		if response, err := e.SyncLauncher(t.Context(), a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{first, second}}); err == nil || len(response.Remove) != 0 || len(response.Awards) != 0 {
-			t.Fatalf("ambiguous observations returned decisions: %+v, %v", response, err)
-		}
+	first := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "run", Holder: "launcher", Generation: 1}}
+	second := first
+	second.Rejected = true
+	if response, err := e.SyncLauncher(t.Context(), a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{first, second}}); err == nil || len(response.Retired) != 0 || len(response.Awards) != 0 {
+		t.Fatalf("duplicate award returned decisions: %+v %v", response, err)
 	}
 }
 
@@ -111,6 +105,7 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 	}
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +114,7 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "job", UID: "uid"}, NodeUID: "node", Rejected: true}
+	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, Rejected: true}
 	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observation}})
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +126,7 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
-		if len(response.Awards) != 0 || len(response.Remove) != 1 || response.Remove[0] != observation.Job {
+		if len(response.Awards) != 0 || len(response.Retired) != 1 || response.Retired[0] != observation.Award {
 			t.Fatalf("rejection not acknowledged: %+v", response)
 		}
 	}
@@ -165,6 +160,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 			var badPrefix string
 			for _, id := range []string{"run", "sibling"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'job','pending',1,?,?)`, id, []byte(`{"id":"job"}`), []byte(`{}`))
+				engineAcceptedFixturePlan(t, e, "a", id)
 				claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: id, NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 				if err != nil {
 					t.Fatal(err)
@@ -174,7 +170,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 					t.Fatal(err)
 				}
 				fence := capability.LeaseRef{Kind: capability.UnitNode, ID: principal.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-				observed = append(observed, controllerwire.LauncherObservation{Award: fence, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: id, UID: id + "-uid"}, NodeUID: id + "-node"})
+				observed = append(observed, controllerwire.LauncherObservation{Award: fence})
 				preparing = append(preparing, fence)
 				if id == "run" {
 					badPrefix = claim.Award.CapabilityPrefix
@@ -190,27 +186,26 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 				t.Fatal(err)
 			}
 			response, err := e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed})
-			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Remove) != 0 {
+			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
 				t.Fatalf("observed-only response=%+v, %v", response, err)
 			}
 			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed, Preparing: preparing})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Remove) != 0 || len(response.RemoveReservations) != 0 {
+			if len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
 				t.Fatalf("response=%+v", response)
 			}
 			for i := range observed {
-				observed[i].Job = controllerwire.LauncherJobRef{}
-				observed[i].ReservationID = "reservation"
+				observed[i].Reservation = true
 			}
 			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed, Preparing: preparing})
-			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.RemoveReservations) != 0 {
+			if err != nil || len(response.Deferred) != 1 || response.Deferred[0] != preparing[0] || len(response.Awards) != 1 || response.Awards[0].RunID != "sibling" || len(response.Retired) != 0 {
 				t.Fatalf("reservation response=%+v, %v", response, err)
 			}
 			engineSQL(t, e.Store, `UPDATE nodes SET lease_expires_at=1 WHERE run_id='sibling'`)
 			response, err = e.syncLauncher(t.Context(), capability.Authorized{Principal: principal}, controllerwire.LauncherSyncRequest{Observed: observed[1:], Preparing: preparing[1:]})
-			if err != nil || len(response.Deferred) != 0 || len(response.RemoveReservations) != 1 {
+			if err != nil || len(response.Deferred) != 0 || len(response.Retired) != 1 {
 				t.Fatalf("retired reservation deferred: %+v, %v", response, err)
 			}
 			engineHTTPRoot(t, e, "", "foreign-launcher", []capability.Grant{capability.ClaimsLaunch})

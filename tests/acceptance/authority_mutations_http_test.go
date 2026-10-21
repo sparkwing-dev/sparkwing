@@ -72,7 +72,7 @@ func TestAuthorityMemberDirectoryHTTP(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
 				code, reads = apierr.Forbidden, 0
 			case "membership lost":
-				b.snapshot.Authorities[0].MembershipValid, code, reads = false, apierr.Unauthenticated, 0
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code, reads = &b.snapshot.Now, apierr.Unauthenticated, 0
 			case "private error":
 				f.readErr, code = errors.New("private credential"), apierr.Internal
 			}
@@ -399,7 +399,7 @@ func TestAuthorityRevocationHTTPStopsDescendantsAcrossRouters(t *testing.T) {
 					here.Capability.Unit, here.Capability.UnitID, here.Capability.Purpose = capability.UnitTrigger, "trigger", capability.PurposeHere
 					here.Capability.Parent = &ancestor.Principal.Authority
 					here.Capability.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Reservation: "here:run"}
-					victim.snapshot.Authorities = []capability.AuthorityState{victim.snapshot.Authorities[0], {Principal: here, MembershipValid: true}, *ancestor}
+					victim.snapshot.Authorities = []capability.AuthorityState{victim.snapshot.Authorities[0], {Principal: here}, *ancestor}
 					victim.snapshot.Authorities[0].Principal.Capability.Parent = &here.Authority
 				}
 			}
@@ -409,7 +409,7 @@ func TestAuthorityRevocationHTTPStopsDescendantsAcrossRouters(t *testing.T) {
 				}
 				switch mutation {
 				case "membership":
-					victim.snapshot.Authorities[0].MembershipValid = false
+					victim.snapshot.Authorities[0].Principal.Capability.RevokedAt = &victim.snapshot.Now
 				case "here parent loses runs.write":
 					victim.snapshot.Authorities[2].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
 				default:

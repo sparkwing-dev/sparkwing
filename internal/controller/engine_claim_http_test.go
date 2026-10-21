@@ -94,6 +94,8 @@ func engineClaimHTTPFixture(t *testing.T, grants []capability.Grant, opts ...sto
 	e, _ := engineRuntimeStore(t, opts...)
 	engineRuntimeClaim(t, e, capability.UnitTrigger)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	engineAcceptedFixturePlan(t, e, "a", "run")
+	e.VersionPolicy = engineVersionPolicy(&engineVersionFake{})
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	raw := engineHTTPRoot(t, e, "a", "root", grants)

@@ -124,6 +124,8 @@ func TestRedactValue(t *testing.T) {
 			"https://hooks.example.com/services/T0/redacted",
 		},
 		{"plain path", "https://cache.example.com/v1/objects", "https://cache.example.com/v1/objects"},
+		{"fragment token", "https://x/y#token=abc123", "https://x/y#token=redacted"},
+		{"encoded query token", "https://x/y?%74oken=abc123", "https://x/y?%74oken=redacted"},
 		{"query apikey", "https://x/y?apikey=abc123", "https://x/y?apikey=redacted"},
 	}
 	for _, c := range cases {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -746,12 +747,12 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	var none InvitationAcceptance
 	at := now.UTC().UnixNano()
 
-	var team, email, role string
+	var team, email, role, inviter string
 	var expires int64
 	var accepted, withdrawn sql.NullInt64
 	err := tx.QueryRowContext(ctx,
-		`SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
-		Scan(&team, &email, &role, &expires, &accepted, &withdrawn)
+		`SELECT team, email, role, invited_by, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
+		Scan(&team, &email, &role, &inviter, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return none, ErrNotFound
 	}
@@ -778,6 +779,15 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	}
 	if err := checkTeamRoomTx(ctx, tx, Team(team), gate.Limits.FreeTeamMembers); err != nil {
 		return none, err
+	}
+	var inviterRole Role
+	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, team, inviter).Scan(&inviterRole); errors.Is(err, sql.ErrNoRows) {
+		return none, ErrInvitationClosed
+	} else if err != nil {
+		return none, err
+	}
+	if !slices.Contains(ScopesForRole(inviterRole), ScopeTeamAdmin) {
+		return none, ErrInvitationClosed
 	}
 	// safety: the update repeats the unaccepted predicate and counts what it
 	// changed, because two callers that both read it open would otherwise both
@@ -869,65 +879,65 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 	if err != nil {
 		return "", "", nil, err
 	}
-	tx, err := o.s.beginTx(ctx)
+	var session *Session
+	err = o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := tx.operator.discoverAccountTeams(ctx, tx, lockSet{}, acct.ID)
+			if team != "" {
+				set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockTeam, keys: [3]string{string(team)}}, optional: true})
+			}
+			return set
+		}); err != nil {
+			return err
+		}
+		if provider != "" {
+			var linked string
+			err := tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider=? AND subject=? AND account_id=?`, provider, subject, acct.ID).Scan(&linked)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrIdentityUnlinked
+			}
+			if err != nil {
+				return err
+			}
+		}
+		var role Role
+		var sessionTeam any
+		if team == "" {
+			if provider == "" {
+				return ErrNotMember
+			}
+		} else {
+			sessionTeam = string(team)
+			if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, team, acct.ID).Scan(&role); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					err = ErrNotMember
+				}
+				return err
+			}
+			if !role.Valid() {
+				return ErrNotMember
+			}
+		}
+		var email string
+		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
+			return err
+		}
+		now := tx.now()
+		expires := now.Add(ttl)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+			return err
+		}
+		if err := tx.operator.recordSessionMembershipsTx(ctx, tx, sessionDigest(raw)); err != nil {
+			return err
+		}
+		session = &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
+		return nil
+	})
 	if err != nil {
 		return "", "", nil, err
 	}
-	defer rollbackOrLog(tx)
-	// safety: the session insert's foreign key takes a team key-share after the
-	// account lock; taking it first keeps team before account (STORE-DATA.md lock order).
-	if team != "" {
-		var name string
-		err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=?`+tx.forKeyShare(), string(team)).Scan(&name)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil, err
-		}
-	}
-	if err := lockAccountTx(ctx, tx, acct.ID); err != nil {
-		return "", "", nil, err
-	}
-	if provider != "" {
-		var linked string
-		err := tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider=? AND subject=? AND account_id=?`, provider, subject, acct.ID).Scan(&linked)
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil, ErrIdentityUnlinked
-		}
-		if err != nil {
-			return "", "", nil, err
-		}
-	}
-	var role Role
-	var sessionTeam any
-	if team == "" {
-		if provider == "" {
-			return "", "", nil, ErrNotMember
-		}
-	} else {
-		sessionTeam = string(team)
-		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				err = ErrNotMember
-			}
-			return "", "", nil, err
-		}
-		if !role.Valid() {
-			return "", "", nil, ErrNotMember
-		}
-	}
-	var email string
-	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
-		return "", "", nil, err
-	}
-	now := tx.now()
-	expires := now.Add(ttl)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
-		return "", "", nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", "", nil, err
-	}
-	return raw, csrf, &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}, nil
+	return raw, csrf, session, nil
 }
 
 // MemberRole reads an account's role in t's team, or ErrNotMember.
@@ -985,7 +995,20 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 	if active == "" {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx,
+	rows, err := tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE account_id=? AND team=? AND capability_prefix=''`, accountID, t.team)
+	if err != nil {
+		return err
+	}
+	sessions, err := scanPrefixes(rows)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if err := (&Tenant{s: tx.store, team: Team(active)}).recordSessionMembershipTx(ctx, tx, session); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx,
 		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
 		active, accountID, string(t.team))
 	return err
@@ -1007,21 +1030,21 @@ func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
 // safety: counting and then inserting is a race unless the team row is locked first; Postgres
 // serializes on it and SQLite's single connection already serializes every writer.
 func (t *Tenant) lockTeamTx(ctx context.Context, tx *storeTx) error {
-	var name string
-	err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name = ?`+tx.forUpdate(), string(t.team)).Scan(&name)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := acquireLockSet(ctx, tx, func() lockSet {
+		var set lockSet
+		set.add(lockTeam, true, string(t.team))
+		return set
+	})
+	if errors.Is(err, ErrUnknownTeam) {
 		return ErrNotFound
 	}
 	return err
 }
 
-// safety: account deletion drops memberships without the team lock, so the
-// role is read under the membership row's lock; a read that did not wait on
-// an uncommitted deletion would let a mint land after the deletion's sweep.
 func (t *Tenant) roleTx(ctx context.Context, tx *storeTx, accountID string) (Role, error) {
 	var role string
 	err := tx.QueryRowContext(ctx,
-		`SELECT role FROM memberships WHERE team = ? AND account_id = ?`+tx.forUpdate(), string(t.team), accountID).Scan(&role)
+		`SELECT role FROM memberships WHERE team = ? AND account_id = ?`, string(t.team), accountID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotMember
 	}
@@ -1112,6 +1135,3 @@ func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation
 	}()
 	return scanInvitations(rows)
 }
-
-// CLITokenLifetime bounds a legacy member credential.
-const CLITokenLifetime = 90 * 24 * time.Hour

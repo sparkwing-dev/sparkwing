@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -45,28 +46,42 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 
 // RevokeGitHubRunner removes enrollment and ends its Actions authority in one transaction.
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error {
-	return t.mutateCredentials(ctx, a, func(tx *storeTx, _ string) error {
-		if repositoryID <= 0 {
-			return ErrInvalidInput
-		}
-		result, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
-		if err := credentialRowChanged(result, err); err != nil {
+	if repositoryID <= 0 {
+		return ErrInvalidInput
+	}
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		var prefixes []string
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_kind='push' AND repo_key=? AND parent_id IS NULL`, t.team, githubRepositoryKey(repositoryID))
+			if err != nil {
+				return lockSet{err: err}
+			}
+			prefixes, err = scanPrefixes(rows)
+			if err != nil {
+				return lockSet{err: err}
+			}
+			leaves := []capability.AuthorityRef{a.Principal.Authority}
+			for _, prefix := range prefixes {
+				leaves = append(leaves, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+			}
+			set := discoverAuthorityLocks(ctx, tx, leaves, prefixes...)
+			set.add(lockTeam, true, string(t.team))
+			return set
+		}); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_kind='push' AND repo_key=? AND parent_id IS NULL`, t.team, githubRepositoryKey(repositoryID))
-		if err != nil {
-			return err
-		}
-		prefixes, err := scanPrefixes(rows)
-		if err != nil {
-			return err
-		}
-		for _, prefix := range prefixes {
-			if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		return t.teamMutationInTx(ctx, tx, a, func(tx *storeTx, _ capability.Principal) error {
+			result, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
+			if err := credentialRowChanged(result, err); err != nil {
 				return err
 			}
-		}
-		return nil
+			for _, prefix := range prefixes {
+				if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	})
 }
 
@@ -76,6 +91,9 @@ func githubRepositoryKey(repositoryID int64) string {
 
 func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	push := spec.Binding.Push
+	if push == nil {
+		return bindingRefusal()
+	}
 	var repositoryID, ownerID int64
 	err := tx.QueryRowContext(ctx, `SELECT repository_id,repository_owner_id FROM github_runner_bindings WHERE team=? AND repo_key=?`+tx.forShare(), spec.Team, push.RepositoryKey).Scan(&repositoryID, &ownerID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -85,7 +103,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		return err
 	}
 	registration := "github:" + strconv.FormatInt(repositoryID, 10) + ":" + strconv.FormatInt(ownerID, 10)
-	if repositoryID <= 0 || ownerID <= 0 || push.RepositoryKey != githubRepositoryKey(repositoryID) || spec.RegistrationID != registration || spec.Subject.ID != registration+":"+push.WorkflowRunID || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 ||
+	if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingPush || push.WorkflowRunID == "" || push.WorkflowRunAttempt == "" || push.Ref == "" || push.SHA == "" || !strings.HasSuffix(push.WorkflowRef, "@"+push.Ref) || !slices.Equal(spec.Repositories, []string{push.RepositoryKey}) || repositoryID <= 0 || ownerID <= 0 || push.RepositoryKey != githubRepositoryKey(repositoryID) || spec.RegistrationID != registration || spec.Subject.ID != registration+":"+push.WorkflowRunID+":"+push.WorkflowRunAttempt || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 ||
 		len(spec.Grants) != 2 || !slices.Contains(spec.Grants, capability.NodesClaim) || !slices.Contains(spec.Grants, capability.TriggersClaim) {
 		return bindingRefusal()
 	}
@@ -93,11 +111,27 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		return authorityError(apierr.Forbidden, "Actions credential exceeds its lifetime")
 	}
 	var live int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM capabilities WHERE team=? AND bind_kind='push' AND parent_id IS NULL AND (revoked_at IS NULL OR revoked_at>?) AND expires_at>?`, spec.Team, tx.now().UnixNano(), tx.now().UnixNano()).Scan(&live); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM capabilities WHERE team=? AND bind_kind='push' AND parent_id IS NULL AND `+liveCredentialSQL(""), spec.Team, tx.now().UnixNano(), tx.now().UnixNano()).Scan(&live); err != nil {
 		return err
 	}
 	if live >= MaxGitHubRunnerCredentials {
 		return ErrGitHubRunnerCredentialLimit
+	}
+	return nil
+}
+
+func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
+	push := spec.Binding.Push
+	result, err := tx.ExecContext(ctx, `INSERT INTO github_actions_exchanges(team,repository_key,run_id,run_attempt) VALUES (?,?,?,?) ON CONFLICT(team,repository_key,run_id,run_attempt) DO NOTHING`, spec.Team, push.RepositoryKey, push.WorkflowRunID, push.WorkflowRunAttempt)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return bindingRefusal()
 	}
 	return nil
 }

@@ -26,7 +26,11 @@ func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability
 	if a.Target.RunID != "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 		return bindingRefusal()
 	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
+	if err := acquireLockSet(ctx, tx, func() lockSet {
+		set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+		set.add(lockTeam, true, string(t.team))
+		return set
+	}); err != nil {
 		return err
 	}
 	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
@@ -119,10 +123,10 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if a.Target.RunID != "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 			return bindingRefusal()
 		}
-		if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
-			return err
-		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			return discoverTeamDeletionLocks(ctx, tx, set, t.team)
+		}); err != nil {
 			return err
 		}
 		if err := t.credentialAdminTx(ctx, tx, a); err != nil {

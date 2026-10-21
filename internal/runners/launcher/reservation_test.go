@@ -15,62 +15,51 @@ import (
 )
 
 func FuzzControllerReservationRetirementMatchesObservation(f *testing.F) {
-	for mode := uint8(0); mode < 11; mode++ {
-		for kind := uint8(0); kind < 3; kind++ {
-			f.Add(mode, kind, []byte("replacement"))
-		}
+	for mode := uint8(0); mode < 8; mode++ {
+		f.Add(mode)
 	}
-	f.Fuzz(func(t *testing.T, mode, kind uint8, input []byte) {
-		mode %= 11
-		unit := wireAward([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+	f.Fuzz(func(t *testing.T, mode uint8) {
+		mode %= 8
+		unit := wireAward(capability.UnitNode)
 		unit.Capability = ""
 		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 		if err != nil {
 			t.Fatal(err)
 		}
-		observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), NodeUID: "node-uid", ReservationID: "reservation"}
-		ref := controllerwire.LauncherReservationRef{Award: binding.LeaseRef(), NodeUID: observation.NodeUID, ReservationID: observation.ReservationID}
-		sum := sha256.Sum256(input)
-		foreign := "foreign-" + hex.EncodeToString(sum[:8])
+		observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), NodeUID: "node", ReservationID: "reservation"}
+		fence := binding.LeaseRef()
 		control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-			want := controllerwire.LauncherObservation{Award: ref.Award, NodeUID: ref.NodeUID, ReservationID: ref.ReservationID}
-			if len(request.Observed) != 1 || request.Observed[0] != want {
-				t.Fatalf("reservation observation gained a Job or lost its fence: %+v", request)
+			if len(request.Observed) != 1 || request.Observed[0] != (controllerwire.LauncherObservation{Award: binding.LeaseRef(), Reservation: true}) {
+				t.Fatalf("reservation changed: %+v", request)
 			}
 			switch mode {
 			case 1:
-				ref.Award.Holder = foreign
+				fence.Holder = "other"
 			case 2:
-				ref.Award.Generation++
+				fence.Generation++
 			case 3:
-				ref.Award.ID = foreign
+				fence.ID = "other"
 			case 4:
-				ref.Award.Kind = capability.UnitTrigger
+				fence.Kind = capability.UnitTrigger
 			case 5:
-				ref.NodeUID = foreign
-			case 6:
-				ref.ReservationID = foreign
-			case 7:
-				return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{{Namespace: "cloud", Name: observation.JobName, UID: "invented-job"}}}, nil
-			case 8:
 				return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}, nil
-			case 9:
-				return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}, RemoveReservations: []controllerwire.LauncherReservationRef{ref}}, nil
-			case 10:
-				return controllerwire.LauncherSyncResponse{RemoveReservations: []controllerwire.LauncherReservationRef{ref}}, errors.New("uncertain response")
+			case 6:
+				return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}, Retired: []capability.LeaseRef{fence}}, nil
+			case 7:
+				return controllerwire.LauncherSyncResponse{Retired: []capability.LeaseRef{fence}}, errors.New("uncertain response")
 			}
-			return controllerwire.LauncherSyncResponse{RemoveReservations: []controllerwire.LauncherReservationRef{ref}}, nil
-		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}})
+			return controllerwire.LauncherSyncResponse{Retired: []capability.LeaseRef{fence}}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{unit.Unit}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
-		if mode == 0 || mode == 8 {
-			if err != nil || len(states) != 1 || states[0].Delete != (mode == 0) || !sameBinding(states[0].Binding, binding) {
-				t.Fatalf("matching decision: states=%+v: %v", states, err)
+		if mode == 0 || mode == 5 {
+			if err != nil || len(states) != 1 || states[0].Delete != (mode == 0) {
+				t.Fatalf("matching decision: %+v %v", states, err)
 			}
 		} else if err == nil || len(states) != 0 {
-			t.Fatalf("nonmatching decision authorized release: mode=%d states=%+v: %v", mode, states, err)
+			t.Fatalf("foreign retirement: %+v %v", states, err)
 		}
 	})
 }

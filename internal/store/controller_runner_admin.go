@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -26,36 +25,38 @@ func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bo
 	if name == "" {
 		return false, authorityError(apierr.BadRequest, "runner name is required")
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackOrLog(tx)
-	if _, err := checkTeamAdministrationTx(ctx, tx, t.team, actor); err != nil {
-		return false, err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL ORDER BY prefix`+tx.forUpdate(), t.team, name)
-	if err != nil {
-		return false, err
-	}
-	var prefixes []string
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			rows.Close()
-			return false, err
+	var found bool
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var prefixes []string
+		if err := acquireLockSet(ctx, tx, func() lockSet {
+			rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL ORDER BY prefix`, t.team, name)
+			if err != nil {
+				return lockSet{err: err}
+			}
+			prefixes, err = scanPrefixes(rows)
+			if err != nil {
+				return lockSet{err: err}
+			}
+			leaves := []capability.AuthorityRef{actor.Authority}
+			for _, prefix := range prefixes {
+				leaves = append(leaves, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+			}
+			set := discoverAuthorityLocks(ctx, tx, leaves, prefixes...)
+			set.add(lockTeam, true, string(t.team))
+			return set
+		}); err != nil {
+			return err
 		}
-		prefixes = append(prefixes, prefix)
-	}
-	err = rows.Err()
-	err = errors.Join(err, rows.Close())
-	if err != nil {
-		return false, err
-	}
-	for _, prefix := range prefixes {
-		if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
-			return false, err
+		if _, err := checkTeamAdministrationTx(ctx, tx, t.team, actor); err != nil {
+			return err
 		}
-	}
-	return len(prefixes) > 0, tx.Commit()
+		for _, prefix := range prefixes {
+			if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+				return err
+			}
+		}
+		found = len(prefixes) > 0
+		return nil
+	})
+	return found, err
 }

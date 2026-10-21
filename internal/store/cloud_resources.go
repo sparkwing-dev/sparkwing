@@ -41,7 +41,7 @@ func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.Auth
 		allocation := matchingResources(resources)
 		return &allocation, nil
 	}
-	if c.Billing == nil || c.Billing.ExecutorClass != "cloud" {
+	if c.Billing == nil || c.Billing.ExecutorClass != TierCloud {
 		return nil, nil
 	}
 	if !c.Billing.Metered {

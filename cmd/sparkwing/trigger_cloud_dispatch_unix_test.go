@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -294,6 +295,25 @@ type cloudDispatchLauncher struct {
 	claimed []capability.UnitKind
 }
 
+func TestCloudDispatchLauncherCanClaimWithConfiguredAdmission(t *testing.T) {
+	l := newCloudDispatchLauncher(t, cloudDispatch{endpoint: "https://controller.example"})
+	control := &cloudDispatchClaimProbe{}
+	l.runtime.Control = control
+	if launched, err := l.runtime.LaunchOne(t.Context()); err != nil || launched || control.claims != 1 {
+		t.Fatalf("launcher admission: launched=%v claims=%d error=%v", launched, control.claims, err)
+	}
+}
+
+type cloudDispatchClaimProbe struct {
+	launcher.CloudControl
+	claims int
+}
+
+func (c *cloudDispatchClaimProbe) Claim(context.Context) (*launcher.CloudJobAward, error) {
+	c.claims++
+	return nil, nil
+}
+
 func newCloudDispatchLauncher(t *testing.T, f cloudDispatch) *cloudDispatchLauncher {
 	t.Helper()
 	l := &cloudDispatchLauncher{f: f, kube: fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})}
@@ -327,8 +347,22 @@ func newCloudDispatchLauncher(t *testing.T, f cloudDispatch) *cloudDispatchLaunc
 		return true, list, nil
 	})
 	image := "runner@sha256:" + strings.Repeat("a", 64)
+	jobs := launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: f.endpoint, CPUCeiling: 64, MemoryCeiling: 64 << 30}
+	identity := "system:serviceaccount:cloud:launcher"
+	l.kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, k8sruntime.Object, error) {
+		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: identity}}}, nil
+	})
+	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: jobs.Namespace, Launcher: identity, RunnerImage: jobs.RunnerImage, DockerImage: jobs.DockerImage})
+	for i := range policies {
+		if err := l.kube.Tracker().Add(policies[i]); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.kube.Tracker().Add(bindings[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
-		Kube: l.kube, Boundary: cloudDispatchBoundary{}, Jobs: launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: f.endpoint, CPUCeiling: 64, MemoryCeiling: 64 << 30},
+		Kube: l.kube, Boundary: cloudDispatchBoundary{}, Jobs: jobs,
 		Demand: controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 64, AvailableMemoryBytes: 64 << 30},
 		Bearer: func(context.Context) (string, error) { return f.launcher, nil },
 	})

@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t *testing.T) {
@@ -29,12 +30,18 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			budget := int64(1)
-			seal := runspec.SealedRequest{Request: runspec.Request{Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}
-			request := sealWith(t, seal, assertedProvenance(t, "ci", "", ""))
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			run.Request.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}
+			run.Request.Request.Git.Repository.Display = "https://github.com/acme/repo"
+			request := sealWith(t, run.Request, run.Request.Provenance)
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=?,created_principal='account',created_subject_kind='account'`, request)
 			for _, id := range []string{"one", "two"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
 			}
+			engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
 			e.claimProfiles = billingCloudProfile{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			cloud := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -59,6 +66,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
 			engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 			engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('personal-session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
+			engineSQL(t, e.Store, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('personal-session','a',0)`)
 			authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "personal-session"}
 			machine, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Repositories: []string{"github.com/acme/*"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 			if err != nil {
@@ -78,9 +86,7 @@ func TestBurstOverflowAPIUsesAuthenticatedAccount(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
-	engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
-	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"}
-	issued, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +94,7 @@ func TestBurstOverflowAPIUsesAuthenticatedAccount(t *testing.T) {
 	call := func(method, body string, status int) *overflowResponse {
 		t.Helper()
 		r := httptest.NewRequest(method, "/api/v1/overflow", strings.NewReader(body))
-		r.Header.Set("Authorization", "Bearer "+issued.Raw)
+		r.Header.Set("Authorization", "Bearer "+issued)
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -114,12 +120,12 @@ func TestBurstOverflowAPIUsesAuthenticatedAccount(t *testing.T) {
 		t.Fatal("budget clear failed")
 	}
 	call("PUT", `{"monthly_minutes":-1}`, http.StatusBadRequest)
-	writeOnly, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	writeOnly, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineClaimHTTP(t, h, writeOnly.Raw, "PUT", "/api/v1/overflow", `{"monthly_minutes":5}`, http.StatusOK)
-	engineClaimHTTP(t, h, writeOnly.Raw, "GET", "/api/v1/overflow", "", http.StatusForbidden)
+	engineClaimHTTP(t, h, writeOnly, "PUT", "/api/v1/overflow", `{"monthly_minutes":5}`, http.StatusOK)
+	engineClaimHTTP(t, h, writeOnly, "GET", "/api/v1/overflow", "", http.StatusForbidden)
 }
 
 type overflowResponse struct {
@@ -157,7 +163,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+	e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 	server := e.Server.WithEngineController(e.EngineController)
@@ -170,7 +176,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	h := server.Handler()
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	member, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	member, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,10 +201,19 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 		t.Fatalf("personal enrollment: %v", err)
 	}
 	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=0 WHERE name='a'`)
-	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}}}, assertedProvenance(t, "ci", "", ""))
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Request.Git.Repository.Display = "https://github.com/acme/repo"
+	run.Request.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}
+	request := sealWith(t, run.Request, run.Request.Provenance)
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display='https://github.com/acme/repo',created_principal='someone-else',created_subject_kind='account'`, request)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job","available_cores":64}`
+	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
+	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=1 WHERE name='a'`)
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusForbidden)
 	engineSQL(t, e.Store, `UPDATE runs SET created_principal='account'`)
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusOK)
