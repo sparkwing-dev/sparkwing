@@ -175,6 +175,24 @@ describe("confirmed action", () => {
   });
 });
 
+describe("team audit events", () => {
+  it("follows the response cursor through the browser client", async () => {
+    const firstEvent = { at: 2, kind: "team.mutated", subject_id: "account-1", attrs: { operation: "membership_removed" } };
+    const olderEvent = { at: 1, kind: "run.deleted", run_id: "run-1" };
+    respond = () => calls.length === 1
+      ? Response.json({ ...team, events: [firstEvent], next_cursor: "fact:a/b+" })
+      : Response.json({ ...team, events: [olderEvent] });
+    const first = await lib.getOperatorTeam("a b");
+    assert.equal(calls[0].url, "/api/v1/operator/teams/a%20b");
+    assert.deepEqual(first.events, [firstEvent]);
+    assert.equal(first.next_cursor, "fact:a/b+");
+    const older = await lib.getOperatorTeam("a b", first.next_cursor);
+    assert.equal(calls[1].url, "/api/v1/operator/teams/a%20b?cursor=fact%3Aa%2Fb%2B");
+    assert.deepEqual(older.events, [olderEvent]);
+    assert.equal(older.next_cursor, undefined);
+  });
+});
+
 describe("waitlist", () => {
   it("approves by id with the session's CSRF token", async () => {
     respond = () =>

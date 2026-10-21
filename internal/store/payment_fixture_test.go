@@ -12,7 +12,7 @@ import (
 // TestOnlyReversePayment exercises the transaction owner with trusted fixture facts.
 func (o *Operator) TestOnlyReversePayment(ctx context.Context, paymentID, reference, createdBy string, amountMicro int64) (out CreditReversal, err error) {
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		out, err = reversePaymentTx(ctx, tx, paymentID, reference, createdBy, amountMicro)
+		out, err = reversePaymentTx(ctx, tx, paymentID, reference, auditActor{system: auditPaymentProvider}, amountMicro)
 		return err
 	})
 	if err != nil {
@@ -45,7 +45,7 @@ func (t *Tenant) TestOnlyHoldForDispute(
 	var created bool
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, "", now)
+		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, "", now, auditActor{system: auditBreakGlass})
 		return err
 	})
 	return created, err
@@ -54,7 +54,7 @@ func (t *Tenant) TestOnlyHoldForDispute(
 // TestOnlySaveCard exercises the transaction owner with trusted fixture facts.
 func (t *Tenant) TestOnlySaveCard(ctx context.Context, c Card, actor string, now time.Time) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return saveCardTx(ctx, tx, t.team, c, actor, now)
+		return saveCardTx(ctx, tx, t.team, c, auditActor{system: auditPaymentProvider}, now)
 	})
 }
 
@@ -68,7 +68,7 @@ func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWa
 		if err := lockPaymentTx(ctx, tx, mode, w.PaymentIntent); err != nil {
 			return err
 		}
-		result, applyErr := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: mode, ObjectID: w.WarningID, PaymentID: w.PaymentIntent, Fingerprint: w.Fingerprint, Actionable: w.Actionable}, "payment_provider")
+		result, applyErr := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: mode, ObjectID: w.WarningID, PaymentID: w.PaymentIntent, Fingerprint: w.Fingerprint, Actionable: w.Actionable}, auditActor{system: auditPaymentProvider})
 		team, err = result.Team, applyErr
 		return err
 	})

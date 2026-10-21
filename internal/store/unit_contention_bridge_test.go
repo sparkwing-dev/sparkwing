@@ -7,7 +7,10 @@ import (
 )
 
 // TestOnlyClock sets the replica clock without changing database time.
-func (s *Store) TestOnlyClock(now time.Time) { s.clock = func() time.Time { return now } }
+func (s *Store) TestOnlyClock(now time.Time) {
+	s.clock = func() time.Time { return now }
+	s.pinnedClock = nil
+}
 
 // TestOnlyUnitDemand seeds a real claim fixture for either SQL dialect.
 func (s *Store) TestOnlyUnitDemand(t *testing.T) UnitDemand {

@@ -33,7 +33,7 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 			meteredRunnerOnly(t, s)
 			if kind == capability.UnitNode {
-				rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done'`)
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=?`, s.now().UnixNano())
 			} else {
 				rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			}
@@ -75,10 +75,11 @@ func TestUnmeteredRunnerWorkCarriesNoCreditHold(t *testing.T) {
 func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) {
 	t.Helper()
 	s, demand := executingRunFixture(t, runspec.DispatchController)
-	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan', status='done'`)
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 	if kind == capability.UnitPlan {
-		rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='pending'`)
 		rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
+	} else {
+		rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=?`, s.now().UnixNano())
 	}
 	switch runner {
 	case "metered":

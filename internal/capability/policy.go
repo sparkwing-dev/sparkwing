@@ -422,7 +422,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 	case CredentialDeployment:
 		return DeploymentAuthority(p)
 	case CredentialOperator:
-		return p.Class == CredentialConsole && c.Subject.Kind == SubjectOperator && c.Subject.ID != "" && c.Unit == "" && c.Binding.Kind == BindingNone
+		return p.Class == CredentialConsole && c.Subject.Kind == SubjectAccount && c.Subject.ID != "" && c.Unit == "" && c.Binding.Kind == BindingNone
 	case CredentialNodeProcess:
 		return p.Class == CredentialBearer && c.Audience == NodeHost && c.Binding.Kind == BindingNode && c.Binding.Holder != "" && c.Binding.Generation > 0 && c.Binding.Attempt > 0 && c.Binding.Expansion == nil
 	case CredentialOwnerProcess:

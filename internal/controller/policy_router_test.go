@@ -232,7 +232,7 @@ func TestPolicyRouterSessionCSRFAndBearerPrecedence(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			var order []string
 			principal := capability.Principal{Class: capability.CredentialConsole, Capability: capability.Capability{
-				Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
+				Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorConsole},
 			}}
 			a := controller.RouteAuthorization{

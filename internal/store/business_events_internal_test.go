@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,14 +24,14 @@ func TestBusinessEventsReadTiesInIDOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range []string{"a", "b", "c", "d", "e"} {
-		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: at, Team: DefaultTeam, Kind: "test.tie", SubjectID: subject}); err != nil {
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: at, Team: DefaultTeam, Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: subject}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	events, err := st.defaultTenant().BusinessEvents(ctx, "test.tie")
+	events, err := st.defaultTenant().BusinessEvents(ctx, BusinessEventCheckoutOpened, 1000, "")
 	if err != nil || len(events) != 5 {
 		t.Fatalf("events = %+v, %v", events, err)
 	}
@@ -38,7 +39,7 @@ func TestBusinessEventsReadTiesInIDOrder(t *testing.T) {
 	for i, ev := range events {
 		ids[i] = ev.ID
 	}
-	if !slices.IsSorted(ids) {
-		t.Fatalf("tied events read in %v, want id order", ids)
+	if !slices.IsSortedFunc(ids, func(a, b string) int { return strings.Compare(b, a) }) {
+		t.Fatalf("tied events read in %v, want descending id order", ids)
 	}
 }

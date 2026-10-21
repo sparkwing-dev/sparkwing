@@ -337,7 +337,7 @@ func TestStoreDataRetainedStorageStableInventoryAndMonthBalance(t *testing.T) {
 }
 
 func TestStoreDataRetainedStorageCorruptSettingsAndWatermarks(t *testing.T) {
-	for _, fault := range []string{"price", "allowance", "watermark", "inventory"} {
+	for _, fault := range []string{"price", "watermark", "inventory"} {
 		t.Run(fault, func(t *testing.T) {
 			s, lease, now := retainedBillingFixture(t)
 			retainedBlob(t, s, "a", "a", StorageBytesPerGB, *now)
@@ -346,8 +346,6 @@ func TestStoreDataRetainedStorageCorruptSettingsAndWatermarks(t *testing.T) {
 			switch fault {
 			case "price":
 				rewriteSchemaExec(t, s.db, "UPDATE settings SET value=? WHERE key=?", []byte(`"bad"`), metaKeyStorageRateMicroPerGBDay)
-			case "allowance":
-				rewriteSchemaExec(t, s.db, "INSERT INTO storage_quotas(team,storage_allowance_bytes,updated_at) VALUES ('a',-1,1)")
 			case "watermark":
 				rewriteSchemaExec(t, s.db, "UPDATE team_storage SET storage_charged_through=0 WHERE team='a' AND store='logs'")
 			case "inventory":

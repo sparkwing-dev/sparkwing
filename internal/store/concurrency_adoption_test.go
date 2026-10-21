@@ -14,7 +14,7 @@ func capacityFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	maintenanceRun(t, s, "run", 1, RunRunning)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch = 'controller',plan_accepted_generation=1 WHERE team = 'a' AND id = 'run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','owner',?,2)`, now.Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation,claimed_by,lease_expires_at) VALUES ('a','run','job','pending',?,?,3,'machine',?)`, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation,claimed_by,capability_prefix,lease_expires_at) VALUES ('a','run','job','pending',?,?,3,'machine','claim',?)`, []byte(`{"id":"job"}`), []byte(`{}`), now.Add(time.Minute).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','key',1,1)`)
 	actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{Holder: "owner", Generation: 2}}}
 	return tenant, now, actor

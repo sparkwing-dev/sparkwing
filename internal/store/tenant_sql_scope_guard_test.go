@@ -16,6 +16,8 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).installAuditProtection":         "baseline audit collision protection checks globally unique event IDs across teams",
+	"(*Operator).installRunTombstones":           "baseline tombstone trigger writes OLD.team for each deleted run, including bulk retention and purge",
 	"(*Operator).readAuthorityNodeTx":            "a global capability prefix or session hash identifies authority before its authenticated team and immutable membership epoch can be resolved",
 	"(*Operator).recordSessionMembershipsTx":     "sign-in discovers all current memberships of its authenticated session before recording each through a tenant handle",
 	"(*Operator).lookupSessionTx":                "a global session digest identifies the one session being validated and renewed before its team is known",
@@ -53,7 +55,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
-	"(*Operator).RecordBusinessEvent":          "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Operator).recordAudit":                  "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Operator).githubInstallationTeamTx":     "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
 	"(*Operator).revokeSelectedCapabilitiesTx": "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
@@ -307,7 +309,7 @@ func tenantTablesTouchedBy(sql string) []string {
 	var out []string
 	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
 		name := strings.ToLower(m[1])
-		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"business_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
+		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"audit_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}

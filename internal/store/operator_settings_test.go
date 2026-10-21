@@ -152,7 +152,7 @@ func TestOperatorSettingsConsoleProofProperty(t *testing.T) {
 		s.consolePolicy = func(p capability.Principal, _ time.Time) bool {
 			return p.DirectAccountSession() && p.Capability.Subject.ID == "owner"
 		}
-		member.Class, member.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
+		member.Class = capability.CredentialConsole
 		member.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 		a := capability.Authorized{Principal: member}
 		switch phase % 6 {

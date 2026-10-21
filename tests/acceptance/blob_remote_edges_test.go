@@ -21,7 +21,7 @@ func checkBlobRemoteCacheEdges(t testing.TB, ctx context.Context, root string) (
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedCacheScope(ctx, teststore.SQL(t, s))
+	request, err := teststore.SeedCacheScope(ctx, s)
 	if err != nil {
 		return err
 	}

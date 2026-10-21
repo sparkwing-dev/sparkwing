@@ -167,7 +167,7 @@ type CreditGrantRequest struct {
 	Reference   string
 	Reverses    string
 	CreatedBy   string
-	// Reason is why an operator made the grant, recorded on its business event.
+	// Reason is operator context and is excluded from the retained audit fact.
 	Reason string
 }
 
@@ -202,14 +202,14 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	defer rollbackOrLog(tx)
-	out, err := recordCreditGrantTx(ctx, tx, team, req)
+	out, err := recordCreditGrantTx(ctx, tx, team, req, auditActor{system: auditBreakGlass})
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
 	return out, tx.Commit()
 }
 
-func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req CreditGrantRequest) (_ CreditGrantResult, err error) {
+func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req CreditGrantRequest, actor auditActor) (_ CreditGrantResult, err error) {
 	if err := req.validate(); err != nil {
 		return CreditGrantResult{}, err
 	}
@@ -243,7 +243,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	if err := l.insertGrant(ctx, grant); err != nil {
 		return CreditGrantResult{}, err
 	}
-	if err := recordGrantEventTx(tx, grant, map[string]any{"reason": req.Reason}); err != nil {
+	if err := recordGrantEventTx(ctx, tx, grant, actor, auditGrant{}); err != nil {
 		return CreditGrantResult{}, err
 	}
 	return CreditGrantResult{Grant: grant, Created: true}, nil
@@ -251,26 +251,10 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 
 // safety: a paid grant is the checkout's payment arriving, so it is recorded
 // as the checkout paid rather than as a grant.
-func recordGrantEventTx(tx *storeTx, g CreditGrant, extra map[string]any) error {
-	kind := BusinessEventCreditGranted
-	switch g.Kind {
-	case CreditGrantPaid:
-		kind = BusinessEventCheckoutPaid
-	case CreditGrantReversal:
-		kind = BusinessEventCreditReversed
-	}
-	attrs := map[string]any{"grant_kind": g.Kind, "amount_micro": g.AmountMicro, "reference": g.Reference}
-	if g.Reverses != "" {
-		attrs["reverses"] = g.Reverses
-	}
-	for k, v := range extra {
-		if v != "" {
-			attrs[k] = v
-		}
-	}
-	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		At: g.CreatedAt, Team: g.Team, Kind: kind, SubjectID: g.ID, Actor: g.CreatedBy, Attrs: attrs,
-	})
+func recordGrantEventTx(ctx context.Context, tx *storeTx, g CreditGrant, actor auditActor, payload auditGrant) error {
+	payload.GrantID, payload.Kind, payload.AmountMicro = g.ID, auditGrantKind(g.Kind), g.AmountMicro
+	payload.Reference, payload.Reverses = digestAudit(g.Reference), digestAudit(g.Reverses)
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: g.CreatedAt, Team: g.Team, Actor: actor}, payload)
 }
 
 // safety: a webhook replay carries the terms it carried the first time, so

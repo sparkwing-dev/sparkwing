@@ -290,14 +290,11 @@ func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string,
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
 		return err
 	}
-	return recordAdmissionEventTx(tx, accountID, kind, "", now)
+	return recordAdmissionEventTx(ctx, tx, accountID, kind, auditActor{system: auditController}, now)
 }
 
-func recordAdmissionEventTx(tx *storeTx, accountID, via, actor string, now time.Time) error {
-	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Account: accountID, Kind: BusinessEventAccountAdmitted, SubjectID: accountID, Actor: actor,
-		Attrs: map[string]any{"via": via},
-	})
+func recordAdmissionEventTx(ctx context.Context, tx *storeTx, accountID, via string, actor auditActor, now time.Time) error {
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Actor: actor}, auditAdmission{AccountID: accountID, Via: auditAdmissionVia(via)})
 }
 
 // safety: g must be the row this transaction locked. The windows start no earlier than the operator last
@@ -488,14 +485,14 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string) (Account, 
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
-	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, actor, tx.now(ctx))
+	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, auditActor{system: auditBreakGlass}, tx.now(ctx))
 	if err != nil {
 		return Account{}, false, err
 	}
 	return acct, changed, tx.Commit()
 }
 
-func (op *Operator) approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.Time) (Account, bool, error) {
+func (op *Operator) approveOneTx(ctx context.Context, tx *storeTx, id string, actor auditActor, now time.Time) (Account, bool, error) {
 	at := now.UTC().UnixNano()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET waitlisted_at = 0, waitlist_reason = '', updated_at = ? WHERE id = ? AND waitlisted_at <> 0`,
@@ -506,7 +503,7 @@ func (op *Operator) approveOneTx(ctx context.Context, tx *storeTx, id, actor str
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return Account{}, false, err
 	}
-	if err := recordAdmissionEventTx(tx, id, "waitlist", actor, now); err != nil {
+	if err := recordAdmissionEventTx(ctx, tx, id, "waitlist", actor, now); err != nil {
 		return Account{}, false, err
 	}
 	acct, err := accountTx(ctx, tx, id)

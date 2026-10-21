@@ -35,7 +35,11 @@ func (t *Tenant) mutationFixtureAuthority(test testing.TB, actor string, grant c
 		test.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(raw))
-	return capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}, Target: capability.Target{Team: string(t.team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{grant}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	principal, err := t.s.AsOperator().ResolveAuthority(test.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])})
+	if err != nil {
+		test.Fatal(err)
+	}
+	return capability.Authorized{Principal: principal, Target: capability.Target{Team: string(t.team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{grant}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 }
 
 // InviteForTest exercises the committing invitation adapter with a fresh account session.
