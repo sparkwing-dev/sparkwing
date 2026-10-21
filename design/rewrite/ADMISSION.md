@@ -55,7 +55,9 @@ expiry. No placement owns a second semaphore implementation.
 Regressions exercise controller-owned plan contention, owner and independent
 claim contention with a finite compute budget, compute enabled and disabled,
 and recovery adoption. Tests inspect persisted holders and actual execution,
-not construction alone.
+not construction alone. The production scheduling regression parks one job until
+another has a persisted waiter, then verifies promotion and release for both
+run-scoped and box-scoped groups with compute enabled and disabled.
 
 Two policy cases need a lead ruling. Plan and job groups share one namespace:
 A holding plan X while waiting for job Y and B holding plan Y while waiting for

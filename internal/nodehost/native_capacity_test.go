@@ -116,27 +116,78 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 				machine = &LocalAdmission{Daemon: daemon}
 			}
 			config.Admission = ComposeNativeAdmission(fixture.Tenant, machine, false)
+			queued := make(chan struct{}, 1)
+			config.Admission.capacity.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
+				queued <- struct{}{}
+				return nil
+			}
 			owner, _, _, err := NewNativeHost(config)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var executed atomic.Int32
+			started, release := make(chan string, 2), make(chan struct{})
 			key := scopedConcurrencyKey("db", test.scope, fixture.Accepted.RunID, fixture.Actor.Owner.Holder)
 			owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-				executed.Add(1)
+				position := executed.Add(1)
 				state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
 				if err != nil || state == nil || len(state.Holders) != 1 || state.Holders[0].NodeID != input.NodeID || state.UsedCost != 1 {
 					t.Errorf("runner lost logical concurrency: %+v %v", state, err)
 				}
+				started <- input.NodeID
+				if position == 1 {
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					}
+				}
 				return fixture.report(ctx, input, store.NodeSuccess)
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			completion, err := owner.Run(ctx, fixture.Input)
-			if err != nil || executed.Load() != 2 || completion.Outcome != "success" {
-				t.Fatalf("completion=%+v executed=%d error=%v", completion, executed.Load(), err)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			var workers sync.WaitGroup
+			defer func() { cancel(); workers.Wait() }()
+			done := make(chan error, 1)
+			workers.Go(func() {
+				completion, err := owner.Run(ctx, fixture.Input)
+				if err == nil && completion.Outcome != "success" {
+					err = fmt.Errorf("runner completion=%+v", completion)
+				}
+				done <- err
+			})
+			var first string
+			select {
+			case first = <-started:
+			case result := <-done:
+				t.Fatalf("runner ended before execution: %+v", result)
+			case <-ctx.Done():
+				t.Fatal(context.Cause(ctx))
+			}
+			select {
+			case <-queued:
+			case id := <-started:
+				t.Fatalf("runner jobs %s and %s overlapped", first, id)
+			case result := <-done:
+				t.Fatalf("runner ended before contention: %+v", result)
+			case <-ctx.Done():
+				t.Fatal(context.Cause(ctx))
 			}
 			state, err := fixture.Tenant.GetConcurrencyState(ctx, key)
+			if err != nil || state == nil || len(state.Holders) != 1 || len(state.Waiters) != 1 || state.Holders[0].NodeID != first || state.Waiters[0].NodeID == first || executed.Load() != 1 {
+				t.Fatalf("runner did not retain holder and waiter: %+v error=%v executed=%d", state, err, executed.Load())
+			}
+			wantCompute := 0
+			if compute {
+				wantCompute = 1
+			}
+			if live, granted, released := daemon.counts(); live != wantCompute || granted != wantCompute || released != 0 {
+				t.Fatalf("queued job acquired compute: live/granted/released=%d/%d/%d", live, granted, released)
+			}
+			close(release)
+			if err := <-done; err != nil || executed.Load() != 2 {
+				t.Fatalf("executed=%d error=%v", executed.Load(), err)
+			}
+			state, err = fixture.Tenant.GetConcurrencyState(ctx, key)
 			if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 				t.Fatalf("concurrency leaked: %+v %v", state, err)
 			}
