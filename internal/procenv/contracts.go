@@ -37,6 +37,7 @@ const (
 	Install
 	HostChild
 	Git
+	kindCount
 )
 
 // Var is a registry row; Prefix matches a family, and engine ownership forbids inheritance.
@@ -77,7 +78,7 @@ type Runtime struct {
 	Branch, Commit, Repo, TriggerSource string
 	GateIndex                           string
 	Startup                             []Assignment
-	AttemptEnv                          []string
+	AttemptEnv                          Env
 }
 
 // Assignment preserves the author's startup marker until host and SDK split job environment delivery.
@@ -93,7 +94,7 @@ type JobEnv struct{ Startup, Body []Assignment }
 // GODEBUG and GOMAXPROCS always belong to Startup. Startup values must not affect declarations;
 // a differing attempt replan fails as plan_drift, rather than changing the accepted plan.
 func SplitJobEnv(env []Assignment) (JobEnv, error) {
-	if err := Validate(env); err != nil {
+	if err := validate(env); err != nil {
 		return JobEnv{}, err
 	}
 	var result JobEnv

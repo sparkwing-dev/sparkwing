@@ -32,7 +32,7 @@ func TestProtocolSessionUsesProcessAuthorityUntilClose(t *testing.T) {
 			}
 			cleaned := false
 			cfg := ProtocolSessionConfig{
-				Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, Environment: []string{"GORACE=atexit_sleep_ms=0"},
+				Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"),
 				ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: revoke,
 				RunCleanups: func(context.Context, CleanupScope) error {
 					if _, err := registry.Resolve(t.Context(), processAuthorized(issued)); err == nil {

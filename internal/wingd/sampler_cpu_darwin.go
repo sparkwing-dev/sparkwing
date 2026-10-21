@@ -4,8 +4,9 @@ package wingd
 
 import (
 	"context"
-	"os/exec"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // hack: macOS exposes no cumulative per-core tick counter through sysctl,
@@ -16,7 +17,7 @@ type cpuTracker struct{}
 func (c *cpuTracker) busyCores(totalCores float64) (float64, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-Ao", "pcpu=").Output()
+	out, err := procenv.HostCommandContext(ctx, "ps", "-Ao", "pcpu=").Output()
 	if err != nil {
 		return 0, false
 	}

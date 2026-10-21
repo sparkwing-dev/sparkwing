@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -23,7 +24,8 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(323, 911))
 	for trial := range 4 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {
-			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
+			now := time.Unix(1700000000, 0).UTC()
+			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), teststore.WithClock(func() time.Time { return now }))
 			tenant, plan, err := storePlanSealRequest(t.Context(), s)
 			if err != nil {
 				t.Fatal(err)
@@ -63,6 +65,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 			}
 			var eligible []string
 			for range 2 + random.IntN(3) {
+				now = now.Add(time.Nanosecond)
 				request := plan.Seal.Request.Request
 				request.Git.Repository = runspec.Repository{Key: "gh:999", Display: "https://github.com/acme/allowed"}
 				admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request})

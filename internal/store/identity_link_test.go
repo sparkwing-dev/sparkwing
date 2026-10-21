@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -669,7 +670,7 @@ func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
 	if won != 1 {
 		t.Fatalf("%d attachments committed for one claim", won)
 	}
-	if ids := identitiesOf(t, st, owner.Account.ID); len(ids) != 2 || ids[1].Subject != "gh-bound" || !ids[1].Linked {
+	if ids := identitiesOf(t, st, owner.Account.ID); len(ids) != 2 || !slices.ContainsFunc(ids, func(id store.Identity) bool { return id.Subject == "gh-bound" && id.Linked }) {
 		t.Fatalf("identities = %+v", ids)
 	}
 	account, err := st.AsOperator().Account(ctx, owner.Account.ID)

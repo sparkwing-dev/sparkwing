@@ -3,9 +3,9 @@ package teststore
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -16,8 +16,8 @@ import (
 )
 
 // SeedUpload seeds a publication authority and its run.
-func SeedUpload(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error) {
-	now := time.Now().UTC()
+func SeedUpload(ctx context.Context, st *store.Store) (store.UploadReservationRequest, error) {
+	now := Now(st)
 	c := capability.Capability{
 		Digest: sha256.Sum256([]byte("upload-boundary")), Prefix: "upload-boundary", Team: string(store.DefaultTeam),
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "publisher"}, Audience: capability.Controller,
@@ -38,11 +38,11 @@ func SeedUpload(ctx context.Context, db *sql.DB) (store.UploadReservationRequest
 	if err != nil {
 		return store.UploadReservationRequest{}, err
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
+	if _, err := Exec(ctx, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
 VALUES (?,'upload',1,'fixture','running',?,'fixture',?,'gh:1','host','publish',?,'publisher',?,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"fixture","writer":"account/fixture"}}`), now.UnixNano(), []byte(`[]`), now.UnixNano()); err != nil {
 		return store.UploadReservationRequest{}, err
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,reserved_pools,created_at,created_by,repo_key,repo_scope)
+	_, err = Exec(ctx, st, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,reserved_pools,created_at,created_by,repo_key,repo_scope)
 VALUES (?,?,?,'machine','publisher','controller',?,'delegate',1,?,'run','upload',?,?,'publisher','gh:1',?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), store.DefaultTeam, grants, body, []byte(`[]`), now.UnixNano(), []byte(`[]`))
 	if err != nil {
 		return store.UploadReservationRequest{}, err
@@ -52,16 +52,16 @@ VALUES (?,?,?,'machine','publisher','controller',?,'delegate',1,?,'run','upload'
 }
 
 // SeedPresence adds terminal imported attempts to a publication fixture.
-func SeedPresence(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error) {
-	request, err := SeedUpload(ctx, db)
+func SeedPresence(ctx context.Context, st *store.Store) (store.UploadReservationRequest, error) {
+	request, err := SeedUpload(ctx, st)
 	if err != nil {
 		return request, err
 	}
 	for _, job := range []string{"a", "b", "unrelated"} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
+		if _, err := Exec(ctx, st, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
 			return request, err
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1,2,'success')`, store.DefaultTeam, job); err != nil {
+		if _, err := Exec(ctx, st, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1,2,'success')`, store.DefaultTeam, job); err != nil {
 			return request, err
 		}
 	}
@@ -72,8 +72,13 @@ func SeedPresence(ctx context.Context, db *sql.DB) (store.UploadReservationReque
 const FeatureSHA = "fea7fea7fea7fea7fea7fea7fea7fea7fea7fea7"
 
 // SeedCacheScope seeds verified cache records for read-policy tests.
-func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error) {
-	request, err := SeedPresence(ctx, db)
+func SeedCacheScope(ctx context.Context, st *store.Store) (_ store.UploadReservationRequest, err error) {
+	db, err := open(st)
+	if err != nil {
+		return store.UploadReservationRequest{}, err
+	}
+	defer func() { err = errors.Join(err, db.Close()) }()
+	request, err := SeedPresence(ctx, st)
 	if err != nil {
 		return request, err
 	}
@@ -93,10 +98,10 @@ func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationReq
 	if err != nil {
 		return request, err
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE runs SET request_json=? WHERE team=? AND id='upload'", body, store.DefaultTeam); err != nil {
+	if _, err := Exec(ctx, st, "UPDATE runs SET request_json=? WHERE team=? AND id='upload'", body, store.DefaultTeam); err != nil {
 		return request, err
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id='upload' AND node_id='a'", []byte(`{"id":"a","memo":{}}`), store.DefaultTeam); err != nil {
+	if _, err := Exec(ctx, st, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id='upload' AND node_id='a'", []byte(`{"id":"a","memo":{}}`), store.DefaultTeam); err != nil {
 		return request, err
 	}
 	if err := db.QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", request.Intent.Authority.CapabilityRef).Scan(&body); err != nil {
@@ -111,16 +116,16 @@ func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationReq
 	if err != nil {
 		return request, err
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE capabilities SET authority_json=?,ref_scope='refs/heads/feature' WHERE prefix=?", body, request.Intent.Authority.CapabilityRef); err != nil {
+	if _, err := Exec(ctx, st, "UPDATE capabilities SET authority_json=?,ref_scope='refs/heads/feature' WHERE prefix=?", body, request.Intent.Authority.CapabilityRef); err != nil {
 		return request, err
 	}
-	if _, err := db.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,3,1)", store.DefaultTeam, request.Intent.Digest); err != nil {
+	if _, err := Exec(ctx, st, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,3,1)", store.DefaultTeam, request.Intent.Digest); err != nil {
 		return request, err
 	}
 	source, err := json.Marshal(request.Intent.Identity)
 	if err != nil {
 		return request, err
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,source_node_id,source_attempt,source_generation,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'memo','fixture','output',?,'gh:1','refs/heads/feature','publisher','local',?,'publication','upload','a',1,7,1,0,'fixture-sha',?,'fixture',1)`, store.DefaultTeam, request.Intent.Digest, source, []byte(`{}`))
+	_, err = Exec(ctx, st, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,source_node_id,source_attempt,source_generation,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'memo','fixture','output',?,'gh:1','refs/heads/feature','publisher','local',?,'publication','upload','a',1,7,1,0,'fixture-sha',?,'fixture',1)`, store.DefaultTeam, request.Intent.Digest, source, []byte(`{}`))
 	return request, err
 }

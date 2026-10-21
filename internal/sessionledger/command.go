@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // runCleanupCommand runs a library-registered cleanup argv once, directly
@@ -23,7 +25,7 @@ func runCleanupCommand(ctx context.Context, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("sessionledger: command handle carries no argv")
 	}
-	err := exec.CommandContext(ctx, argv[0], argv[1:]...).Run()
+	err := procenv.HostCommandContext(ctx, argv[0], argv[1:]...).Run()
 	var pathErr *fs.PathError
 	var execErr *exec.Error
 	switch {

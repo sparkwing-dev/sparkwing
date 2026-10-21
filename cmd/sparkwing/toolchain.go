@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func goOnPath() bool {
@@ -20,7 +22,7 @@ func userGoVersion() string {
 	if !goOnPath() {
 		return ""
 	}
-	out, err := exec.Command("go", "env", "GOVERSION").Output()
+	out, err := procenv.HostCommand("go", "env", "GOVERSION").Output()
 	if err != nil {
 		return ""
 	}

@@ -29,3 +29,9 @@ Moving the controller, store and storage trees under `internal/` adds their
 existing exports to the unexport census. The move accepts those package counts
 once and translates the existing depguard and F1 paths. It does not add a
 standing growth exemption. Subsequent changes must keep shrinking these lists.
+
+The typed spawn guard has no allow-list. It rejects raw process constructors,
+`exec.Cmd` value construction and direct `Cmd.Env` access outside `procenv`.
+It inventories production source independently and fails on uncovered build
+profiles. Protected pipeline paths also require `procenv.Build` provenance.
+See [guard scope and accepted residuals](../internal/guardcheck/README).

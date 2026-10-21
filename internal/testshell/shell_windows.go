@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
@@ -21,7 +22,7 @@ func init() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Getenv("SPARKWING_TEST_SHELL_BASH"), append([]string{filepath.ToSlash(exe + ".sh")}, os.Args[1:]...)...)
+	cmd := procenv.HostCommandContext(ctx, os.Getenv("SPARKWING_TEST_SHELL_BASH"), append([]string{filepath.ToSlash(exe + ".sh")}, os.Args[1:]...)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := procgroup.RunCommand(cmd); err != nil {
 		if e, ok := err.(*exec.ExitError); ok {

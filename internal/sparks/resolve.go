@@ -9,13 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"path"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
@@ -75,8 +75,7 @@ func goEnvValue(ctx context.Context, environment []string, name string) string {
 	if err != nil {
 		return ""
 	}
-	cmd := exec.CommandContext(ctx, executable, "env", name)
-	cmd.Env = environment
+	cmd := procenv.ControlCommandContext(ctx, environment, executable, "env", name)
 	cmd.Stderr = io.Discard
 	out, err := cmd.Output()
 	if err != nil {
@@ -222,8 +221,7 @@ func (r *Resolver) resolveViaGoList(ctx context.Context, lib Library) (string, e
 			return "", err
 		}
 	}
-	cmd := exec.CommandContext(ctx, bin, "list", "-m", "-json", lib.Source+"@"+query)
-	cmd.Env = env
+	cmd := procenv.ControlCommandContext(ctx, env, bin, "list", "-m", "-json", lib.Source+"@"+query)
 	cmd.Dir = r.Dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

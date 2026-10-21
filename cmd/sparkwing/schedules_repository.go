@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -171,7 +172,7 @@ func readScheduleRepository(ctx context.Context, root string, follow bool) (resu
 	if err != nil {
 		return result, err
 	}
-	checkout := triggerCheckout{directory: root, environment: environment, diagnostics: diagnostics}
+	checkout := triggerCheckout{directory: root, environment: slices.Collect(environment.Values()), diagnostics: diagnostics}
 	remote, err := checkout.read(ctx, "remote", "get-url", "origin")
 	if err != nil {
 		return result, err

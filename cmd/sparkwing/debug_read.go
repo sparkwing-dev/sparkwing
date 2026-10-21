@@ -115,8 +115,8 @@ func attachDebugExecution(ctx context.Context, target controllerwire.DebugExecut
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, bin, "exec", "-it", "--namespace", target.Namespace, "--container", target.Container, target.Pod, "--", "bash")
-	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, out, os.Stderr, env
+	cmd := procenv.CommandContext(ctx, env, bin, "exec", "-it", "--namespace", target.Namespace, "--container", target.Container, target.Pod, "--", "bash")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, os.Stderr
 	return errors.Join(cmd.Run(), ctx.Err())
 }
 

@@ -60,7 +60,7 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			unitBillingTotal(t, s, (70+SliceSeconds)*pin.rate, false)
+			unitBillingTotal(t, s, 130*pin.rate, false)
 			if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 				t.Fatal(err)
 			}

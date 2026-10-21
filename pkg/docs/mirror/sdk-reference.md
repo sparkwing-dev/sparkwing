@@ -579,6 +579,8 @@ type JobNode struct {
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
+- `func (n *JobNode) StartsChildren(pipelines ...string) *JobNode` -- StartsChildren appends pipelines in the parent repository that this job may start with RunAndAwait.
+- `func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode` -- StartsChildrenIn declares child pipelines in a canonical repository key such as "gh:123" or "git:host/org/repo".
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
 - `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify checks a postcondition after each successful action attempt.
 
@@ -1170,5 +1172,5 @@ var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 ```
 
 ```
-var ErrSecretMissing = errors.New("secret missing")
+var ErrSecretMissing = secretname.ErrMissing
 ```

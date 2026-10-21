@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/docker"
@@ -322,7 +323,7 @@ func randomSuffix() (string, error) {
 }
 
 func runDocker(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := procenv.HostCommandContext(ctx, "docker", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -22,8 +23,8 @@ import (
 type upgradeVerifier struct {
 	environment []string
 	install     func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)
-	buildEnv    func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
-	exec        func(context.Context, string, []string, string, ...string) ([]byte, error)
+	buildEnv    func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error)
+	exec        func(context.Context, string, procenv.Env, string, ...string) ([]byte, error)
 }
 
 func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected engine.Resolved) (resultErr error) {
@@ -61,7 +62,7 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 			return selected.InstallSDK(ctx, request)
 		}
 	}
-	command, err := install(ctx, selected, engine.SDKInstallRequest{Directory: checkout, PipelineDir: ".sparkwing", SDK: sdk, Environment: installEnv})
+	command, err := install(ctx, selected, engine.SDKInstallRequest{Directory: checkout, PipelineDir: ".sparkwing", SDK: sdk, Environment: slices.Collect(installEnv.Values())})
 	defer func() { resultErr = errors.Join(resultErr, command.Close()) }()
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return fmt.Errorf("upgrade: install SDK: %w", err)
@@ -95,12 +96,16 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	return nil
 }
 
-func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env []string, sdk engine.SDKKind) error {
+func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env, sdk engine.SDKKind) error {
 	var command []string
 	switch sdk {
 	case engine.GoSDK:
 		// safety: a parent workspace must not substitute another checkout's SDK pin.
-		env = setEnv(env, "GOWORK", "off")
+		var err error
+		env, err = env.GoTool("GOWORK=off")
+		if err != nil {
+			return err
+		}
 		command = []string{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}
 	case engine.TypeScriptSDK:
 		command = []string{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}
@@ -140,19 +145,19 @@ func upgradePipelineNames(raw []byte) ([]string, error) {
 	return names, nil
 }
 
-func executeUpgradeCheck(ctx context.Context, dir string, env []string, program string, args ...string) ([]byte, error) {
+func executeUpgradeCheck(ctx context.Context, dir string, env procenv.Env, program string, args ...string) ([]byte, error) {
 	var command *exec.Cmd
 	if program == "npm" {
 		var err error
-		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
+		command, err = pipelineentry.NPMCommand(ctx, env, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		// #nosec G204 -- native tool argv or the resolver's verified executable, never a shell.
-		command = exec.CommandContext(ctx, program, args...)
+		command = procenv.CommandContext(ctx, env, program, args...)
 	}
-	command.Dir, command.Env = dir, env
+	command.Dir = dir
 	var out, diagnostics bytes.Buffer
 	command.Stdout, command.Stderr = &out, &diagnostics
 	if err := command.Run(); err != nil {

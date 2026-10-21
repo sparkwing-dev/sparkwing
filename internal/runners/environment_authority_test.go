@@ -21,12 +21,12 @@ func TestRunnerOperatorEnvironmentNeverInheritsAuthorityProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, entry := range base.Ambient[:4] {
-			if !slices.Contains(env, entry) {
+			if !slices.Contains(slices.Collect(env.Values()), entry) {
 				t.Fatalf("lost allowed operator setting %q", entry)
 			}
 		}
 		for _, entry := range base.Ambient[4:] {
-			if slices.Contains(env, entry) {
+			if slices.Contains(slices.Collect(env.Values()), entry) {
 				t.Fatalf("inherited authority through %q", strings.SplitN(entry, "=", 2)[0])
 			}
 		}

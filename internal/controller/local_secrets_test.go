@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,7 +84,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	for _, kind := range []procenv.Kind{procenv.Install, procenv.Plan, procenv.Attempt, procenv.Eval} {
 		environment, err := procenv.Build(kind, base, procenv.Runtime{})
-		if err != nil || strings.Contains(strings.Join(environment, "\n"), "BUILD_REGION="+submittedValue) == (kind == procenv.Install) || strings.Contains(strings.Join(environment, "\n"), "UNLISTED=") {
+		if err != nil || strings.Contains(strings.Join(slices.Collect(environment.Values()), "\n"), "BUILD_REGION="+submittedValue) == (kind == procenv.Install) || strings.Contains(strings.Join(slices.Collect(environment.Values()), "\n"), "UNLISTED=") {
 			t.Fatal("remote process lost submitted values or inherited unlisted input", err)
 		}
 	}

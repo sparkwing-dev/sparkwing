@@ -5,9 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"os/exec"
 	"path"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 type Generator interface {
@@ -70,7 +71,7 @@ func (g CommandGenerator) run(ctx context.Context, prompt string) (string, error
 	if len(g.Argv) == 0 {
 		return "", fmt.Errorf("generator command is empty")
 	}
-	cmd := exec.CommandContext(ctx, g.Argv[0], g.Argv[1:]...)
+	cmd := procenv.HostCommandContext(ctx, g.Argv[0], g.Argv[1:]...)
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

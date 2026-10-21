@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
@@ -214,10 +214,11 @@ func headerPath(name string) string {
 }
 
 func git(root, index string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	environment := os.Environ()
 	if index != "" {
-		cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+		environment = append(environment, "GIT_INDEX_FILE="+index)
 	}
+	cmd := procenv.ControlCommand(environment, "git", append([]string{"-C", root}, args...)...)
 	var out strings.Builder
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
