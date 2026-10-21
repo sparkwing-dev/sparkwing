@@ -214,7 +214,7 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	if err != nil {
 		return err
 	}
-	return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: tx.now()}, auditRefillSettings{ReceiptID: change, Enabled: s.Enabled, ThresholdCents: s.ThresholdCents, AmountCents: s.AmountCents, WeekLimitCents: s.WeekLimitCents, MonthLimitCents: s.MonthLimitCents})
+	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: tx.now(ctx)}, auditRefillSettings{ReceiptID: change, Enabled: s.Enabled, ThresholdCents: s.ThresholdCents, AmountCents: s.AmountCents, WeekLimitCents: s.WeekLimitCents, MonthLimitCents: s.MonthLimitCents})
 }
 
 // DueRefills opens a refill for every opted-in team whose balance fell below its threshold, within its limits, and
@@ -260,7 +260,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	st, err := spendStandingTx(ctx, tx, team, now)
 	if err != nil {
 		return nil, err
@@ -335,7 +335,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 		now.Add(refillKeyLife).UnixNano(), CheckoutKindRefill, r.Customer, r.PaymentMethod, r.ReceiptEmail); err != nil {
 		return nil, err
 	}
-	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: auditActor{system: auditController}, At: now}, auditRefill{RefillID: r.ID, AmountCents: r.AmountCents, BalanceMicro: st.BalanceMicro, ThresholdCents: refill.ThresholdCents}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditController}, At: now}, auditRefill{RefillID: r.ID, AmountCents: r.AmountCents, BalanceMicro: st.BalanceMicro, ThresholdCents: refill.ThresholdCents}); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -401,7 +401,7 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 		if err != nil {
 			return err
 		}
-		now := tx.now()
+		now := tx.now(ctx)
 		st, err := spendStandingTx(ctx, tx, r.Team, now)
 		if err != nil {
 			return err
@@ -439,7 +439,7 @@ func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
 		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			tx.now().UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
+			tx.now(ctx).UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
 		return err
 	})
 }

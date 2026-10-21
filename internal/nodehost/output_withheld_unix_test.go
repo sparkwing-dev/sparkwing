@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -71,7 +73,7 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 			if err := host.Execute(t.Context(), input); err != nil {
 				t.Fatalf("job failed: %v", err)
 			}
-			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 			if err != nil {
 				t.Fatal(err)
 			}

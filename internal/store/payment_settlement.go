@@ -157,7 +157,7 @@ func paymentEventReplayTx(ctx context.Context, tx *storeTx, event capability.Pay
 // safety: Add funds and refills settle through this one path, under the team's ledger lock: a refused card closes
 // the row unpaid and queues its refund, a paid one funds one grant and takes back any refund that arrived first.
 func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
-	team, now := checkout.result.Team, tx.now()
+	team, now := checkout.result.Team, tx.now(ctx)
 	l, err := lockLedgerTx(ctx, tx, team)
 	if err != nil {
 		return err
@@ -230,11 +230,11 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	default:
 		threeDS = "unknown"
 	}
-	return recordGrantEventTx(tx, grant, auditActor{system: auditPaymentProvider}, auditGrant{SessionID: digestAudit(event.CheckoutID), ThreeDS: threeDS, LiabilityShift: event.LiabilityShift, Refill: checkout.kind == CheckoutKindRefill})
+	return recordGrantEventTx(ctx, tx, grant, auditActor{system: auditPaymentProvider}, auditGrant{SessionID: digestAudit(event.CheckoutID), ThreeDS: threeDS, LiabilityShift: event.LiabilityShift, Refill: checkout.kind == CheckoutKindRefill})
 }
 
 func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
-	team, now := checkout.result.Team, tx.now()
+	team, now := checkout.result.Team, tx.now(ctx)
 	failure := ""
 	kind := BusinessEventCheckoutFailed
 	switch {
@@ -252,14 +252,14 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	return tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditPaymentProvider}}, auditCheckout{CheckoutID: checkout.result.CheckoutID, Outcome: auditCheckoutOutcome(kind), PaymentMode: auditPaymentMode(event.Mode), EventID: digestAudit(event.EventID)})
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditPaymentProvider}}, auditCheckout{CheckoutID: checkout.result.CheckoutID, Outcome: auditCheckoutOutcome(kind), PaymentMode: auditPaymentMode(event.Mode), EventID: digestAudit(event.EventID)})
 }
 
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
 // settlement finds the team through the checkout's payment; a warned card also holds the team. Refusal removes the
 // matching saved card, and a refused refill records its failure, so later passes cannot charge it again.
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
-	team, now := checkout.result.Team, tx.now()
+	team, now := checkout.result.Team, tx.now(ctx)
 	checkout.result.Refused = refusal.reason
 	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?, warning_id=?,
 	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
@@ -272,7 +272,7 @@ func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.Payment
 	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
 		return err
 	}
-	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: BusinessEventCardRefused}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: BusinessEventCardRefused}); err != nil {
 		return err
 	}
 	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)

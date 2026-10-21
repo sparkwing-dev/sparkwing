@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -15,8 +17,8 @@ import (
 
 func claimedFixtureNode(t *testing.T, f *storeHostFixture, id string) NodeInput {
 	t.Helper()
-	ref := controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id}
-	if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)}
+	if _, err := f.State.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	awarded, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
@@ -45,7 +47,7 @@ func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInpu
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: source.NodeID})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(source.NodeID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,11 +85,11 @@ func TestAResumedRunKeepsAFailedGeneratedNode(t *testing.T) {
 	if err != nil || completion.Outcome != "failed" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: child.ID})
+	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(child.ID)})
 	if err != nil || row.Outcome != store.NodeFailed {
 		t.Fatalf("child=%+v error=%v", row, err)
 	}
-	summary, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "summary"})
+	summary, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "summary"})
 	if err != nil || summary.Outcome != store.NodeCancelled {
 		t.Fatalf("waiter=%+v error=%v", summary, err)
 	}
@@ -104,7 +106,7 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 			calls := 0
 			f.Host.Expand = func(_ context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 				calls++
-				if input.NodeID != source.NodeID || input.Generation != source.Generation || row.Ref.NodeID != source.NodeID {
+				if input.NodeID != source.NodeID || runspec.ClaimGeneration(input.Generation) != source.Generation || row.Ref.NodeID != runspec.NodeID(source.NodeID) {
 					t.Error("expansion lost source fence")
 				}
 				jobs := []nodeproto.JobSpec{}
@@ -122,7 +124,7 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 				t.Fatalf("completion=%+v error=%v evaluations=%d", completion, err, calls)
 			}
 			snapshot, err := f.Tenant.ReadSnapshot(t.Context(), f.Accepted.RunID)
-			if err != nil || len(snapshot.Expansions) != 1 || snapshot.Expansions[0].SourceGeneration != source.Generation {
+			if err != nil || len(snapshot.Expansions) != 1 || runspec.ClaimGeneration(snapshot.Expansions[0].SourceGeneration) != source.Generation {
 				t.Fatalf("expansions=%+v error=%v", snapshot.Expansions, err)
 			}
 		})

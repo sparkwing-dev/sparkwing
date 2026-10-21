@@ -81,8 +81,8 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			if err == nil && previous != t.team {
-				previousTeam = Team(previous)
-				prior := &Tenant{s: t.s, team: Team(previous)}
+				previousTeam = previous
+				prior := &Tenant{s: t.s, team: previous}
 				if err := prior.unbindGitHubAppInstallationTx(ctx, tx, row.InstallationID); err != nil {
 					return err
 				}
@@ -93,7 +93,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		row.ConnectedBy = p.Capability.Subject.ID
 		var err error
-		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now())
+		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -103,7 +103,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			for _, team := range []Team{previousTeam, t.team} {
-				if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: team, Actor: auditPrincipalActor(p)}, auditInstallation{ReceiptID: transfer, InstallationID: row.InstallationID, PreviousTeam: previousTeam, NewTeam: t.team}); err != nil {
+				if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: team, Actor: auditPrincipalActor(p)}, auditInstallation{ReceiptID: transfer, InstallationID: row.InstallationID, PreviousTeam: previousTeam, NewTeam: t.team}); err != nil {
 					return err
 				}
 			}

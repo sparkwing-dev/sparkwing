@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -28,7 +30,7 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 	if c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush {
 		return nil
 	}
-	if c.Binding.Kind != capability.BindingTrigger || c.Binding.RunID != unit.RunID {
+	if c.Binding.Kind != capability.BindingTrigger || c.Binding.RunID != string(unit.RunID) {
 		return holderRefusal()
 	}
 	if c.Purpose == capability.PurposeHere {
@@ -39,18 +41,19 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 		if err := tx.QueryRowContext(ctx, `SELECT generation FROM triggers WHERE team=? AND id=?`, c.Team, unit.RunID).Scan(&generation); err != nil {
 			return err
 		}
-		if generation == 0 && (c.Binding.ClaimBy == nil || !c.Binding.ClaimBy.After(tx.now())) {
+		if generation == 0 && (c.Binding.ClaimBy == nil || !c.Binding.ClaimBy.After(tx.now(ctx))) {
 			return holderRefusal()
 		}
 		return nil
 	}
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}}
-	return checkOwnerTx(ctx, tx, Team(c.Team), actor, unit.RunID, tx.now())
+	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}}
+
+	return checkOwnerTx(ctx, tx, Team(c.Team), actor, string(unit.RunID))
 }
 
 func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	now := tx.now().UnixNano()
-	run, err := readRunTx(ctx, tx, team, unit.RunID)
+	now := tx.now(ctx).UnixNano()
+	run, err := readRunTx(ctx, tx, team, string(unit.RunID))
 	if err != nil {
 		return err
 	}
@@ -128,9 +131,9 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	var result sql.Result
 	var err error
 	if claim.Kind == capability.UnitEval {
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now().UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
 	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now().UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
 	}
 	if err != nil {
 		return err
@@ -155,7 +158,7 @@ type queuedClaim struct {
 func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
 	var candidates []queuedClaim
 	for _, kind := range kinds {
-		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
+		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now(ctx).UnixNano())
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return UnitRef{}, err
@@ -173,7 +176,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		}
 	}
 	slices.SortFunc(candidates, func(a, b queuedClaim) int {
-		return strings.Compare(string(a.team)+"\x00"+a.unit.RunID+"\x00"+string(a.unit.Kind)+"\x00"+a.unit.NodeID, string(b.team)+"\x00"+b.unit.RunID+"\x00"+string(b.unit.Kind)+"\x00"+b.unit.NodeID)
+		return strings.Compare(string(a.team)+"\x00"+string(a.unit.RunID)+"\x00"+string(a.unit.Kind)+"\x00"+string(a.unit.NodeID), string(b.team)+"\x00"+string(b.unit.RunID)+"\x00"+string(b.unit.Kind)+"\x00"+string(b.unit.NodeID))
 	})
 	var eligible []queuedClaim
 	for _, candidate := range candidates {

@@ -37,7 +37,7 @@ func (unregisteredAuditPayload) isAuditPayload() {}
 func TestAuditWriterRejectsUnregisteredPayload(t *testing.T) {
 	s := authorityStore(t)
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, unregisteredAuditPayload{Personal: "Jane Doe; person@example.test"})
+		return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, unregisteredAuditPayload{Personal: "Jane Doe; person@example.test"})
 	})
 	if err == nil {
 		t.Fatal("unregistered audit payload committed")
@@ -53,7 +53,7 @@ func TestAuditWriterPreservesNonAccountProvenance(t *testing.T) {
 			for _, kind := range []capability.SubjectKind{capability.SubjectMachine, capability.SubjectService, capability.SubjectOperator, capability.SubjectLocal} {
 				p := capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: kind, ID: name}, Binding: capability.Binding{Holder: name}}, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "verified-prefix"}}
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
-					return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditPrincipalActor(p)}, auditSecretRelease{Name: digestAudit("KEY"), Holder: digestAudit(name)})
+					return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditPrincipalActor(p)}, auditSecretRelease{Name: digestAudit("KEY"), Holder: digestAudit(name)})
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -81,7 +81,7 @@ func TestAuditWriterRequiresClosedActor(t *testing.T) {
 	s := authorityStore(t)
 	for _, actor := range []auditActor{{}, {system: "caller-selected"}, {subject: capability.Subject{Kind: "caller-selected", ID: "account"}}, {system: auditController, subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}}} {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: actor}, auditSecretRelease{Name: digestAudit("KEY")})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: actor}, auditSecretRelease{Name: digestAudit("KEY")})
 		}); err == nil {
 			t.Fatalf("invalid actor committed: %+v", actor)
 		}
@@ -93,7 +93,7 @@ func TestAuditWriterPreservesAccountKindWithoutLookup(t *testing.T) {
 	s := authorityStore(t)
 	p := capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "verified-account"}}}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditPrincipalActor(p)}, auditSecretRelease{Name: digestAudit("KEY")})
+		return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditPrincipalActor(p)}, auditSecretRelease{Name: digestAudit("KEY")})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestAuditWriterDistinguishesPrincipalProvenance(t *testing.T) {
 			next.Capability.Subject.ID = "other-runner"
 		}
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditPrincipalActor(next)}, auditSecretRelease{Name: digestAudit("KEY")})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditPrincipalActor(next)}, auditSecretRelease{Name: digestAudit("KEY")})
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestAuditWriterRejectsSystemActorsForOtherKinds(t *testing.T) {
 					allowed = allowed || candidate == system
 				}
 				err := s.inTx(t.Context(), func(tx *storeTx) error {
-					return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: system}}, tc.payload)
+					return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditActor{system: system}}, tc.payload)
 				})
 				if (err == nil) != allowed {
 					t.Errorf("system=%s allowed=%v err=%v", system, allowed, err)

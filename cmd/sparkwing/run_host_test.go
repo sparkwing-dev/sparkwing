@@ -652,7 +652,7 @@ func FuzzDetachedIntakeDiagnosticsNeverExposeArguments(f *testing.F) {
 		deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 			runtime, err := resolve(ctx, options)
 			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-				cause := error(errors.New("intake failed: " + secret))
+				cause := errors.New("intake failed: " + secret)
 				if canonical {
 					cause = &apierr.Error{Code: apierr.InvalidArgs, Message: "intake failed: " + secret}
 				}

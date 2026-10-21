@@ -34,11 +34,11 @@ func (o *Operator) CreateOperatorTeam(ctx context.Context, a capability.Authoriz
 		if err != nil {
 			return err
 		}
-		now := tx.now().UnixNano()
+		now := tx.now(ctx).UnixNano()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO accounts(id,email,name,active_team,created_at,updated_at) VALUES (?,'',?,?,?,?)`, account, displayName, slug, now, now); err != nil {
 			return err
 		}
-		if err := createTeamTx(ctx, tx, account, Team(slug), displayName, auditPrincipalActor(p), tx.now()); err != nil {
+		if err := createTeamTx(ctx, tx, account, Team(slug), displayName, auditPrincipalActor(p), tx.now(ctx)); err != nil {
 			return err
 		}
 		tx.createdTeam = &TeamInfo{Slug: Team(slug), CreatedBy: account}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -71,7 +70,7 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 					code, raw = f.do(http.MethodPatch, "/api/v1/team/members/"+erin.ID, f.ownerA, map[string]string{"role": "editor"})
 				case "deleted":
 					code = http.StatusNoContent
-					if _, err := f.st.DeleteAccount(ctx, erin.ID, time.Now().UTC()); err != nil {
+					if _, err := f.st.DeleteAccount(ctx, erin.ID); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -277,14 +277,14 @@ func FuzzRemoteReconciliationPreservesTerminalResult(f *testing.F) {
 	f.Add("previous", "source", uint64(9))
 	f.Add("", "", uint64(0))
 	f.Fuzz(func(t *testing.T, run, job string, sequence uint64) {
-		ref := controllerwire.NodeRef{RunID: "run-" + hex.EncodeToString([]byte(run)), NodeID: "job-" + hex.EncodeToString([]byte(job))}
+		ref := controllerwire.NodeRef{RunID: runspec.RunID("run-" + hex.EncodeToString([]byte(run))), NodeID: runspec.NodeID("job-" + hex.EncodeToString([]byte(job)))}
 		stateSeq := int64(sequence%(1<<62)) + 1
 		source := &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: ref, StateSeq: stateSeq}}
 		row := executionWireFixture()
 		row.Status, row.Outcome = "done", "success"
-		wireSource := &controllerwire.ReuseSource{Policy: string(source.Kind), Result: &controllerwire.MaterializedResultSource{RunID: ref.RunID, JobID: ref.NodeID, StateSeq: stateSeq}}
+		wireSource := &controllerwire.ReuseSource{Policy: string(source.Kind), Result: &controllerwire.MaterializedResultSource{RunID: string(ref.RunID), JobID: string(ref.NodeID), StateSeq: stateSeq}}
 		wire := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{Kind: string(store.Materialize), Job: row, Source: wireSource}}
-		result, err := (&RemoteOwnerStore{Controller: wire}).ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "target", NodeID: row.ID}, Policy: source.Kind, Source: source, MaterializeOnly: true})
+		result, err := (&RemoteOwnerStore{Controller: wire}).ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "target", NodeID: runspec.NodeID(row.ID)}, Policy: source.Kind, Source: source, MaterializeOnly: true})
 		if err != nil || !reflect.DeepEqual(wire.request.Source, wireSource) || !reflect.DeepEqual(result.Source, source) {
 			t.Fatalf("terminal result fence changed: error=%v", err)
 		}

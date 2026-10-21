@@ -35,7 +35,7 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 	namespace.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
 	for _, row := range nodes {
 		var job nodeproto.JobSpec
-		if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || job.ID != row.Ref.NodeID {
+		if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || runspec.NodeID(job.ID) != row.Ref.NodeID {
 			return errors.New("persisted mask namespace has an invalid job")
 		}
 		namespace.Jobs = append(namespace.Jobs, job)

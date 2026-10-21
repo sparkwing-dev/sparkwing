@@ -30,8 +30,14 @@ type BillingStanding struct {
 }
 
 // BillingStanding reports the team's history and balance backed standing.
-func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error) {
-	return trustStandingTx(ctx, storeRowQuerier{t.s}, t.team, now)
+func (t *Tenant) BillingStanding(ctx context.Context) (out BillingStanding, err error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackOrLog(tx)
+
+	return trustStandingTx(ctx, tx, t.team, tx.now(ctx))
 }
 
 func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (BillingStanding, error) {
@@ -110,6 +116,6 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	if err != nil {
 		return before, after, err
 	}
-	err = tx.operator.recordAudit(tx, auditContext{Team: t.team, Actor: actor, At: now}, auditTrust{ReceiptID: subject, Before: auditTrustValue(before.Trust), After: auditTrustValue(after.Trust), StandingBefore: auditStanding(before.Tier), StandingAfter: auditStanding(after.Tier)})
+	err = tx.operator.recordAudit(ctx, tx, auditContext{Team: t.team, Actor: actor, At: now}, auditTrust{ReceiptID: subject, Before: auditTrustValue(before.Trust), After: auditTrustValue(after.Trust), StandingBefore: auditStanding(before.Tier), StandingAfter: auditStanding(after.Tier)})
 	return before, after, err
 }

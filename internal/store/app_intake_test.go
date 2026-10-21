@@ -42,7 +42,8 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 		}
 		in.Subscription = &sub
 	}
-	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery", *now); err != nil {
+	s.SetTestClock(t, func() time.Time { return *now })
+	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery"); err != nil {
 		t.Fatal(err)
 	}
 	s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {

@@ -61,12 +61,12 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 		}
 		grant := CreditGrant{
 			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(),
+			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(ctx),
 		}
 		if err := l.insertGrant(ctx, grant); err != nil {
 			return CreditReversal{}, err
 		}
-		if err := recordGrantEventTx(tx, grant, actor, auditGrant{}); err != nil {
+		if err := recordGrantEventTx(ctx, tx, grant, actor, auditGrant{}); err != nil {
 			return CreditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true
@@ -111,7 +111,7 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
 		return false, err
 	}
-	if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(disputeID), PaymentID: digestAudit(paymentID)}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(disputeID), PaymentID: digestAudit(paymentID)}); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -153,7 +153,7 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 		return 0, err
 	}
 	for _, id := range released {
-		if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(id), Released: true, NoFault: noFault}); err != nil {
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(id), Released: true, NoFault: noFault}); err != nil {
 			return 0, err
 		}
 	}
@@ -172,7 +172,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 		return err
 	}
 	if refusal.reason != "" {
-		return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardRefused})
+		return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardRefused})
 	}
 	addedAt := now.UnixNano()
 	if !c.AddedAt.IsZero() {
@@ -196,7 +196,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 	    WHERE team = ? AND refill_blocked = 1 AND payment_method <> ?`, string(team), c.PaymentMethod); err != nil {
 		return err
 	}
-	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardAdded}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardAdded}); err != nil {
 		return err
 	}
 	return nil

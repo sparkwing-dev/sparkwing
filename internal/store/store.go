@@ -1007,17 +1007,16 @@ ORDER BY node_id, attempt, started_at, step_id`, string(t.team), runID)
 	return out, rows.Err()
 }
 
-// safety: a rollback after a successful commit reports ErrTxDone, which is the
-// ordinary path; any other failure lost a cleanup and is worth a line.
+// safety: cleanup failures must stay visible when the caller has already returned.
 func rollbackOrLog(tx *storeTx) {
-	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+	if err := tx.Rollback(); err != nil {
 		slog.Warn("rolling back a store transaction failed", "err", err)
 	}
 }
 
 // safety: closes the cursor on an early return, where the caller's own Close
 // never runs; a second close after that one reports nothing.
-func closeRowsOrLog(rows *sql.Rows) {
+func closeRowsOrLog(rows rowCursor) {
 	if err := rows.Close(); err != nil {
 		slog.Warn("closing a store row cursor failed", "err", err)
 	}
@@ -1074,7 +1073,7 @@ SELECT run_id, seq, node_id, kind, ts, payload
 // AppendEvent writes the run's next event in order.
 func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now())
+		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("run", runID)
 		}

@@ -40,7 +40,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 				}
 				return nil
 			})
-			change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &record}}}
+			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &record}}}
 			_, err := tenant.TransitionNode(t.Context(), change)
 			if (scenario == "success") != (err == nil) {
 				t.Fatalf("%s: %v", scenario, err)
@@ -75,7 +75,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 func TestResultRecordsFromAnEarlierAttemptCannotFinishARetry(t *testing.T) {
 	s, records, finish := blobResultFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"retry":{"set":true,"value":1}}`))
-	retry := NodeTransition{Ref: finish.Ref, Actor: finish.Actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(2), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}}
+	retry := nodeTransition{Ref: finish.Ref, Actor: finish.Actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(2), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}}
 	if applied, err := records.tenant.TransitionNode(t.Context(), retry); err != nil || applied.Attempt != 3 {
 		t.Fatalf("retry: %+v, %v", applied, err)
 	}

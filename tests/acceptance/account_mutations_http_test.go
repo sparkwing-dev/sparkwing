@@ -61,7 +61,7 @@ var _ controller.AccountWriter = (*store.Operator)(nil)
 func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {
 	f := newSessionFlow(t)
 	now := time.Now()
-	member, err := f.store.AsOperator().ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-member", Email: "real-member@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
+	member, err := f.store.AsOperator().ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-member", Email: "real-member@example.test", EmailVerified: true}, store.SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {
 	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at,linked) VALUES ('github','linked',?,'',0,?,1)`, member.Account.ID, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	owner, err := f.store.AsOperator().ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-owner", Email: "real-owner@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
+	owner, err := f.store.AsOperator().ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-owner", Email: "real-owner@example.test", EmailVerified: true}, store.SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}

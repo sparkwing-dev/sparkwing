@@ -177,7 +177,8 @@ func appReference(t *testing.T, s *Store, ref, sha, pin string) (*Tenant, string
 		t.Fatal(err)
 	}
 	digest := "reference-" + strings.ReplaceAll(ref, "/", "-") + pin
-	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery", now); err != nil {
+	s.SetTestClock(t, func() time.Time { return now })
+	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery"); err != nil {
 		t.Fatal(err)
 	}
 	app := runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: now}
@@ -215,11 +216,12 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 	t.Helper()
 	tenant := referenceWorld(t, s, "")
 	now := s.now()
+	s.SetTestClock(t, func() time.Time { return now })
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
 		ID: "schedule-9", RepoPath: "https://github.com/acme/repo-9.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
 		GitBranch: "main", ArmedBy: "owner@example.com", Args: map[string]string{"message": "hello"},
-	}, now)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,8 +240,9 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 	switch mode {
 	case "fire", "locked":
 		result, err = tenant.AdmitScheduledRun(t.Context(), sched, now)
+		s.SetTestClock(t, func() time.Time { return now })
 	case "override":
-		if err := tenant.SetCronOverride(t.Context(), sched.ID, CronOverride{TZSet: true, TZ: "Europe/Paris"}, now); err != nil {
+		if err := tenant.SetCronOverride(t.Context(), sched.ID, CronOverride{TZSet: true, TZ: "Europe/Paris"}); err != nil {
 			t.Fatal(err)
 		}
 		if sched, err = tenant.GetCronSchedule(t.Context(), sched.ID); err != nil {

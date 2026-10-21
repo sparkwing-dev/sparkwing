@@ -120,7 +120,9 @@ func assertBackdatedOccurrenceCannotExpireAudit(t *testing.T, s *store.Store) {
 	t.Helper()
 	now := time.Now()
 	old := now.Add(-401 * 24 * time.Hour)
-	signed, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("backdated", "person@example.test"), store.SignUpConditions{}, old)
+	s.SetTestClock(t, func() time.Time { return old })
+	signed, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("backdated", "person@example.test"), store.SignUpConditions{})
+	s.SetTestClock(t, func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}

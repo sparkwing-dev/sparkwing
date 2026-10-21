@@ -106,7 +106,7 @@ func TestOwnerInputMatchesPersistedTriggerFence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := teststore.SeedTriggerClaim(state, t.Context(), "team", award.RunID, store.Actor{Holder: award.Binding.Holder, CapabilityPrefix: award.Capability, Generation: award.Binding.Generation}, award.LeaseExpiresAt, nil); err != nil {
+	if err := teststore.SeedTriggerClaim(state, t.Context(), "team", award.RunID, store.Actor{CapabilityPrefix: award.Capability, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)}}, award.LeaseExpiresAt, nil); err != nil {
 		t.Fatal(err)
 	}
 	tenant := teststore.ForTeam(t, state, "team")

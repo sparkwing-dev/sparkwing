@@ -120,7 +120,7 @@ func TestProcessAuthority(t *testing.T) {
 			var issued []capability.Issued
 			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				deps.Bind = func(ctx context.Context, in NodeInput) (ProcessGrant, error) {
-					binding = capability.Binding{Kind: capability.BindingNode, RunID: in.Accepted.RunID, NodeID: in.NodeID, Holder: in.Authority.Holder, Generation: in.Generation, Attempt: in.Attempt}
+					binding = capability.Binding{Kind: capability.BindingNode, RunID: in.Accepted.RunID, NodeID: in.NodeID, Holder: in.Authority.Holder, Generation: int64(in.Generation), Attempt: int64(in.Attempt)}
 					parent.snapshot.Authorities[0].Principal.Capability.Binding = binding
 					parent.snapshot.Binding.Current = binding
 					spec.Binding, service.Job = binding, in.Accepted.Plan.Jobs[0]

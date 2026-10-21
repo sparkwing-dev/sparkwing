@@ -91,7 +91,8 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund"); err != nil {
 				t.Fatal(err)
 			}
-			due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+			s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+			due, err := s.AsOperator().DueCardRefunds(ctx)
 			if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
 				t.Fatalf("terminal callback lost or applied twice: %+v, %v", due, err)
 			}

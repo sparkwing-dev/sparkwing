@@ -225,7 +225,7 @@ func TestScheduleHTTPRetainedHistoryAndCounts(t *testing.T) {
 	for i := range 60 {
 		at := base.Add(time.Duration(i) * time.Hour)
 		fire := &store.CronFire{DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeMissed, Detail: "seeded"}
-		if err := f.writer.ResolveCronDue(t.Context(), id, at, nil, fire, at); err != nil {
+		if err := f.writer.ResolveCronDue(t.Context(), id, at, nil, fire); err != nil {
 			t.Fatal(err)
 		}
 	}

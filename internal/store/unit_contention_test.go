@@ -77,7 +77,7 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 						t.Fatalf("claim winners = %d", len(claims))
 					}
 					claim := <-claims
-					if claim.Award.Generation != int64(round+1) {
+					if int64(claim.Award.Generation) != int64(round+1) {
 						t.Fatalf("generation = %d", claim.Award.Generation)
 					}
 					start = make(chan struct{})

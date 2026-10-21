@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -21,10 +23,10 @@ func runCompletionFixture(t *testing.T, s *store.Store) (*store.Tenant, store.Fi
 	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: plan.RunID, Actor: plan.Actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	return tenant, store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunTransition{RunID: plan.RunID, To: store.RunSuccess, Cause: store.RunFinish, Actor: plan.Actor}}
+	return tenant, store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(plan.RunID), Cause: store.RunFinish, Actor: plan.Actor}}
 }
 
 func TestRunCompletionHasOneCommittedWinner(t *testing.T) {
@@ -56,18 +58,18 @@ func TestRunCompletionHasOneCommittedWinner(t *testing.T) {
 	if wins.Load() != 1 {
 		t.Fatalf("committed winners=%d, want one", wins.Load())
 	}
-	before, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+	before, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 	if err != nil || before.FinishedAt == nil || before.State != store.RunSuccess {
 		t.Fatalf("winning run: %+v, %v", before, err)
 	}
 	for _, state := range []store.RunState{store.RunSuccess, store.RunFailed, store.RunCancelled} {
 		retry := finish
-		retry.Transition.To, retry.Transition.MaskedError = state, "late report"
+		retry.Transition.MaskedError = string(state) + " late report"
 		if _, err := other.FinishRunAndUnit(t.Context(), retry); err == nil {
 			t.Fatalf("different terminal report %s accepted", state)
 		}
 	}
-	after, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+	after, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("late report rewrote terminal run: %+v, %v", after, err)
 	}
@@ -77,15 +79,16 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 	tenant, finish := runCompletionFixture(t, s)
 	foreign := tenantFor(t, s, "foreign")
-	before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
-	for _, state := range []store.RunState{"", store.RunPending, store.RunRunning, "invalid"} {
+	before := readMutationSnapshot(t, tenant, s, string(finish.Unit.RunID))
+
+	for _, cause := range []store.RunCause{store.RunStart, store.RunCancel, store.RunPublish, store.RunOwnerLost} {
 		invalid := finish
-		invalid.Transition.To = state
+		invalid.Transition.Cause = cause
 		if _, err := tenant.FinishRunAndUnit(t.Context(), invalid); err == nil {
-			t.Fatalf("nonterminal finish %q accepted", state)
+			t.Fatalf("non-completion cause %s accepted", cause)
 		}
-		if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
-			t.Fatal("invalid finish changed persisted state")
+		if after := readMutationSnapshot(t, tenant, s, string(finish.Unit.RunID)); !reflect.DeepEqual(before, after) {
+			t.Fatal("invalid completion changed persisted state")
 		}
 	}
 
@@ -100,14 +103,14 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 		case 1:
 			forged.Transition.Actor.Authority.ID += suffix
 		case 2:
-			forged.Transition.Actor.Owner.Generation += 1 + rng.Int64N(100)
+			forged.Transition.Actor.Owner.Generation += runspec.ClaimGeneration(1 + rng.Int64N(100))
 		case 3:
-			forged.Unit.Generation += 1 + rng.Int64N(100)
+			forged.Unit.Generation += runspec.ClaimGeneration(1 + rng.Int64N(100))
 		case 4:
 			forged.Unit.Holder += suffix
 			forged.Transition.Actor.Owner = forged.Unit
 		case 5:
-			forged.Unit.RunID += suffix
+			forged.Unit.RunID += runspec.RunID(suffix)
 			forged.Transition.Actor.Owner = forged.Unit
 		case 6:
 			target = foreign
@@ -117,7 +120,7 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 		if _, err := target.FinishRunAndUnit(t.Context(), forged); err == nil {
 			t.Fatalf("forged owner accepted: %+v", forged)
 		}
-		if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
+		if after := readMutationSnapshot(t, tenant, s, string(finish.Unit.RunID)); !reflect.DeepEqual(before, after) {
 			t.Fatal("refused owner changed persisted state")
 		}
 	}
@@ -131,14 +134,14 @@ func TestRunCompletionFailureRollsBackOwnerAndVerdict(t *testing.T) {
 		t.Run(table, func(t *testing.T) {
 			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
 			tenant, finish := runCompletionFixture(t, s)
-			before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
+			before := readMutationSnapshot(t, tenant, s, string(finish.Unit.RunID))
 			if _, err := s.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_completion_event BEFORE INSERT ON `+table+` BEGIN SELECT RAISE(ABORT,'event refused'); END`); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
 				t.Fatal("completion ignored failed event")
 			}
-			if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
+			if after := readMutationSnapshot(t, tenant, s, string(finish.Unit.RunID)); !reflect.DeepEqual(before, after) {
 				t.Fatal("failed completion committed partial state")
 			}
 			if _, err := s.DB().ExecContext(t.Context(), `DROP TRIGGER refuse_completion_event`); err != nil {

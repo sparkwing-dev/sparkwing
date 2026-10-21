@@ -57,7 +57,7 @@ func TestScheduleFactoryUsesOwnedStoreForPinsAndTicks(t *testing.T) {
 	if err := os.WriteFile(compiled, []byte("pipeline fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)
+	now := time.Now().UTC()
 	service.Now = func() time.Time { return now }
 	armed, err := service.Arm(t.Context(), root, crons.ArmOptions{Prove: func(context.Context, string, string) (crons.Proof, error) {
 		return crons.Proof{Binary: compiled}, nil

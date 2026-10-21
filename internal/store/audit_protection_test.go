@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
@@ -16,7 +15,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','person@example.test',1,1)`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditAccountActor("account")}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
+		return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditAccountActor("account")}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +30,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,run_id,actor) SELECT id,ts,team,kind,subject_id,run_id,'forged' FROM audit_events`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
+		return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +106,7 @@ func TestMemberRemovalRequiresCommittedAudit(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].Actor != "owner" || rows[0].SubjectID != "member" || rows[0].Attrs["operation"] != "membership.removed" {
 		t.Fatalf("membership audit=%+v: %v", rows, err)
 	}
-	if _, err := s.DeleteAccount(t.Context(), "member", time.Now()); err != nil {
+	if _, err := s.DeleteAccount(t.Context(), "member"); err != nil {
 		t.Fatal(err)
 	}
 	rows, err = tenant.BusinessEvents(t.Context(), "team.mutated", 1000, "")
@@ -120,19 +119,19 @@ func TestAuditOwnerRejectsEmails(t *testing.T) {
 	s := authorityStore(t)
 	writers := []func(*storeTx) error{
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Team: "person@example.test", Actor: auditAccountActor("account")}, auditTeamCreation{AccountID: "account"})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "person@example.test", Actor: auditAccountActor("account")}, auditTeamCreation{AccountID: "account"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: auditAccountActor("account")}, auditRunDeletion{RunID: "person@example.test"})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Actor: auditAccountActor("account")}, auditRunDeletion{RunID: "person@example.test"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: auditAccountActor("account")}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Actor: auditAccountActor("account")}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
 		},
 		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "account", Via: "person@example.test"})
+			return tx.operator.recordAudit(t.Context(), tx, auditContext{Actor: auditActor{system: auditController}}, auditAdmission{AccountID: "account", Via: "person@example.test"})
 		},
 	}
 	for _, write := range writers {

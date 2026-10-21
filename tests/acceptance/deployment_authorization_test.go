@@ -38,6 +38,7 @@ func deploymentBoundary(grant capability.Grant) *credentialBoundary {
 	b := consoleBoundary()
 	p := &b.snapshot.Authorities[0].Principal
 	p.Class = capability.CredentialBearer
+	p.Capability.Subject.Kind = capability.SubjectOperator
 	p.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "deployment"}
 	p.Capability.Prefix = p.Authority.ID
 	p.Capability.Grants = []capability.Grant{grant}

@@ -115,7 +115,7 @@ func TestExpansionReplayStillRequiresLiveOwner(t *testing.T) {
 }
 
 func TestExpansionEvalKeepsSourceAndLeaseFencesSeparate(t *testing.T) {
-	for _, problem := range []string{"", "eval_generation", "owner_generation", "owner_expiry"} {
+	for _, problem := range []string{"", "eval_generation", "owner_generation", "owner_expiry", "fence_source", "fence_generation"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, now, request := expansionFixture(t)
 			unitID, err := encodeAwardUnit(UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 2})
@@ -127,10 +127,15 @@ func TestExpansionEvalKeepsSourceAndLeaseFencesSeparate(t *testing.T) {
 			eval.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: unitID, Holder: "eval-host", Generation: 8}}
 			authorityPersist(t, tenant.s, eval)
 			request.Actor.Authority.ID, request.Actor.CapabilityPrefix = eval.Prefix, eval.Prefix
+			request.Actor.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4,1,1)`, now.Add(time.Minute).UnixNano())
 			switch problem {
+			case "fence_source":
+				request.Actor.Owner.SourceNodeID = "other-job"
+			case "fence_generation":
+				request.Actor.Owner.Generation = request.Actor.Owner.SourceGeneration
 			case "eval_generation":
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET generation=9`)
 			case "owner_generation":

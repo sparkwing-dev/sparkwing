@@ -80,7 +80,7 @@ func (u JobUpload) check(input NodeInput, kind blob.Kind) error {
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil || input.Accepted.SpecHash == "" || input.Accepted.PlanHash == "" || string(spec.Hash) != input.Accepted.SpecHash || string(spec.PlanHash) != input.Accepted.PlanHash {
 		return executorError(apierr.SpecDrift, "job upload requires an accepted run spec")
 	}
-	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
+	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation), Attempt: int64(input.Attempt)}
 	if attempt.Team == "" || attempt.RunID == "" || attempt.NodeID == "" || attempt.Generation < 1 || attempt.Attempt < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" {
 		return errors.New("job upload requires an awarded job attempt")
 	}

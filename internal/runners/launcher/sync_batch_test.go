@@ -8,6 +8,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type syncControl struct {
@@ -22,7 +24,7 @@ func (c syncControl) Sync(_ context.Context, observations []CloudJobObservation)
 func TestSyncReconcilesAllPersistedJobsTogether(t *testing.T) {
 	l, kube, boundary, control := fixture()
 	for _, id := range []string{"first", "second"} {
-		control.award.Binding.UnitID, control.award.Binding.NodeID = id, id
+		control.award.Binding.UnitID, control.award.Binding.NodeID = id, runspec.NodeID(id)
 		if _, err := l.LaunchOne(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +67,7 @@ func FuzzSyncRejectsUnboundCleanup(f *testing.F) {
 	f.Fuzz(func(t *testing.T, mode uint8, changed string, reverse bool) {
 		l, kube, boundary, control := fixture()
 		for _, id := range []string{"first", "second"} {
-			control.award.Binding.UnitID, control.award.Binding.NodeID = id, id
+			control.award.Binding.UnitID, control.award.Binding.NodeID = id, runspec.NodeID(id)
 			if _, err := l.LaunchOne(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +113,7 @@ func FuzzSyncRejectsUnboundCleanup(f *testing.F) {
 func TestSyncDefersOneCorruptAwardAndRetiresItsSibling(t *testing.T) {
 	l, kube, boundary, control := fixture()
 	for _, id := range []string{"broken", "finished"} {
-		control.award.Binding.UnitID, control.award.Binding.NodeID = id, id
+		control.award.Binding.UnitID, control.award.Binding.NodeID = id, runspec.NodeID(id)
 		if _, err := l.LaunchOne(t.Context()); err != nil {
 			t.Fatal(err)
 		}

@@ -220,7 +220,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
-		CreatedBy: req.CreatedBy, CreatedAt: tx.now(),
+		CreatedBy: req.CreatedBy, CreatedAt: tx.now(ctx),
 	}
 	// safety: the lock is what makes the reference check and the insert one
 	// step, so two deliveries of the same grant cannot both find nothing.
@@ -243,7 +243,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	if err := l.insertGrant(ctx, grant); err != nil {
 		return CreditGrantResult{}, err
 	}
-	if err := recordGrantEventTx(tx, grant, actor, auditGrant{}); err != nil {
+	if err := recordGrantEventTx(ctx, tx, grant, actor, auditGrant{}); err != nil {
 		return CreditGrantResult{}, err
 	}
 	return CreditGrantResult{Grant: grant, Created: true}, nil
@@ -251,10 +251,10 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 
 // safety: a paid grant is the checkout's payment arriving, so it is recorded
 // as the checkout paid rather than as a grant.
-func recordGrantEventTx(tx *storeTx, g CreditGrant, actor auditActor, payload auditGrant) error {
+func recordGrantEventTx(ctx context.Context, tx *storeTx, g CreditGrant, actor auditActor, payload auditGrant) error {
 	payload.GrantID, payload.Kind, payload.AmountMicro = g.ID, auditGrantKind(g.Kind), g.AmountMicro
 	payload.Reference, payload.Reverses = digestAudit(g.Reference), digestAudit(g.Reverses)
-	return tx.operator.recordAudit(tx, auditContext{At: g.CreatedAt, Team: g.Team, Actor: actor}, payload)
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: g.CreatedAt, Team: g.Team, Actor: actor}, payload)
 }
 
 // safety: a webhook replay carries the terms it carried the first time, so

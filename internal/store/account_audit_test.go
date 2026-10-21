@@ -5,7 +5,6 @@ import (
 	"math/rand/v2"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -41,7 +40,7 @@ func TestAuditReaderLabelsDeletedAccount(t *testing.T) {
 	if err != nil || len(before) != 1 || before[0].Actor != account.Account.ID {
 		t.Fatalf("live account: %+v %v", before, err)
 	}
-	if _, err := s.DeleteAccount(t.Context(), account.Account.ID, time.Now()); err != nil {
+	if _, err := s.DeleteAccount(t.Context(), account.Account.ID); err != nil {
 		t.Fatal(err)
 	}
 	after, err := tn.BusinessEvents(t.Context(), store.BusinessEventTeamCreated, 10, "")

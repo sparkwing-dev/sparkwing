@@ -208,7 +208,8 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 			t.Logf("older completion accepted: %v", err)
 			return false
 		}
-		standing, err := tenant.SpendStanding(t.Context(), second)
+		tenant.s.SetTestClock(t, func() time.Time { return second })
+		standing, err := tenant.SpendStanding(t.Context())
 		if err != nil || standing.Card.PaymentMethod != newer.PaymentMethod || !standing.Card.AddedAt.Equal(second) {
 			t.Logf("card or timestamp changed: %+v, %v", standing.Card, err)
 			return false
@@ -230,7 +231,8 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	blobAccountingDiskStore(t, s)
-	standing, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	standing, err := tenant.SpendStanding(t.Context())
 	if err != nil || standing.Card.PaymentMethod != "newer" || !standing.Card.AddedAt.Equal(now.Add(-time.Second)) {
 		t.Fatalf("setup order did not survive reopening: %+v, %v", standing.Card, err)
 	}

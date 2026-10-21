@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -268,7 +269,7 @@ func auditOneOf[T ~string](value T, choices ...string) bool {
 
 // Releases, mutations and deletion authorizations retain every occurrence.
 // Other facts deduplicate by team, kind and subject in the committing transaction.
-func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayload) error {
+func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext, payload auditPayload) error {
 	actor, accountActor, err := c.Actor.projection()
 	if err != nil {
 		return err
@@ -364,7 +365,7 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		return fmt.Errorf("%w: invalid audit payload or actor for kind", ErrInvalidInput)
 	}
 	if ev.At.IsZero() {
-		ev.At = tx.now()
+		ev.At = tx.now(ctx)
 	}
 	attrs, err := json.Marshal(payload)
 	if err != nil {
@@ -389,7 +390,7 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	if ev.Team == "" {
 		team = nil
 	}
-	_, err = tx.Exec(`INSERT INTO audit_events (id,ts,team,account,kind,subject_id,actor,attrs,run_id,actor_is_account,subject_is_account)
+	_, err = tx.ExecContext(ctx, `INSERT INTO audit_events (id,ts,team,account,kind,subject_id,actor,attrs,run_id,actor_is_account,subject_is_account)
  VALUES (?,?,?,?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END) ON CONFLICT DO NOTHING`, id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID, ev.Actor, string(attrs), ev.RunID, boolInt(accountActor), ev.SubjectID)
 	return err
 }

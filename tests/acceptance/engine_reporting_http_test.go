@@ -201,10 +201,10 @@ func TestEngineReportingAuthorities(t *testing.T) {
 						t.Fatalf("step fence = %+v", f.step.Attempt)
 					}
 				}
-				if actor.Kind != kind || actor.Generation != generation || actor.Authority != b.snapshot.Authorities[0].Principal.Authority {
+				if actor.Kind != kind || actor.Generation != runspec.ClaimGeneration(generation) || actor.Authority != b.snapshot.Authorities[0].Principal.Authority {
 					t.Fatalf("actor = %+v", actor)
 				}
-				if authority == "owner" && actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "runner", Generation: 4}) {
+				if authority == "owner" && actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "runner", Generation: 4}}) {
 					t.Fatalf("owner = %+v", actor.Owner)
 				}
 			})
@@ -471,7 +471,7 @@ func TestEngineTypedStepAttemptProperty(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = current
 				b.snapshot.Binding.Current.Attempt = current
 			}
-			f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: current}}
+			f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: runspec.AttemptOrdinal(current)}}
 			start := time.Date(2026, 10, 14, 12, 0, 0, int(seed%1000000000), time.UTC)
 			finish := start.Add(time.Nanosecond)
 			input := controllerwire.StepReportRequest{StepID: "compile", State: "passed", SourceAttempt: observed, StartedAt: &start, FinishedAt: &finish, MaskedError: "masked"}

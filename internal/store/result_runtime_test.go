@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: "machine", Generation: 7}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "machine", Generation: 7}}
 	return s, &Tenant{s: s, team: "a"}, actor, runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7}
 }
 
@@ -215,7 +216,7 @@ func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
 func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(`{"retry":{"set":true,"value":2}}`))
-	ref := controllerwire.NodeRef{RunID: attempt.RunID, NodeID: attempt.NodeID}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
 	for retry := range 2 {
 		if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "old result"}); err != nil {
 			t.Fatal(err)
@@ -223,13 +224,45 @@ func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, Level: "warning", Message: "old annotation"}); err != nil {
 			t.Fatal(err)
 		}
-		applied, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(attempt.Attempt + int64(retry)), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
+		applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(attempt.Attempt + int64(retry)), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		node, err := tenant.GetNode(t.Context(), ref.RunID, ref.NodeID)
-		if err != nil || node.Summary != "" || len(node.Annotations) != 0 || int64(node.AttemptsConsumed) != applied.Attempt {
+		node, err := tenant.GetNode(t.Context(), string(ref.RunID), string(ref.NodeID))
+		if err != nil || node.Summary != "" || len(node.Annotations) != 0 || int64(node.AttemptsConsumed) != int64(applied.Attempt) {
 			t.Fatalf("new attempt inherited metadata: %+v, %v", node, err)
 		}
+	}
+}
+
+func TestRecordStepReturnsClockFailure(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	started := s.now().Add(-time.Second)
+	report := StepReport{Attempt: attempt, Actor: actor, StepID: "compile", State: "running", StartedAt: &started}
+	if err := tenant.RecordStep(t.Context(), report); err != nil {
+		t.Fatal(err)
+	}
+	connection := recordStoreFences(t, s)
+	clockErr := errors.New("clock unavailable during step completion")
+	connection.beforeQuery = func(query string) error {
+		if strings.Contains(query, "SELECT status,error,started_at,source_started_at,source_finished_at FROM node_steps") {
+			s.pinnedClock = nil
+			s.clock = nil
+			connection.beforeQuery = func(query string) error {
+				if query == databaseTimeSQL(s.dialect) {
+					return clockErr
+				}
+				return nil
+			}
+		}
+		return nil
+	}
+	report.State = "passed"
+	if err := tenant.RecordStep(t.Context(), report); !errors.Is(err, clockErr) {
+		t.Fatalf("step clock failure = %v", err)
+	}
+	var state string
+	if err := s.db.QueryRow(`SELECT status FROM node_steps WHERE step_id='compile'`).Scan(&state); err != nil || state != "running" {
+		t.Fatalf("step after failure = %q: %v", state, err)
 	}
 }

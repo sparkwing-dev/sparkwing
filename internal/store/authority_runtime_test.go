@@ -303,7 +303,7 @@ func issueFixtureAward(t *testing.T, s *Store, tx *storeTx, spec capability.Awar
 		return capability.Issued{}, err
 	}
 	expiry := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
-	prospective := &awardRow{team: "a", run: unit.RunID, node: unit.NodeID, generation: 7, holder: "machine", lease: sql.NullInt64{Int64: expiry, Valid: true}}
+	prospective := &awardRow{team: "a", run: string(unit.RunID), node: string(unit.NodeID), generation: 7, holder: "machine", lease: sql.NullInt64{Int64: expiry, Valid: true}}
 	issued, err := s.issueTx(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec}, prospective)
 	if err != nil {
 		return capability.Issued{}, err
@@ -311,7 +311,7 @@ func issueFixtureAward(t *testing.T, s *Store, tx *storeTx, spec capability.Awar
 	if spec.Unit == capability.UnitNode {
 		_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET status='running',claimed_by='machine',capability_prefix=?,lease_expires_at=?,generation=7,attempt=2,started_at=1 WHERE run_id=? AND node_id=?`, issued.Capability.Prefix, expiry, unit.RunID, unit.NodeID)
 	} else {
-		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
+		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
 	}
 	return issued, err
 }

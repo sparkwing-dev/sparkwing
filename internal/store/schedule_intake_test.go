@@ -19,12 +19,13 @@ func scheduleIntakeFixture(t *testing.T, suffix uint32) (*Tenant, CronSchedule, 
 	now := time.Unix(1700000000, 37).UTC()
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}
+	tenant.s.SetTestClock(t, func() time.Time { return now })
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
 		ID: fmt.Sprintf("schedule-%x", suffix), RepoPath: fmt.Sprintf("https://github.com/acme/repo-%x.git", suffix), GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
 		GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567", ArmedBy: "owner@example.com",
 		Args: map[string]string{"message": fmt.Sprintf("hello-%x", suffix)},
-	}, now)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +201,8 @@ func TestScheduleAdmissionCountsAllSchedulesAgainstArmedBy(t *testing.T) {
 	if _, err := tenant.AdmitScheduledRun(t.Context(), first, now); err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", GitBranch: first.GitBranch, LockedRef: first.LockedRef, Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy, GitHubInstallationID: first.GitHubInstallationID, GitHubRepositoryID: first.GitHubRepositoryID}, now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", GitBranch: first.GitBranch, LockedRef: first.LockedRef, Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy, GitHubInstallationID: first.GitHubInstallationID, GitHubRepositoryID: first.GitHubRepositoryID})
 	if err != nil {
 		t.Fatal(err)
 	}

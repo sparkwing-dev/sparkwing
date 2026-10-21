@@ -80,7 +80,7 @@ internal/sparks	5
 internal/sparkwingruntime	5
 internal/storage/logseg	24
 internal/storage/s3	1
-internal/store	264
+internal/store	261
 internal/store/internal/storetest	1
 internal/store/teststore	5
 internal/tokenpark	3

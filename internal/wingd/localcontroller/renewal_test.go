@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -18,7 +20,7 @@ func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
 		principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "award"}, Capability: capability.Capability{
 			Prefix: "award", Unit: capability.UnitTrigger, Binding: capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Holder: "holder", Generation: 2},
 		}}
-		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: "award", Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "holder", Generation: 2}}
+		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: "award", Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "holder", Generation: 2}}}
 		field %= 9
 		switch field {
 		case 1:
@@ -28,11 +30,11 @@ func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
 		case 3:
 			actor.CapabilityPrefix += value + "!"
 		case 4:
-			actor.Owner.RunID += value + "!"
+			actor.Owner.RunID += runspec.RunID(value + "!")
 		case 5:
 			actor.Owner.Holder += value + "!"
 		case 6:
-			actor.Owner.Generation ^= delta | 1
+			actor.Owner.Generation ^= runspec.ClaimGeneration(delta | 1)
 		case 7:
 			actor.Owner.Kind = store.OwnerController
 		case 8:

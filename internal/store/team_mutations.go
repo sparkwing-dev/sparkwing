@@ -46,11 +46,11 @@ func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability
 	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 		return err
 	}
-	return recordMutationAuditTx(tx, t.team, auditPrincipalActor(p), operation, subject)
+	return recordMutationAuditTx(ctx, tx, t.team, auditPrincipalActor(p), operation, subject)
 }
 
-func recordMutationAuditTx(tx *storeTx, team Team, actor auditActor, operation, subject string) error {
-	return tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: team, Actor: actor}, auditMutation{SubjectID: subject, Operation: auditOperation(operation)})
+func recordMutationAuditTx(ctx context.Context, tx *storeTx, team Team, actor auditActor, operation, subject string) error {
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: team, Actor: actor}, auditMutation{SubjectID: subject, Operation: auditOperation(operation)})
 }
 
 // RenameAuthorizedTeam changes the display name under current team administration.
@@ -61,7 +61,7 @@ func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if name == "" || len(name) > maxDisplayNameLen {
 			return fmt.Errorf("%w: a display name is 1 to %d characters", ErrInvalidInput, maxDisplayNameLen)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET display_name=?,updated_at=? WHERE name=?`, name, tx.now().UnixNano(), t.team); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET display_name=?,updated_at=? WHERE name=?`, name, tx.now(ctx).UnixNano(), t.team); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx, `SELECT name,display_name,created_by FROM teams WHERE name=?`, t.team).Scan(&out.Slug, &out.DisplayName, &out.CreatedBy)
@@ -109,7 +109,7 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		out, err = t.createInvitationTx(ctx, tx, p.Capability.Subject.ID, email, role, id, tx.now())
+		out, err = t.createInvitationTx(ctx, tx, p.Capability.Subject.ID, email, role, id, tx.now(ctx))
 		return err
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 // DeleteAuthorizedInvitation withdraws an open invitation under current administration.
 func (t *Tenant) DeleteAuthorizedInvitation(ctx context.Context, a capability.Authorized, id string) error {
 	return t.teamMutationTx(ctx, a, "DeleteAuthorizedInvitation", id, func(tx *storeTx, _ capability.Principal) error {
-		result, err := tx.ExecContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.now().UnixNano(), t.team, id)
+		result, err := tx.ExecContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.now(ctx).UnixNano(), t.team, id)
 		return credentialRowChanged(result, err)
 	})
 }
@@ -160,14 +160,14 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if !hasOther {
 			return ErrOnlyTeam
 		}
-		if _, err := t.markForDeletionTx(ctx, tx, p.Capability.Subject.ID, tx.now()); err != nil {
+		if _, err := t.markForDeletionTx(ctx, tx, p.Capability.Subject.ID, tx.now(ctx)); err != nil {
 			return err
 		}
 		out, err = teamDeletionTx(ctx, tx, t.team)
 		if err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, t.team, auditPrincipalActor(p), "DeleteAuthorizedTeam", string(t.team))
+		return recordMutationAuditTx(ctx, tx, t.team, auditPrincipalActor(p), "DeleteAuthorizedTeam", string(t.team))
 	})
 	if err != nil {
 		return TeamDeletion{}, err
@@ -242,7 +242,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
 			return err
 		}
-		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: auditPrincipalActor(p)}, auditRunDeletion{RunID: a.Target.RunID}); err != nil {
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditRunDeletion{RunID: a.Target.RunID}); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, a.Target.RunID)

@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -33,7 +35,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	snapshot := capability.AuthenticationSnapshot{Now: tx.now(), Binding: state}
+	snapshot := capability.AuthenticationSnapshot{Now: tx.now(ctx), Binding: state}
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
 	}
@@ -53,7 +55,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: run, NodeID: a.Target.NodeID})
+	row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(a.Target.NodeID)})
 	if err != nil {
 		return blob.Blob{}, err
 	}
@@ -61,7 +63,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 		return blob.Blob{}, blob.ErrNotFound
 	}
 	key := *row.OutputRecord
-	if key.Team != string(t.team) || key.Kind != blob.KindOutput || key.Scope.Job != row.Ref.NodeID {
+	if key.Team != string(t.team) || key.Kind != blob.KindOutput || runspec.NodeID(key.Scope.Job) != row.Ref.NodeID {
 		return blob.Blob{}, blob.ErrIntegrity
 	}
 	namespace, err := blob.RecordNamespace(key)
@@ -72,7 +74,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	if !found || !record.Pinned && record.ExpiresAt.Set && !record.ExpiresAt.Value.After(tx.now()) {
+	if !found || !record.Pinned && record.ExpiresAt.Set && !record.ExpiresAt.Value.After(tx.now(ctx)) {
 		return blob.Blob{}, blob.ErrNotFound
 	}
 	size, err := requireBlobTx(ctx, tx, t.team, record.Digest)

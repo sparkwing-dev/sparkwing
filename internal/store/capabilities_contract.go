@@ -373,7 +373,7 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 	}
 
 	c := node.principal.Capability
-	if !capability.CredentialAlive(c, tx.now()) {
+	if !capability.CredentialAlive(c, tx.now(ctx)) {
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if node.requirement != nil {
@@ -452,7 +452,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 		}
 		ref = *parent
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	for _, node := range chain {
 		c := node.principal.Capability
 		if !capability.CredentialAlive(c, now) {
@@ -589,7 +589,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(p.Capability.Team), auditPrincipalActor(p), "authority.revoked", string(target.Kind)+":"+target.ID)
+		return recordMutationAuditTx(ctx, tx, Team(p.Capability.Team), auditPrincipalActor(p), "authority.revoked", string(target.Kind)+":"+target.ID)
 	})
 }
 
@@ -617,7 +617,7 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(p.Capability.Team), auditPrincipalActor(p), "authority.revoked", string(target.Kind)+":"+target.ID)
+		return recordMutationAuditTx(ctx, tx, Team(p.Capability.Team), auditPrincipalActor(p), "authority.revoked", string(target.Kind)+":"+target.ID)
 	})
 }
 
@@ -627,7 +627,7 @@ func (op *Operator) revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capa
 	}); err != nil {
 		return err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	if ref.Kind == capability.AuthorityCapability {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {

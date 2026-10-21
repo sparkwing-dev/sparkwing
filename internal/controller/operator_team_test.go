@@ -245,7 +245,7 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	checkActors("member")
 	s.WithOperatorAccounts(nil)
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/teams", `{"slug":"refused-team"}`, 403)
-	if _, err := s.store.DeleteAccount(t.Context(), "member", time.Now()); err != nil {
+	if _, err := s.store.DeleteAccount(t.Context(), "member"); err != nil {
 		t.Fatal(err)
 	}
 	checkActors("deleted account")

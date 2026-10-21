@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -74,5 +76,5 @@ func reconciledClaimMatches(result store.ReconciledNode) bool {
 	if claim == nil || claim.Holder == "" || claim.CapabilityPrefix == "" || claim.Generation <= 0 || claim.LeaseExpiresAt.IsZero() || row.LeaseExpiresAt == nil {
 		return false
 	}
-	return claim.Generation == row.Generation && claim.Holder == row.ClaimedBy && claim.CapabilityPrefix == row.CapabilityPrefix && claim.LeaseExpiresAt.Equal(*row.LeaseExpiresAt)
+	return runspec.ClaimGeneration(int64(claim.Generation)) == row.Generation && claim.Holder == row.ClaimedBy && claim.CapabilityPrefix == row.CapabilityPrefix && claim.LeaseExpiresAt.Equal(*row.LeaseExpiresAt)
 }

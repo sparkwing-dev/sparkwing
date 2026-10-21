@@ -42,7 +42,13 @@ func (o *Operator) TestOnlyPaymentTeam(ctx context.Context, paymentID string) (T
 func (t *Tenant) TestOnlyHoldForDispute(
 	ctx context.Context, disputeID, paymentID, reason string, now time.Time,
 ) (bool, error) {
-	return t.hold(ctx, disputeID, paymentID, reason, "", now)
+	var created bool
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, "", now, auditActor{system: auditBreakGlass})
+		return err
+	})
+	return created, err
 }
 
 // TestOnlySaveCard exercises the transaction owner with trusted fixture facts.

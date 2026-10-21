@@ -111,7 +111,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if result.Grant != nil {
 			grantID = result.Grant.ID
 		}
-		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: actor}, auditRefund{ReceiptID: subject, GrantID: grantID, PaidMicro: result.PaidMicro, ReversedMicro: result.ReversedMicro, BalanceMicro: result.BalanceMicro, PaymentID: digestAudit(req.PaymentID), RefundID: digestAudit(req.RefundID)}); err != nil {
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: actor}, auditRefund{ReceiptID: subject, GrantID: grantID, PaidMicro: result.PaidMicro, ReversedMicro: result.ReversedMicro, BalanceMicro: result.BalanceMicro, PaymentID: digestAudit(req.PaymentID), RefundID: digestAudit(req.RefundID)}); err != nil {
 			return CreditReversal{}, err
 		}
 		return result, nil

@@ -157,7 +157,8 @@ func TestPaymentStateEverySetupDeliveryPermutation(t *testing.T) {
 					}
 				}
 			}
-			standing, err := tenant.SpendStanding(t.Context(), now)
+			tenant.s.SetTestClock(t, func() time.Time { return now })
+			standing, err := tenant.SpendStanding(t.Context())
 			if err != nil || standing.Card.PaymentMethod != "new-method" {
 				t.Fatalf("setup was lost before page association: %+v: %v", standing.Card, err)
 			}
@@ -252,7 +253,8 @@ func TestPaymentStateProviderModesKeepIndependentConsequences(t *testing.T) {
 					if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 {
 						t.Fatalf("%s consequence reused a released hold: %+v: %v", mode, freeze, err)
 					}
-					if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed", now); err != nil {
+					tenant.s.SetTestClock(t, func() time.Time { return now })
+					if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -269,7 +271,8 @@ func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, n
 	if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || !freeze.Frozen {
 		t.Fatalf("warning hold=%+v: %v", freeze, err)
 	}
-	due, err := s.AsOperator().DueCardRefunds(t.Context(), now.Add(24*time.Hour))
+	s.SetTestClock(t, func() time.Time { return now.Add(24 * time.Hour) })
+	due, err := s.AsOperator().DueCardRefunds(t.Context())
 	want := 0
 	if refundDue {
 		want = 1

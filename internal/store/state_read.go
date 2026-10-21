@@ -47,7 +47,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	}
 	if controller {
 		var owner OwnerLeaseRef
-		owner.Kind, owner.Name, owner.RunID = OwnerController, "controller.owner", id
+		owner.Kind, owner.Name, owner.RunID = OwnerController, "controller.owner", runspec.RunID(id)
 		err = tx.QueryRowContext(ctx, `SELECT holder,generation FROM leases WHERE name='controller.owner'`).Scan(&owner.Holder, &owner.Generation)
 		if err == nil {
 			v.Owner = &owner
@@ -55,7 +55,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 			return v, err
 		}
 	} else {
-		owner := OwnerLeaseRef{Kind: OwnerTrigger, RunID: id}
+		owner := OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation FROM triggers WHERE team=? AND id=?`, team, id).Scan(&owner.Holder, &owner.Generation)
 		if err == nil {
 			v.Owner = &owner
@@ -81,7 +81,7 @@ func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.
 	var actor, execution, output, manifest []byte
 	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest)
 	if errors.Is(err, sql.ErrNoRows) {
-		return v, notFound("job", ref.NodeID)
+		return v, notFound("job", string(ref.NodeID))
 	}
 	if err != nil {
 		return v, err
@@ -125,7 +125,7 @@ func stateTime(v sql.NullInt64) *time.Time {
 }
 
 func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (RunSnapshot, error) {
-	out := RunSnapshot{StoreNow: tx.now()}
+	out := RunSnapshot{StoreNow: tx.now(ctx)}
 	var err error
 	if out.Run, err = readRunTx(ctx, tx, team, id); err != nil {
 		return out, err
@@ -144,7 +144,7 @@ func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (Run
 			_ = rows.Close()
 			return out, err
 		}
-		ref := controllerwire.NodeRef{RunID: id, NodeID: node}
+		ref := controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
 		refs = append(refs, ref)
 		if len(body) > 0 {
 			out.Expansions = append(out.Expansions, AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: digest})

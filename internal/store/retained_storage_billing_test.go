@@ -373,7 +373,8 @@ func TestRetainedStorageSweepIsolatesTeamDamageAndDeletion(t *testing.T) {
 				if damage == "watermarks" {
 					rewriteSchemaExec(t, s.db, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store='logs'", badTeam)
 				} else {
-					if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), Team(badTeam), *now); err != nil {
+					s.SetTestClock(t, func() time.Time { return *now })
+					if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), Team(badTeam)); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -391,5 +392,22 @@ func TestRetainedStorageSweepReturnsDatabaseFailures(t *testing.T) {
 	rewriteSchemaExec(t, s.db, "DROP TABLE blobs")
 	if _, err := s.AsOperator().ChargeRetainedStorage(t.Context(), lease); err == nil {
 		t.Fatal("database failure was treated as tenant damage")
+	}
+}
+
+func TestRetainedStorageBillingUsesDatabaseClock(t *testing.T) {
+	s, lease, now := retainedBillingFixture(t)
+	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now.Add(-time.Hour))
+	recordStoreFences(t, s)
+	s.dialect = DialectSQLite
+	s.pinnedClock = nil
+	s.clock = nil
+	// The maintenance lease must stay live when the fixture returns to database time.
+	rewriteSchemaExec(t, s.db, `UPDATE leases SET until=? WHERE name='maintenance'`, time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
+	retainedBill(t, s, lease)
+	rewriteSchemaExec(t, s.db, `UPDATE team_storage SET storage_charged_through=storage_charged_through-?`, int64(24*time.Hour))
+	sweep := retainedBill(t, s, lease)
+	if len(sweep.Charges) != 1 || sweep.ChargedMicro < CloudStorageRateMicroPerGBDay {
+		t.Fatalf("database-clock billing = %+v", sweep)
 	}
 }

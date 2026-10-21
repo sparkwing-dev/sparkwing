@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestOwnerCancellationProofKeepsIssuerAttemptAndFenceProperty(t *testing.T) {
@@ -17,8 +18,8 @@ func TestOwnerCancellationProofKeepsIssuerAttemptAndFenceProperty(t *testing.T) 
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			tenant, now, owner := reconcileFixture(t)
 			owner.Holder, owner.Generation = owner.Owner.Holder, owner.Owner.Generation
-			owner.Result = &capability.RecordedResult{Actor: owner.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/transition", RunID: "run", NodeID: "job", Generation: owner.Generation, Digest: strings.Repeat("a", 64)}
-			change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: fmt.Sprintf("cancel/%x", random.Uint64())}}}
+			owner.Result = &capability.RecordedResult{Actor: owner.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/transition", RunID: "run", NodeID: "job", Generation: int64(owner.Generation), Digest: strings.Repeat("a", 64)}
+			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: fmt.Sprintf("cancel/%x", random.Uint64())}}}
 			mutation := i % 8
 			switch mutation {
 			case 1:
@@ -63,11 +64,11 @@ func TestOwnerCancellationProofKeepsIssuerAttemptAndFenceProperty(t *testing.T) 
 func TestCancellationIntentReachesHolderRenewal(t *testing.T) {
 	tenant, _, owner := reconcileFixture(t)
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-	_, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: "user_cancelled"}}})
+	_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: owner, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: "user_cancelled"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
+	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 	beat, err := tenant.RenewNodeClaim(t.Context(), ref, holder)
 	if err != nil || !beat.CancelRequested || beat.CancelReason != "user_cancelled" {
 		t.Fatalf("cancellation intent: %+v, %v", beat, err)
@@ -90,7 +91,7 @@ func TestCancellationIntentAndHolderResultStayIndependentProperty(t *testing.T) 
 				if runCancel {
 					_, err = tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", Actor: operator, To: RunCancelled, Cause: RunCancel, Reason: reason})
 				} else {
-					_, err = tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
+					_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: owner, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -98,7 +99,7 @@ func TestCancellationIntentAndHolderResultStayIndependentProperty(t *testing.T) 
 			}
 			cancel(reason)
 			cancel("later cancellation")
-			holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
+			holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 			beat, err := tenant.RenewNodeClaim(t.Context(), ref, holder)
 			if err != nil || !beat.CancelRequested || beat.CancelReason != reason {
 				t.Fatalf("holder intent changed: %+v, %v", beat, err)
@@ -110,7 +111,7 @@ func TestCancellationIntentAndHolderResultStayIndependentProperty(t *testing.T) 
 				}
 			}
 			result := &NodeResult{Outcome: NodeCancelled, Reason: "executor_cancelled", MaskedError: "drained"}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: holder, To: NodeCancelled, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: result}}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeCancelled, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: result}}); err != nil {
 				t.Fatal(err)
 			}
 			row, err := tenant.ReadNode(t.Context(), ref)

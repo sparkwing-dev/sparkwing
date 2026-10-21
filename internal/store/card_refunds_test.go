@@ -78,14 +78,16 @@ func queuedRefundFixture(t *testing.T, paidFirst bool) (*Store, *Tenant, time.Ti
 func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	s, _, now := queuedRefundFixture(t, false)
 	ctx := t.Context()
-	due, err := s.AsOperator().DueCardRefunds(ctx, now)
+	s.SetTestClock(t, func() time.Time { return now })
+	due, err := s.AsOperator().DueCardRefunds(ctx)
 	if err != nil || len(due) != 1 || due[0].Key != "payment-0" {
 		t.Fatalf("due = %+v, %v", due, err)
 	}
 	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "re_1"); err != nil {
 		t.Fatal(err)
 	}
-	if due, err := s.AsOperator().DueCardRefunds(ctx, now); err != nil || len(due) != 0 {
+	s.SetTestClock(t, func() time.Time { return now })
+	if due, err := s.AsOperator().DueCardRefunds(ctx); err != nil || len(due) != 0 {
 		t.Fatalf("a pending refund = %+v, %v; want not due", due, err)
 	}
 	event := providerPaymentEvent(now, capability.PaymentRefund)
@@ -93,10 +95,12 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
 		t.Fatal(err)
 	}
-	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(30*time.Minute)); err != nil || len(due) != 0 {
+	s.SetTestClock(t, func() time.Time { return now.Add(30 * time.Minute) })
+	if due, err := s.AsOperator().DueCardRefunds(ctx); err != nil || len(due) != 0 {
 		t.Fatalf("a failed refund inside its backoff = %+v, %v", due, err)
 	}
-	due, err = s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+	s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+	due, err = s.AsOperator().DueCardRefunds(ctx)
 	if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
 		t.Fatalf("a failed refund after its backoff = %+v, %v; want it due under a new key", due, err)
 	}
@@ -110,7 +114,8 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
 		t.Fatal(err)
 	}
-	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
+	s.SetTestClock(t, func() time.Time { return now.Add(48 * time.Hour) })
+	if due, err := s.AsOperator().DueCardRefunds(ctx); err != nil || len(due) != 0 {
 		t.Fatalf("a succeeded refund = %+v, %v; want done", due, err)
 	}
 }
@@ -141,7 +146,8 @@ func TestPartialRefundThenWarningRefundFailureIsRetried(t *testing.T) {
 	if _, err := s.settlePaymentFacts(ctx, failed); err != nil {
 		t.Fatalf("verified $6 failure after a prior $4 refund must settle: %v", err)
 	}
-	due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+	s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+	due, err := s.AsOperator().DueCardRefunds(ctx)
 	if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
 		t.Fatalf("failed remainder refund must be retryable: %+v, %v", due, err)
 	}
@@ -157,7 +163,8 @@ func TestPartialRefundThenWarningRefundFailureIsRetried(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
+	s.SetTestClock(t, func() time.Time { return now.Add(48 * time.Hour) })
+	if due, err := s.AsOperator().DueCardRefunds(ctx); err != nil || len(due) != 0 {
 		t.Fatalf("successful remainder refund remains queued: %+v, %v", due, err)
 	}
 	var refunded int64
@@ -204,7 +211,8 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			if state != wantState || attempts != wantAttempts {
 				t.Fatalf("bound refund lost its recorded outcome: status=%s attempts=%d, want %s/%d", state, attempts, wantState, wantAttempts)
 			}
-			due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+			s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+			due, err := s.AsOperator().DueCardRefunds(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -269,7 +277,7 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	ctx := t.Context()
 	owner := authorityMember(t, s, "operator", RoleReader)
 	console := s.AsConsole(func(id string) bool { return id == "operator" })
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
 	if _, err := console.ConsoleRefund(ctx, a, controllerwire.OperatorRefund{PaymentID: "payment", RefundID: "operator-refund", AmountCents: 400, Reason: "partial"}, "once"); err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +286,8 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
 		t.Fatal(err)
 	}
-	due, err := s.AsOperator().DueCardRefunds(ctx, now)
+	s.SetTestClock(t, func() time.Time { return now })
+	due, err := s.AsOperator().DueCardRefunds(ctx)
 	if err != nil || len(due) != 1 || due[0].Key != "payment-0" {
 		t.Fatalf("operator refund moved the queue: %+v, %v", due, err)
 	}
@@ -291,7 +300,8 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
+	s.SetTestClock(t, func() time.Time { return now.Add(48 * time.Hour) })
+	if due, err := s.AsOperator().DueCardRefunds(ctx); err != nil || len(due) != 0 {
 		t.Fatalf("successful refund remains queued: %+v, %v", due, err)
 	}
 	state, err := tenant.CreditState(ctx, 0)
@@ -324,7 +334,8 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund"); err != nil {
 		t.Fatal(err)
 	}
-	due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+	s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+	due, err := s.AsOperator().DueCardRefunds(ctx)
 	if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
 		t.Fatalf("refund outcome was lost on retry: %+v, %v", due, err)
 	}

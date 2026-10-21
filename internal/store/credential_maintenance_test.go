@@ -191,7 +191,7 @@ func TestSourceReleaseAuditsRenderDeletedAccount(t *testing.T) {
 	if err != nil || len(before) != 1 || before[0].OwnerAccountID != "owner" {
 		t.Fatalf("live account projection: %+v, %v", before, err)
 	}
-	if _, err := tenant.s.DeleteAccount(t.Context(), "owner", tenant.s.now()); err != nil {
+	if _, err := tenant.s.DeleteAccount(t.Context(), "owner"); err != nil {
 		t.Fatal(err)
 	}
 	after, err := tenant.SourceReleaseAudits(t.Context(), 10)
@@ -220,7 +220,7 @@ func assertSourceReleaseAuditProjection(t *testing.T, got, source capability.Sou
 func seedMaintenanceGit(t *testing.T, tenant *Tenant, row GitCredential) {
 	t.Helper()
 	if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := tenant.putGitCredentialTx(t.Context(), tx, row, tx.now())
+		_, err := tenant.putGitCredentialTx(t.Context(), tx, row, transactionTime(t, tx))
 		return err
 	}); err != nil {
 		t.Fatal(err)

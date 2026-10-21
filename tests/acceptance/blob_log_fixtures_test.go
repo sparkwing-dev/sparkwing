@@ -55,6 +55,6 @@ VALUES (?,?,?,'machine','logger','controller',?,'delegate',1,?,'node','logs','jo
 		}
 	}
 	attempt := runspec.AttemptIdentity{Team: c.Team, RunID: "logs", NodeID: "job", Attempt: 1, Generation: 7}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Holder: "logger", Generation: 7}
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID), Holder: "logger", Generation: 7}}
 	return store.SegmentCommit{Subject: blob.LogSubject{Kind: blob.LogJobAttempt, Team: c.Team, RunID: "logs", Attempt: &attempt}, Actor: actor, RetentionClass: "r30"}, nil
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -71,7 +73,7 @@ func TestUnitReaperBoundsNodeRecovery(t *testing.T) {
 				t.Fatalf("recovered unit: %+v", unit)
 			}
 			seen[unit.RunID] = true
-			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
+			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.NodeID)})
 			if err != nil || row.Status != store.StatusPending || row.Generation != 4 || row.Attempt != 1 || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.ApplicationRetries != 0 {
 				t.Fatalf("requeued node: %+v, %v", row, err)
 			}

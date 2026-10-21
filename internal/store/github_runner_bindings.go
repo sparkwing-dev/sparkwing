@@ -33,11 +33,7 @@ func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBind
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	var out []GitHubRunnerBinding
 	for rows.Next() {
 		b := GitHubRunnerBinding{Team: t.team}

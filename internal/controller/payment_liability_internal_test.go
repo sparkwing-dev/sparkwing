@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -75,7 +74,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 					if err != nil || balance != wantBalance {
 						t.Fatalf("balance = %d, want %d: %v", balance, wantBalance, err)
 					}
-					refunds, err := s.AsOperator().DueCardRefunds(t.Context(), time.Now())
+					refunds, err := s.AsOperator().DueCardRefunds(t.Context())
 					wantRefunds := 1
 					if protected {
 						wantRefunds = 0
@@ -94,7 +93,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 					if err := teststore.SQL(t, s).QueryRow(`SELECT card_payment_method FROM teams WHERE name='b'`).Scan(&savedCard); err != nil || savedCard != "" {
 						t.Fatalf("deployment card block = %q: %v", savedCard, err)
 					}
-					standing, err := tenant.BillingStanding(t.Context(), time.Now())
+					standing, err := tenant.BillingStanding(t.Context())
 					if err != nil || standing.Tier != "Held" || standing.CloudVCPU != 0 {
 						t.Fatalf("held spending = %+v: %v", standing, err)
 					}
@@ -104,7 +103,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 						t.Fatalf("settled authentication/protection = %q/%t, want %q/%t: %v", persistedResult, persistedShift, result, protected, err)
 					}
 					if protected {
-						if count, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "dispute window closed", time.Now()); err != nil || count != 1 {
+						if count, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "dispute window closed"); err != nil || count != 1 {
 							t.Fatalf("release = %d: %v", count, err)
 						}
 						if restored, err := tenant.CreditBalanceMicro(t.Context()); err != nil || restored != wantBalance {

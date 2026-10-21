@@ -76,7 +76,7 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 			return err
 		}
 		if change.Role == nil {
-			if err := t.moveSessionsOffTeamTx(ctx, tx, change.AccountID, tx.now()); err != nil {
+			if err := t.moveSessionsOffTeamTx(ctx, tx, change.AccountID, tx.now(ctx)); err != nil {
 				return err
 			}
 		}
@@ -84,6 +84,6 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change Membe
 		if change.Role != nil {
 			operation = "membership.role:" + string(*change.Role)
 		}
-		return recordMutationAuditTx(tx, t.team, auditPrincipalActor(p), operation, change.AccountID)
+		return recordMutationAuditTx(ctx, tx, t.team, auditPrincipalActor(p), operation, change.AccountID)
 	})
 }

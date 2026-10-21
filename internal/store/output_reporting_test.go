@@ -20,14 +20,14 @@ func TestOutputReportingUsesCommittedResult(t *testing.T) {
 		t.Run(read, func(t *testing.T) {
 			var nodes []*Node
 			if read == "get" {
-				n, err := records.tenant.GetNode(t.Context(), change.Ref.RunID, change.Ref.NodeID)
+				n, err := records.tenant.GetNode(t.Context(), string(change.Ref.RunID), string(change.Ref.NodeID))
 				if err != nil {
 					t.Fatal(err)
 				}
 				nodes = []*Node{n}
 			} else {
 				var err error
-				nodes, err = records.tenant.ListNodes(t.Context(), change.Ref.RunID)
+				nodes, err = records.tenant.ListNodes(t.Context(), string(change.Ref.RunID))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -93,7 +93,7 @@ func TestOutputReportingNeverRevealsAnotherResultProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		rewriteSchemaExec(t, s.db, "UPDATE nodes SET output_record=? WHERE team='a' AND run_id='run' AND node_id='job'", body)
-		n, err := records.tenant.GetNode(t.Context(), change.Ref.RunID, change.Ref.NodeID)
+		n, err := records.tenant.GetNode(t.Context(), string(change.Ref.RunID), string(change.Ref.NodeID))
 		if err == nil && n.OutputDigest != "" {
 			t.Logf("forged selector revealed output: %+v", key)
 			return false
@@ -111,7 +111,7 @@ func TestOutputReportingOmitsCollectedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM blob_records WHERE kind='output'")
-	n, err := records.tenant.GetNode(t.Context(), change.Ref.RunID, change.Ref.NodeID)
+	n, err := records.tenant.GetNode(t.Context(), string(change.Ref.RunID), string(change.Ref.NodeID))
 	if err != nil || n.OutputDigest != "" {
 		t.Fatalf("collected output: %+v, %v", n, err)
 	}

@@ -23,7 +23,7 @@ func assertFirstSuccessfulRunSurvivesAuditRetention(t *testing.T, s *store.Store
 	t.Helper()
 	ctx := t.Context()
 	tenant, first := runCompletionFixture(t, s)
-	run, err := tenant.ReadRun(ctx, first.Unit.RunID)
+	run, err := tenant.ReadRun(ctx, string(first.Unit.RunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,20 +46,30 @@ func assertFirstSuccessfulRunSurvivesAuditRetention(t *testing.T, s *store.Store
 	if err != nil || result.AuditEvents != 1 {
 		t.Fatalf("prune first-success audit: %+v, %v", result, err)
 	}
-	admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: run.Request.AuthorityRef, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: first.Unit.RunID}}})
+	admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: run.Request.AuthorityRef, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: string(first.Unit.RunID)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: admitted.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if run.Spec == nil {
+		t.Fatal("first run has no accepted plan")
+	}
+	if _, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{Request: admitted.Request, Declarations: run.Spec.Declarations, Resolved: run.Spec.Resolved, Plan: run.Plan}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunTransition{RunID: admitted.RunID, Actor: actor, To: store.RunSuccess, Cause: store.RunFinish}}); err != nil {
+	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(admitted.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: store.RunFinish}}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := tenant.ReadRun(ctx, admitted.RunID)
+	if err != nil || second.State != store.RunSuccess || second.FinishedAt == nil {
+		t.Fatalf("later run did not succeed: %+v, %v", second, err)
 	}
 	if events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 10, ""); err != nil || len(events) != 0 {
 		t.Fatalf("later success became first after audit expiry: %+v, %v", events, err)

@@ -83,8 +83,8 @@ type NodeInput struct {
 	NodeID        string
 	Execution     runspec.JobExecutionSettings
 	SpecHash      string
-	Generation    int64
-	Attempt       int64
+	Generation    runspec.ClaimGeneration
+	Attempt       runspec.AttemptOrdinal
 	Entry         *source.Entry
 	Authority     ClaimAuthority
 	GrantedRunner nodeproto.RunnerIdentity

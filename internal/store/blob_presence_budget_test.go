@@ -24,11 +24,11 @@ func TestBlobPresenceBudgetNeverReturnsAnExpiredSuccess(t *testing.T) {
 		deadline := base.Add(time.Duration(1+int(ticks)%40) * time.Nanosecond)
 		var observed time.Time
 		next := base
-		s.clock = func() time.Time {
+		s.SetTestClock(t, func() time.Time {
 			observed = next
 			next = next.Add(time.Nanosecond)
 			return observed
-		}
+		})
 		digests := make([]blob.Digest, 1+int(copies)%8)
 		for i := range digests {
 			digests[i] = ticket.Blob.Digest

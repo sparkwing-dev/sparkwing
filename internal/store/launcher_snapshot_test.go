@@ -8,6 +8,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -71,7 +73,7 @@ func TestLauncherSnapshotRetainsCurrentAwardThroughExchange(t *testing.T) {
 				if award.Claim.Award != claim.Award || award.Claim.Owner != claim.Owner || award.Claim.SourceGeneration != claim.SourceGeneration || award.Claim.Kind != kind || award.Claim.Team != claim.Team || len(award.Claim.Bearer) != 0 || award.Capability.Parent == nil || *award.Capability.Parent != ref || award.Run.ID != claim.RunID || award.ParentCapabilityExpiry == nil {
 					t.Fatalf("changed or unsafe award: %+v", award)
 				}
-				if kind == capability.UnitNode && (award.Node.Ref.NodeID != claim.NodeID || award.Node.Generation != claim.Award.Generation) {
+				if kind == capability.UnitNode && (award.Node.Ref.NodeID != runspec.NodeID(claim.NodeID) || award.Node.Generation != claim.Award.Generation) {
 					t.Fatalf("missing persisted job: %+v", award.Node)
 				}
 				if exchange == 0 {
@@ -264,7 +266,7 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 			}
 			ref.ID = issued.Capability.Prefix
 		}
-		fence := capability.LeaseRef{Kind: kind, ID: claim.RunID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+		fence := capability.LeaseRef{Kind: kind, ID: claim.RunID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 		var id string
 		if err := s.db.QueryRowContext(t.Context(), `SELECT unit_id FROM capabilities WHERE prefix=?`, claim.Award.CapabilityPrefix).Scan(&id); err != nil {
 			t.Fatal(err)

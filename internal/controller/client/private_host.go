@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -129,10 +130,10 @@ func (c *LocalHostClient) ReadSnapshot(ctx context.Context, run string) (store.R
 // ReadNode reads private execution state for one node of the awarded run.
 func (c *LocalHostClient) ReadNode(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
 	var result store.NodeRow
-	if ref.RunID != c.run || ref.NodeID == "" {
+	if ref.RunID != runspec.RunID(c.run) || ref.NodeID == "" {
 		return result, localHostClientRefusal()
 	}
-	if c.node != "" && ref.NodeID != c.node {
+	if c.node != "" && ref.NodeID != runspec.NodeID(c.node) {
 		var snapshot localhostwire.LocalNodeSnapshot
 		if err := c.request(ctx, "GET", "/snapshot", "", nil, &snapshot); err != nil {
 			return result, err
@@ -140,12 +141,12 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref controllerwire.NodeR
 		if snapshot.Run.ID != c.run {
 			return result, localHostClientRefusal()
 		}
-		if key, ok := snapshot.ArtifactSources[ref.NodeID]; ok {
+		if key, ok := snapshot.ArtifactSources[string(ref.NodeID)]; ok {
 			return store.NodeRow{Ref: ref, Status: store.StatusDone, ManifestRecord: &key}, nil
 		}
 		return result, localHostClientRefusal()
 	}
-	if err := c.request(ctx, "GET", "", ref.NodeID, nil, &result); err != nil {
+	if err := c.request(ctx, "GET", "", string(ref.NodeID), nil, &result); err != nil {
 		return store.NodeRow{}, err
 	}
 	if result.Ref != ref {
@@ -157,7 +158,7 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref controllerwire.NodeR
 // TransitionRun submits an edge while the server derives its actor and fence.
 func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTransition) (store.Applied, error) {
 	var result store.Applied
-	if c.node != "" || change.RunID != c.run {
+	if c.node != "" || change.RunID != runspec.RunID(c.run) {
 		return result, localHostClientRefusal()
 	}
 	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
@@ -169,37 +170,37 @@ func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTra
 func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish store.FinishRunRequest) (store.Applied, error) {
 	var result store.Applied
 	change := finish.Transition
-	if c.node != "" || change.RunID != c.run || finish.Unit != change.Actor.Owner {
+	if c.node != "" || change.RunID != runspec.RunID(c.run) || finish.Unit != change.Actor.Owner {
 		return result, localHostClientRefusal()
 	}
-	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
+	body := localhostwire.LocalRunCompletion{Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
 	err := c.request(ctx, "POST", "/finish", "", body, &result)
 	return result, err
 }
 
 // TransitionNode selects retained holder credentials without sending actor authority.
-func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	var result store.Applied
-	if change.Ref.RunID != c.run || change.Ref.NodeID == "" || change.Extra.Claim != nil {
+	ref, actor := store.NodeCommandAuthority(change)
+	if ref.RunID != runspec.RunID(c.run) || ref.NodeID == "" {
 		return result, localHostClientRefusal()
 	}
 	selected := c
-	if change.Actor.Kind == store.ActorHolder && c.node == "" {
-		transport, award, err := c.nodeTransport(ctx, change.Ref)
+	if actor.Kind == store.ActorHolder && c.node == "" {
+		transport, award, err := c.nodeTransport(ctx, ref)
 		if err != nil {
 			return result, err
 		}
-		if change.Actor.CapabilityPrefix != award.prefix || change.Actor.Generation != award.generation {
+		if actor.CapabilityPrefix != award.prefix || actor.Generation != runspec.ClaimGeneration(award.generation) {
 			return result, localHostClientRefusal()
 		}
 		selected = &LocalHostClient{transport: transport, run: c.run}
 	}
-	extra := change.Extra
-	body := localhostwire.LocalNodeTransition{
-		To: change.To, Cause: change.Cause, SourceAttempt: change.SourceAttempt,
-		Extra: localhostwire.LocalTransitionExtra{OwnerPolicy: extra.OwnerPolicy, Result: extra.Result, Materialize: extra.Materialize, Approval: extra.Approval, RetryAt: extra.RetryAt},
+	body, err := store.NodeCommandPayloadFor(change)
+	if err != nil {
+		return result, err
 	}
-	err := selected.request(ctx, "POST", "/transition", change.Ref.NodeID, body, &result)
+	err = selected.request(ctx, "POST", "/transition", string(ref.NodeID), body, &result)
 	return result, err
 }
 
@@ -251,7 +252,7 @@ func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, 
 
 // AdoptClaim retains a separately awarded node bearer after fresh ownership checks.
 func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.ReconciledNode) error {
-	if c.node != "" || claim.Kind != store.Execute || claim.Claim == nil || len(claim.Bearer) == 0 || claim.Node.Ref.RunID != c.run || claim.Node.Ref.NodeID == "" {
+	if c.node != "" || claim.Kind != store.Execute || claim.Claim == nil || len(claim.Bearer) == 0 || claim.Node.Ref.RunID != runspec.RunID(c.run) || claim.Node.Ref.NodeID == "" {
 		return localHostClientRefusal()
 	}
 	owner, err := c.Principal(ctx)
@@ -267,7 +268,7 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 	}
 	raw := string(claim.Bearer)
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(claim.Bearer)}
-	snapshot, err := c.ReadAuthentication(ctx, lookup, capability.RequestEvidence{Target: capability.Target{Team: owner.Capability.Team, RunID: c.run, NodeID: row.Ref.NodeID}})
+	snapshot, err := c.ReadAuthentication(ctx, lookup, capability.RequestEvidence{Target: capability.Target{Team: owner.Capability.Team, RunID: c.run, NodeID: string(row.Ref.NodeID)}})
 	if err != nil {
 		return err
 	}
@@ -276,7 +277,7 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 		return err
 	}
 	binding := principal.Capability.Binding
-	if principal.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) || principal.Capability.Subject != owner.Capability.Subject || binding.Kind != capability.BindingNode || binding.RunID != c.run || binding.NodeID != row.Ref.NodeID || binding.Generation != row.Generation || binding.Holder != row.ClaimedBy {
+	if principal.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) || principal.Capability.Subject != owner.Capability.Subject || binding.Kind != capability.BindingNode || binding.RunID != c.run || runspec.NodeID(binding.NodeID) != row.Ref.NodeID || runspec.ClaimGeneration(binding.Generation) != row.Generation || binding.Holder != row.ClaimedBy {
 		return localHostClientRefusal()
 	}
 	c.mu.Lock()
@@ -284,22 +285,22 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 	if c.closed {
 		return errors.New("local host client is closed")
 	}
-	c.nodes[row.Ref.NodeID] = localNodeBearer{raw: raw, prefix: row.CapabilityPrefix, generation: row.Generation, unit: principal.Capability.UnitID}
+	c.nodes[string(row.Ref.NodeID)] = localNodeBearer{raw: raw, prefix: row.CapabilityPrefix, generation: int64(row.Generation), unit: principal.Capability.UnitID}
 	return nil
 }
 
 func (c *LocalHostClient) nodeTransport(ctx context.Context, ref controllerwire.NodeRef) (*engineClient, localNodeBearer, error) {
 	if c.node != "" {
-		if ref.RunID != c.run || ref.NodeID != c.node {
+		if ref.RunID != runspec.RunID(c.run) || ref.NodeID != runspec.NodeID(c.node) {
 			return nil, localNodeBearer{}, localHostClientRefusal()
 		}
 		return c.transport, localNodeBearer{}, c.live()
 	}
-	if ref.RunID != c.run || ref.NodeID == "" {
+	if ref.RunID != runspec.RunID(c.run) || ref.NodeID == "" {
 		return nil, localNodeBearer{}, localHostClientRefusal()
 	}
 	c.mu.Lock()
-	award, ok := c.nodes[ref.NodeID]
+	award, ok := c.nodes[string(ref.NodeID)]
 	closed := c.closed
 	c.mu.Unlock()
 	if closed || !ok {
@@ -309,7 +310,7 @@ func (c *LocalHostClient) nodeTransport(ctx context.Context, ref controllerwire.
 	if err != nil {
 		return nil, localNodeBearer{}, err
 	}
-	if row.Generation != award.generation || row.CapabilityPrefix != award.prefix && (row.FinishedAt == nil || row.StateActor.CapabilityPrefix != award.prefix) {
+	if row.Generation != runspec.ClaimGeneration(award.generation) || row.CapabilityPrefix != award.prefix && (row.FinishedAt == nil || row.StateActor.CapabilityPrefix != award.prefix) {
 		return nil, localNodeBearer{}, localHostClientRefusal()
 	}
 	transport := *c.transport
@@ -330,7 +331,7 @@ func (c *LocalHostClient) RenewNode(ctx context.Context, ref controllerwire.Node
 		}
 		award.prefix, award.generation, award.unit = principal.Capability.Prefix, principal.Capability.Binding.Generation, principal.Capability.UnitID
 	}
-	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != award.generation {
+	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != runspec.ClaimGeneration(award.generation) {
 		return store.LeaseBeat{}, localHostClientRefusal()
 	}
 	response, err := transport.Renew(ctx, award.unit, controllerwire.RenewalRequest{Executing: executing})
@@ -372,6 +373,6 @@ var (
 		TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	} = (*LocalHostClient)(nil)
 	_ interface {
-		TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+		TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	} = (*LocalHostClient)(nil)
 )

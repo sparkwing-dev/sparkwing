@@ -31,7 +31,8 @@ func standingCapFree(t *testing.T, s *Store, id string, cents int64) {
 
 func standingCapWant(t *testing.T, tenant *Tenant, now time.Time, tier, history, ceiling string) BillingStanding {
 	t.Helper()
-	b, err := tenant.BillingStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	b, err := tenant.BillingStanding(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,8 @@ func TestStandingCapPrepayStaysWithinOneTierAndBelowHighProperty(t *testing.T) {
 		if freeCents%200000 > 0 {
 			standingCapFree(t, s, "free-property", int64(freeCents%200000))
 		}
-		b, err := tenant.BillingStanding(t.Context(), now.Add(time.Duration(ageDays%60)*24*time.Hour))
+		tenant.s.SetTestClock(t, func() time.Time { return now.Add(time.Duration(ageDays%60) * 24 * time.Hour) })
+		b, err := tenant.BillingStanding(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}

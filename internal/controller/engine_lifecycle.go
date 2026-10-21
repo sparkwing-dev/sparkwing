@@ -40,7 +40,7 @@ func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, 
 	}
 	var applied store.Applied
 	if request.Transition.Cause == store.RunPublish {
-		applied, err = tenant.TransitionRun(ctx, request.Transition)
+		applied, err = tenant.TransitionRun(ctx, store.RunTransition{RunID: request.Transition.RunID, Actor: request.Transition.Actor, Cause: request.Transition.Cause, Reason: request.Transition.Reason, MaskedError: request.Transition.MaskedError})
 	} else {
 		applied, err = tenant.FinishRunAndUnit(ctx, request)
 	}
@@ -55,7 +55,7 @@ func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, 
 	}
 	actor := store.Actor{Authority: a.Principal.Authority, Kind: store.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
 	applied, err := tenant.TransitionRun(ctx, store.RunTransition{
-		RunID: a.Target.RunID, To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: body.Reason,
+		RunID: runspec.RunID(a.Target.RunID), To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: body.Reason,
 	})
 	return appliedResponse(applied), engineLookupError(err)
 }
@@ -120,8 +120,9 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 
 func appliedResponse(applied store.Applied) controllerwire.Applied {
 	return controllerwire.Applied{
+		Outcome: string(applied.Outcome), Reason: applied.Reason,
 		Replayed: applied.Replayed, CancelRequested: applied.CancelRequested,
-		StateSeq: applied.StateSeq, Generation: applied.Generation, Attempt: applied.Attempt,
+		StateSeq: applied.StateSeq, Generation: int64(applied.Generation), Attempt: int64(applied.Attempt),
 	}
 }
 
@@ -135,20 +136,17 @@ func engineMaskedError(failure *apierr.Error) (string, error) {
 	return failure.Message, nil
 }
 
-func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTransitionRequest) (store.NodeTransition, error) {
+func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTransitionRequest) (store.NodeCommand, error) {
 	if a.Target.RunID == "" || a.Target.NodeID == "" {
-		return store.NodeTransition{}, invalidEngineBody("transition requires a job")
+		return nil, invalidEngineBody("transition requires a job")
 	}
-	change := store.NodeTransition{
-		Ref: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
-		To:  store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Actor: engineActor(a),
-		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt, Publication: body.Publication},
-	}
+	ref, actor := controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a)
+	var resultForStore *store.NodeResult
 	if result := body.Result; result != nil {
 		if int64(len(result.MaskedError)) > limits.ErrorBytes {
-			return store.NodeTransition{}, invalidEngineBody("masked result error exceeds its byte limit")
+			return nil, invalidEngineBody("masked result error exceeds its byte limit")
 		}
-		change.Extra.Result = &store.NodeResult{
+		resultForStore = &store.NodeResult{
 			Outcome: store.NodeState(result.Outcome), Reason: result.Reason,
 			MaskedError: result.MaskedError,
 			ExitCode:    result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure,
@@ -156,15 +154,27 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 		if result.Failure != nil {
 			masked, err := engineMaskedError(result.Failure.Error)
 			if err != nil {
-				return store.NodeTransition{}, err
+				return nil, err
 			}
 			if result.MaskedError != "" && result.MaskedError != masked {
-				return store.NodeTransition{}, invalidEngineBody("masked result error differs from its structured failure")
+				return nil, invalidEngineBody("masked result error differs from its structured failure")
 			}
-			change.Extra.Result.MaskedError = masked
+			resultForStore.MaskedError = masked
 		}
 	}
-	return change, nil
+	switch store.TransitionCause(body.Cause) {
+	case store.CauseStart, store.CauseRetry, store.CauseReport, store.CausePublish, store.CausePublishAttempt, store.CauseRelease:
+	default:
+		return nil, invalidEngineBody("unsupported node command")
+	}
+	command, err := (store.NodeCommandPayload{
+		To: store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt),
+		Extra: store.NodeCommandExtra{Result: resultForStore, RetryAt: body.RetryAt, Publication: body.Publication},
+	}).NodeCommand(ref, actor)
+	if err != nil {
+		return nil, invalidEngineBody(err.Error())
+	}
+	return command, nil
 }
 
 func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) (store.FinishRunRequest, error) {
@@ -176,11 +186,11 @@ func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) 
 		return store.FinishRunRequest{}, invalidEngineBody("finish requires a run")
 	}
 	change := store.RunTransition{
-		RunID: a.Target.RunID, To: store.RunState(body.Outcome), Actor: engineActor(a),
+		RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a),
 		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked,
 	}
 	if a.Access.Credential == capability.CredentialPublisher {
 		change.Cause = store.RunPublish
 	}
-	return store.FinishRunRequest{Transition: change, Unit: change.Actor.Owner}, nil
+	return store.FinishRunRequest{Transition: store.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner}, nil
 }

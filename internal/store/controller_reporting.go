@@ -43,16 +43,13 @@ func (t *Tenant) WriteActivity(ctx context.Context, ref controllerwire.NodeRef, 
 	if err := boundedResultText(detail); err != nil {
 		return err
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if _, err := checkResultWriterTx(ctx, tx, t.team, ref, actor); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status_detail=? WHERE team=? AND run_id=? AND node_id=?`, detail, t.team, ref.RunID, ref.NodeID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if _, err := checkResultWriterTx(ctx, tx, t.team, ref, actor); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status_detail=? WHERE team=? AND run_id=? AND node_id=?`, detail, t.team, ref.RunID, ref.NodeID); err != nil {
+			return err
+		}
+		return nil
+	})
 }

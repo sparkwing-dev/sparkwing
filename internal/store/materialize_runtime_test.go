@@ -104,8 +104,8 @@ func TestReconcileMaterializationRefusesInvalidSource(t *testing.T) {
 
 func TestMaterializationCannotSupplyAnOutcome(t *testing.T) {
 	tenant, request := materializationFixture(t, SourceManualRetry)
-	for _, extra := range []TransitionExtra{{Materialize: request.Source, Result: &NodeResult{Outcome: NodeFailed}}, {Materialize: request.Source}} {
-		_, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, To: NodeFailed, Extra: extra})
+	for _, extra := range []transitionExtra{{Materialize: request.Source, Result: &NodeResult{Outcome: NodeFailed}}, {Materialize: request.Source}} {
+		_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, To: NodeFailed, Extra: extra})
 		if err == nil {
 			t.Fatal("caller selected materialization outcome")
 		}
@@ -194,7 +194,7 @@ func TestReconcileRetryCanReuseMaterializedResult(t *testing.T) {
 			owner.ExpiresAt = &expiry
 			authorityPersist(t, tenant.s, owner)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','next','claimed','trigger',1,1,'host','next-owner',1,?,?,?,1)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "next-owner"}, CapabilityPrefix: "next-owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "next", Holder: "host", Generation: 1}}
+			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "next-owner"}, CapabilityPrefix: "next-owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "next", Holder: "host", Generation: 1}}}
 			source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: first.Node.Ref, StateSeq: first.Node.StateSeq}}
 			tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, Actor, controllerwire.NodeRef, MaterializeSource) (materializedRecords, error) {
 				return materializedRecords{}, nil

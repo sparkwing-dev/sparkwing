@@ -37,7 +37,7 @@ func TestLeasedConcurrencyMaintenancePromotesAfterExpiry(t *testing.T) {
 }
 
 func TestLeasedConcurrencyMaintenanceWaiterContinuity(t *testing.T) {
-	for _, scenario := range []string{"live", "expired waiter", "expired owner", "terminal run", "terminal job", "missing job"} {
+	for _, scenario := range []string{"live", "expired waiter", "expired owner", "expired claim", "expired owner and claim", "terminal run", "terminal job", "missing job"} {
 		t.Run(scenario, func(t *testing.T) {
 			tenant, now, _ := capacityFixture(t)
 			s := tenant.s
@@ -48,10 +48,15 @@ func TestLeasedConcurrencyMaintenanceWaiterContinuity(t *testing.T) {
 				until = *now
 			case "expired owner":
 				rewriteSchemaExec(t, s.db, `UPDATE leases SET until=1 WHERE name='controller.owner'`)
+			case "expired claim":
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=1 WHERE node_id='job'`)
+			case "expired owner and claim":
+				rewriteSchemaExec(t, s.db, `UPDATE leases SET until=1 WHERE name='controller.owner'`)
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=1 WHERE node_id='job'`)
 			case "terminal run":
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=1 WHERE id='run'`)
 			case "terminal job":
-				rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1 WHERE node_id='job'`)
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE node_id='job'`)
 			case "missing job":
 				nodeID = "missing"
 			}
@@ -60,7 +65,7 @@ func TestLeasedConcurrencyMaintenanceWaiterContinuity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "live" {
+			if scenario == "live" || scenario == "expired owner" || scenario == "expired claim" {
 				if len(result.StaleWaiters) != 0 || result.Promoted != 1 {
 					t.Fatalf("live waiter: %+v", result)
 				}

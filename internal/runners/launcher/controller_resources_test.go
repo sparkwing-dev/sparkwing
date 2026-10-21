@@ -60,7 +60,7 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 					t.Fatal(err)
 				}
 				cloudResourceSQL(t, e.Store, `UPDATE runs SET sealed_at=1,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan'`, spec, []byte(`{"jobs":[{"id":"job"}]}`))
-				if err := teststore.SeedTriggerClaim(e.Store, t.Context(), "a", "run", store.Actor{Holder: "owner", CapabilityPrefix: "owner", Generation: 1}, time.Now().Add(time.Hour), nil); err != nil {
+				if err := teststore.SeedTriggerClaim(e.Store, t.Context(), "a", "run", store.Actor{CapabilityPrefix: "owner", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 1}}, time.Now().Add(time.Hour), nil); err != nil {
 					t.Fatal(err)
 				}
 				cloudResourceSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), execution)

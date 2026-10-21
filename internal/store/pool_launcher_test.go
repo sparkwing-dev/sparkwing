@@ -73,7 +73,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	ordinal := int64(0)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: &ordinal}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
@@ -185,7 +185,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		if i > 0 {
 			cause = CauseReport
 		}
-		if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error {
-	attempt := runspec.AttemptIdentity{Team: string(team), RunID: row.Ref.RunID, NodeID: row.Ref.NodeID, Attempt: row.Attempt, Generation: row.Generation}
+	attempt := runspec.AttemptIdentity{Team: string(team), RunID: string(row.Ref.RunID), NodeID: string(row.Ref.NodeID), Attempt: int64(row.Attempt), Generation: int64(row.Generation)}
 	if attempt.Attempt <= 0 || attempt.Generation <= 0 || actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: actor.CapabilityPrefix}) {
 		return blob.ErrDigestNotReadable
 	}

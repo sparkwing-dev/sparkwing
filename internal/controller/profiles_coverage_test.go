@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -31,7 +33,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if id == "c" && mode == "memoized" {
 					outcome = "memoized"
 				}
-				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, controllerwire.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
+				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, controllerwire.NodeRef{RunID: "r", NodeID: runspec.NodeID(id)}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				cpu := int64(100)

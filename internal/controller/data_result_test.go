@@ -41,13 +41,13 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 		actor := engineActor(authorized)
 		ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 		ordinal := int64(0)
-		started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &ordinal})
+		started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)})
 		if err != nil {
 			t.Log(err)
 			return false
 		}
 		c := authorized.Principal.Capability
-		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: c.Team, RunID: c.Binding.RunID, Principal: blob.Principal(c.Subject.ID), CapabilityRef: c.Prefix, Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: started.Attempt, Generation: started.Generation}}}
+		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: c.Team, RunID: c.Binding.RunID, Principal: blob.Principal(c.Subject.ID), CapabilityRef: c.Prefix, Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Attempt: int64(started.Attempt), Generation: int64(started.Generation)}}}
 		authority := blob.Authority{CapabilityRef: c.Prefix, Attempt: identity.Attempt}
 		output := dataResultUpload(t, tenant, objects, authority, identity, "output", payload[:])
 		manifest := blob.Manifest{Entries: []blob.ManifestEntry{{Path: "result", Digest: output.Digest, Size: output.Size, Mode: 0o640}}}
@@ -93,8 +93,8 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			t.Logf("corrupt manifest lookup: %+v: %v", hit, err)
 			return false
 		}
-		ordinal = started.Attempt
-		request := store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &ordinal, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess, OutputRecord: &outputKey, ManifestRecord: &manifestKey}}}
+		ordinal = int64(started.Attempt)
+		request := store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess, OutputRecord: &outputKey, ManifestRecord: &manifestKey}}
 		if _, err := tenant.TransitionNode(t.Context(), request); !errors.Is(err, blob.ErrIntegrity) {
 			t.Logf("corrupt result: %v", err)
 			return false

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
@@ -21,7 +22,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		want[state] = 0
 	}
 	random := rand.New(rand.NewPCG(401, 807))
-	states := []NodeState{NodePending, NodeReady, NodeClaimed, NodeRunning, NodeApprovalPending, NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeMemoized, NodeSuperseded}
+	states := []NodeState{nodePending, NodeReady, NodeClaimed, NodeRunning, NodeApprovalPending, NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeMemoized, NodeSuperseded}
 	for i := range 256 {
 		run := i % 5
 		team := Team("a")
@@ -29,12 +30,12 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 			team = "b"
 		}
 		state := states[i%len(states)]
-		row := NodeRow{Ref: controllerwire.NodeRef{RunID: fmt.Sprintf("run-%d", run), NodeID: fmt.Sprintf("job-%d", i)}, Status: StatusPending}
+		row := NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(fmt.Sprintf("run-%d", run)), NodeID: runspec.NodeID(fmt.Sprintf("job-%d", i))}, Status: StatusPending}
 		if random.IntN(2) == 0 || state == NodeReady {
 			row.ReadyAt = now
 		}
 		switch state {
-		case NodePending:
+		case nodePending:
 			row.ReadyAt = nil
 		case NodeClaimed, NodeRunning:
 			row.ClaimedBy, row.CapabilityPrefix, row.Generation = fmt.Sprintf("holder-%d", i%3), "claim", 1
@@ -58,7 +59,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,ready_at,claimed_by,capability_prefix,generation,attempt,lease_expires_at,finished_at,started_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Status, row.Outcome, timeNS(row.ReadyAt), holder, row.CapabilityPrefix, row.Generation, row.Attempt, timeNS(row.LeaseExpiresAt), timeNS(row.FinishedAt), timeNS(row.StartedAt), []byte(`{}`), []byte(`{}`))
 		if run < 2 && row.Status != StatusDone {
 			key := string(state)
-			if state == NodePending {
+			if state == nodePending {
 				key = QueueStateWaiting
 			}
 			want[key]++

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -89,13 +91,13 @@ type AccountDeletion struct {
 
 // RequestTeamDeletion queues a team for deletion on the operator's word,
 // with no membership check, for a deletion request that arrived by mail.
-func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error) {
+func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team) (TeamDeletion, []string, error) {
 	t := &Tenant{s: o.s, team: NormalizeTeam(team)}
 	var result TeamDeletion
 	var revoked []string
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, now)
+		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, tx.now(ctx))
 		return err
 	})
 	return result, revoked, err
@@ -355,7 +357,7 @@ func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err 
 }
 
 func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now().UnixNano())...)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now(ctx).UnixNano())...)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +394,7 @@ func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.T
 	tx.cancelingTeam = t.team
 	defer func() { tx.cancelingTeam = previous }()
 	for _, id := range ids {
-		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: id, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}, now); err != nil {
+		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: runspec.RunID(id), To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}); err != nil {
 			return err
 		}
 	}
@@ -463,37 +465,43 @@ func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, er
 // holder's lease is live or nothing is due, so one replica purges a team at
 // a time; a purger calls it again before each step that reaches outside the
 // database, and stops when it reports false.
-func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error) {
-	if holder == "" {
-		return false, errors.New("store: a deletion lease needs a holder")
-	}
-	at := now.UTC().UnixNano()
-	res, err := o.s.exec(ctx, `
-		UPDATE team_deletions SET lease_holder = ?, lease_until = ?
-		WHERE slug = ?
-		  AND (state = ? OR (state = ? AND recheck_at IS NOT NULL AND recheck_at <= ?))
-		  AND (lease_until IS NULL OR lease_until < ? OR lease_holder = ?)`,
-		holder, now.Add(lease).UTC().UnixNano(), string(NormalizeTeam(team)),
-		TeamDeletionPending, TeamDeletionDone, at, at, holder)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n == 1, err
+func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, lease time.Duration) (out bool, err error) {
+	err = o.s.inTxOnce(ctx, func(tx *storeTx) error {
+		if holder == "" {
+			return errors.New("store: a deletion lease needs a holder")
+		}
+		at := tx.now(ctx).UTC().UnixNano()
+		res, err := tx.ExecContext(ctx, `
+			UPDATE team_deletions SET lease_holder = ?, lease_until = ?
+			WHERE slug = ?
+			  AND (state = ? OR (state = ? AND recheck_at IS NOT NULL AND recheck_at <= ?))
+			  AND (lease_until IS NULL OR lease_until < ? OR lease_holder = ?)`,
+			holder, tx.now(ctx).Add(lease).UTC().UnixNano(), string(NormalizeTeam(team)),
+			TeamDeletionPending, TeamDeletionDone, at, at, holder)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		out = n == 1
+		return err
+	})
+	return out, err
 }
 
-func (o *Operator) requireLease(ctx context.Context, team Team, holder, state string, now time.Time) error {
-	var n int
-	if err := o.s.queryRow(ctx, `
+func (o *Operator) requireLease(ctx context.Context, team Team, holder, state string) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM team_deletions
 		WHERE slug = ? AND state = ? AND lease_holder = ? AND lease_until >= ?`,
-		string(team), state, holder, now.UTC().UnixNano()).Scan(&n); err != nil {
-		return err
-	}
-	if n != 1 {
-		return fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team)
-	}
-	return nil
+			string(team), state, holder, tx.now(ctx).UTC().UnixNano()).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team)
+		}
+		return nil
+	})
 }
 
 // safety: runs goes last so the rows that reference a run are removed by
@@ -522,21 +530,21 @@ func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 // one transaction, because a large team's rows may not fit one; a purge
 // that stops part-way leaves the deletion pending and the next one finishes
 // it.
-func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error {
+func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, recheckAfter time.Duration) error {
 	team = NormalizeTeam(team)
-	if err := o.requireLease(ctx, team, holder, TeamDeletionPending, now); err != nil {
+	if err := o.requireLease(ctx, team, holder, TeamDeletionPending); err != nil {
 		return err
 	}
 	if err := o.deleteTenantRows(ctx, team); err != nil {
 		return err
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		at := now.UTC().UnixNano()
+		at := tx.now(ctx).UTC().UnixNano()
 		res, err := tx.ExecContext(ctx, `
 			UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
 			    lease_holder = '', lease_until = NULL
 			WHERE slug = ? AND state = ? AND lease_holder = ?`,
-			TeamDeletionDone, at, now.Add(recheckAfter).UTC().UnixNano(), string(team), TeamDeletionPending, holder)
+			TeamDeletionDone, at, tx.now(ctx).Add(recheckAfter).UTC().UnixNano(), string(team), TeamDeletionPending, holder)
 		if err != nil {
 			return err
 		}
@@ -555,9 +563,9 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now 
 }
 
 // FinishTeamRecheck performs the final SQL sweep under the holder's deletion lease.
-func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error {
+func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string) error {
 	team = NormalizeTeam(team)
-	if err := o.requireLease(ctx, team, holder, TeamDeletionDone, now); err != nil {
+	if err := o.requireLease(ctx, team, holder, TeamDeletionDone); err != nil {
 		return err
 	}
 	if err := o.deleteTenantRows(ctx, team); err != nil {
@@ -609,11 +617,11 @@ func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, er
 // It refuses with a [*LastOwnerError] while the account is the last owner of
 // a team that has other members, because deleting it would leave those
 // members in a team nobody can administer.
-func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error) {
+func (s *Store) DeleteAccount(ctx context.Context, accountID string) (AccountDeletion, error) {
 	var result AccountDeletion
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, now)
+		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, tx.now(ctx))
 		return err
 	})
 	return result, err
@@ -829,7 +837,7 @@ const MaxInvitationEmailsPerDay = 5
 // reports false instead when its address has already been mailed
 // [MaxInvitationEmailsPerDay] times in the last 24 hours, counting every
 // team. A claimed invitation is never claimed twice.
-func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error) {
+func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string) (bool, error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return false, err
@@ -852,8 +860,8 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 			return false, err
 		}
 	}
-	at := now.UTC().UnixNano()
-	since := now.Add(-24 * time.Hour).UnixNano()
+	at := tx.now(ctx).UTC().UnixNano()
+	since := tx.now(ctx).Add(-24 * time.Hour).UnixNano()
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM invitation_email_log WHERE address = ? AND sent_at <= ?`, address, since); err != nil {
 		return false, err

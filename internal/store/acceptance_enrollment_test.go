@@ -60,7 +60,7 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET expires_at=?`, time.Now().Add(time.Hour).UnixNano()); err != nil {
 		return err
 	}
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: plan.RunID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return err
 	}
 	if err := reopen(); err != nil {

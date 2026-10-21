@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -28,13 +30,14 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 		if c.Team != string(t.team) || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.DataRead) {
 			return holderRefusal()
 		}
-		if err := prepareStateActorTx(ctx, tx, t.team, source.RunID, actor, tx.now()); err != nil {
+
+		if err := prepareStateActorTx(ctx, tx, t.team, string(source.RunID), actor); err != nil {
 			return err
 		}
-		if err := lockStateRunTx(ctx, tx, t.team, source.RunID); err != nil {
+		if err := lockStateRunTx(ctx, tx, t.team, string(source.RunID)); err != nil {
 			return err
 		}
-		snapshot, err := readSnapshotTx(ctx, tx, t.team, source.RunID)
+		snapshot, err := readSnapshotTx(ctx, tx, t.team, string(source.RunID))
 		if err != nil {
 			return err
 		}
@@ -42,10 +45,10 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 			return holderRefusal()
 		}
 		if actor.Kind == ActorRunHost {
-			if err := checkOwnerTx(ctx, tx, t.team, actor, source.RunID, tx.now()); err != nil {
+			if err := checkOwnerTx(ctx, tx, t.team, actor, string(source.RunID)); err != nil {
 				return err
 			}
-		} else if actor.Kind != ActorHolder || c.Binding.Kind != capability.BindingNode || c.Binding.RunID != source.RunID {
+		} else if actor.Kind != ActorHolder || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != source.RunID {
 			return holderRefusal()
 		}
 		declared := false
@@ -55,24 +58,24 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 			if row.Ref == source {
 				parent = row
 			}
-			if actor.Kind == ActorHolder && row.Ref.NodeID != c.Binding.NodeID {
+			if actor.Kind == ActorHolder && row.Ref.NodeID != runspec.NodeID(c.Binding.NodeID) {
 				continue
 			}
 			var job nodeproto.JobSpec
 			if err := json.Unmarshal(row.Spec, &job); err != nil {
 				return err
 			}
-			if job.OnFailureOf != source.NodeID {
+			if runspec.NodeID(job.OnFailureOf) != source.NodeID {
 				continue
 			}
 			if actor.Kind == ActorHolder {
-				if err := checkHolderTx(ctx, tx, t.team, *row, actor, tx.now()); err != nil {
+				if err := checkHolderTx(ctx, tx, t.team, *row, actor); err != nil {
 					return err
 				}
 			}
 			declared = true
 		}
-		if !declared || parent == nil || parent.Status != StatusDone || parent.Generation != generation {
+		if !declared || parent == nil || parent.Status != StatusDone || parent.Generation != runspec.ClaimGeneration(generation) {
 			return holderRefusal()
 		}
 		if parent.Outcome != NodeFailed {

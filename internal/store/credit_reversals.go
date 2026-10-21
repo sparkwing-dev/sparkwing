@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // ErrUnknownPayment is returned when a provider payment has no settled grant.
@@ -71,19 +70,19 @@ const OperatorHoldPrefix = "operator-"
 
 // HoldByOperator holds t on actor's word and returns the hold's id. The hold
 // and its audit fact, naming actor and hold ID, commit together.
-func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error) {
+func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string) (string, error) {
 	id, err := newCreditID("hold")
 	if err != nil {
 		return "", err
 	}
 	id = OperatorHoldPrefix + id
-	_, err = t.hold(ctx, id, "", reason, actor, now)
+	_, err = t.hold(ctx, id, "", reason, actor)
 	return id, err
 }
 
-func (t *Tenant) hold(ctx context.Context, disputeID, paymentID, reason, actor string, now time.Time) (created bool, err error) {
+func (t *Tenant) hold(ctx context.Context, disputeID, paymentID, reason, actor string) (created bool, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, now, auditActor{system: auditBreakGlass})
+		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, tx.now(ctx), auditActor{system: auditBreakGlass})
 		return err
 	})
 	if err != nil {
@@ -115,23 +114,23 @@ func (op *Operator) disputeHoldTx(ctx context.Context, tx *storeTx, disputeID st
 }
 
 // ReleaseCreditFreezes releases the named hold on this tenant and commits its audit event.
-func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, reason string, now time.Time) (int64, error) {
+func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, reason string) (int64, error) {
 	if strings.TrimSpace(disputeID) == "" {
 		return 0, fmt.Errorf("%w: a release names the hold it releases", ErrInvalidInput)
 	}
-	return t.releaseFreezes(ctx, disputeID, false, actor, reason, now)
+	return t.releaseFreezes(ctx, disputeID, false, actor, reason)
 }
 
 // ReleaseOperatorHolds releases every hold an operator placed on t, and never
 // a payment dispute's. Each release and its audit fact, naming actor and hold
 // ID, commit together.
-func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error) {
-	return t.releaseFreezes(ctx, "", true, actor, reason, now)
+func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string) (int64, error) {
+	return t.releaseFreezes(ctx, "", true, actor, reason)
 }
 
-func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorOnly bool, actor, reason string, now time.Time) (count int64, err error) {
+func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorOnly bool, actor, reason string) (count int64, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, now, auditActor{system: auditBreakGlass})
+		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, false, actor, reason, tx.now(ctx), auditActor{system: auditBreakGlass})
 		return err
 	})
 	if err != nil {
@@ -178,7 +177,7 @@ func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCred
 	return scanCreditFreeze(rows)
 }
 
-func scanCreditFreeze(rows *sql.Rows) (TeamCreditFreeze, error) {
+func scanCreditFreeze(rows rowCursor) (TeamCreditFreeze, error) {
 	var out TeamCreditFreeze
 	for rows.Next() {
 		var id, cause string

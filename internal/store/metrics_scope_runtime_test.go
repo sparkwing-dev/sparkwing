@@ -37,7 +37,7 @@ func TestMetricIdentityPreservesTenantAndConflictingRetriesProperty(t *testing.T
 		if err := f.tenant.WriteMetric(t.Context(), a, conflict); err == nil {
 			t.Fatal("conflicting metric replaced its predecessor")
 		}
-		rows, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+		rows, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 		if err != nil || len(rows) != i+1 {
 			t.Fatalf("samples = %d, %v; want %d", len(rows), err, i+1)
 		}
@@ -46,7 +46,7 @@ func TestMetricIdentityPreservesTenantAndConflictingRetriesProperty(t *testing.T
 			t.Fatalf("sample changed: %+v; want %+v", got, sample)
 		}
 	}
-	if rows, err := foreign.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID); err != nil || len(rows) != 0 {
+	if rows, err := foreign.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID)); err != nil || len(rows) != 0 {
 		t.Fatalf("foreign samples = %d, %v", len(rows), err)
 	}
 }

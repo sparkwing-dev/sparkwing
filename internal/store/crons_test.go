@@ -28,11 +28,12 @@ VALUES (?, ?, (SELECT COALESCE(MAX(number),0)+1 FROM runs WHERE team=?), 'nightl
 func armCron(t *testing.T, st *store.Store, id, repo, pipeline string, at time.Time) store.CronSchedule {
 	t.Helper()
 	next := at.Add(time.Hour)
+	st.SetTestClock(t, func() time.Time { return at })
 	sched, created, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(context.Background(), store.CronSchedule{
 		ID: id, RepoPath: repo, Pipeline: pipeline,
 		Cron: "0 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip,
 		CatchUp: time.Hour, ArmedBy: "korey", NextDueAt: &next,
-	}, at)
+	})
 	if err != nil {
 		t.Fatalf("ArmCronSchedule(%s): %v", id, err)
 	}
@@ -57,23 +58,26 @@ func TestArmCronScheduleInsertsThenRefreshesWithoutClobberingState(t *testing.T)
 		t.Fatalf("armed row carries fire history %+v", sched)
 	}
 
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, sched.ID, true, cronBase.Add(time.Minute)); err != nil {
+	st.SetTestClock(t, func() time.Time { return cronBase.Add(time.Minute) })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, sched.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	fired := cronBase.Add(2 * time.Minute)
+	st.SetTestClock(t, func() time.Time { return fired })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, fired, nil, &store.CronFire{
 		DueAt: fired, DecidedAt: fired, Outcome: store.CronOutcomeFired, RunID: "run-1",
-	}, fired); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	rearmedAt := cronBase.Add(time.Hour)
 	next := rearmedAt.Add(6 * time.Hour)
+	st.SetTestClock(t, func() time.Time { return rearmedAt })
 	again, created, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 		ID: "crn_ignored", RepoPath: "/repo/one", Pipeline: "nightly",
 		Cron: "0 3 * * *", TZ: "America/Boise", Overlap: store.CronOverlapQueue,
 		CatchUp: 2 * time.Hour, ArmedBy: "someone-else", NextDueAt: &next,
-	}, rearmedAt)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +109,8 @@ func TestArmCronScheduleRedeclaresAWithdrawnSchedule(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleDeclared(ctx, sched.ID, false, cronBase.Add(time.Minute)); err != nil {
+	st.SetTestClock(t, func() time.Time { return cronBase.Add(time.Minute) })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleDeclared(ctx, sched.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -115,10 +120,11 @@ func TestArmCronScheduleRedeclaresAWithdrawnSchedule(t *testing.T) {
 	if got.Declared {
 		t.Fatal("SetCronScheduleDeclared(false) left the schedule declared")
 	}
+	st.SetTestClock(t, func() time.Time { return cronBase.Add(2 * time.Minute) })
 	if _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 		ID: sched.ID, RepoPath: "/repo/one", Pipeline: "nightly",
 		Cron: "0 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
-	}, cronBase.Add(2*time.Minute)); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil || !got.Declared {
@@ -163,11 +169,12 @@ func TestCronScheduleMutatorsReportAnUnknownID(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	next := cronBase.Add(time.Hour)
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	for name, err := range map[string]error{
-		"pause":    teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, "crn_absent", true, cronBase),
-		"declared": teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleDeclared(ctx, "crn_absent", false, cronBase),
-		"next due": teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleNextDue(ctx, "crn_absent", &next, cronBase),
-		"resolve":  teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, "crn_absent", cronBase, nil, nil, cronBase),
+		"pause":    teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, "crn_absent", true),
+		"declared": teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleDeclared(ctx, "crn_absent", false),
+		"next due": teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleNextDue(ctx, "crn_absent", &next),
+		"resolve":  teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, "crn_absent", cronBase, nil, nil),
 	} {
 		if !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("%s = %v, want ErrNotFound", name, err)
@@ -180,7 +187,8 @@ func TestSetCronSchedulePausedRoundTrips(t *testing.T) {
 	st := storetest.Open(t)
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
 	paused := cronBase.Add(time.Minute)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, sched.ID, true, paused); err != nil {
+	st.SetTestClock(t, func() time.Time { return paused })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, sched.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -191,7 +199,8 @@ func TestSetCronSchedulePausedRoundTrips(t *testing.T) {
 		t.Fatalf("paused = %v, updated = %v, want true at %v", got.Paused, got.UpdatedAt, paused)
 	}
 	resumed := paused.Add(time.Minute)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, sched.ID, false, resumed); err != nil {
+	st.SetTestClock(t, func() time.Time { return resumed })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronSchedulePaused(ctx, sched.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil || got.Paused {
@@ -206,7 +215,8 @@ func TestSetCronScheduleNextDueClearsAndSets(t *testing.T) {
 	if sched.NextDueAt == nil {
 		t.Fatal("armed schedule lost its next due instant")
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleNextDue(ctx, sched.ID, nil, cronBase.Add(time.Minute)); err != nil {
+	st.SetTestClock(t, func() time.Time { return cronBase.Add(time.Minute) })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleNextDue(ctx, sched.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -217,7 +227,8 @@ func TestSetCronScheduleNextDueClearsAndSets(t *testing.T) {
 		t.Fatalf("next due = %v, want nil for an expression that never matches again", got.NextDueAt)
 	}
 	next := cronBase.Add(24 * time.Hour)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleNextDue(ctx, sched.ID, &next, cronBase.Add(2*time.Minute)); err != nil {
+	st.SetTestClock(t, func() time.Time { return cronBase.Add(2 * time.Minute) })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleNextDue(ctx, sched.ID, &next); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil || got.NextDueAt == nil || !got.NextDueAt.Equal(next) {
@@ -231,13 +242,15 @@ func TestResolveCronDueNeverRewindsTheCursor(t *testing.T) {
 	cronRun(t, st, "run-1")
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
 	ahead := cronBase.Add(time.Hour)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, ahead, nil, nil, ahead); err != nil {
+	st.SetTestClock(t, func() time.Time { return ahead })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, ahead, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	behind := cronBase.Add(time.Minute)
+	st.SetTestClock(t, func() time.Time { return behind })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, behind, nil, &store.CronFire{
 		DueAt: behind, DecidedAt: behind, Outcome: store.CronOutcomeFired, RunID: "run-1",
-	}, behind); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -262,9 +275,10 @@ func TestDeleteCronSchedulesForRepoCountsWhatWent(t *testing.T) {
 	armCron(t, st, "crn_a2", "/repo/one", "release", cronBase)
 	kept := armCron(t, st, "crn_b1", "/repo/two", "build", cronBase)
 	at := cronBase.Add(time.Minute)
+	st.SetTestClock(t, func() time.Time { return at })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, "crn_a1", at, nil, &store.CronFire{
 		DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeMissed, Detail: "host asleep",
-	}, at); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -298,9 +312,10 @@ func TestResolveCronDueStampsEachOutcome(t *testing.T) {
 
 	firedAt := cronBase.Add(time.Hour)
 	next := firedAt.Add(time.Hour)
+	st.SetTestClock(t, func() time.Time { return firedAt })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, firedAt, &next, &store.CronFire{
 		DueAt: firedAt, DecidedAt: firedAt, Outcome: store.CronOutcomeFired, RunID: "run-1",
-	}, firedAt); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -319,9 +334,10 @@ func TestResolveCronDueStampsEachOutcome(t *testing.T) {
 		store.CronOutcomeSkippedOverlap, store.CronOutcomeMissed, store.CronOutcomeFailed,
 	} {
 		at := firedAt.Add(time.Duration(i+1) * time.Hour)
+		st.SetTestClock(t, func() time.Time { return at })
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, &store.CronFire{
 			DueAt: at, DecidedAt: at, Outcome: outcome, Detail: "detail " + outcome,
-		}, at); err != nil {
+		}); err != nil {
 			t.Fatalf("%s: %v", outcome, err)
 		}
 		got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -355,7 +371,8 @@ func TestResolveCronDueWithoutAFireOnlyMovesTheCursor(t *testing.T) {
 	st := storetest.Open(t)
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
 	at := cronBase.Add(time.Hour)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, nil, at); err != nil {
+	st.SetTestClock(t, func() time.Time { return at })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -378,9 +395,10 @@ func TestResolveCronDueRefusesAnUnknownOutcome(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, cronBase, nil, &store.CronFire{
 		DueAt: cronBase, DecidedAt: cronBase, Outcome: "exploded",
-	}, cronBase)
+	})
 	if err == nil {
 		t.Fatal("ResolveCronDue accepted an outcome outside the enum")
 	}
@@ -393,9 +411,10 @@ func TestResolveCronDuePrunesFireHistory(t *testing.T) {
 	const written = 210
 	for i := range written {
 		at := cronBase.Add(time.Duration(i+1) * time.Minute)
+		st.SetTestClock(t, func() time.Time { return at })
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, &store.CronFire{
 			DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeMissed,
-		}, at); err != nil {
+		}); err != nil {
 			t.Fatalf("fire %d: %v", i, err)
 		}
 	}
@@ -424,9 +443,10 @@ func TestListCronFiresOrderAndDefaultLimit(t *testing.T) {
 	const written = 60
 	for i := range written {
 		at := cronBase.Add(time.Duration(i+1) * time.Minute)
+		st.SetTestClock(t, func() time.Time { return at })
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, &store.CronFire{
 			DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeFailed, Detail: "boom",
-		}, at); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -506,12 +526,13 @@ func TestArmCronScheduleRoundTripsNameWhereArgsAndLock(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	args := map[string]string{"env": "prod", "shard": "2"}
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	sched, created, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 		ID: "crn_named", RepoPath: "/repo/one", Pipeline: "nightly", Name: "morning",
 		Cron: "0 6 * * *", TZ: "UTC", CatchUp: time.Hour,
 		Where: store.CronWhereController, Args: args,
 		LockedRef: "abc123", LockedBinary: "/home/bin/nightly", LockedDigest: "sha256:beef",
-	}, cronBase)
+	})
 	if err != nil || !created {
 		t.Fatalf("ArmCronSchedule = (%v, %v), want a created row", created, err)
 	}
@@ -543,10 +564,11 @@ func TestArmCronScheduleDefaultsNameWhereAndArgs(t *testing.T) {
 
 func TestArmCronScheduleRefusesAnUnknownWhere(t *testing.T) {
 	st := storetest.Open(t)
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	if _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(context.Background(), store.CronSchedule{
 		ID: "crn_a", RepoPath: "/repo/one", Pipeline: "nightly",
 		Cron: "0 * * * *", TZ: "UTC", Where: "mars",
-	}, cronBase); err == nil {
+	}); err == nil {
 		t.Fatal("ArmCronSchedule accepted a where outside the enum")
 	}
 }
@@ -557,15 +579,17 @@ func TestArmCronSchedulePreservesTheOverride(t *testing.T) {
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
 	catchUp := 30 * time.Minute
 	set := cronBase.Add(time.Minute)
+	st.SetTestClock(t, func() time.Time { return set })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, store.CronOverride{
 		Cron: "0 4 * * *", CatchUp: &catchUp, Base: sched.Declaration(), SetAt: set,
-	}, set); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
+	st.SetTestClock(t, func() time.Time { return cronBase.Add(time.Hour) })
 	again, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 		ID: sched.ID, RepoPath: "/repo/one", Pipeline: "nightly",
 		Cron: "0 3 * * *", TZ: "UTC", CatchUp: time.Hour,
-	}, cronBase.Add(time.Hour))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +622,8 @@ func TestCronOverrideRoundTripsAndClears(t *testing.T) {
 		Base:    sched.Declaration(),
 		SetAt:   set,
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, override, set); err != nil {
+	st.SetTestClock(t, func() time.Time { return set })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, override); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -628,9 +653,10 @@ func TestCronOverrideRoundTripsAndClears(t *testing.T) {
 	// safety: an override replaces the previous one whole, so a field the new
 	// one leaves unset must stop applying rather than linger.
 	replaced := set.Add(time.Minute)
+	st.SetTestClock(t, func() time.Time { return replaced })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, store.CronOverride{
 		TZ: "UTC", Base: sched.Declaration(), SetAt: replaced,
-	}, replaced); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil {
@@ -641,7 +667,8 @@ func TestCronOverrideRoundTripsAndClears(t *testing.T) {
 	}
 
 	cleared := replaced.Add(time.Minute)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).ClearCronOverride(ctx, sched.ID, cleared); err != nil {
+	st.SetTestClock(t, func() time.Time { return cleared })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).ClearCronOverride(ctx, sched.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil {
@@ -658,18 +685,20 @@ func TestCronOverrideRoundTripsAndClears(t *testing.T) {
 func TestCronOverrideDistinguishesNoArgsFromNoArgOverride(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	sched, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 		ID: "crn_a", RepoPath: "/repo/one", Pipeline: "nightly",
 		Cron: "0 * * * *", TZ: "UTC", CatchUp: time.Hour,
 		Args: map[string]string{"env": "prod"},
-	}, cronBase)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	at := cronBase.Add(time.Minute)
+	st.SetTestClock(t, func() time.Time { return at })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, store.CronOverride{
 		Base: sched.Declaration(), SetAt: at,
-	}, at); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -683,9 +712,10 @@ func TestCronOverrideDistinguishesNoArgsFromNoArgOverride(t *testing.T) {
 		t.Errorf("effective args = %v, want the declared ones", got.Effective().Args)
 	}
 
+	st.SetTestClock(t, func() time.Time { return at })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, store.CronOverride{
 		Args: map[string]string{}, Base: sched.Declaration(), SetAt: at,
-	}, at); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil {
@@ -733,7 +763,8 @@ func TestSetCronScheduleLockPinsAndUnlocks(t *testing.T) {
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
 	locked := cronBase.Add(time.Minute)
 	lock := store.CronLock{Ref: "abc123", Binary: "/home/bin/nightly", Digest: "sha256:beef"}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleLock(ctx, sched.ID, lock, locked); err != nil {
+	st.SetTestClock(t, func() time.Time { return locked })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleLock(ctx, sched.ID, lock); err != nil {
 		t.Fatal(err)
 	}
 	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -746,7 +777,8 @@ func TestSetCronScheduleLockPinsAndUnlocks(t *testing.T) {
 	if !got.UpdatedAt.Equal(locked) {
 		t.Errorf("updated_at = %v, want %v", got.UpdatedAt, locked)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleLock(ctx, sched.ID, store.CronLock{}, locked.Add(time.Minute)); err != nil {
+	st.SetTestClock(t, func() time.Time { return locked.Add(time.Minute) })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleLock(ctx, sched.ID, store.CronLock{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID); err != nil {
@@ -755,7 +787,8 @@ func TestSetCronScheduleLockPinsAndUnlocks(t *testing.T) {
 	if got.LockedRef != "" || got.LockedBinary != "" || got.LockedDigest != "" {
 		t.Errorf("a zero lock left %+v", got.Declaration())
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleLock(ctx, "crn_absent", lock, locked); !errors.Is(err, store.ErrNotFound) {
+	st.SetTestClock(t, func() time.Time { return locked })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronScheduleLock(ctx, "crn_absent", lock); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("lock of an unknown id = %v, want ErrNotFound", err)
 	}
 }
@@ -763,9 +796,10 @@ func TestSetCronScheduleLockPinsAndUnlocks(t *testing.T) {
 func TestCronOverrideMutatorsReportAnUnknownID(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	for name, err := range map[string]error{
-		"set":    teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, "crn_absent", store.CronOverride{SetAt: cronBase}, cronBase),
-		"clear":  teststore.ForTeam(t, st, store.DefaultTeam).ClearCronOverride(ctx, "crn_absent", cronBase),
+		"set":    teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, "crn_absent", store.CronOverride{SetAt: cronBase}),
+		"clear":  teststore.ForTeam(t, st, store.DefaultTeam).ClearCronOverride(ctx, "crn_absent"),
 		"delete": teststore.ForTeam(t, st, store.DefaultTeam).DeleteCronSchedule(ctx, "crn_absent"),
 	} {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -778,9 +812,10 @@ func TestSetCronOverrideRefusesAnUnknownOverlap(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
+	st.SetTestClock(t, func() time.Time { return cronBase })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetCronOverride(ctx, sched.ID, store.CronOverride{
 		Overlap: "pile-up", SetAt: cronBase,
-	}, cronBase); err == nil {
+	}); err == nil {
 		t.Fatal("SetCronOverride accepted an overlap outside the enum")
 	}
 }
@@ -790,19 +825,21 @@ func TestDeleteCronScheduleTakesItsFiresAndSparesSiblings(t *testing.T) {
 	st := storetest.Open(t)
 	var ids []string
 	for _, name := range []string{"morning", "evening"} {
+		st.SetTestClock(t, func() time.Time { return cronBase })
 		sched, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 			ID: "crn_" + name, RepoPath: "/repo/one", Pipeline: "nightly", Name: name,
 			Cron: "0 * * * *", TZ: "UTC", CatchUp: time.Hour,
-		}, cronBase)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, sched.ID)
 		at := cronBase.Add(time.Minute)
 		cronRun(t, st, "run-"+name)
+		st.SetTestClock(t, func() time.Time { return at })
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, &store.CronFire{
 			DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeFired, RunID: "run-" + name,
-		}, at); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -838,15 +875,17 @@ func TestCronFireRoundTripsArgs(t *testing.T) {
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
 	at := cronBase.Add(time.Hour)
 	args := map[string]string{"env": "prod", "shard": "2"}
+	st.SetTestClock(t, func() time.Time { return at })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, at, nil, &store.CronFire{
 		DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeFired, RunID: "run-1", Args: args,
-	}, at); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	bare := at.Add(time.Hour)
+	st.SetTestClock(t, func() time.Time { return bare })
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, bare, nil, &store.CronFire{
 		DueAt: bare, DecidedAt: bare, Outcome: store.CronOutcomeMissed,
-	}, bare); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	fires, err := teststore.ForTeam(t, st, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
@@ -879,7 +918,8 @@ func TestResolveCronDueSkipsASecondFiredRowForTheSameInstantAndRun(t *testing.T)
 		}
 	}
 	for i := 0; i < 2; i++ {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, due, &next, fire("run-1"), cronBase); err != nil {
+		st.SetTestClock(t, func() time.Time { return cronBase })
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, due, &next, fire("run-1")); err != nil {
 			t.Fatalf("resolve %d: %v", i, err)
 		}
 	}
@@ -892,14 +932,16 @@ func TestResolveCronDueSkipsASecondFiredRowForTheSameInstantAndRun(t *testing.T)
 	}
 
 	// safety: a different run for the same instant is `crons run`, not a repeat.
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, due, &next, fire("run-2"), cronBase); err != nil {
+	st.SetTestClock(t, func() time.Time { return cronBase })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, due, &next, fire("run-2")); err != nil {
 		t.Fatalf("resolve a second run: %v", err)
 	}
 	// safety: so is a different outcome for the same instant.
 	miss := &store.CronFire{
 		DueAt: due, DecidedAt: cronBase, Outcome: store.CronOutcomeMissed, Detail: "asleep",
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, due, &next, miss, cronBase); err != nil {
+	st.SetTestClock(t, func() time.Time { return cronBase })
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).ResolveCronDue(ctx, sched.ID, due, &next, miss); err != nil {
 		t.Fatalf("resolve a miss: %v", err)
 	}
 	fires, err = teststore.ForTeam(t, st, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
@@ -928,14 +970,14 @@ func TestArmCronScheduleKeysTheRepositoryPipelineAndNamePerTeam(t *testing.T) {
 		ID: "crn_team_b", RepoPath: "https://git.example.com/acme/app.git", Pipeline: "nightly",
 		Cron: "0 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
 	}
-	if _, created, err := tenantB.ArmCronSchedule(ctx, sched, cronBase); err != nil || !created {
+	if _, created, err := tenantB.ArmCronSchedule(ctx, sched); err != nil || !created {
 		t.Fatalf("team B arming the same repository, pipeline and name = created %v, %v", created, err)
 	}
 	if own, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, "crn_default"); err != nil || own.Team != store.DefaultTeam {
 		t.Fatalf("the default team's schedule after team B's arm: %+v, %v", own, err)
 	}
 	sched.ID, sched.Pipeline = "crn_default", "weekly"
-	if _, created, err := tenantB.ArmCronSchedule(ctx, sched, cronBase); err != nil || !created {
+	if _, created, err := tenantB.ArmCronSchedule(ctx, sched); err != nil || !created {
 		t.Fatalf("team B arming an id the default team holds = created %v, %v", created, err)
 	}
 	if own, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, "crn_default"); err != nil || own.Pipeline != "nightly" {

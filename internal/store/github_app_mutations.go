@@ -33,7 +33,7 @@ func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Au
 		}
 		row.CreatedBy = p.Capability.Subject.ID
 		var err error
-		out, err = t.putGitHubAppTriggerTx(ctx, tx, row, tx.now())
+		out, err = t.putGitHubAppTriggerTx(ctx, tx, row, tx.now(ctx))
 		return err
 	})
 	if err != nil {

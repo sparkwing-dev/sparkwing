@@ -7,6 +7,8 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -22,7 +24,7 @@ func (h *OwnerHost) expansionActor(ctx context.Context, input RunInput, row stor
 		return h.ExpansionActor(ctx, input, row)
 	}
 	owner := input.Owner
-	if h.Delegator == nil || owner.Kind != store.ActorRunHost || owner.Owner.Kind != store.OwnerTrigger || owner.Owner.RunID != input.RunID || row.Ref.RunID != input.RunID || row.Ref.NodeID == "" || row.Generation < 0 {
+	if h.Delegator == nil || owner.Kind != store.ActorRunHost || owner.Owner.Kind != store.OwnerTrigger || owner.Owner.RunID != runspec.RunID(input.RunID) || row.Ref.RunID != runspec.RunID(input.RunID) || row.Ref.NodeID == "" || row.Generation < 0 {
 		return store.Actor{}, errors.New("expansion requires source-bound owner delegation")
 	}
 	parent, err := h.Delegator.ResolveAuthority(ctx, owner.Authority)
@@ -30,12 +32,12 @@ func (h *OwnerHost) expansionActor(ctx context.Context, input RunInput, row stor
 		return store.Actor{}, err
 	}
 	binding := parent.Capability.Binding
-	if parent.Authority != owner.Authority || binding.Kind != capability.BindingTrigger || binding.RunID != input.RunID || binding.Holder != owner.Owner.Holder || binding.Generation != owner.Owner.Generation {
+	if parent.Authority != owner.Authority || binding.Kind != capability.BindingTrigger || binding.RunID != input.RunID || binding.Holder != owner.Owner.Holder || runspec.ClaimGeneration(binding.Generation) != owner.Owner.Generation {
 		return store.Actor{}, errors.New("expansion parent differs from its current owner")
 	}
-	binding.Kind, binding.NodeID, binding.Generation, binding.Attempt = capability.BindingNode, row.Ref.NodeID, row.Generation, row.Attempt
+	binding.Kind, binding.NodeID, binding.Generation, binding.Attempt = capability.BindingNode, string(row.Ref.NodeID), int64(row.Generation), int64(row.Attempt)
 	binding.Holder = ""
-	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: input.RunID, Holder: owner.Owner.Holder, Generation: owner.Owner.Generation}
+	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: input.RunID, Holder: owner.Owner.Holder, Generation: int64(owner.Owner.Generation)}
 	expected, err := json.Marshal(binding)
 	if err != nil {
 		return store.Actor{}, err

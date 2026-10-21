@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
@@ -55,7 +56,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		}
 		if claim {
 			b := p.Capability.Binding
-			if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: auditPrincipalActor(p)}, auditSecretRelease{RunID: b.RunID, Name: digestAudit(out.Name), Pipeline: digestAudit(out.Pipeline), NodeID: digestAudit(b.NodeID), Generation: b.Generation, CapabilityPrefix: digestAudit(p.Capability.Prefix), Holder: digestAudit(b.Holder)}); err != nil {
+			if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditSecretRelease{RunID: b.RunID, Name: digestAudit(out.Name), Pipeline: digestAudit(out.Pipeline), NodeID: digestAudit(b.NodeID), Generation: b.Generation, CapabilityPrefix: digestAudit(p.Capability.Prefix), Holder: digestAudit(b.Holder)}); err != nil {
 				return err
 			}
 		}
@@ -77,7 +78,7 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 	for i, node := range chain {
 		states[i] = capability.AuthorityState{Principal: node.principal}
 	}
-	p, err := capability.ValidateAuthority(states, tx.now())
+	p, err := capability.ValidateAuthority(states, tx.now(ctx))
 	if err != nil {
 		return capability.Principal{}, err
 	}
@@ -93,7 +94,7 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 			continue
 		}
 		if rule.Binding == capability.BindDeclaredSecret {
-			if err := checkBurstClaimantTx(ctx, tx, t.team, chain, UnitRef{Kind: p.Capability.Unit, RunID: p.Capability.Binding.RunID, NodeID: p.Capability.Binding.NodeID}); err != nil {
+			if err := checkBurstClaimantTx(ctx, tx, t.team, chain, UnitRef{Kind: p.Capability.Unit, RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID)}); err != nil {
 				return capability.Principal{}, err
 			}
 			if err := t.secretClaimFenceTx(ctx, tx, p.Capability); err != nil {
@@ -112,7 +113,7 @@ func (t *Tenant) secretClaimFenceTx(ctx context.Context, tx *storeTx, c capabili
 	if c.UnitID == "" || b.RunID == "" || b.Expansion != nil || c.Delivery == capability.DeliveryBootstrap || !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitNode}, c.Unit) {
 		return bindingRefusal()
 	}
-	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: c.Unit, RunID: b.RunID, NodeID: b.NodeID}); err != nil {
+	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: c.Unit, RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)}); err != nil {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, b.RunID); err != nil {
@@ -128,14 +129,14 @@ func (t *Tenant) secretClaimFenceTx(ctx context.Context, tx *storeTx, c capabili
 	if err != nil {
 		return err
 	}
-	if state.RunCancelled || state.RunFinished || state.FinishedAt != nil || b.Generation <= 0 || b.Holder == "" || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || b.Attempt > 0 && state.Current.Attempt != b.Attempt || !state.LeaseExpiresAt.After(tx.now()) {
+	if state.RunCancelled || state.RunFinished || state.FinishedAt != nil || b.Generation <= 0 || b.Holder == "" || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || b.Attempt > 0 && state.Current.Attempt != b.Attempt || !state.LeaseExpiresAt.After(tx.now(ctx)) {
 		return bindingRefusal()
 	}
 	var deadline sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM triggers WHERE team=? AND id=?`, t.team, b.RunID).Scan(&deadline); err != nil {
 		return err
 	}
-	if deadline.Valid && deadline.Int64 <= tx.now().UnixNano() {
+	if deadline.Valid && deadline.Int64 <= tx.now(ctx).UnixNano() {
 		return bindingRefusal()
 	}
 	return nil

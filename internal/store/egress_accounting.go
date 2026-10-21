@@ -79,10 +79,10 @@ const EgressUsageRetentionMonths = 13
 func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error) {
 	var removed int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return err
 		}
-		now := tx.now().UTC()
+		now := tx.now(ctx).UTC()
 		cutoff := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -EgressUsageRetentionMonths, 0).Format("2006-01")
 		result, err := tx.ExecContext(ctx, "DELETE FROM egress_usage WHERE period<?", cutoff)
 		if err != nil {

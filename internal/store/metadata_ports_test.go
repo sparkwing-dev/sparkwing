@@ -24,7 +24,7 @@ func metadataAttempt(t *testing.T, f *storeRecoveryFixture) runspec.AttemptIdent
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runspec.AttemptIdentity{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, Generation: row.Generation, Attempt: row.Attempt}
+	return runspec.AttemptIdentity{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(row.Generation), Attempt: int64(row.Attempt)}
 }
 
 func metadataStep(t *testing.T, f *storeRecoveryFixture, step, state string) {
@@ -171,20 +171,20 @@ func TestMetadataWritesCannotCrossClaimFencesProperty(t *testing.T) {
 		actor, ref, forged := f.holder, f.ref, attempt
 		switch random.IntN(7) {
 		case 0:
-			actor.Generation += int64(random.IntN(100) + 1)
+			actor.Generation += runspec.ClaimGeneration(random.IntN(100) + 1)
 		case 1:
 			actor.Holder = fmt.Sprintf("foreign-%x", random.Uint64())
 		case 2:
 			actor.CapabilityPrefix = fmt.Sprintf("foreign-%x", random.Uint64())
 		case 3:
-			ref.RunID = fmt.Sprintf("foreign-%x", random.Uint64())
-			forged.RunID = ref.RunID
+			ref.RunID = runspec.RunID(fmt.Sprintf("foreign-%x", random.Uint64()))
+			forged.RunID = string(ref.RunID)
 		case 4:
-			ref.NodeID = fmt.Sprintf("foreign-%x", random.Uint64())
-			forged.NodeID = ref.NodeID
+			ref.NodeID = runspec.NodeID(fmt.Sprintf("foreign-%x", random.Uint64()))
+			forged.NodeID = string(ref.NodeID)
 		case 5:
 			forged.Team = fmt.Sprintf("foreign-%x", random.Uint64())
-			ref.RunID = forged.Team
+			ref.RunID = runspec.RunID(forged.Team)
 		case 6:
 			actor.Authority.ID = fmt.Sprintf("foreign-%x", random.Uint64())
 		}
@@ -219,7 +219,7 @@ func TestMetadataStepStatesAndTerminalSettlement(t *testing.T) {
 					t.Fatalf("terminal step accepted %q", state)
 				}
 			}
-			_, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: outcome, Cause: store.CauseReport, SourceAttempt: &attempt.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: outcome}}})
+			_, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt.Attempt), Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -250,7 +250,7 @@ func TestMetadataRunnerClockAheadDoesNotBlockRecovery(t *testing.T) {
 	if err != nil || len(units) != 1 || !units[0].Requeued {
 		t.Fatalf("recover ahead-clock runner: %+v, %v", units, err)
 	}
-	steps, err := f.tenant.ListNodeSteps(t.Context(), f.ref.RunID)
+	steps, err := f.tenant.ListNodeSteps(t.Context(), string(f.ref.RunID))
 	if err != nil || len(steps) != 1 || steps[0].Status != store.StepFailed || steps[0].FinishedAt == nil {
 		t.Fatalf("recovered steps = %+v, %v", steps, err)
 	}
@@ -289,7 +289,7 @@ func TestMetadataRetryClosesOnlyTheEndingAttempt(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
 	metadataStep(t, f, "body", "running")
 	first := metadataAttempt(t, f)
-	retry := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseRetry, SourceAttempt: &first.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeFailed}}}
+	retry := store.RetryNode{Ref: f.ref, Actor: f.holder, SourceAttempt: (*runspec.AttemptOrdinal)(&first.Attempt), Result: &store.NodeResult{Outcome: store.NodeFailed}}
 	if _, err := f.tenant.TransitionNode(t.Context(), retry); err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestMetadataRetryClosesOnlyTheEndingAttempt(t *testing.T) {
 	if second.Attempt != first.Attempt+1 {
 		t.Fatal("retry did not advance attempt")
 	}
-	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &second.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: (*runspec.AttemptOrdinal)(&second.Attempt), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := f.s.DB().QueryContext(t.Context(), storetest.Rebind(f.s, `SELECT attempt,status,finished_at FROM node_steps WHERE team=? AND run_id=? AND node_id=? ORDER BY attempt`), f.tenant.Team(), f.ref.RunID, f.ref.NodeID)
@@ -369,12 +369,12 @@ func TestMetadataStepClosureRollsBackWithTheJobReport(t *testing.T) {
 	if _, err := f.s.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_metadata_completion BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'refuse completion'); END`); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &attempt.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}})
+	_, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt.Attempt), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}})
 	if err == nil {
 		t.Fatal("report committed without completion event")
 	}
 	row, err := f.tenant.ReadNode(t.Context(), f.ref)
-	if err != nil || row.Status != store.StatusRunning || row.Attempt != attempt.Attempt {
+	if err != nil || row.Status != store.StatusRunning || row.Attempt != runspec.AttemptOrdinal(attempt.Attempt) {
 		t.Fatalf("refused report changed job: %+v, %v", row, err)
 	}
 	var state string

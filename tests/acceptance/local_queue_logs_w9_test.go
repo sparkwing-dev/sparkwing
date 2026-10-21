@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -79,7 +80,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: principal.Capability.Binding.Holder, Generation: principal.Capability.Binding.Generation}
+	actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(principal.Capability.Binding.RunID), NodeID: runspec.NodeID(principal.Capability.Binding.NodeID), Holder: principal.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(principal.Capability.Binding.Generation)}}
 	result, err := (logseg.CommittedReader{Records: tenant, Objects: objects}).Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &output)
 	if err != nil || !result.Complete || output.String() != "last owner line\n" {
 		t.Fatalf("cancelled owner lost persisted final logs: complete=%t output=%q: %v", result.Complete, output.String(), err)

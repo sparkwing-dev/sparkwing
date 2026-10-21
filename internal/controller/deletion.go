@@ -216,7 +216,7 @@ func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time) {
 var errDeletionNotHeld = errors.New("another replica holds this team deletion")
 
 func (s *Server) holdDeletion(ctx context.Context, team store.Team, now time.Time) error {
-	ok, err := s.operator.ClaimTeamDeletion(ctx, team, s.deletionHolder(), now, teamDeletionLease)
+	ok, err := s.operator.ClaimTeamDeletion(ctx, team, s.deletionHolder(), teamDeletionLease)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) 
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	return op.PurgeTeam(ctx, team, s.deletionHolder(), now, teamRecheckDelay)
+	return op.PurgeTeam(ctx, team, s.deletionHolder(), teamRecheckDelay)
 }
 
 func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time) error {
@@ -263,7 +263,7 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	return s.operator.FinishTeamRecheck(ctx, team, s.deletionHolder(), now)
+	return s.operator.FinishTeamRecheck(ctx, team, s.deletionHolder())
 }
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {

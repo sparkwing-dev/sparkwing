@@ -130,7 +130,7 @@ func TestRefillLimitsStopTheNextRefill(t *testing.T) {
 					s.clock = func() time.Time { return now }
 				}
 			}
-			st, err := tenant.SpendStanding(t.Context(), now)
+			st, err := tenant.SpendStanding(t.Context())
 			if err != nil || st.Refill.Limit != tc.want {
 				t.Fatalf("limit = %q, %v; want %q (%+v)", st.Refill.Limit, err, tc.want, st.Refill)
 			}
@@ -197,7 +197,8 @@ func TestRefillExpiresAndAWarnedCardTurnsRefillOff(t *testing.T) {
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "efw", PaymentIntent: "pi_elsewhere", Fingerprint: "fp_1", Actionable: true}, now); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Enabled || st.Card.PaymentMethod != "" {
 		t.Fatalf("after a warning on the saved card: refill %+v, card %+v, %v", st.Refill, st.Card, err)
 	}
@@ -258,7 +259,7 @@ func TestARefusedRefillStopsRefillsAcrossWorkerPasses(t *testing.T) {
 			t.Fatalf("pass %d charged the refused card again: %+v", pass, again)
 		}
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Card.PaymentMethod != "" || st.Refill.Enabled || st.Refill.Failure != CardRefusedPinned || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 {
 		t.Fatalf("after a refused refill: card %+v refill %+v, %v", st.Card, st.Refill, err)
 	}
@@ -270,7 +271,8 @@ func TestARefusedRefillStopsRefillsAcrossWorkerPasses(t *testing.T) {
 
 func TestRefillCapsFollowHistoryNotTheBalance(t *testing.T) {
 	s, tenant, now := refillFixture(t, false)
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Caps != (RefillCaps{AmountCents: 5_000, PerDay: 1, WeekCents: 10_000}) {
 		t.Fatalf("without paid history: caps %+v, %v", st.Refill.Caps, err)
 	}
@@ -278,7 +280,8 @@ func TestRefillCapsFollowHistoryNotTheBalance(t *testing.T) {
 	if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 6_000}); err != nil {
 		t.Fatal(err)
 	}
-	st, err = tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err = tenant.SpendStanding(t.Context())
 	if err != nil || st.Billing.Tier != "Trusted" || st.Billing.History.Tier != "Established" || st.Refill.Caps != (RefillCaps{AmountCents: 20_000, PerDay: 2, WeekCents: 50_000}) || st.Refill.Limit != "" {
 		t.Fatalf("after $100 Add funds: tier %s history %s caps %+v limit %q, %v", st.Billing.Tier, st.Billing.History.Tier, st.Refill.Caps, st.Refill.Limit, err)
 	}
@@ -312,13 +315,14 @@ func TestABoundRefillKeepsItsSlotUntilItsOutcome(t *testing.T) {
 	if len(again) != 1 || again[0].ID != first[0].ID || again[0].PaymentIntent != "pi_late" {
 		t.Fatalf("a bound refill gave up its slot: %+v", again)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || !st.Refill.Open || st.Refill.DayCount != 0 || st.Refill.WeekCents != 1_000 {
 		t.Fatalf("bound refill state = %+v, %v", st.Refill, err)
 	}
 	now = now.Add(refillMonth)
 	s.clock = func() time.Time { return now }
-	if st, err = tenant.SpendStanding(t.Context(), now); err != nil || !st.Refill.Open || st.Refill.MonthCents != 0 {
+	if st, err = tenant.SpendStanding(t.Context()); err != nil || !st.Refill.Open || st.Refill.MonthCents != 0 {
 		t.Fatalf("old bound refill state = %+v, %v", st.Refill, err)
 	}
 	if due := dueRefillsFor(t, s, "a"); len(due) != 1 || due[0].ID != first[0].ID {
@@ -340,7 +344,8 @@ func TestAnUnboundRefillRechecksItsCardsPin(t *testing.T) {
 	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
 		t.Fatalf("an unbound refill retried a newly pinned card: %+v", due)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Card.PaymentMethod != "" || st.Refill.Enabled || st.Refill.Open || st.Refill.DayCount != 0 {
 		t.Fatalf("after the pin refusal: card %+v refill %+v, %v", st.Card, st.Refill, err)
 	}
@@ -371,7 +376,8 @@ func TestTurningRefillOffClosesOnlyAnUnboundReservation(t *testing.T) {
 			if (len(again) == 1) != bound {
 				t.Fatalf("refill after opt-out = %+v", again)
 			}
-			st, err := tenant.SpendStanding(t.Context(), now)
+			tenant.s.SetTestClock(t, func() time.Time { return now })
+			st, err := tenant.SpendStanding(t.Context())
 			if err != nil || st.Refill.Open != bound || !st.Refill.FailedAt.IsZero() {
 				t.Fatalf("refill after opt-out = %+v, %v", st.Refill, err)
 			}
@@ -439,12 +445,14 @@ func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {
 	if again := dueRefillsFor(t, s, "a"); len(again) != 0 {
 		t.Fatalf("a settings change lifted a failed refill: %+v", again)
 	}
-	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 {
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 {
 		t.Fatalf("a failed refill escaped the windows: %+v, %v", st.Refill, err)
 	}
 	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
 	addFunds(t, s, 100, "pi_manual")
-	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "" {
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.Failure != "" {
 		t.Fatalf("a paid Add funds kept the refill failure: %+v, %v", st.Refill, err)
 	}
 	if again := dueRefillsFor(t, s, "a"); len(again) != 1 {
@@ -464,7 +472,8 @@ func TestALateRefillFailureDoesNotUndoNewerAddFunds(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Failure != "" {
 		t.Fatalf("delayed failure undid Add funds recovery: %+v, %v", st.Refill, err)
 	}
@@ -484,7 +493,8 @@ func TestAddFundsDoesNotRecoverANewerRefillFailure(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Failure != "insufficient_funds" {
 		t.Fatalf("earlier Add funds hid a newer failure: %+v, %v", st.Refill, err)
 	}
@@ -500,7 +510,8 @@ func TestARefundedRefillStillCountsAgainstEveryWindow(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), refunded); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != RefillLimitStandingDaily {
 		t.Fatalf("a refunded refill escaped the windows: %+v, %v", st.Refill, err)
 	}
@@ -526,13 +537,15 @@ func TestASavedCardRecoversAFailedRefillWithoutClearingItsWindows(t *testing.T) 
 	if err := tenant.TestOnlySaveCard(t.Context(), stale, "billing", now); !errors.Is(err, ErrStaleCardSetup) {
 		t.Fatalf("stale card setup = %v", err)
 	}
-	if st, err := tenant.SpendStanding(t.Context(), now); err != nil || st.Refill.Failure != "insufficient_funds" {
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.Failure != "insufficient_funds" {
 		t.Fatalf("a stale setup recovered the failure: %+v, %v", st.Refill, err)
 	}
 	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_2", PaymentMethod: "pm_2", Fingerprint: "fp_2", Brand: "visa", Last4: "4242", AddedAt: setupCreated}, "billing", now); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Failure != "" || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 {
 		t.Fatalf("after saving a replacement card: %+v, %v", st.Refill, err)
 	}
@@ -553,7 +566,8 @@ func TestALateRefillFailureDoesNotBlockTheReplacementCard(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Card.PaymentMethod != "pm_2" || st.Refill.Failure != "" {
 		t.Fatalf("late failure blocked the replacement: card %+v refill %+v, %v", st.Card, st.Refill, err)
 	}
@@ -576,7 +590,8 @@ func TestSavingTheSameMethodDoesNotRecoverAFailedRefill(t *testing.T) {
 	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: r.Customer, PaymentMethod: r.PaymentMethod, Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
 		t.Fatal(err)
 	}
-	st, err := tenant.SpendStanding(t.Context(), now)
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	st, err := tenant.SpendStanding(t.Context())
 	if err != nil || st.Refill.Failure != "insufficient_funds" {
 		t.Fatalf("unchanged method cleared refill failure: %+v, %v", st.Refill, err)
 	}
@@ -602,7 +617,8 @@ func TestARefusedAddFundsDisablesOnlyItsSavedCard(t *testing.T) {
 			if got, err := s.settlePaymentFacts(t.Context(), paid); err != nil || got.Refused != CardRefusedPinned {
 				t.Fatalf("Add funds on a pinned card = %+v, %v", got, err)
 			}
-			st, err := tenant.SpendStanding(t.Context(), now)
+			tenant.s.SetTestClock(t, func() time.Time { return now })
+			st, err := tenant.SpendStanding(t.Context())
 			if err != nil || (st.Card.PaymentMethod != "") != replaced || st.Refill.Enabled != replaced {
 				t.Fatalf("after the refused Add funds: card %+v refill %+v, %v", st.Card, st.Refill, err)
 			}
@@ -623,7 +639,8 @@ func TestRefillGlobalMaximumAppliesWithAndWithoutStandingCaps(t *testing.T) {
 				t.Fatalf("oversized refill: %v", err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE teams SET refill_amount_cents=? WHERE name='a'`, MaxCardPaymentCents+1)
-			st, err := tenant.SpendStanding(t.Context(), now)
+			tenant.s.SetTestClock(t, func() time.Time { return now })
+			st, err := tenant.SpendStanding(t.Context())
 			if err != nil || st.Refill.Limit != RefillLimitPaymentSize {
 				t.Fatalf("legacy refill=%+v: %v", st.Refill, err)
 			}
@@ -718,7 +735,8 @@ func TestBoundRefillConfirmationRechecksEligibility(t *testing.T) {
 				if err := s.db.QueryRow(`SELECT payment_id,closed_at,failure FROM credit_checkouts WHERE id=?`, r.ID).Scan(&payment, &closed, &failure); err != nil || payment != r.PaymentIntent || closed == 0 || failure != "canceled" {
 					t.Fatalf("canceled reservation = %q %d %q, %v", payment, closed, failure, err)
 				}
-				state, err := tenant.SpendStanding(t.Context(), now)
+				tenant.s.SetTestClock(t, func() time.Time { return now })
+				state, err := tenant.SpendStanding(t.Context())
 				if err != nil || state.Refill.DayCount != 0 || state.Refill.WeekCents != 0 || state.Refill.MonthCents != 0 {
 					t.Fatalf("canceled payment consumed refill limits: %+v, %v", state.Refill, err)
 				}
@@ -728,7 +746,7 @@ func TestBoundRefillConfirmationRechecksEligibility(t *testing.T) {
 }
 
 func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
-	for _, fault := range []string{"a", "b", "database", "deletion"} {
+	for _, fault := range []string{"a", "b", "constraint", "database", "deletion"} {
 		t.Run(fault, func(t *testing.T) {
 			s, _, now := refillFixture(t, true)
 			b := &Tenant{s: s, team: "b"}
@@ -743,8 +761,11 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 			switch fault {
 			case "database":
 				rewriteSchemaExec(t, s.db, "DROP TABLE credit_checkouts")
+			case "constraint":
+				rewriteSchemaExec(t, s.db, "CREATE TRIGGER reject_refill BEFORE INSERT ON credit_checkouts WHEN NEW.team='b' BEGIN SELECT RAISE(ABORT,'unavailable'); END")
+				s.SetTestClock(t, func() time.Time { return now })
 			case "deletion":
-				if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), "a", now); err != nil {
+				if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), "a"); err != nil {
 					t.Fatal(err)
 				}
 			default:

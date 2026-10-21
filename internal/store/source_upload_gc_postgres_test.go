@@ -32,7 +32,7 @@ func newSourceGCFixture(t *testing.T, ctx context.Context) sourceGCFixture {
 	t.Helper()
 	s := storetest.NewPostgres(t).Open(t)
 	s.DB().SetMaxOpenConns(8)
-	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("uploader", "uploader@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("uploader", "uploader@example.test"), store.SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}

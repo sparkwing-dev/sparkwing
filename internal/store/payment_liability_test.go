@@ -50,7 +50,8 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	if err != nil || len(freeze.Disputes) != 1 {
 		t.Fatalf("freeze = %+v: %v", freeze, err)
 	}
-	if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed", now); err != nil {
+	s.SetTestClock(t, func() time.Time { return now })
+	if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(24 * time.Hour)
@@ -76,7 +77,7 @@ func TestProtectedWarningCannotMoveACardToAnotherTeam(t *testing.T) {
 	if err != nil || settlement.Granted || settlement.Refused != CardRefusedPinned {
 		t.Fatalf("protected payment bypassed card pin: %+v: %v", settlement, err)
 	}
-	refunds, err := s.AsOperator().DueCardRefunds(t.Context(), s.now())
+	refunds, err := s.AsOperator().DueCardRefunds(t.Context())
 	if err != nil || len(refunds) != 1 || refunds[0].Team != "b" || refunds[0].PaymentIntent != other.PaymentID {
 		t.Fatalf("refused payment refunds = %+v: %v", refunds, err)
 	}
@@ -104,7 +105,7 @@ func TestPaymentWarningUsesConfiguredModeWhenTeamHasBothModes(t *testing.T) {
 	if balance, err := (&Tenant{s: s, team: "a"}).CreditBalanceMicro(t.Context()); err != nil || balance != 1000000 {
 		t.Fatalf("live warning reversed wrong mode: balance=%d: %v", balance, err)
 	}
-	refunds, err := s.AsOperator().DueCardRefunds(t.Context(), s.now())
+	refunds, err := s.AsOperator().DueCardRefunds(t.Context())
 	if err != nil || len(refunds) != 1 || refunds[0].PaymentIntent != paid.PaymentID {
 		t.Fatalf("live warning refund=%+v: %v", refunds, err)
 	}

@@ -10,7 +10,8 @@ import (
 )
 
 func TestTickRefreshesAndEvaluatesThroughEachTenant(t *testing.T) {
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "schedules.db"))
+	now := time.Unix(1700000000, 37).UTC()
+	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "schedules.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,14 +21,13 @@ func TestTickRefreshesAndEvaluatesThroughEachTenant(t *testing.T) {
 		}
 	})
 	teststore.SeedTeam(t, s, "other")
-	now := time.Unix(1700000000, 37).UTC()
 	next := now.Add(time.Hour)
 	for _, team := range []store.Team{store.DefaultTeam, "other"} {
 		tenant := teststore.ForTeam(t, s, team)
 		_, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{
 			ID: "schedule-" + string(team), RepoPath: "https://git.example.com/project",
 			Pipeline: "nightly", Cron: "0 * * * *", TZ: "UTC", Where: store.CronWhereController, NextDueAt: &next,
-		}, now)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

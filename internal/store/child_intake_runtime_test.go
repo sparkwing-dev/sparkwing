@@ -17,7 +17,7 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	t.Helper()
 	tenant, _, actor := liveHolderFixture(t)
 	parent := authorityRoot("child-parent", "a")
-	parent.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: actor.Holder, Generation: actor.Generation}
+	parent.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: actor.Holder, Generation: int64(actor.Generation)}
 	parent.Grants = []capability.Grant{capability.ChildrenStart}
 	parent.Children = []nodeproto.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
 	authorityPersist(t, tenant.s, parent)

@@ -158,7 +158,7 @@ func signUp(t *testing.T, st *store.Store, name string) (store.Account, store.Te
 	res, err := st.AsOperator().ResolveSignIn(context.Background(), store.SignInProfile{
 		Provider: "google", Subject: "sub-" + name, Email: name + "@example.test",
 		EmailVerified: true, Name: name, GivenName: name,
-	}, store.SignUpConditions{}, time.Now().UTC())
+	}, store.SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}

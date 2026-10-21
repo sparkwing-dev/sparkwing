@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -101,7 +102,7 @@ VALUES (?,?,'trigger',1,1,?,?)`, binding.Tenant.Team(), id, []byte(`[]`), []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), id, store.Actor{Holder: "owner", CapabilityPrefix: "owner-cap", Generation: 7}, time.Unix(0, 1), start); err != nil {
+	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), id, store.Actor{CapabilityPrefix: "owner-cap", NodeFence: runspec.NodeFence{RunID: runspec.RunID(id), Holder: "owner", Generation: 7}}, time.Unix(0, 1), start); err != nil {
 		t.Fatal(err)
 	}
 }

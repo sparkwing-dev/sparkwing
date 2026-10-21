@@ -29,7 +29,7 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		resources, err := unitResourcesTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		resources, err := unitResourcesTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources match.Resour
 func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud bool) (bool, error) {
 	var err error
 	if cloud {
-		err = checkOverflowTx(ctx, tx, team, unit.RunID)
+		err = checkOverflowTx(ctx, tx, team, string(unit.RunID))
 		var overflow *apierr.Error
 		if errors.As(err, &overflow) && overflow.Code == apierr.LockHeld {
 			return false, nil
@@ -122,7 +122,7 @@ func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitR
 	if err != nil {
 		return err
 	}
-	return refuseUnfundedTx(ctx, l, amount, unit.RunID, unit.NodeID)
+	return refuseUnfundedTx(ctx, l, amount, string(unit.RunID), string(unit.NodeID))
 }
 
 func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64) (*billingAward, error) {
@@ -165,13 +165,13 @@ func computeUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 		return err
 	}
 	if executing {
-		return startBillableIntervalTx(ctx, tx, team, a.provenance.ReservationID, fmt.Sprintf("compute:%d", count), attempt, tx.now())
+		return startBillableIntervalTx(ctx, tx, team, a.provenance.ReservationID, fmt.Sprintf("compute:%d", count), attempt, tx.now(ctx))
 	}
 	key := fmt.Sprintf("compute:%d", count-1)
 	if active == billingID("interval", team, a.provenance.ReservationID, "award") {
 		key = "award"
 	}
-	return finishBillableIntervalTx(ctx, tx, team, a.provenance.ReservationID, key, tx.now())
+	return finishBillableIntervalTx(ctx, tx, team, a.provenance.ReservationID, key, tx.now(ctx))
 }
 
 func settleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64, through time.Time) error {
@@ -199,9 +199,9 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 		if a.provenance.Metered && !a.drain.Valid {
 			return time.Time{}, holderRefusal()
 		}
-		return fundedBoundTx(ctx, tx, team, unit, generation, tx.now())
+		return fundedBoundTx(ctx, tx, team, unit, generation, tx.now(ctx))
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	err = renewBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, now, a.provenance.Metered && !a.drain.Valid)
 	if refused := (*InsufficientCreditsError)(nil); errors.As(err, &refused) {
 		err = stopAwardTx(ctx, tx, team, *a, refused.Error(), now.Add(SliceSeconds*time.Second))
@@ -244,7 +244,7 @@ func stopHeldAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
 		return err
 	}
 	reason := (&InsufficientCreditsError{Hold: cause}).Error()
-	drain := tx.now().Add(SliceSeconds * time.Second)
+	drain := tx.now(ctx).Add(SliceSeconds * time.Second)
 	for _, reservation := range reservations {
 		a, err := readBillingAwardTx(ctx, tx, team, reservation)
 		if err != nil {
@@ -274,7 +274,7 @@ func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, re
 			return err
 		}
 		if run.FinishedAt == nil && run.CancelRequestedAt == nil {
-			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: a.run, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: reason}, tx.now()); err != nil {
+			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(a.run), To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: reason}); err != nil {
 				return err
 			}
 		}
@@ -285,44 +285,45 @@ func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, re
 			return err
 		}
 		if intervals == 0 {
-			_, err := accountBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, tx.now(), true)
+			_, err := accountBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, tx.now(ctx), true)
 			return err
 		}
 		return nil
 	}
-	ref := controllerwire.NodeRef{RunID: a.run, NodeID: a.node}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(a.run), NodeID: runspec.NodeID(a.node)}
 	row, err := readNodeTx(ctx, tx, team, ref)
-	if err != nil || row.Status == StatusDone || row.Generation != a.generation || row.CancelRequestedAt != nil {
+	if err != nil || row.Status == StatusDone || row.Generation != runspec.ClaimGeneration(a.generation) || row.CancelRequestedAt != nil {
 		return err
 	}
-	_, err = transitionNodeStateTx(ctx, tx, team, NodeTransition{Ref: ref, To: NodeCancelled, Actor: Actor{Kind: ActorOperator}, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}}, tx.now())
+
+	_, err = transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: ref, To: NodeCancelled, Actor: Actor{Kind: ActorOperator}, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
 	return err
 }
 
-func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
+func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
 	if row.ClaimedBy == "" {
 		return nil
 	}
 	if edge.RequestOnly {
-		if change.Cause != CauseCancel {
+		if change.Cause != causeCancel {
 			return nil
 		}
-		return endUnstartedBillingTx(ctx, tx, team, row.Ref.RunID, &row.Ref.NodeID)
+		return endUnstartedBillingTx(ctx, tx, team, string(row.Ref.RunID), (*string)(&row.Ref.NodeID))
 	}
 	unit := UnitRef{Kind: capability.UnitNode, RunID: row.Ref.RunID, NodeID: row.Ref.NodeID}
 	if change.To == NodeRunning {
 		if change.Cause == CauseRetry {
-			if err := computeUnitBillingTx(ctx, tx, team, unit, row.Generation, row.Attempt, false); err != nil {
+			if err := computeUnitBillingTx(ctx, tx, team, unit, int64(row.Generation), int64(row.Attempt), false); err != nil {
 				return err
 			}
 		}
-		return computeUnitBillingTx(ctx, tx, team, unit, row.Generation, row.Attempt+1, true)
+		return computeUnitBillingTx(ctx, tx, team, unit, int64(row.Generation), int64(row.Attempt+1), true)
 	}
-	if change.To == NodePending || terminalNodeState(change.To) {
+	if change.To == nodePending || terminalNodeState(change.To) {
 		if change.Cause == CauseLeaseLapse && row.LeaseExpiresAt != nil && row.LeaseExpiresAt.Before(now) {
 			now = *row.LeaseExpiresAt
 		}
-		return settleUnitBillingTx(ctx, tx, team, unit, row.Generation, now)
+		return settleUnitBillingTx(ctx, tx, team, unit, int64(row.Generation), now)
 	}
 	return nil
 }
@@ -350,7 +351,7 @@ func endUnstartedBillingTx(ctx context.Context, tx *storeTx, team Team, run stri
 		return err
 	}
 	for _, reservation := range unstarted {
-		if _, err := accountBillingAwardTx(ctx, tx, team, reservation, tx.now(), true); err != nil {
+		if _, err := accountBillingAwardTx(ctx, tx, team, reservation, tx.now(ctx), true); err != nil {
 			return err
 		}
 	}
@@ -371,7 +372,7 @@ func billingRecoveryEnd(owner ownerRecovery, now time.Time) time.Time {
 func ownerUnitTx(ctx context.Context, tx *storeTx, team Team, run string) (UnitRef, error) {
 	var kind capability.UnitKind
 	err := tx.QueryRowContext(ctx, `SELECT unit_kind FROM triggers WHERE team=? AND id=?`, team, run).Scan(&kind)
-	return UnitRef{Kind: kind, RunID: run}, err
+	return UnitRef{Kind: kind, RunID: runspec.RunID(run)}, err
 }
 
 func settleOwnerBillingTx(ctx context.Context, tx *storeTx, team Team, run string, generation int64, through time.Time) error {
@@ -391,8 +392,8 @@ func finishExpansionBillingTx(ctx context.Context, tx *storeTx, team Team, reque
 	if lease == nil || lease.Kind != capability.UnitEval {
 		return nil
 	}
-	unit := UnitRef{Kind: capability.UnitEval, RunID: request.Source.RunID, NodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration}
-	return settleUnitBillingTx(ctx, tx, team, unit, lease.Generation, tx.now())
+	unit := UnitRef{Kind: capability.UnitEval, RunID: request.Source.RunID, NodeID: request.Source.NodeID, SourceGeneration: int64(request.SourceGeneration)}
+	return settleUnitBillingTx(ctx, tx, team, unit, lease.Generation, tx.now(ctx))
 }
 
 func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor Actor, now time.Time) ([]time.Time, error) {
@@ -426,7 +427,7 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	var bounds []time.Time
 	for _, award := range awards {
 		var beat LeaseBeat
-		bound, err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: award.node}, award.generation, &beat)
+		bound, err := renewUnitBillingTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: actor.Owner.RunID, NodeID: runspec.NodeID(award.node)}, award.generation, &beat)
 		if err != nil {
 			return nil, err
 		}

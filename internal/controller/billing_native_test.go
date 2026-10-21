@@ -257,14 +257,14 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spend, err := tenant.SpendStanding(t.Context(), time.Now()); err != nil || spend.Card.PaymentMethod != "" {
+	if spend, err := tenant.SpendStanding(t.Context()); err != nil || spend.Card.PaymentMethod != "" {
 		t.Fatalf("setup attached a card before its page bound it: %+v: %v", spend.Card, err)
 	}
 	for range 2 {
 		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",`+stamp+`}}`)
 		webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	}
-	spend, err := tenant.SpendStanding(t.Context(), time.Now())
+	spend, err := tenant.SpendStanding(t.Context())
 	if err != nil || spend.Card.PaymentMethod != "pm_native" || spend.Billing.Tier != "New" {
 		t.Fatalf("card=%+v: %v", spend, err)
 	}
@@ -274,7 +274,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	for range 2 {
 		webhook("evt_prepay", "checkout.session.completed", `{"id":"cs_prepay","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"pi_prepay","amount_total":2000,"currency":"usd"}`)
 	}
-	standing, err := tenant.BillingStanding(t.Context(), time.Now())
+	standing, err := tenant.BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Established" {
 		t.Fatalf("prepay standing=%+v: %v", standing, err)
 	}
@@ -284,13 +284,13 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		s.refillPass(t.Context())
 	}
 	webhook("evt_unbound_refill", "payment_intent.succeeded", strings.NewReplacer("pi_auto", "pi_other", "ch_auto", "ch_other").Replace(refilled))
-	if spend, err := tenant.SpendStanding(t.Context(), time.Now()); err != nil || spend.BalanceMicro != 0 || !spend.Refill.Open {
+	if spend, err := tenant.SpendStanding(t.Context()); err != nil || spend.BalanceMicro != 0 || !spend.Refill.Open {
 		t.Fatalf("unbound refill changed credit or closed the bound refill: %+v: %v", spend, err)
 	}
 	for range 2 {
 		webhook("evt_refill", "payment_intent.succeeded", refilled)
 	}
-	spend, err = tenant.SpendStanding(t.Context(), time.Now())
+	spend, err = tenant.SpendStanding(t.Context())
 	if err != nil || spend.BalanceMicro != 1000*store.MicroCreditsPerCent || spend.Refill.Open || spend.Billing.Tier != "Established" {
 		t.Fatalf("refilled=%+v: %v", spend, err)
 	}

@@ -40,7 +40,7 @@ func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Author
 		if _, err = check(); err != nil {
 			return err
 		}
-		return recordMutationAuditTx(tx, Team(a.Target.Team), auditPrincipalActor(p), operation, string(grant))
+		return recordMutationAuditTx(ctx, tx, Team(a.Target.Team), auditPrincipalActor(p), operation, string(grant))
 	})
 }
 
@@ -70,7 +70,7 @@ func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authori
 			if err != nil {
 				return err
 			}
-			g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(req.Reason), p.Capability.Subject.ID, tx.now()
+			g.Mode, g.Source, g.Reason, g.SetBy, g.UpdatedAt = mode, WaitlistReasonOperator, strings.TrimSpace(req.Reason), p.Capability.Subject.ID, tx.now(ctx)
 		}
 		for _, field := range []struct{ supplied, stored *int }{
 			{req.HourlyLimit, &g.Limits.HourlyLimit},

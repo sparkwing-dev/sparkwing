@@ -81,7 +81,7 @@ func storedCloudAwardW8(t *testing.T) (*storedEngineW8, launcher.CloudJobAward) 
 	if unit.CloudResources == nil || unit.CloudResources.Cores != 2 || unit.CloudResources.MemoryBytes != store.CPUClassMemoryBytes(2) || unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil || unit.Execution.Resources.Value.Cores.Value != 1 || unit.Execution.Resources.Value.MemoryBytes.Value != 1<<29 {
 		t.Fatal("Cloud claim lost bootstrap delivery, parent expiry, engine or execution resources")
 	}
-	binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}
+	binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}
 	if unit.OwnerDeadline != nil {
 		binding.OwnerDeadline = *unit.OwnerDeadline
 	}
@@ -169,7 +169,7 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: held.RunID, NodeID: held.JobID})
+	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(held.RunID), NodeID: runspec.NodeID(held.JobID)})
 	if err != nil || row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != award.Binding.Generation || row.ClaimedBy != "" {
 		t.Fatalf("Cloud persisted completion: outcome=%s attempt=%d generation=%d error=%v", row.Outcome, row.Attempt, row.Generation, err)
 	}
@@ -187,15 +187,15 @@ func FuzzCloudStoreBootstrapConfinementW8(f *testing.F) {
 		case 0:
 			award.Binding.Team += text + "x"
 		case 1:
-			award.Binding.RunID += text + "x"
+			award.Binding.RunID += runspec.RunID(text + "x")
 		case 2:
-			award.Binding.NodeID += text + "x"
+			award.Binding.NodeID += runspec.NodeID(text + "x")
 		case 3:
 			award.Binding.Holder += text + "x"
 		case 4:
-			award.Binding.Generation ^= number | 1
+			award.Binding.Generation ^= runspec.ClaimGeneration(number | 1)
 		case 5:
-			award.Binding.Attempt ^= number | 1
+			award.Binding.Attempt ^= runspec.AttemptOrdinal(number | 1)
 		case 6:
 			award.Memory ^= number | 1
 		case 7:
