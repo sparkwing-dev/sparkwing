@@ -37,7 +37,7 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,allowed_pools=? WHERE id='run'`, body, []byte(`["deploy"]`))
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=json_set(execution_json, '$.requires', json(?)) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy"]}`)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=CAST(json_set(execution_json, '$.requires', json(?)) AS BLOB) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy"]}`)
 	return s, demand
 }
 

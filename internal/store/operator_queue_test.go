@@ -99,7 +99,13 @@ func TestTenantPendingTriggersIgnoreForeignQueueProperty(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, id)
 		}
 		status := []string{"pending", "claimed", "done"}[random.IntN(3)]
-		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES (?,?,?,'trigger',1,1,?,?)`, team, id, status, []byte(`[]`), []byte(`[]`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES (?,?,'trigger',1,1,?,?)`, team, id, []byte(`[]`), []byte(`[]`))
+		switch status {
+		case "claimed":
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='claimed',claimed_by='holder',capability_prefix='claim',generation=1,claimed_at=1,lease_expires_at=2 WHERE team=? AND id=?`, team, id)
+		case "done":
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=1 WHERE team=? AND id=?`, team, id)
+		}
 		if status == "pending" {
 			want[team]++
 		}

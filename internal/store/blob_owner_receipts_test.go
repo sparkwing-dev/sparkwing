@@ -68,7 +68,7 @@ func TestBlobOwnerReceiptCannotTransferToAJob(t *testing.T) {
 			var issued capability.Issued
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
 				var err error
-				issued, err = s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "machine"}, Unit: capability.UnitNode, UnitID: unit, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect}})
+				issued, err = issueFixtureAward(t, s, tx, capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "machine"}, Unit: capability.UnitNode, UnitID: unit, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect})
 				return err
 			}); err != nil {
 				t.Fatal(err)

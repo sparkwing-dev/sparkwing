@@ -522,7 +522,7 @@ func TestBlobUploadPublicationTicketsKeepImportedAttempt(t *testing.T) {
 			rewriteSchemaExec(t, s.db, "UPDATE runs SET intake_mode='publish' WHERE team='a' AND id='run'")
 			identity := blob.UploadIdentity{Kind: blob.UploadPublication, Team: "a", RunID: "run", Principal: "machine", CapabilityRef: publisher.Prefix}
 			if imported {
-				rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=2,outcome='success' WHERE team='a' AND run_id='run'")
+				rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=?,outcome='success' WHERE team='a' AND run_id='run'", s.now().UnixNano())
 				identity.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}
 			}
 			intent := blob.UploadIntent{Identity: identity, Authority: blob.Authority{CapabilityRef: publisher.Prefix, Attempt: identity.Attempt}, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 3}

@@ -12,6 +12,7 @@ import (
 
 func TestRetentionIdentityPreservesLiveAuthorityProperty(t *testing.T) {
 	s, _, now := maintenanceStore(t)
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
 	random := rand.New(rand.NewPCG(771, 204))
 	kept := map[string]bool{}
 	var expected int64
@@ -26,7 +27,7 @@ func TestRetentionIdentityPreservesLiveAuthorityProperty(t *testing.T) {
 		if !kept[id] {
 			expected++
 		}
-		rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team) VALUES (?,'account','runs.read',1,?,'a')`, id, at.UnixNano())
+		rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'account','runs.read',1,?,'a','account')`, id, at.UnixNano())
 		if parent {
 			child := authorityRoot("child-"+id, "a")
 			child.Parent = &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}
@@ -79,7 +80,11 @@ func TestRetentionInvitationsKeepsWhatStillAdmits(t *testing.T) {
 		{"recent-expired", recent, nil, nil},
 		{"open", future, nil, nil},
 	} {
-		rewriteSchemaExec(t, s.db, `INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at,accepted_at,withdrawn_at) VALUES (?,'a',?,'reader','owner',?,?,?,?)`, row.id, row.id+"@example.test", old, row.expires, row.accepted, row.withdrawn)
+		acceptedBy := ""
+		if row.accepted != nil {
+			acceptedBy = "account"
+		}
+		rewriteSchemaExec(t, s.db, `INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at,accepted_at,accepted_by,withdrawn_at) VALUES (?,'a',?,'reader','owner',?,?,?,?,?)`, row.id, row.id+"@example.test", old, row.expires, row.accepted, acceptedBy, row.withdrawn)
 	}
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Hour)
 	if err != nil {
@@ -100,7 +105,8 @@ func TestRetentionInvitationsKeepsWhatStillAdmits(t *testing.T) {
 
 func TestRetentionIdentityRollsBackAndFences(t *testing.T) {
 	s, _, now := maintenanceStore(t)
-	rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team) VALUES ('expired','account','runs.read',1,?,'a')`, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('expired','account','runs.read',1,?,'a','account')`, now.UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at) VALUES ('expired','a','expired@example.test','reader','owner',1,1)`)
 	operator := s.AsOperator()
 	lease, err := operator.AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Minute)

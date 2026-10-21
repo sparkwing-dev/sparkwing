@@ -68,6 +68,8 @@ func TestAppAdmissionRequiresCurrentOriginProperty(t *testing.T) {
 		case 0:
 			rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET suspended=1`)
 		case 1:
+			rewriteSchemaExec(t, s.db, `DELETE FROM github_app_automation`)
+			rewriteSchemaExec(t, s.db, `DELETE FROM github_app_triggers`)
 			rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b'`)
 		case 2:
 			rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET created_at=created_at+1`)
@@ -192,16 +194,29 @@ func TestAppPartialDeliveryCannotMoveTeamsProperty(t *testing.T) {
 		if _, err := tenant.AdmitGitHubAppRun(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}
+		rewriteSchemaExec(t, s.db, `DELETE FROM github_app_automation`)
+		rewriteSchemaExec(t, s.db, `DELETE FROM github_app_triggers`)
 		rewriteSchemaExec(t, s.db, `UPDATE github_app_installations SET team='b',created_at=created_at+1`)
-		rewriteSchemaExec(t, s.db, `UPDATE github_app_automation SET team='b'`)
-		rewriteSchemaExec(t, s.db, `UPDATE github_app_triggers SET team='b',pipeline='other'`)
 		in.Installation.Team = "b"
 		in.Installation.CreatedAt = in.Installation.CreatedAt.Add(time.Nanosecond)
 		in.Request.Team, in.Request.Pipeline = "b", "other"
+		if in.Automation != nil {
+			grant := in.Automation
+			rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at,runner) VALUES ('b','gh:701',701,?,7,?,?,?)`, grant.Repository, grant.EnabledBy, grant.EnabledAt.UnixNano(), grant.Runner)
+		}
 		if in.Subscription != nil {
 			in.Subscription.Team, in.Subscription.Pipeline = "b", "other"
+			sub := in.Subscription
+			rewriteSchemaExec(t, s.db, `INSERT INTO github_app_triggers(team,repo_key,repository_id,repository,installation_id,pipeline,on_push,created_by,created_at,runner) VALUES ('b','gh:701',701,?,7,'other',1,?,?,?)`, sub.Repository, sub.CreatedBy, sub.CreatedAt.UnixNano(), sub.Runner)
 		}
 		other := &Tenant{s: s, team: "b"}
+		if automatic {
+			if _, err := other.GitHubAppAutomation(t.Context(), 7, 701); err != nil {
+				t.Fatalf("new team's automation grant: %v", err)
+			}
+		} else if subscriptions, err := other.GitHubAppTriggersFor(t.Context(), 7, 701); err != nil || len(subscriptions) != 1 || subscriptions[0].Pipeline != "other" {
+			t.Fatalf("new team's subscriptions: %+v %v", subscriptions, err)
+		}
 		result, err := other.AdmitGitHubAppRun(t.Context(), in)
 		rewriteSchemaCount(t, s.db, "runs", 1)
 		rewriteSchemaCount(t, s.db, "triggers", 1)

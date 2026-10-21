@@ -726,7 +726,7 @@ func TestBoundRefillConfirmationRechecksEligibility(t *testing.T) {
 }
 
 func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
-	for _, fault := range []string{"a", "b", "constraint", "database", "deletion"} {
+	for _, fault := range []string{"a", "b", "database", "deletion"} {
 		t.Run(fault, func(t *testing.T) {
 			s, _, now := refillFixture(t, true)
 			b := &Tenant{s: s, team: "b"}
@@ -741,14 +741,12 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 			switch fault {
 			case "database":
 				rewriteSchemaExec(t, s.db, "DROP TABLE credit_checkouts")
-			case "constraint":
-				rewriteSchemaExec(t, s.db, "CREATE TRIGGER reject_refill BEFORE INSERT ON credit_checkouts WHEN NEW.team='b' BEGIN SELECT RAISE(ABORT,'unavailable'); END")
 			case "deletion":
 				if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), "a", now); err != nil {
 					t.Fatal(err)
 				}
 			default:
-				rewriteSchemaExec(t, s.db, "UPDATE teams SET card_added_at='damaged' WHERE name=?", fault)
+				rewriteSchemaExec(t, s.db, "CREATE TRIGGER reject_refill BEFORE INSERT ON credit_checkouts WHEN NEW.team='"+fault+"' BEGIN SELECT RAISE(ABORT,'unavailable'); END")
 			}
 			due, err := s.AsOperator().DueRefills(t.Context())
 			if fault == "database" {

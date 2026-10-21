@@ -69,7 +69,7 @@ func TestScheduleAdmissionSealsReplaysAndRollsBack(t *testing.T) {
 		t.Fatal("ordinary intake manufactured schedule authority")
 	}
 
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET args=?`, []byte(`{"message":"changed"}`))
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET args=?`, `{"message":"changed"}`)
 	current, err := tenant.GetCronSchedule(t.Context(), sched.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +167,7 @@ func TestScheduleAdmissionRechecksAppConsentProperty(t *testing.T) {
 			case 0:
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_installations SET suspended=1`)
 			case 1:
+				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_installations SET team='b'`)
 			case 2:
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)

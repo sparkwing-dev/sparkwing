@@ -182,7 +182,8 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			case 2:
 				run.Request.Request.Origin = runspec.OriginTrigger
 			case 3:
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET team='b'`)
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (8,'b',80,'other','Organization',1,1)`)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET team='b',installation_id=8`)
 			case 4:
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)
 			case 5:
