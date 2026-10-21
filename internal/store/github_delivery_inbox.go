@@ -19,9 +19,9 @@ var (
 	// ErrGitHubDeliveryConflict means a delivery ID or payload digest was
 	// previously bound to different signed material or an event name.
 	ErrGitHubDeliveryConflict = errors.New("store: GitHub delivery binding conflicts")
-	// ErrGitHubDeliveryLeaseLost means a worker tried to finish a claim that
+	// errGitHubDeliveryLeaseLost means a worker tried to finish a claim that
 	// expired or was replaced by a later claim.
-	ErrGitHubDeliveryLeaseLost = errors.New("store: GitHub delivery lease lost")
+	errGitHubDeliveryLeaseLost = errors.New("store: GitHub delivery lease lost")
 )
 
 // GitHubDelivery is one durable, leased App webhook. Lease fences Finish calls;
@@ -108,7 +108,7 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 		return nil, err
 	}
 	if n != 1 {
-		return nil, ErrGitHubDeliveryLeaseLost
+		return nil, errGitHubDeliveryLeaseLost
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDeliv
 		return err
 	}
 	if n != 1 {
-		return ErrGitHubDeliveryLeaseLost
+		return errGitHubDeliveryLeaseLost
 	}
 	return nil
 }

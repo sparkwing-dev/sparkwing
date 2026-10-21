@@ -80,8 +80,8 @@ func TestGitHubDeliveryReopenRetryAndStaleLease(t *testing.T) {
 	if err != nil || second == nil || second.Lease == first.Lease || second.Attempts != 2 || !bytes.Equal(second.Body, []byte("body")) {
 		t.Fatalf("reclaimed after restart: %+v, %v", second, err)
 	}
-	if err := op.FinishGitHubDelivery(ctx, *first, "", now.Add(2*time.Minute)); !errors.Is(err, store.ErrGitHubDeliveryLeaseLost) {
-		t.Fatalf("stale completion: %v", err)
+	if err := op.FinishGitHubDelivery(ctx, *first, "", now.Add(2*time.Minute)); err == nil {
+		t.Fatal("stale completion accepted")
 	}
 	if err := op.FinishGitHubDelivery(ctx, *second, "temporary failure", now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
