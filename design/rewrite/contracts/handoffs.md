@@ -1001,3 +1001,8 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-21 Korey decision 45: one admission owner in the store
 
 - All logical concurrency capacity is held by one durable admission module in the controller's store (the local store in local mode) (design: simplicity/CONTROLLER-ONLY-ADMISSION.md). Owners and hosts never acquire; they ask to start work under an award and receive admit, wait, skip or fail. Each level's group set is granted atomically with one arrival sequence; reservation identity belongs to the work, not the coordinator, so handoff never moves it. Decisions 37, 38 and 42 stand.
+
+## 2026-10-21 Korey decision 46: a restore may lose usage, never a payment
+
+- After a point-in-time restore, usage and credit holds recorded after the restore point are not recovered; that credit stays with the customer (no usage journal). Customers are never overcharged by a restore.
+- Guarantee: no Stripe payment is ever lost. Restore reconciliation pulls every provider payment, refund and dispute since the backup through the idempotent settlement path. Any provider object that cannot be matched to a team's records blocks the operator's restore acknowledgment until it is resolved by hand, and stays listed until then.
