@@ -15,7 +15,8 @@ func TestRewriteSchemaCapabilitiesPreserveAuthority(t *testing.T) {
 	rewriteSchemaExec(t, db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
 repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
 VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
-	rewriteSchemaExec(t, db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team) VALUES ('session','account','runs.write',1,100,'a')`)
+	rewriteSchemaExec(t, db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.com',1,1)`)
+	rewriteSchemaExec(t, db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.write',1,100,'a','account')`)
 	deadline := time.Unix(100, 7).UTC()
 	cases := []struct {
 		name     string

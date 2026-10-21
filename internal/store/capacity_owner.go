@@ -127,7 +127,8 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 		if err != nil {
 			return err
 		}
-		if row.Generation != runspec.ClaimGeneration(b.Generation) || row.Status == StatusDone || row.CancelRequestedAt != nil {
+		// Reservations survive award replacement, so supersession targets the current job.
+		if row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return nil
 		}
 		row.CancelRequestedAt = &now
@@ -179,7 +180,11 @@ func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter
 	if err := tx.QueryRowContext(ctx, `SELECT lease_expires_at FROM concurrency_waiters WHERE team=? AND key=? AND run_id=? AND node_id=?`, team, waiter.Key, waiter.RunID, waiter.NodeID).Scan(&expires); err != nil {
 		return false, err
 	}
-	return capacityWorkLiveTx(ctx, tx, team, CapacityBinding{RunID: waiter.RunID, NodeID: waiter.NodeID, Generation: waiter.generation}, expires)
+	live, err := capacityWorkLiveTx(ctx, tx, team, CapacityBinding{RunID: waiter.RunID, NodeID: waiter.NodeID}, expires)
+	if err != nil || live {
+		return live, err
+	}
+	return false, discardAdmissionLevelTx(ctx, tx, team, waiter.RunID, waiter.NodeID)
 }
 
 func capacityWorkLiveTx(ctx context.Context, tx *storeTx, team Team, binding CapacityBinding, expires int64) (bool, error) {
@@ -201,7 +206,7 @@ func capacityWorkLiveTx(ctx context.Context, tx *storeTx, team Team, binding Cap
 	return ceiling > tx.now(ctx).UnixNano(), err
 }
 
-func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, keys []string, fence capacityFence) error {
+func lockAdmissionTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 	if tx.dialect == DialectPostgres {
 		var locked bool
 		if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))`, "admission:"+string(team)).Scan(&locked); err != nil {
@@ -210,6 +215,13 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 		if !locked {
 			return errCapacityAdmissionBusy
 		}
+	}
+	return nil
+}
+
+func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, keys []string, fence capacityFence) error {
+	if err := lockAdmissionTeamTx(ctx, tx, team); err != nil {
+		return err
 	}
 	for _, key := range keys {
 		name := fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)

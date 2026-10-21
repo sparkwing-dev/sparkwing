@@ -321,7 +321,7 @@ func createPersonalTeamTx(ctx context.Context, tx *storeTx, accountID, base, dis
 			suffix := "-" + strconv.Itoa(n)
 			candidate = strings.TrimRight(truncate(base, maxSlugLen-len(suffix)), "-") + suffix
 		}
-		err := createTeamTx(ctx, tx, accountID, Team(candidate), displayName, accountID, now)
+		err := createTeamTx(ctx, tx, accountID, Team(candidate), displayName, auditAccountActor(accountID), now)
 		if err == nil {
 			return Team(candidate), nil
 		}
@@ -617,13 +617,13 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 			"%w: one user creates at most %d teams, the personal team included, and this user has created %d",
 			ErrTeamLimit, MaxCreatedTeams, created)
 	}
-	if err := createTeamTx(ctx, tx, accountID, slug, displayName, accountID, now); err != nil {
+	if err := createTeamTx(ctx, tx, accountID, slug, displayName, auditAccountActor(accountID), now); err != nil {
 		return TeamInfo{}, err
 	}
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
 }
 
-func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName, actor string, now time.Time) error {
+func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, actor auditActor, now time.Time) error {
 	var deleted int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug = ?`, string(slug)).Scan(&deleted); err != nil {
 		return err
@@ -646,10 +646,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 		string(slug), accountID, string(RoleOwner), now.UTC().UnixNano()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
 	}
-	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: slug, Account: accountID, Kind: BusinessEventTeamCreated,
-		SubjectID: string(slug), Actor: actor,
-	}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: slug, Actor: actor}, auditTeamCreation{AccountID: accountID}); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET teams_created = teams_created + 1 WHERE id = ?`, accountID)

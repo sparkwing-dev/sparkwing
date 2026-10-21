@@ -36,7 +36,7 @@ func evalUploadFixture(t *testing.T) (*Store, *Tenant, UploadReservationRequest)
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,grants=? WHERE prefix=?", raw, grants, claim.Award.CapabilityPrefix)
-	rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation=2,status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL WHERE team='a' AND run_id='run'")
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation=2,status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run'")
 	id, err := encodeAwardUnit(UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestBlobEvalUploadRechecksIndependentPersistedFences(t *testing.T) {
 			case "prefix":
 				rewriteSchemaExec(t, s.db, "UPDATE eval_units SET capability_prefix='replacement'")
 			case "status":
-				rewriteSchemaExec(t, s.db, "UPDATE eval_units SET status='done'")
+				rewriteSchemaExec(t, s.db, "UPDATE eval_units SET status='done',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,finished_at=1")
 			}
 			request.ID = "replacement"
 			if _, err := tenant.ReserveBlobUpload(t.Context(), request); err == nil {

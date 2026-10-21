@@ -62,6 +62,10 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 			t.Fatal("node selected the owner's authority")
 		}
 		actor.Generation = award.Node.Generation
+		engineAcceptedFixturePlan(t, server.engine, "a", "run", "build", "sibling")
+		if result, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+			t.Fatalf("execution admission: %+v, %v", result, err)
+		}
 		_, err = host.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&sourceAttempt)})
 		if (err == nil) != (run == "run" && node == "build" && sourceAttempt == 0) {
 			t.Fatalf("node transition escaped exact run/node/attempt fence: %v", err)

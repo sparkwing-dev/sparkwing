@@ -109,8 +109,8 @@ func TestStoreDataBuildTrustFailuresNeverEnableIt(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, "DROP TRIGGER refuse_build_trust")
 	for _, value := range []any{2, -1, "true", "false"} {
-		rewriteSchemaExec(t, s.db, "INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('a',?) ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds", value)
-		if trust, err := tenant.TrustLocalBuilds(t.Context()); err == nil || trust {
+		rewriteSchemaRefuses(t, s.db, "INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('a',?) ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds", value)
+		if trust, err := tenant.TrustLocalBuilds(t.Context()); err != nil || trust {
 			t.Fatalf("corrupt policy %v authorized local builds=%v, %v", value, trust, err)
 		}
 	}

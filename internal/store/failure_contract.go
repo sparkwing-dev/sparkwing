@@ -45,7 +45,6 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 			return holderRefusal()
 		}
 		if actor.Kind == ActorRunHost {
-
 			if err := checkOwnerTx(ctx, tx, t.team, actor, string(source.RunID)); err != nil {
 				return err
 			}
@@ -70,7 +69,6 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 				continue
 			}
 			if actor.Kind == ActorHolder {
-
 				if err := checkHolderTx(ctx, tx, t.team, *row, actor); err != nil {
 					return err
 				}

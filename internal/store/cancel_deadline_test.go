@@ -16,6 +16,9 @@ func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, _, claim, now := renewalFixture(t, kind)
 			tenant := &Tenant{s: s, team: "a"}
+			if kind == capability.UnitEval {
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET plan_accepted_generation=3 WHERE team='a' AND id='run'`)
+			}
 			if kind == capability.UnitNode {
 				principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 				if err != nil {
@@ -25,6 +28,7 @@ func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				admitExecution(t, tenant, actor)
 				if _, err := tenant.TransitionNode(t.Context(), StartNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)
 				}

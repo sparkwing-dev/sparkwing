@@ -26,7 +26,7 @@ func ownerReaperFixture(t *testing.T, started bool, disruptions int, origin runs
 	if started {
 		start = now.Add(-time.Minute).UnixNano()
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,disruptions,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'owner','owner-cap',7,?,?,?,?,?)`, now.UnixNano(), start, disruptions, []byte(`[]`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,disruptions,needs_labels,prefers_labels,claimed_at) VALUES ('a','run','claimed','trigger',1,1,'owner','owner-cap',7,?,?,?,?,?,1)`, now.UnixNano(), start, disruptions, []byte(`[]`), []byte(`[]`))
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 			if mode == "already_accepted" {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET expansion='accepted',expansion_body=?,expansion_digest='accepted' WHERE node_id='job'`, []byte(`{"jobs":[]}`))
 			}
-			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,started_at,disruptions) VALUES ('a','run','job',2,?,8,'evaluator','eval-cap',?,4,?,?)`, status, now.UnixNano(), started, disruptions)
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,started_at,disruptions,claimed_at) VALUES ('a','run','job',2,?,8,'evaluator','eval-cap',?,4,?,?,1)`, status, now.UnixNano(), started, disruptions)
 			lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
 			if err != nil {
 				t.Fatal(err)
@@ -212,7 +212,7 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 func TestOwnerReaperLeavesControllerOwnershipToElection(t *testing.T) {
 	tenant, now, _ := expansionFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='done',unit_kind='plan',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='done',unit_kind='plan',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,finished_at=1 WHERE id='run'`)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','previous',4,?)`, now.UnixNano())
 	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
 	if err != nil {
@@ -364,7 +364,7 @@ func TestOwnerReaperRecoversEveryTeamWithoutFailingRemoteRuns(t *testing.T) {
 			request = []byte(`{"request":{"origin":"trigger"}}`)
 		}
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=?,request_json=? WHERE id=?`, team, request, id)
-		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',2,?,?,?,?)`, team, id, now.UnixNano(), now.Add(-time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels,claimed_at) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',2,?,?,?,?,1)`, team, id, now.UnixNano(), now.Add(-time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
 	}
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
 	if err != nil {

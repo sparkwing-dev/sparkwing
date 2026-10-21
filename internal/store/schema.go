@@ -5,22 +5,66 @@ import (
 	"strings"
 )
 
-// TranslateSchema preserves neutral constraints and maps BLOB to BYTEA for PostgreSQL.
+// TranslateSchema preserves constraints and emits native scalar types and STRICT SQLite tables.
 func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 	if dialect != DialectSQLite && dialect != DialectPostgres {
 		return "", errors.New("unsupported schema dialect")
 	}
 	var out strings.Builder
+	var previousWord string
+	var tableName string
+	var table bool
+	depth := 0
 	err := scanSQL(neutral, func(token string, kind sqlTokenKind) error {
 		if kind == sqlWord {
-			switch strings.ToUpper(token) {
+			word := strings.ToUpper(token)
+			if word == "TABLE" && previousWord == "CREATE" {
+				table = true
+			}
+			if table && previousWord == "TABLE" {
+				tableName = word
+			}
+			switch word {
 			case "PRAGMA", "AUTOINCREMENT", "SERIAL", "BYTEA":
 				return errors.New("schema contains non-neutral syntax")
+			case "DATABASE_TIMESTAMP":
+				token = auditRecordingTimeSQL(dialect)
+			case "BIGINT":
+				// INTEGER PRIMARY KEY aliases rowid and silently invents a NULL key.
+				if dialect == DialectSQLite {
+					token = "INT"
+				}
+			case "DOUBLE":
+				if dialect == DialectSQLite {
+					token = "REAL"
+				}
+			case "PRECISION":
+				if dialect == DialectSQLite && previousWord == "DOUBLE" {
+					token = ""
+				}
 			case "BLOB":
 				if dialect == DialectPostgres {
 					token = "BYTEA"
 				}
 			}
+			previousWord = word
+		}
+		if token == "(" {
+			depth++
+		} else if token == ")" {
+			depth--
+			if table && depth == 0 {
+				table = false
+				if dialect == DialectSQLite {
+					token += " STRICT"
+					if tableName == "AUDIT_EVENTS" {
+						// An implicit rowid would bypass the audit ID's replacement guard.
+						token += ", WITHOUT ROWID"
+					}
+				}
+			}
+		} else if token == ";" {
+			previousWord = ""
 		}
 		out.WriteString(token)
 		return nil
@@ -142,7 +186,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "blob_records", Owner: SchemaTenant},
 	{Name: "blob_tombstones", Owner: SchemaTenant},
 	{Name: "blobs", Owner: SchemaTenant},
-	{Name: "business_events", Owner: SchemaOperator},
+	{Name: "audit_events", Owner: SchemaOperator},
 	{Name: "capabilities", Owner: SchemaOperator},
 	{Name: "card_refunds", Owner: SchemaTenant},
 	{Name: "concurrency_entries", Owner: SchemaTenant},
@@ -154,6 +198,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "credit_freezes", Owner: SchemaTenant},
 	{Name: "credit_grants", Owner: SchemaTenant},
 	{Name: "cron_fires", Owner: SchemaTenant},
+	{Name: "console_refund_receipts", Owner: SchemaTenant},
 	{Name: "cron_schedules", Owner: SchemaTenant},
 	{Name: "debug_pauses", Owner: SchemaTenant},
 	{Name: "egress_usage", Owner: SchemaTenant},
@@ -161,7 +206,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "events", Owner: SchemaTenant},
 	{Name: "flow_nonces", Owner: SchemaOperator},
 	{Name: "free_slots", Owner: SchemaTenant},
-	{Name: "git_credential_releases", Owner: SchemaTenant},
 	{Name: "git_credentials", Owner: SchemaTenant},
 	{Name: "github_app_automation", Owner: SchemaTenant},
 	{Name: "github_app_deliveries", Owner: SchemaOperator},
@@ -218,6 +262,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "team_counters", Owner: SchemaTenant},
 	{Name: "team_deletions", Owner: SchemaOperator},
 	{Name: "team_download_day", Owner: SchemaTenant},
+	{Name: "team_first_success", Owner: SchemaTenant},
 	{Name: "team_storage", Owner: SchemaTenant},
 	{Name: "teams", Owner: SchemaOperator},
 	{Name: "triggers", Owner: SchemaTenant},

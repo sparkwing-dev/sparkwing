@@ -72,10 +72,11 @@ func seedOtherCapacityHolder(t *testing.T, server *serverFixture, key string) {
 	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{ID: "other", Pipeline: "ci", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
+	engineSQL(t, server.store, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE team='a' AND id='other'`)
 	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','other','build','pending',?,?)`, []byte(`{"id":"build"}`), []byte(`{}`))
 	engineSQL(t, server.store, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a',?,1,1)`, key)
 	now := time.Now()
-	engineSQL(t, server.store, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a',?,'other/build','other','build',?,?)`, key, now.UnixNano(), now.Add(time.Hour).UnixNano())
+	engineSQL(t, server.store, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a',?,'other/-','other','',?,?)`, key, now.UnixNano(), now.Add(time.Hour).UnixNano())
 }
 
 func privateCapacityRequest(t *testing.T, server *serverFixture, bearer string, body any) int {

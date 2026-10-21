@@ -67,6 +67,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 		t.Fatalf("claim: %s %v", response.Body, err)
 	}
 	raw := award.Claim.Capability
+	engineAdmitBearer(t, e.Store, raw)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {

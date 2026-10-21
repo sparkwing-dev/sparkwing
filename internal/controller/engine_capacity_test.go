@@ -194,7 +194,7 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := server.store.AsOperator().MaintainConcurrency(t.Context(), reaper, store.ConcurrencyMaintenanceOptions{}); err != nil {
+				if _, err := server.store.AsOperator().MaintainConcurrency(t.Context(), reaper); err != nil {
 					t.Fatal(err)
 				}
 				server.reconcileOwnedRuns(t.Context())

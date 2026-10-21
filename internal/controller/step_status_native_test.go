@@ -14,6 +14,7 @@ func TestRunStepsExposePersistedFailureThroughSharedClient(t *testing.T) {
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	raw := nativeClaimPresentation(t, engine, authorized)
 	server := New(engine.Store, nil)
+	engineAdmitBearer(t, engine.Store, raw)
 	engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"run","state":"running","source_attempt":1}`, 200)
 	engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/steps/finish", `{"step_id":"run","state":"failed","error":"service request fields cannot be null","source_attempt":1}`, 200)

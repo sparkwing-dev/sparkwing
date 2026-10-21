@@ -18,6 +18,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s, demand, owner, now := renewalFixture(t, capability.UnitTrigger)
 			tenant := &Tenant{s: s, team: owner.Team}
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET spec_json=?,spec_hash='fixture',plan_json=?,plan_hash='fixture',sealed_at=1 WHERE team=? AND id=?`, []byte(`{}`), []byte(`{"jobs":[{"id":"job"}]}`), owner.Team, owner.RunID)
 			ref := controllerwire.NodeRef{RunID: runspec.RunID(owner.RunID), NodeID: "job"}
 			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Award.CapabilityPrefix}, CapabilityPrefix: owner.Award.CapabilityPrefix, Owner: owner.Owner}
 			change := nodeTransition{Ref: ref, Actor: actor, To: nodePending, Cause: CauseRevoke}
@@ -57,6 +58,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 				}
 				if i%8 >= 5 {
 					holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+					admitExecution(t, tenant, holder)
 					start, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 					if err != nil {
 						t.Fatal(err)

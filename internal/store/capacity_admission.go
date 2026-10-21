@@ -3,11 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"slices"
 	"time"
 
-	"encoding/json"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -349,6 +349,14 @@ func clearAdmissionLevelTx(ctx context.Context, tx *storeTx, team Team, runID, n
 		}
 	}
 	return nil
+}
+
+func discardAdmissionLevelTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
+	if err := clearAdmissionLevelTx(ctx, tx, team, runID, nodeID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM admission_work WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID)
+	return err
 }
 
 func nullableTime(t *time.Time) any {

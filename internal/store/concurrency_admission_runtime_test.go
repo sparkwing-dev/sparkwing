@@ -130,8 +130,8 @@ func TestConcurrencyUsesTimeAfterCapacityLocks(t *testing.T) {
 				return locked
 			})
 			if maintenance {
-				result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease, ConcurrencyMaintenanceOptions{})
-				if err != nil || len(result.StaleHolders) != 1 || result.Promoted != 1 {
+				result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease)
+				if err != nil || len(result.StaleHolders) != 1 {
 					t.Fatalf("maintenance after lock: %+v, %v", result, err)
 				}
 			} else {

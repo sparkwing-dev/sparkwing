@@ -16,7 +16,7 @@ import (
 
 // ConsoleRefund records a provider refund and its operator receipt in one transaction.
 func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (CreditReversal, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, actor string) (CreditReversal, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (CreditReversal, error) {
 		req.PaymentID, req.RefundID = strings.TrimSpace(req.PaymentID), strings.TrimSpace(req.RefundID)
 		reason, err := consoleReason(req.Reason)
 		req.Reason = reason
@@ -40,7 +40,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		identity, err := json.Marshal([]string{actor, key})
+		identity, err := json.Marshal([]string{actor.subject.ID, key})
 		if err != nil {
 			return CreditReversal{}, err
 		}
@@ -54,20 +54,16 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			return CreditReversal{}, err
 		}
 		digest := sha256.Sum256(body)
-		var receipt struct {
-			Digest [32]byte       `json:"digest"`
-			Result CreditReversal `json:"result"`
-		}
-		err = tx.QueryRowContext(ctx, `SELECT attrs FROM business_events WHERE team=? AND kind='operator.refund_recorded' AND subject_id=?`, t.team, subject).Scan(&body)
+		requestDigest := hex.EncodeToString(digest[:])
+		var previousDigest string
+		err = tx.QueryRowContext(ctx, `SELECT request_digest,result_json FROM console_refund_receipts WHERE team=? AND receipt_id=?`, t.team, subject).Scan(&previousDigest, &body)
 		if err == nil {
-			if err := json.Unmarshal(body, &receipt); err != nil {
-				return CreditReversal{}, err
-			}
-			if receipt.Digest != digest {
+			if previousDigest != requestDigest {
 				return CreditReversal{}, authorityError(apierr.Conflict, "idempotency key names another refund")
 			}
-			receipt.Result.Created = false
-			return receipt.Result, nil
+			var result CreditReversal
+			err := json.Unmarshal(body, &result)
+			return result, err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return CreditReversal{}, err
@@ -104,7 +100,18 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: t.team, Kind: "operator.refund_recorded", SubjectID: subject, Actor: actor, Attrs: map[string]any{"digest": digest, "result": result, "reason": req.Reason, "payment_id": req.PaymentID, "refund_id": req.RefundID}}); err != nil {
+		body, err = json.Marshal(result)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO console_refund_receipts(team,receipt_id,request_digest,result_json) VALUES (?,?,?,?)`, t.team, subject, requestDigest, body); err != nil {
+			return CreditReversal{}, err
+		}
+		grantID := ""
+		if result.Grant != nil {
+			grantID = result.Grant.ID
+		}
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: actor}, auditRefund{ReceiptID: subject, GrantID: grantID, PaidMicro: result.PaidMicro, ReversedMicro: result.ReversedMicro, BalanceMicro: result.BalanceMicro, PaymentID: digestAudit(req.PaymentID), RefundID: digestAudit(req.RefundID)}); err != nil {
 			return CreditReversal{}, err
 		}
 		return result, nil

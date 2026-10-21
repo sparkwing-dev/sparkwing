@@ -47,6 +47,7 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
 		t.Fatal(err)
 	}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -349,42 +350,44 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 }
 
 func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
-	tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
-	rewriteSchemaExec(t, tenant.s.db, "INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','live',2,1),('a','expired',2,1)")
-	for _, id := range []string{"live", "expired"} {
-		expiry := now.Add(time.Minute)
-		if id == "expired" {
-			expiry = *now
-		}
-		rewriteSchemaExec(t, tenant.s.db, "INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a',?,?,?,'',?,?,1)", id, id, request.RunID, now.Add(-time.Minute).UnixNano(), expiry.UnixNano())
-		rewriteSchemaExec(t, tenant.s.db, "INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a',?,?,?,'job',?,?,1,'queue')", id, id, request.RunID, now.Add(-time.Minute).UnixNano(), expiry.UnixNano())
-	}
-	rewriteSchemaExec(t, tenant.s.db, "INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','live','previous',?,'',?,?,1)", request.RunID, now.Add(-time.Minute).UnixNano(), now.UnixNano())
-	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "controller", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		for _, id := range []string{"live", "expired"} {
-			var expires int64
-			if err := tenant.s.db.QueryRow("SELECT lease_expires_at FROM "+table+" WHERE team='a' AND key=? AND holder_id=?", id, id).Scan(&expires); err != nil {
+	for _, live := range []bool{true, false} {
+		t.Run(map[bool]string{true: "live", false: "expired"}[live], func(t *testing.T) {
+			group := nodeproto.ConcurrencySpec{Group: "capacity", Scope: new("global"), Capacity: new(1)}
+			tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{
+				Concurrency: []nodeproto.ConcurrencySpec{group},
+				Jobs:        []nodeproto.JobSpec{{ID: "job", Concurrency: []nodeproto.ConcurrencySpec{group}}},
+			})
+			controllerJobActor(t, tenant, request.RunID)
+			expiry := *now
+			if live {
+				expiry = now.Add(time.Minute)
+			}
+			for _, table := range []string{"concurrency_holders", "admission_work"} {
+				rewriteSchemaExec(t, tenant.s.db, "UPDATE "+table+" SET lease_expires_at=? WHERE team=? AND run_id=?", expiry.UnixNano(), tenant.team, request.RunID)
+			}
+			lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "controller", time.Hour)
+			if err != nil {
 				t.Fatal(err)
 			}
-			want := now.Add(3 * time.Minute).UnixNano()
-			if id == "expired" {
-				want = now.UnixNano()
+			if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
+				t.Fatal(err)
 			}
-			if expires != want {
-				t.Fatalf("%s %s expiry: %d, want %d", table, id, expires, want)
+			for _, table := range []string{"concurrency_holders", "admission_work"} {
+				for _, node := range []string{"", "job"} {
+					var actual int64
+					if err := tenant.s.db.QueryRow("SELECT lease_expires_at FROM "+table+" WHERE team=? AND run_id=? AND node_id=?", tenant.team, request.RunID, node).Scan(&actual); err != nil {
+						t.Fatal(err)
+					}
+					want := expiry.UnixNano()
+					if live || node == "" {
+						want = now.Add(defaultConcurrencyLease).UnixNano()
+					}
+					if actual != want {
+						t.Fatalf("%s node=%q continuous=%t: expiry=%d want %d", table, node, live, actual, want)
+					}
+				}
 			}
-		}
-	}
-	var previous int64
-	if err := tenant.s.db.QueryRow("SELECT lease_expires_at FROM concurrency_holders WHERE team='a' AND key='live' AND holder_id='previous'").Scan(&previous); err != nil || previous != now.UnixNano() {
-		t.Fatalf("expired previous holder revived: %d, %v", previous, err)
+		})
 	}
 }
 

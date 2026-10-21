@@ -294,8 +294,9 @@ Unused `ClaimToken`, `ClaimTokenKind` and its kind constants are removed.
 `Tenant.FinishRun` and its unfenced terminal writer are removed. Use
 `Tenant.FinishRunAndUnit` with the current owner authority. Terminal time comes
 from the store clock. Exact replay preserves it. The first successful run
-records its team business event in the same transaction as the verdict, owner
-completion and pipeline pin. An event failure rolls the transaction back.
+records its durable team marker and audit fact in the same transaction as the
+verdict, owner completion and pipeline pin. Audit expiry preserves the marker.
+An event failure rolls the transaction back.
 
 The unused `ConcurrencyHeartbeatInterval`, `ConcurrencyHeartbeatTimeout` and
 both `DefaultConcurrencyHeartbeat*` constants are removed. The shared lease
@@ -641,10 +642,9 @@ capability quota counts live roots. Expiry frees quota without deleting the
 retained authority rows.
 
 `Tenant.ReleaseConcurrencySlot`, `ResolveCoalesceFollowers` and
-`ActiveConcurrencyHolder` are removed. `ReleaseAndNotify` commits release,
-follower resolution and waiter promotion together. `ConcurrencyHolder` reads
-an unexpired holder, including a superseded one. Callers that require active
-capacity check its `Superseded` field.
+`ActiveConcurrencyHolder` are removed. Terminal node and run transitions release
+complete reservations. Hosts retry `MayStart` for grouped promotion. Raw holder
+release, follower resolution and per-group promotion exist only in ledger tests.
 
 `Operator.UsageMetrics`, its weekly-report types and `UsageWeekStart` are
 removed with the retired usage-metrics route. The unused
@@ -678,9 +678,35 @@ Revocation updates the envelope and authority generation. Descendants
 retain their ancestry check. Every effect rolls back after a failed write.
 
 `SchemaTables` is the single table inventory in `schema.go`. Runtime purge,
-tenant SQL guards and shape tests use it. Operator-owned `business_events`,
-`capabilities` and `sessions` may carry a nullable team. Their bound rows leave
-with that team. Purge removes quota reservations before aggregates and removes
+tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
+`capabilities` and `sessions` may carry a nullable team. Audit rows are retained
+after team deletion and expire only by age. Human actors and account subjects use
+account IDs. Non-account claimants use capability and holder digests, with no
+caller-selected actor name. System actors use fixed enums permitted by each
+payload kind. Invitation subjects use invitation IDs, and audit rows contain no
+email addresses or free-form personal details. Readers render erased accounts
+as "deleted account". One audit writer accepts a closed, typed payload for each
+kind. It retains identifiers, enums, digests and generated receipt IDs. Retained
+caller names and grant keys use digests. Free-form reasons and messages are
+excluded.
+
+Audit rows are append-only against application code. Both dialects reject every
+UPDATE and permit DELETE only for rows older than `operator.audit_retention_days`
+(default 400 days, set through the operator storage settings API). The leased
+controller maintenance pass prunes expired rows in bounded batches using the same
+database-clock cutoff as the triggers. The database stamps `recorded_at` at
+insertion and callers cannot set it. Retention uses that recording time. The
+separate `ts` occurrence time remains available for display, so backdating an
+occurrence cannot shorten retention. PostgreSQL rejects TRUNCATE. One PostgreSQL
+role owns the tables and runs the app, so credentials can disable the triggers.
+Separate roles are post-launch hardening. Local SQLite append-only holds only
+against SQL the app issues. Bound capabilities and sessions leave with the team.
+
+`team_first_success` records the team's first successful run in the
+completion transaction and has no run foreign key. Run deletion and audit
+expiry cannot make a later success the first.
+
+Purge removes quota reservations before aggregates and removes
 runs after their operational rows and restrictive pins. Generated SQLite checks
 compare all surviving rows across repeated purges with adversarial tenant keys.
 They exercise the purge primitive, not deletion-request authorization or billing.
@@ -1161,9 +1187,10 @@ Purge's account `updated_at` write also uses nanoseconds. Final-schema stores
 have no seconds-based compatibility reader or data conversion.
 
 `Tenant.SourceReleaseAudits` implements the final tenant-scoped audit projection.
-It reads capability prefixes and nanosecond timestamps, newest first, with the
+It reads event, run and account IDs, generation, digests of caller-supplied
+identifiers and nanosecond occurrence timestamps, newest first, with the
 existing 200-row bound. Secret and git-credential row timestamps also use Unix
-nanoseconds. The old ClaimToken audit reader remains for its unmigrated callers.
+nanoseconds.
 
 `ReadAuthentication` projects `BindingState.CancelReason`. A job's committed
 intent takes precedence over the run's intent, including an empty reason.
@@ -1408,16 +1435,19 @@ clears holder authority, consumes no disruption and fences every previous award.
 C2's billing start rule still determines whether compute began at award or awaits
 a qualifying pod renewal/start.
 
-`Operator.MaintainConcurrency(ctx, lease, options)` runs under that same
-`controller.reaper` fence. It locks affected capacity entries in tenant/key order,
-removes expired or terminal holders and abandoned waiters, and promotes live queued work in
-one transaction. The fence is checked before work and before commit. Any failure
+`Operator.MaintainConcurrency(ctx, lease)` runs under that same
+`controller.reaper` fence. It locks capacity entries in tenant/key order and
+removes dead holders and waiters in one transaction. Hosts retry `MayStart` to
+promote complete group sets through the sole admission owner. Maintenance never
+grants an individual group. The fence is checked before work and before commit. Any failure
 returns zero counters and rolls back the whole pass. Expired waiter leases never
 retain arrival order. Waiters bound to terminal or missing jobs cannot promote.
 Live blocked waiters retain their arrival and lease across owner generations.
 Queue precedence, grouped grants and renewal share claim-or-owner liveness. A job
-generation still fences replacement executions. Options retain the existing
-promotion lease and abandoned-waiter age defaults.
+generation still fences replacement executions. A reservation identifies durable
+work, so supersession cancels its current job award rather than comparing the
+reservation's original claim generation. No separate promotion lease or waiter-age
+policy remains.
 
 `Store.MaintainConcurrency`, the `Maintenance` function registry and its six
 unfenced operations are removed. `OperatorStore` includes the leased pass. The
@@ -1527,21 +1557,21 @@ GetPipelineProfile, ListPipelineProfiles and CacheExcludedCounts. Tenant owns
 the complete profile API. Local orchestration, capacity stats and profile
 diagnostics select the registered DefaultTeam explicitly.
 
-Tenant owns concurrency acquisition, holder reads and renewal, release,
-follower resolution, promotion, waiter polling/cancellation and state reads.
+Tenant admission owns complete-set grants and award permits. State and terminal
+transitions own renewal and release. Tenant exposes scoped group and queue reads.
 The raw Store twins and unused deployment-wide ListConcurrencyStates are removed.
 The local adapter selects the registered DefaultTeam and propagates handle errors.
-Acquisition and promotion persist the work's current generation. Queued arrivals
-also persist their lease. Expired waiters cannot keep arrival order or promote.
-Admission, polling, renewal and capacity maintenance use the store clock. Promotion and
-waiter maintenance use the owner lease or a live run job claim instead of the
-removed run heartbeat. Run queries carry the selected tenant key.
+Permits capture the current award generation. Reservation identity and queue
+arrival survive handoff. Queued arrivals persist their lease. Expired waiters
+cannot keep arrival order or promote. Admission, renewal and maintenance use the
+store clock and one claim-or-owner liveness horizon. Run queries carry the selected tenant key.
 
 The SQLite recovery proof `recovery-concurrency-continuous-adoption/store-sqlite`
 holds node and plan capacity through owner loss, remote claim renewal and store
-reopening. It reclaims the owner through ClaimUnit and adopts both holders.
+reopening. It reclaims the owner through ClaimUnit and retains both reservations.
 Job completion releases node capacity. Run completion releases plan capacity.
-Each release allows one queued competitor, and repeated promotion admits none.
+Each release allows one queued competitor through `MayStart`, and retries never
+grant partial group sets.
 Enrollment is a contract fake. Native process recovery remains separate evidence.
 
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
@@ -1611,9 +1641,10 @@ dependency, reads the confirmed team credential, and commits the complete
 `SourceReleaseAudit` before returning the sealed credential. The controller owns
 decryption. Audit or commit failure returns neither credential nor audit. A final
 clock check refuses a lease or authority that expires during policy work.
-`git_credential_releases` includes repository_key, node_id, generation, machine_id
-and owner_account_id so the C2 audit survives without consulting mutable claims.
-Release timestamps use store-clock nanoseconds.
+`audit_events` retains the run ID and generation with digests of the source
+release's repository, node, machine and capability identifiers. The audit survives
+without consulting mutable claims. Occurrence timestamps use store-clock
+nanoseconds. The database assigns recording time for retention.
 
 **Superseded by decision 6c (2026-10-18):** `Tenant.SetSourceMachineConsent` is removed. `Tenant.OwnerMachineClaimant`
 reports whether an award's root is the run requester itself or a personal machine
@@ -1968,7 +1999,7 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
     before adding a lock; they must not silently acquire an earlier class late.
     Authority mutations use `acquireLockSet` to discover every team, membership,
     authority and installation row before acquiring any of them. The set includes
-    teams referenced by foreign keys, such as audit events. The owner acquires
+    teams referenced by authority and installation rows. The owner acquires
     each row once in class order, then repeats discovery under those locks. A
     changed set restarts the transaction and releases its locks before retrying.
     Nested authority checks reuse held locks. A late earlier-class lock or lock
@@ -2814,7 +2845,7 @@ hold no competing idempotency fields.
    implementation. Hashes exclude their own fields and seal timestamps; object
    keys sort, list order and explicit presence remain stable. Typed namespace
    components must encode without collisions, including manual ref scope.
-7. Account audit and account sessions may precede any team. `business_events` and
+7. Account audit and account sessions may precede any team. `audit_events` and
    `sessions` are operator-owned with nullable team. Tenant queries still filter it. Intake idempotency belongs to `runs`, scoped by the server-derived principal
    and pipeline, so published runs receive the same replay guarantee.
 8. Newest-success pins use a restrictive run FK because a cascading pin would
@@ -3270,8 +3301,10 @@ Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefu
 and the request key, returning CreditReversal. It runs through consoleWrite,
 resolves the persisted paid grant before any reversal and checks its team
 against the path. Its reference matches verified refund settlement. A receipt
-in business_events retains the normalized request digest and result. The
-existing ledger lock serializes reads, replay, reversal and receipt commit.
+in console_refund_receipts retains the normalized request digest and original
+result independently of audit retention. The audit row projects identifiers,
+digests and financial facts. The existing ledger lock serializes reads, replay,
+reversal and receipt commit.
 
 <!-- design:end -->
 
@@ -3593,8 +3626,9 @@ Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
 grants; capped at $100 without the explicit flag. `sparkwing-controller admin
 grant` refuses more than 10,000 cents per grant unless the pod sets
 `SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1`. It grants once per key with reference
-`admin:<key>` and records `credit.granted` with actor `sparkwing-controller
-admin` and the reason. No remote credential reaches it.
+`admin:<key>` and records `credit.granted` with fixed system actor
+`sparkwing-controller admin` and a digest of the reference. Audit rows exclude
+free-form reasons. No remote credential reaches it.
 
 ## Integrated working-tree source uploads
 
@@ -4277,7 +4311,7 @@ Runs, nodes and triggers store a generated `drain_deadline_at` from their first
 `cancel_requested_at` plus five minutes. The database derives it in the same
 write, including concurrency supersession. Cancellation clamps existing work and
 slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
-bounds. The schema baseline is version 16.
+bounds. The schema baseline is version 20.
 The shared capacity writer applies the bound to each holder and waiter,
 including controller reconciliation.
 Node capacity follows the later live claim or owner lease; plan capacity follows

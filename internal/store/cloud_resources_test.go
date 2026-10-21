@@ -11,7 +11,7 @@ import (
 func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *testing.T) {
 	property := func(rate uint16, additional uint8) bool {
 		s, demand, _ := meteredUnitFixture(t, true)
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json='{}'`)
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
 		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if err != nil {
 			t.Fatal(err)

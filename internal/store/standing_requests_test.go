@@ -171,7 +171,7 @@ func standingRequestEvents(t *testing.T, s *Store, want map[string]int) {
 	t.Helper()
 	for kind, n := range want {
 		var got int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM business_events WHERE team='a' AND kind=?`, kind).Scan(&got); err != nil || got != n {
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team='a' AND kind=?`, kind).Scan(&got); err != nil || got != n {
 			t.Fatalf("%s events=%d want %d: %v", kind, got, n, err)
 		}
 	}

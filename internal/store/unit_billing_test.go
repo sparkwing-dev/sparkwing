@@ -159,7 +159,7 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation) VALUES ('a','run','job',2,'claimed',8,'eval-host','evaluation',?,4)`, now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at) VALUES ('a','run','job',2,'claimed',8,'eval-host','evaluation',?,4,1)`, now.Add(time.Minute).UnixNano())
 	if _, err := s.AsOperator().RenewUnit(t.Context(), c.Prefix, true); err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +181,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 			unitBillingTotal(t, s, 600, false)
 			*now = now.Add(5 * time.Second)
 			tenant := &Tenant{s: s, team: "a"}
+			admitExecution(t, tenant, actor)
 			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)
@@ -334,6 +335,7 @@ func TestMeteredUnitReaperSettlesAtLeaseLapse(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
 	start := *now
 	claim, actor := meteredUnitClaim(t, s, demand)
+	admitExecution(t, &Tenant{s: s, team: "a"}, actor)
 	if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -357,6 +359,7 @@ func TestMeteredUnitApplicationRetryKeepsOneReservation(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}},"retry":{"set":true,"value":1}}`))
 	_, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
+	admitExecution(t, tenant, actor)
 	start := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}
 	if _, err := tenant.TransitionNode(t.Context(), start); err != nil {
 		t.Fatal(err)
@@ -404,6 +407,7 @@ func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
+	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}

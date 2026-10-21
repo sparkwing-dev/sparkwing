@@ -2,11 +2,12 @@ package store_test
 
 import (
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -206,5 +207,40 @@ func TestWaitingGroupSetDoesNotPreemptEarlierGroup(t *testing.T) {
 	state, err := f.tenant.GetConcurrencyState(t.Context(), "job:global:a-cancel")
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].Superseded {
 		t.Fatalf("waiting set preempted earlier group: %+v %v", state, err)
+	}
+}
+
+func TestAdmissionReapsCapacityWhenClaimAndOwnerBothEnd(t *testing.T) {
+	for _, dialect := range []struct {
+		name   string
+		target func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
+				doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "plan", Scope: new("global"), Capacity: new(1)}}
+				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "job", Scope: new("global"), Capacity: new(1)}}
+			})
+			binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+			if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != store.AcquireGranted {
+				t.Fatalf("initial admission: %+v %v", result, err)
+			}
+			for _, table := range []string{"triggers", "nodes"} {
+				column := "run_id"
+				if table == "triggers" {
+					column = "id"
+				}
+				if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `UPDATE `+table+` SET lease_expires_at=1 WHERE team=? AND `+column+`=?`), f.tenant.Team(), f.ref.RunID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			competitor, award := admissionPolicyBlocker(t, f)
+			if result, err := f.tenant.MayStart(t.Context(), competitor, award); err != nil || result.Kind != store.AcquireGranted {
+				t.Fatalf("dead work still consumes capacity: %+v %v", result, err)
+			}
+			var count int
+			if err := f.s.DB().QueryRowContext(t.Context(), storetest.Rebind(f.s, `SELECT COUNT(*) FROM concurrency_holders WHERE team=? AND run_id=?`), f.tenant.Team(), f.ref.RunID).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("dead reservations retained: %d %v", count, err)
+			}
+		})
 	}
 }

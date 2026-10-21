@@ -50,7 +50,7 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 	}
 }
 
-func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
+func TestConcurrency_MaintenancePreservesOrphanedQueue(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := ctxT(t)
 
@@ -74,17 +74,17 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		t.Fatalf("setup: expected 0 holders + 1 waiter, got %+v", state)
 	}
 
-	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{})
+	result, err := teststore.MaintainConcurrency(ctx, s)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if result.Promoted != 1 {
-		t.Fatalf("expected 1 waiter promoted, got %d", result.Promoted)
+	if len(result.StaleHolders) != 0 || len(result.StaleWaiters) != 0 {
+		t.Fatalf("live waiter was swept: %+v", result)
 	}
 
 	state, _ = tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
-	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
-		t.Fatalf("post-reconcile holders: %+v", state.Holders)
+	if len(state.Holders) != 0 || len(state.Waiters) != 1 || state.Waiters[0].HolderID != "w1" {
+		t.Fatalf("post-maintenance queue: %+v", state)
 	}
 }
 
@@ -212,7 +212,7 @@ func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
 	}
 }
 
-func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
+func TestConcurrency_WaiterReaperDropsExpiredWaiters(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := ctxT(t)
 
@@ -232,7 +232,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		t.Fatalf("rewrite arrived_at: %v", err)
 	}
 
-	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
+	result, err := teststore.MaintainConcurrency(ctx, s)
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	result, err = teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
+	result, err = teststore.MaintainConcurrency(ctx, s)
 	if err != nil {
 		t.Fatal(err)
 	}

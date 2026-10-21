@@ -3,7 +3,6 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 	"testing/quick"
 	"time"
@@ -103,6 +102,7 @@ func TestSourceReleaseSupportsOwnerUnitsAndGrantedCloudPlacement(t *testing.T) {
 
 func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 	tenant, auth := sourceReleaseFixture(t)
+	authorityMember(t, tenant.s, "owner", RoleReader)
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err != nil {
 		t.Fatal(err)
@@ -110,13 +110,11 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 	if credential.ID != "credential" || credential.Secret != "encrypted-secret" || audit.ID == "" || audit.Team != "a" || audit.RepositoryKey != "gh:1" || audit.NodeID != "job" || audit.Generation != 1 || audit.MachineID != "runner" || audit.OwnerAccountID != "owner" || !audit.ReleasedAt.Equal(tenant.s.now()) {
 		t.Fatalf("release: credential=%s audit=%+v", credential.ID, audit)
 	}
-	var stored capability.SourceReleaseAudit
-	var released int64
-	err = tenant.s.db.QueryRow(`SELECT id,team,credential_id,host,repository_key,run_id,node_id,generation,machine_id,owner_account_id,capability_prefix,released_at FROM git_credential_releases`).Scan(&stored.ID, &stored.Team, &stored.CredentialID, &stored.Host, &stored.RepositoryKey, &stored.RunID, &stored.NodeID, &stored.Generation, &stored.MachineID, &stored.OwnerAccountID, &stored.CapabilityPrefix, &released)
-	stored.ReleasedAt = time.Unix(0, released).UTC()
-	if err != nil || !reflect.DeepEqual(stored, audit) {
+	stored, err := tenant.SourceReleaseAudits(t.Context(), 10)
+	if err != nil || len(stored) != 1 {
 		t.Fatalf("audit did not commit: %+v %v", stored, err)
 	}
+	assertSourceReleaseAuditProjection(t, stored[0], audit)
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
@@ -162,16 +160,16 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 			case "enrollment":
 				s.claimProfiles = nil
 			case "audit":
-				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_audit BEFORE INSERT ON git_credential_releases BEGIN SELECT RAISE(ABORT,'audit refused'); END`)
+				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit refused'); END`)
 			case "commit":
 				rewriteSchemaExec(t, s.db, `CREATE TABLE source_commit_guard(team TEXT REFERENCES teams(name) DEFERRABLE INITIALLY DEFERRED)`)
-				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_commit AFTER INSERT ON git_credential_releases BEGIN INSERT INTO source_commit_guard(team) VALUES ('missing-team'); END`)
+				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_commit AFTER INSERT ON audit_events BEGIN INSERT INTO source_commit_guard(team) VALUES ('missing-team'); END`)
 			}
 			credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 			if err == nil || credential.Secret != "" || audit.ID != "" {
 				t.Fatalf("failed %s release returned data: credential=%s audit=%s error=%v", problem, credential.ID, audit.ID, err)
 			}
-			rewriteSchemaCount(t, s.db, "git_credential_releases", 0)
+			rewriteSchemaCount(t, s.db, "audit_events WHERE kind='git_credential.released'", 0)
 		})
 	}
 }
@@ -212,7 +210,7 @@ func TestSourceReleaseRechecksLeaseAfterEnrollment(t *testing.T) {
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("release outlived the locked lease")
 	}
-	rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
+	rewriteSchemaCount(t, tenant.s.db, "audit_events WHERE kind='git_credential.released'", 0)
 }
 
 func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
@@ -224,7 +222,7 @@ func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("mutable executor facts replaced the awarded executor class")
 	}
-	rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
+	rewriteSchemaCount(t, tenant.s.db, "audit_events WHERE kind='git_credential.released'", 0)
 }
 
 func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
@@ -241,7 +239,7 @@ func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 		}
 		credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 		var released int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_releases`).Scan(&released); err != nil {
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released'`).Scan(&released); err != nil {
 			t.Fatal(err)
 		}
 		if registered && !personal {

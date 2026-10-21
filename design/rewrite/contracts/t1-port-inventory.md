@@ -610,9 +610,10 @@ finalization tests are deleted with the warm dispatcher. Their matching,
 tenant-scope and no-fallback concerns move to the final claim proofs. Enrollment
 remains a fake and native Actions/launcher transport is still required.
 
-`internal/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
-aged-waiter liveness, abandoned-work cleanup and repeated-pass assertions from the
-old maintenance suite. The fence property generates forged names, holders and
+`internal/store/concurrency_maintenance_fence_test.go` covers expired-holder
+cleanup, claim-or-owner waiter liveness, abandoned-work cleanup and repeated-pass
+assertions. Maintenance never promotes individual groups. Host `MayStart` retries
+exercise complete-set promotion through the durable admission owner. The fence property generates forged names, holders and
 generations. Rollback tests cover statement failure and lease expiry during the
 pass. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell also checks
 reopening and returning-owner queue order. Obsolete concurrency-cache sweeps are

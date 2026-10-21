@@ -305,6 +305,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	if placement == "cloud-retry" {
 		previousAttempt := int64(2)
 		workerClient := newClient(awarded.Claim.Capability, false)
+		engineAdmitBearer(t, s.store, awarded.Claim.Capability)
 		started, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &previousAttempt})
 		if err != nil || started.Attempt != 3 {
 			t.Fatalf("retry start: %+v %v", started, err)
@@ -336,6 +337,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	}
 	if proof == nil && placement != "cloud-retry" {
 		workerClient := newClient(awarded.Claim.Capability, false)
+		engineAdmitBearer(t, s.store, awarded.Claim.Capability)
 		sourceAttempt := int64(0)
 		if _, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &sourceAttempt}); err != nil {
 			t.Fatalf("worker start before cancellation: %v", err)

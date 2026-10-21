@@ -42,6 +42,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 		t.Fatalf("claim: %v", err)
 	}
 	claim := award.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
 	plain := []byte("masked log\n")

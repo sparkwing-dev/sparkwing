@@ -127,7 +127,7 @@ func TestRunOwnerLossPreservesCancellation(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	maintenanceRun(t, s, "run", 1, RunRunning)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=? WHERE team='a' AND id='run'`, now.UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'owner',1,?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at,capability_prefix) VALUES ('a','run','claimed','trigger',1,1,'owner',1,?,?,?,1,'claim')`, now.Add(-time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
 	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "controller.reaper", "replica", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestRunQueueTimeoutPreservesLiveOwner(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	maintenanceRun(t, s, "run", 1, RunPending)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json = ? WHERE team='a' AND id='run'`, []byte(`{"version":1,"admitted_at":"2027-01-01T00:00:00Z","request":{"options":{"claim_wait":{"set":true,"value":1}}},"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'owner',1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at,capability_prefix) VALUES ('a','run','claimed','trigger',1,1,'owner',1,?,?,?,1,'claim')`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "controller.reaper", "replica", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +163,7 @@ func liveHolderFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	authorityPersist(t, tenant.s, c)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=?,execution_json=?,expansion='' WHERE team='a' AND run_id='run'`, expiry.UnixNano(), []byte(`{"retry":{"set":true,"value":1}}`))
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
+	admitExecution(t, tenant, actor)
 	return tenant, now, actor
 }
 
@@ -210,7 +211,7 @@ func TestTransitionHolderRights(t *testing.T) {
 	owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Holder: "host", Generation: 1}
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, tenant.s, owner)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'host','owner',1,?,?,?)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','run','claimed','trigger',1,1,'host','owner',1,?,?,?,1)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
 	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}}
 	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Actor: actor, Cause: CauseReport}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
@@ -225,6 +226,28 @@ func TestTransitionHolderRights(t *testing.T) {
 	row, err := tenant.ReadNode(t.Context(), change.Ref)
 	if err != nil || row.Status != StatusRunning || row.StateSeq != 0 {
 		t.Fatalf("refused writes changed row: %+v, %v", row, err)
+	}
+}
+
+func TestSchemaAllowsRetryThenTerminalClaimClearing(t *testing.T) {
+	tenant, _, actor := liveHolderFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"retry":{"set":true,"value":1}}`))
+	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+	retry := nodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed}}}
+	if _, err := tenant.TransitionNode(t.Context(), retry); err != nil {
+		t.Fatal(err)
+	}
+	finish := nodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(4)}
+	if _, err := tenant.TransitionNode(t.Context(), finish); err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadNode(t.Context(), ref)
+	if err != nil || row.Status != StatusDone || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.LeaseExpiresAt != nil || row.FinishedAt == nil {
+		t.Fatalf("terminal row: %+v, %v", row, err)
+	}
+	var open int
+	if err := tenant.s.db.QueryRow(`SELECT count(*) FROM node_attempts WHERE finished_at IS NULL`).Scan(&open); err != nil || open != 0 {
+		t.Fatalf("open attempts: %d, %v", open, err)
 	}
 }
 

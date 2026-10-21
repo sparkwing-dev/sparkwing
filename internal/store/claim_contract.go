@@ -75,7 +75,7 @@ type OperatorStore interface {
 	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
-	MaintainConcurrency(context.Context, SingletonLease, ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
+	MaintainConcurrency(context.Context, SingletonLease) (ConcurrencyMaintenanceResult, error)
 }
 
 var _ OperatorStore = (*Operator)(nil)

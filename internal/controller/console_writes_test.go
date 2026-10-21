@@ -85,6 +85,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 	s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	base := authority.principal
 	base.Class = capability.CredentialConsole
+	base.Capability.Subject.Kind = capability.SubjectAccount
 	base.Authority = capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(base.Capability.Digest[:])}
 	base.Capability.Prefix = ""
 	base.Capability.Grants = []capability.Grant{capability.OperatorConsole}
@@ -102,7 +103,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 	})
 	s.githubApp = &githubAppState{}
 	f := &consoleWritesFake{}
-	s.WithConsoleWriter(f)
+	s.consoleWrites = f
 	cases := []struct {
 		method, path, body string
 		status             int

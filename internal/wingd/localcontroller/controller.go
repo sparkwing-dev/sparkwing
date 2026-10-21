@@ -244,7 +244,7 @@ func (c *localController) sweep(ctx context.Context, lease store.SingletonLease)
 			break
 		}
 	}
-	_, err := c.operator.MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+	_, err := c.operator.MaintainConcurrency(ctx, lease)
 	return err
 }
 

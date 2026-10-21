@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
 // Fixture adapters expose the shared accounting primitives to external-package tests.
-type AcquireSlotRequest = acquireSlotRequest
-type WaiterResolution = waiterResolution
-type WaiterStatus = waiterStatus
+type (
+	AcquireSlotRequest = acquireSlotRequest
+	WaiterResolution   = waiterResolution
+	WaiterStatus       = waiterStatus
+)
 
 const (
 	WaiterStillWaiting   = waiterStillWaiting
@@ -351,4 +354,346 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRu
 		return waiterResolution{}, err
 	}
 	return result, nil
+}
+
+func txCommitChecked(ctx context.Context, tx *storeTx, nowNS int64, keys ...concurrencyKey) error {
+	seen := make(map[concurrencyKey]bool, len(keys))
+	for _, k := range keys {
+		if k.key == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		if err := txCheckConcurrencyInvariants(ctx, tx, k.team, k.key, nowNS); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// safety: leader reads retain tenant scope before disclosing an outcome.
+func txNodeOutcome(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (outcome, failureReason string, found bool, err error) {
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT outcome, failure_reason FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID,
+	).Scan(&outcome, &failureReason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return outcome, failureReason, true, nil
+}
+
+// waiterStatus is what a polling waiter observes.
+type waiterStatus string
+
+const (
+	waiterStillWaiting waiterStatus = "still_waiting"
+	waiterPromoted     waiterStatus = "promoted"
+
+	waiterLeaderFinished waiterStatus = "leader_finished"
+
+	waiterCancelled waiterStatus = "cancelled"
+	waiterExpired   waiterStatus = "expired"
+)
+
+// waiterResolution: fields populate per Status.
+type waiterResolution struct {
+	Status              waiterStatus
+	HolderID            string
+	HolderLeaseExpires  time.Time
+	OutputRef           string
+	OriginRunID         string
+	OriginNodeID        string
+	LeaderRunID         string
+	LeaderNodeID        string
+	LeaderOutcome       string
+	LeaderFailureReason string
+
+	Position    int
+	QueueLength int
+	Holders     []ConcurrencyHolder
+}
+
+func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID, leaderRunID, leaderNodeID string, lease time.Duration, fence *capacityFence) (waiterResolution, error) {
+	var err error
+
+	if fence != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, key, *fence); err != nil {
+			return waiterResolution{}, err
+		}
+	}
+
+	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
+		return waiterResolution{}, err
+	}
+	if err := checkCapacityMutationTx(ctx, tx, t.team, key, "", fence); err != nil {
+		return waiterResolution{}, err
+	}
+	nowNS := tx.now(ctx).UnixNano()
+	if _, err := reapStaleConcurrencyHoldersTx(ctx, tx, t.team, key); err != nil {
+		return waiterResolution{}, err
+	}
+
+	var holderID string
+	var leaseNS int64
+	var superInt int
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT holder_id, lease_expires_at, superseded
+		   FROM concurrency_holders
+		  WHERE team = ? AND key = ? AND run_id = ? AND node_id = ?`,
+		string(t.team), key, runID, nodeID,
+	).Scan(&holderID, &leaseNS, &superInt)
+	switch {
+	case err == nil && superInt == 0 && leaseNS > nowNS:
+		return waiterResolution{
+			Status:             waiterPromoted,
+			HolderID:           holderID,
+			HolderLeaseExpires: time.Unix(0, leaseNS),
+		}, nil
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return waiterResolution{}, err
+	}
+
+	waiter, err := scanWaiter(tx.QueryRowContext(
+		ctx,
+		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND lease_expires_at > ?`,
+		string(t.team), key, runID, nodeID, nowNS,
+	))
+	if err == nil {
+		deadline, err := capacityQueueDeadlineTx(ctx, tx, t.team, waiter)
+		if err != nil {
+			return waiterResolution{}, err
+		}
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
+			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
+				return waiterResolution{}, err
+			}
+			return waiterResolution{Status: waiterExpired}, nil
+		}
+
+		shouldPromote := waiter.Policy == OnLimitQueue
+		if waiter.Policy == OnLimitCancelOthers {
+			var holderCount int
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM concurrency_holders WHERE team = ? AND key = ?`,
+				string(t.team), key,
+			).Scan(&holderCount); err != nil {
+				return waiterResolution{}, err
+			}
+			shouldPromote = holderCount == 0
+		}
+		if shouldPromote {
+			now := tx.now(ctx)
+			promoted, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(lease).UnixNano())
+			if err != nil {
+				return waiterResolution{}, err
+			}
+			for _, waiter := range promoted {
+				if waiter.RunID == runID && waiter.NodeID == nodeID {
+					return waiterResolution{
+						Status:             waiterPromoted,
+						HolderID:           waiter.HolderID,
+						HolderLeaseExpires: now.Add(lease),
+					}, nil
+				}
+			}
+		}
+		var position int
+		if e := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy IN (?, ?) AND arrived_at < ?`,
+			string(t.team), key, OnLimitQueue, OnLimitCancelOthers, waiter.ArrivedAt.UnixNano(),
+		).Scan(&position); e != nil {
+			return waiterResolution{}, e
+		}
+		var queueLength int
+		if e := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy IN (?, ?)`,
+			string(t.team), key, OnLimitQueue, OnLimitCancelOthers,
+		).Scan(&queueLength); e != nil {
+			return waiterResolution{}, e
+		}
+		holders, e := txActiveHolders(ctx, tx, t.team, key, nowNS)
+		if e != nil {
+			return waiterResolution{}, e
+		}
+		return waiterResolution{Status: waiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return waiterResolution{}, err
+	}
+
+	if leaderRunID != "" {
+		leaderOutcome, leaderReason, found, err := txNodeOutcome(ctx, tx, t.team, leaderRunID, leaderNodeID)
+		if err != nil {
+			return waiterResolution{}, err
+		}
+		if !found || leaderOutcome != "success" {
+			return waiterResolution{Status: waiterCancelled}, nil
+		}
+		return waiterResolution{
+			Status:              waiterLeaderFinished,
+			LeaderRunID:         leaderRunID,
+			LeaderNodeID:        leaderNodeID,
+			LeaderOutcome:       leaderOutcome,
+			LeaderFailureReason: leaderReason,
+		}, nil
+	}
+
+	return waiterResolution{Status: waiterCancelled}, nil
+}
+
+func txPromoteWaiters(ctx context.Context, tx *storeTx, team Team, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+	if _, err := reapStaleConcurrencyHoldersTx(ctx, tx, team, key); err != nil {
+		return nil, err
+	}
+	return txPromoteWaitersLocked(ctx, tx, team, key, nowNS, expiresNS)
+}
+
+func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+	acct, err := txConcurrencyAccounting(ctx, tx, team, key, nowNS)
+	if err != nil {
+		return nil, err
+	}
+	entryCap, holderMin, used := acct.entryCap, acct.floor, acct.used
+
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT `+waiterColumns+`
+		   FROM concurrency_waiters
+		  WHERE team = ? AND key = ? AND policy IN (?, ?) AND lease_expires_at > ?
+		  ORDER BY arrived_at ASC`,
+		string(team), key, OnLimitQueue, OnLimitCancelOthers, nowNS,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []ConcurrencyWaiter
+	for rows.Next() {
+		w, serr := scanWaiter(rows)
+		if serr != nil {
+			_ = rows.Close()
+			return nil, serr
+		}
+		candidates = append(candidates, w)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var promoted []ConcurrencyWaiter
+	for _, w := range candidates {
+		var owned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM admission_work WHERE team=? AND run_id=? AND node_id=?)`, team, w.RunID, w.NodeID).Scan(&owned); err != nil {
+			return nil, err
+		}
+		if owned {
+			continue
+		}
+		current, err := capacityWaiterCurrentTx(ctx, tx, team, w)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			continue
+		}
+		deadline, err := capacityQueueDeadlineTx(ctx, tx, team, w)
+		if err != nil {
+			return nil, err
+		}
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
+			continue
+		}
+
+		c, candCap := waiterBudget(w, entryCap, holderMin)
+		if !fitsBudget(used, c, candCap) {
+			if blockedByYoungerHolders(acct.holders, w.ArrivedAt.UnixNano(), c, candCap) {
+				break
+			}
+			continue
+		}
+		used += c
+		if holderMin == 0 || candCap < holderMin {
+			holderMin = candCap
+		}
+		promoted = append(promoted, w)
+	}
+
+	for i, w := range promoted {
+		newHolder := w.HolderID
+		if newHolder == "" {
+			newHolder = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
+		}
+		if _, err := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); err != nil {
+			return nil, err
+		}
+		c := w.Cost
+		if c <= 0 {
+			c = 1
+		}
+		dc := w.DeclaredCapacity
+		if dc <= 0 {
+			dc = entryCap
+		}
+		if err := txInsertHolder(ctx, tx, holderRow{
+			team: w.team, key: w.Key, holderID: newHolder, runID: w.RunID, nodeID: w.NodeID,
+			cost: c, declaredCapacity: dc, queueArrivedNS: w.ArrivedAt.UnixNano(),
+		}, nowNS, expiresNS); err != nil {
+			return nil, err
+		}
+		promoted[i].HolderID = newHolder
+	}
+	return promoted, nil
+}
+
+func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID string) (released bool, runID, nodeID string, err error) {
+	var queueArrivedNS int64
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT run_id, node_id, queue_arrived_at
+		   FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`,
+		string(team), key, holderID,
+	).Scan(&runID, &nodeID, &queueArrivedNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, "", "", nil
+	}
+	if err != nil {
+		return false, "", "", err
+	}
+
+	now := tx.now(ctx)
+
+	if nodeID == "" && queueArrivedNS > 0 {
+		if err := txSupersede(ctx, tx, team, key, holderID); err != nil {
+			return false, "", "", err
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE concurrency_holders
+   SET lease_expires_at = ?, cost = 0
+ WHERE team = ? AND key = ? AND holder_id = ?`, now.UnixNano(), string(team), key, holderID); err != nil {
+			return false, "", "", err
+		}
+	} else {
+		if err := txDeleteHolder(ctx, tx, team, key, holderID); err != nil {
+			return false, "", "", err
+		}
+	}
+
+	return true, runID, nodeID, nil
+}
+
+func txDeleteHolder(ctx context.Context, tx *storeTx, team Team, key, holderID string) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`,
+		string(team), key, holderID,
+	)
+	return err
 }

@@ -211,6 +211,9 @@ func checkRecoveryUnstarted(t *testing.T) error {
 		kinds = append(kinds, "job_ready", "job_claimed")
 		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: next.Node.Ref.RunID, NodeID: next.Node.Ref.NodeID, Holder: next.Claim.Holder, Generation: next.Claim.Generation}}
 	}
+	if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+		return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	}
 	applied, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return err
@@ -237,6 +240,9 @@ func checkRecoveryStartedCap(t *testing.T) error {
 	ref := f.ref
 	var kinds []string
 	for ordinal := 1; ordinal <= 3; ordinal++ {
+		if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+			return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+		}
 		started, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(int64(ordinal - 1))})
 		if err != nil {
 			return err
@@ -310,6 +316,9 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 	ctx := t.Context()
 	f := newStoreRecoveryFixture(t, false)
 	ref := f.ref
+	if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+		return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	}
 	started, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil || started.Attempt != 1 {
 		return fmt.Errorf("first execution: %+v %v", started, err)

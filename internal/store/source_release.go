@@ -67,7 +67,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		return insertSourceReleaseAuditTx(ctx, tx, audit)
+		return insertSourceReleaseAuditTx(ctx, tx, audit, auditPrincipalActor(chain[0].principal))
 	})
 	if err != nil {
 		return GitCredential{}, capability.SourceReleaseAudit{}, err
@@ -174,7 +174,6 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 	return executor, nil
 }
 
-func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO git_credential_releases(id,team,credential_id,host,repository_key,run_id,node_id,generation,machine_id,owner_account_id,runner,capability_prefix,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, audit.ID, audit.Team, audit.CredentialID, audit.Host, audit.RepositoryKey, audit.RunID, audit.NodeID, audit.Generation, audit.MachineID, audit.OwnerAccountID, audit.MachineID, audit.CapabilityPrefix, audit.ReleasedAt.UnixNano())
-	return err
+func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit, actor auditActor) error {
+	return tx.operator.recordAudit(ctx, tx, auditContext{At: audit.ReleasedAt, Team: Team(audit.Team), Actor: actor}, auditSourceRelease{AccountID: audit.OwnerAccountID, RunID: audit.RunID, CredentialID: digestAudit(audit.CredentialID), Repository: digestAudit(audit.RepositoryKey), NodeID: digestAudit(audit.NodeID), Generation: audit.Generation, MachineID: digestAudit(audit.MachineID), CapabilityPrefix: digestAudit(audit.CapabilityPrefix)})
 }

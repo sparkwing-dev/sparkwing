@@ -160,6 +160,7 @@ func TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences(t *testing.T) {
 	if _, err := server.Renew(t.Context(), authorized, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatal(err)
 	}
+	engineAdmitExecution(t, server.Store, authorized.Principal)
 	started, err := server.TransitionJob(t.Context(), authorized, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))})
 	if err != nil || started.Attempt != 1 || started.Generation != 1 {
 		t.Fatalf("start: %+v, %v", started, err)
@@ -229,6 +230,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := capability.Authorized{Principal: principal, Binding: response.Claim.Binding, Target: owner.Target}
+	engineAdmitExecution(t, server.Store, executor.Principal)
 	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))}); err != nil {
 		t.Fatal(err)
 	}

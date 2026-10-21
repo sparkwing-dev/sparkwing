@@ -32,22 +32,32 @@ func TestAdmissionHasOneGrantOwner(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			function := ""
 			ast.Inspect(tree, func(node ast.Node) bool {
+				if declaration, ok := node.(*ast.FuncDecl); ok {
+					function = declaration.Name.Name
+				}
 				if literal, ok := node.(*ast.BasicLit); ok && literal.Kind == token.STRING {
 					sql, err := strconv.Unquote(literal.Value)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if reservationInsert.MatchString(sql) && (dir != root || name != "concurrency.go") {
-						t.Errorf("%s writes reservations outside the ledger", filepath.Join(dir, name))
+					if match := reservationInsert.FindStringSubmatch(sql); match != nil {
+						writer := "txPark"
+						if strings.EqualFold(match[1], "holders") {
+							writer = "txInsertHolder"
+						}
+						if dir != root || name != "concurrency.go" || function != writer {
+							t.Errorf("%s writes reservations outside the ledger writer %s", filepath.Join(dir, name), writer)
+						}
 					}
 					if permitGrant.MatchString(sql) && (dir != root || name != "capacity_admission.go") {
 						t.Errorf("%s grants permits outside the admission owner", filepath.Join(dir, name))
 					}
 				}
 				if call, ok := node.(*ast.CallExpr); ok {
-					if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "txInsertHolder" && (dir != root || name != "concurrency.go") {
-						t.Errorf("%s creates a holder outside the ledger", filepath.Join(dir, name))
+					if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "txInsertHolder" && (dir != root || name != "concurrency.go" || function != "acquireConcurrencySlotTx") {
+						t.Errorf("%s grants a holder outside the admission policy engine", filepath.Join(dir, name))
 					}
 					if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "acquireConcurrencySlotTx" && (dir != root || name != "capacity_admission.go") {
 						t.Errorf("%s creates logical capacity outside the admission owner", filepath.Join(dir, name))

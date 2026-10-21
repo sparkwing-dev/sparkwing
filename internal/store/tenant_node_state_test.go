@@ -16,6 +16,9 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 	if _, err := foreign.TransitionNode(t.Context(), start); err == nil {
 		t.Fatal("foreign tenant started the job")
 	}
+	if result, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.holder.RunID), NodeID: string(f.holder.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != store.AcquireGranted {
+		t.Fatalf("execution admission: %+v, %v", result, err)
+	}
 	if _, err := f.tenant.TransitionNode(t.Context(), start); err != nil {
 		t.Fatal(err)
 	}

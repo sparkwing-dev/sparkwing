@@ -119,6 +119,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	if err := json.Unmarshal(parent.Body.Bytes(), &award); err != nil {
 		t.Fatal(err)
 	}
+	controller.EngineAdmitBearer(t, e.Store, award.Claim.Capability)
 	controller.EngineClaimHTTP(t, handler, award.Claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	transport := &childOutputTransport{handler: handler}
 	httpClient := &http.Client{Transport: transport}
@@ -256,6 +257,7 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 	}
 	raw := string(claim.Bearer)
 	path := "/api/v1/runs/" + run + "/jobs/stamp/transition"
+	controller.EngineAdmitBearer(t, st, raw)
 	controller.EngineClaimHTTP(t, handler, raw, "POST", path, `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	host, err := client.NewNodeHostClient(client.EngineOptions{URL: "http://local", HTTP: httpClient, Bearer: func(context.Context) (string, error) { return raw, nil }}, run, "stamp")
 	if err != nil {
@@ -335,6 +337,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := award.Claim.Capability
+	controller.EngineAdmitBearer(t, e.Store, raw)
 	controller.EngineClaimHTTP(t, handler, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	httpClient := &http.Client{Transport: childOutputTransport{handler: handler}}
 	finishChildOutput(t, e.Store, handler, httpClient, "run")

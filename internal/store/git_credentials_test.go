@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -85,7 +87,7 @@ func TestSourceGitCredentialHTTPSDeletionAndTenant(t *testing.T) {
 		t.Fatalf("deleted release: %+v, %+v, %v", c, audit, err)
 	}
 	rows, err := tenant.SourceReleaseAudits(ctx, 10)
-	if err != nil || len(rows) != 1 || rows[0].CredentialID != row.ID {
+	if err != nil || len(rows) != 1 || rows[0].CredentialID != fmt.Sprintf("%x", sha256.Sum256([]byte(row.ID))) {
 		t.Fatalf("audit after deletion: %+v, %v", rows, err)
 	}
 	rows, err = foreign.SourceReleaseAudits(ctx, 10)

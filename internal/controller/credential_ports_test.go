@@ -137,7 +137,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 			}
 		case 3:
 			if trigger {
-				engineSQL(t, e.Store, `UPDATE triggers SET status='done',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND id='run'`)
+				engineSQL(t, e.Store, `UPDATE triggers SET status='done',finished_at=1,claimed_by=NULL,claimed_at=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND id='run'`)
 			} else {
 				engineSQL(t, e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run' AND node_id='job'`)
 			}
@@ -301,6 +301,7 @@ func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 		t.Fatal("missing awarded capability")
 	}
 	raw := response.Claim.Capability
+	engineAdmitBearer(t, e.Store, raw)
 	w = engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	var started controllerwire.Applied
 	if json.Unmarshal(w.Body.Bytes(), &started) != nil || started.Attempt != 1 {

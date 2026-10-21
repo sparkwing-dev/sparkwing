@@ -219,11 +219,7 @@ func concurrencyFuzzOp(t *testing.T, ctx context.Context, s *store.Store, rng *r
 			}
 		}
 	case 9, 10, 11:
-		maxAge := time.Hour
-		if rng.Intn(3) == 0 {
-			maxAge = time.Nanosecond
-		}
-		if _, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: maxAge}); err != nil {
+		if _, err := teststore.MaintainConcurrency(ctx, s); err != nil {
 			return fmt.Errorf("maintain concurrency: %w", err)
 		}
 	}

@@ -12,7 +12,8 @@ group set grants in one transaction with one durable arrival sequence. A queued
 set holds no group. Policy effects, including cancellation, roll back if another
 group must wait. Promotion runs through the same complete-set operation. Handoff
 changes authorization fences and start permits, never reservation identity or
-arrival. An expired reservation starts a new arrival. The retained transactional
+arrival. An expired reservation starts a new arrival. Supersession cancels the current
+job award even when the reservation predates its claim. The retained transactional
 ledger and policy engine live in `internal/store/concurrency.go`.
 
 Every executable job needs an award-bound permit, including jobs without groups.
@@ -29,7 +30,9 @@ The store commits skip, failure or opening the approval through one source-fence
 boundary. A true predicate stays skipped. Expansions use the same release boundary.
 
 Acquisition, renewal and queue precedence use claim **or** owner liveness, bounded
-by the capacity lease and cancellation deadline. Recovery reconciles immediately.
+by the capacity lease and cancellation deadline. Acquisition and maintenance discard holders and waiters when neither source
+remains live. Maintenance only reaps. Hosts retry `MayStart` to promote a complete
+set through the same admission operation. Recovery reconciles immediately.
 Lapsed plan capacity queues indefinitely after the first release, regardless of
 its initial policy. Only new releases wait. Released jobs and evaluations settle
 without reacquiring the plan. Queue views name the group being reacquired.

@@ -125,7 +125,7 @@ type Server struct {
 	paymentVerifier   capability.PaymentAuthenticator
 	paymentLedger     PaymentSettler
 	operators         atomic.Pointer[map[string]bool]
-	consoleWrites     ConsoleWriter
+	consoleWrites     consoleWriteTransactions
 
 	dashboard                 *Dashboard
 	localHTTPOnce             sync.Once
@@ -546,7 +546,7 @@ func (s *Server) reapLeased(ctx context.Context) bool {
 }
 
 func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
-	concurrency, err := s.operator.MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+	concurrency, err := s.operator.MaintainConcurrency(ctx, lease)
 	if err != nil {
 		s.logger.Error("concurrency maintenance failed", "err", err)
 	}

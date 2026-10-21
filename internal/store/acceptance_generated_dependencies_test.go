@@ -150,6 +150,9 @@ func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *s
 		return store.NodeRow{}, err
 	}
 	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	if admitted, err := tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || admitted.Kind != store.AcquireGranted {
+		return store.NodeRow{}, fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	}
 	start, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return store.NodeRow{}, err

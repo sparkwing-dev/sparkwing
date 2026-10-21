@@ -507,7 +507,7 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 // safety: runs goes last so the rows that reference a run are removed by
 // their own statements rather than by a cascade from a very large delete.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
-	tables := append([]string{"business_events", "capabilities", "sessions", "payment_events"}, tenantTables...)
+	tables := append([]string{"capabilities", "sessions", "payment_events"}, tenantTables...)
 	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
 	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
@@ -690,9 +690,6 @@ func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID s
 		{`UPDATE team_deletions SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
 		{`UPDATE standing_requests SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
 		{`UPDATE standing_requests SET decided_by = '' WHERE decided_by = ?`, []any{accountID}},
-		{`DELETE FROM business_events WHERE team IS NULL AND account = ?`, []any{accountID}},
-		{`UPDATE business_events SET account = '' WHERE account = ?`, []any{accountID}},
-		{`UPDATE business_events SET actor = '' WHERE actor IN (?, ?)`, []any{accountID, acct.Email}},
 		{`DELETE FROM accounts WHERE id = ?`, []any{accountID}},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {

@@ -20,6 +20,8 @@ export interface OperatorEvent {
   at: number;
   kind: string;
   actor?: string;
+  subject_id?: string;
+  run_id?: string;
   attrs?: Record<string, unknown>;
 }
 
@@ -44,6 +46,7 @@ export interface OperatorTeam {
   // hold_causes[i] names why holds[i] was placed.
   hold_causes: HoldCause[];
   events: OperatorEvent[];
+  next_cursor?: string;
 }
 
 export type HoldCause = "operator" | "dispute" | "early_fraud_warning" | string;
@@ -226,9 +229,10 @@ export async function searchTeams(q: string): Promise<TeamMatch[]> {
   return (await readJSON<{ teams: TeamMatch[] }>(res)).teams;
 }
 
-export async function getOperatorTeam(team: string): Promise<OperatorTeam> {
+export async function getOperatorTeam(team: string, cursor?: string): Promise<OperatorTeam> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
   const res = await authFetch(
-    `/api/v1/operator/teams/${encodeURIComponent(team)}`,
+    `/api/v1/operator/teams/${encodeURIComponent(team)}${query}`,
     {},
     quiet,
   );

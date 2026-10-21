@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **concurrency:** Release logical capacity when neither its claim nor owner remains live. After claim replacement, `cancel_others` cancels the current job while preserving the reservation's identity and arrival. Queue promotion grants complete group sets through the store admission owner.
+
 - **memo:** Preserve authorization and fence refusals as errors. Make cached results reusable only with the producer's committed success, so cancelled or refused completion cannot publish a hit.
 
 - **execution:** Evaluate executable jobs' `SkipIf` and memo checks on the executing host under the job's award, after concurrency admission. A skipped job waits for its slot, then releases its groups without running its body. The coordinator no longer acquires job groups for evaluation.
@@ -30,14 +32,15 @@ unlock.
 
 - **admission:** Wait to reacquire a lapsed plan concurrency group after work has been released. Released jobs finish, further releases wait, and queue views name the group being reacquired.
 
-- **admission (Breaking):** Move all logical capacity into one durable store owner. Grant complete plan and job group sets atomically with one arrival per set. Release permission commits with plan admission. Every job start and process grant requires an award-bound permit, including jobs without groups. Released jobs continue while the plan waits to reacquire capacity. Burst uses provisional awards and returns job reservations when compute is unavailable. Schema baseline 17 adds durable admission records.
+- **admission (Breaking):** Move all logical capacity into one durable store owner. Grant complete plan and job group sets atomically with one arrival per set. Release permission commits with plan admission. Every job start and process grant requires an award-bound permit, including jobs without groups. Released jobs continue while the plan waits to reacquire capacity. Burst uses provisional awards and returns job reservations when compute is unavailable. Schema baseline 20 includes durable admission records.
 
 - **launcher:** Seal box-scoped concurrency to the reserved execution node at authenticated Job activation. Capacity requests and their Pod identities cannot select a box.
 
 - **controller (Breaking):** Remove `--trigger-dedupe-window` and chart `controller.triggerDedupeWindow`. Identical API submissions create separate runs unless the caller supplies an idempotency key. Explicit keys and GitHub delivery IDs keep their persistent replay behavior.
 - **admission (Breaking):** Remove the `jev` admission mode and its adviser configuration. Use `classic`, `off`, `auto` or `custom` for deterministic machine admission. Queue status drops the adviser counters.
 - **runner:** Remove the persistent plan cache. Each new planning attempt invokes the SDK. An accepted plan remains stored for resume.
-- **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 16 adds generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
+- **store (Breaking):** The schema baseline advances to version 20, with SQLite STRICT storage and stronger tenant, account, attempt and row constraints. Secret and source credential releases and privileged mutations share an append-only audit log that survives run, team and account deletion. Audit entries use closed payloads containing identifiers and digests. Database recording time controls their operator-set retention horizon (400 days by default). Refund idempotency survives audit expiry. Runner clock skew cannot block step recovery. Editors may delete only runs they submitted. See [migration](docs/migrations/_unreleased.md#run-deletion-and-audit-retention).
+- **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 20 includes generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
 
 - **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
 

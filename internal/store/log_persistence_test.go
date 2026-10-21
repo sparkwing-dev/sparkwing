@@ -391,7 +391,7 @@ func TestLogPersistenceTriggerReadRechecksItsOwnerLease(t *testing.T) {
 					t.Fatalf("live trigger read of %s: %v", request.Subject.Kind, err)
 				}
 			}
-			changes := map[string]string{"expired": "lease_expires_at=1", "generation": "generation=generation+1", "holder": "claimed_by='other'", "prefix": "capability_prefix='other'", "ended": "status='done',claimed_by=NULL,lease_expires_at=NULL"}
+			changes := map[string]string{"expired": "lease_expires_at=1", "generation": "generation=generation+1", "holder": "claimed_by='other'", "prefix": "capability_prefix='other'", "ended": "status='done',finished_at=claimed_at,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',claimed_at=NULL"}
 			rewriteSchemaExec(t, s.db, "UPDATE triggers SET "+changes[stale]+" WHERE id='run'")
 			for _, request := range requests {
 				if _, err := tenant.ReadLogSegments(t.Context(), actor, request); err == nil {
