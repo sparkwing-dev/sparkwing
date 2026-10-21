@@ -815,7 +815,11 @@ the private owner transport, including before a job has an execution award.
 Plan and job groups have separate persisted key namespaces. Pipeline acceptance
 refuses box-scoped plan groups because a run can span machines, naming the group
 and pointing at job-level box scope. Controller scheduling admits all plan
-groups before releasing work.
+groups before releasing work. Native owners revalidate the same plan admission
+before each subsequent release. After any work has been released, plan
+reacquisition queues without a timeout under every original on-limit policy.
+Released jobs finish while further releases wait. Queue views name the group
+being reacquired.
 The capacity store derives job-level box scope only from `Capability.ExecutionHost`, sealed
 on the award independently of its accountable subject. Machine roots and Actions
 push credentials use their machine subject. Account-backed here awards use the

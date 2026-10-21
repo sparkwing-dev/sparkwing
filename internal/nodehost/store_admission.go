@@ -41,15 +41,18 @@ func (e *AdmissionFailure) Unwrap() error { return e.Err }
 
 // Run retains plan capacity under the unit lease, including after an owner exits.
 func (a *storeAdmission) Run(ctx context.Context, accepted AcceptedRun, body func(context.Context) (RunCompletion, error)) (RunCompletion, error) {
-	spec, err := admissionSpec(accepted)
-	if err != nil {
-		return RunCompletion{}, err
-	}
-	err = a.acquire(ctx, accepted.RunID, "", a.Owner.Owner.Generation, spec.Resolved.Settings.Concurrency)
-	if err != nil {
+	if err := a.plan(ctx, accepted); err != nil {
 		return RunCompletion{}, err
 	}
 	return body(ctx)
+}
+
+func (a *storeAdmission) plan(ctx context.Context, accepted AcceptedRun) error {
+	spec, err := admissionSpec(accepted)
+	if err != nil {
+		return err
+	}
+	return a.acquire(ctx, accepted.RunID, "", a.Owner.Owner.Generation, spec.Resolved.Settings.Concurrency)
 }
 
 // Node admits the awarded job; terminal transitions release its capacity atomically.

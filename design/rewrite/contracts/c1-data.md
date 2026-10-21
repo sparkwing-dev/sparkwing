@@ -4255,3 +4255,15 @@ Capacity Pod UIDs and provisional Pod placement never supply a box identity.
 reservation, activation, exchange and subsequent reconciliation through the
 launcher, controller and store. The Actions, account-backed here and unbound
 machine regressions retain their placement identity coverage.
+
+## Plan continuity after release
+
+`Tenant.AdmitCapacity` derives plan reacquisition policy from committed release
+events. Once work has been released, plan groups queue without a timeout under
+every original on-limit policy. Initial admission still applies the accepted
+policy. Controller settlement processes terminal work while plan capacity is
+unavailable and withholds further release. Read-only group and queue views show
+`waiting to reacquire <group>` for that run. The controller continuity-lapse
+regression covers running-job completion, contention and subsequent release for
+queue, skip, fail and cancel-others. The native-owner regression covers the same
+release boundary with compute enabled and disabled.

@@ -363,7 +363,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		}
 		return nil
 	}
-	if kind != store.DecisionApproval && h.Admit != nil {
+	if h.Admit != nil {
 		err := h.Admit(ctx, accepted, row, work)
 		var refused *AdmissionFailure
 		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {

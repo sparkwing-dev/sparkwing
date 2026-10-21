@@ -34,7 +34,12 @@ func acceptCapacityPlan(t *testing.T, server *serverFixture, tenant *store.Tenan
 
 func acceptCapacityDocument(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, plan nodeproto.PlanDoc) {
 	t.Helper()
-	run, err := tenant.ReadRun(t.Context(), "run")
+	acceptCapacityDocumentForRun(t, server, tenant, owner, "run", plan)
+}
+
+func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, runID string, plan nodeproto.PlanDoc) {
+	t.Helper()
+	run, err := tenant.ReadRun(t.Context(), runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +51,7 @@ func acceptCapacityDocument(t *testing.T, server *serverFixture, tenant *store.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, server.store, `UPDATE runs SET request_json=?,request_hash=? WHERE team='a' AND id='run'`, sealed, run.Request.Hash)
+	engineSQL(t, server.store, `UPDATE runs SET request_json=?,request_hash=? WHERE team='a' AND id=?`, sealed, run.Request.Hash, runID)
 	declarations := runspec.CheckoutDeclarations{Version: 1}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: declarations, Plan: plan})
 	if err != nil {
@@ -56,8 +61,8 @@ func acceptCapacityDocument(t *testing.T, server *serverFixture, tenant *store.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
-	_, err = tenant.AcceptPlan(t.Context(), store.PlanAcceptance{RunID: "run", Actor: actor, Seal: runspec.SealInput{Request: run.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
+	actor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: runID}})
+	_, err = tenant.AcceptPlan(t.Context(), store.PlanAcceptance{RunID: runID, Actor: actor, Seal: runspec.SealInput{Request: run.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

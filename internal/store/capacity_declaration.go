@@ -18,7 +18,24 @@ func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	if err != nil || run.Spec == nil {
 		return nil, err
 	}
-	return run.Spec.Resolved.Settings.Concurrency, nil
+	groups := run.Spec.Resolved.Settings.Concurrency
+	released, err := planWorkReleasedTx(ctx, tx, team, runID)
+	if err != nil {
+		return nil, err
+	}
+	if released {
+		// Released work must finish even if plan continuity has lapsed.
+		for i := range groups {
+			groups[i].OnLimit, groups[i].QueueTimeoutMS = OnLimitQueue, nil
+		}
+	}
+	return groups, nil
+}
+
+func planWorkReleasedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
+	var released bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE team=? AND run_id=? AND kind IN ('job_ready','job_approval_pending'))`, team, runID).Scan(&released)
+	return released, err
 }
 
 func declaredCapacityGroupTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, key string, authority capability.AuthorityRef) (runspec.Concurrency, error) {

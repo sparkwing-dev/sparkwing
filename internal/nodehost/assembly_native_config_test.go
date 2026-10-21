@@ -205,7 +205,7 @@ func TestNativeServicesValidatesPlansForEveryLaunchPlacement(t *testing.T) {
 			}
 			planning := PlanningInput{Validation: owner.Planning.Validation}
 			planned, err := PlanInitial(t.Context(), planning, func(context.Context) (json.RawMessage, error) {
-				return json.RawMessage(`{"jobs":[{"id":"generate","closures":{"generate":["children"]},"steps":[{"id":"run"}]},{"id":"approve","approval":{},"closures":{"skip_if":["condition"]}}],"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}`), nil
+				return json.RawMessage(`{"jobs":[{"id":"generate","closures":{"generate":["children"]},"steps":[{"id":"run"}]},{"id":"approve","approval":{},"closures":{"skip_if":["condition"]}}],"concurrency":[{"group":"g","scope":"global","capacity":1,"cost":1,"on_limit":"queue"}]}`), nil
 			})
 			if err != nil || len(planned.Plan.Jobs) != 2 {
 				t.Fatalf("native planning: %+v, %v", planned, err)

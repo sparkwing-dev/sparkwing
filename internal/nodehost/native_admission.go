@@ -70,9 +70,14 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		return body(ctx)
 	}
 	// safety: readiness reserves no compute: a claimant may already hold the job's capacity.
-	owner.Admit = func(ctx context.Context, _ AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+	owner.Admit = func(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
 		if err := a.check(row.Execution.Concurrency); err != nil {
 			return err
+		}
+		if capacity != nil && row.ReadyAt == nil && row.ClaimedBy == "" {
+			if err := capacity.plan(ctx, accepted); err != nil {
+				return err
+			}
 		}
 		return body(ctx)
 	}

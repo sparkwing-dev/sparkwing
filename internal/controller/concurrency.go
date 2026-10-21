@@ -44,7 +44,8 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request, 
 	}
 	for _, wt := range st.Waiters {
 		resp.Waiters = append(resp.Waiters, controllerwire.QueueGroupWaiter{
-			RunID: wt.RunID, JobID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
+			BlockingReason: wt.BlockingReason,
+			RunID:          wt.RunID, JobID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
 			Policy: wt.Policy, CacheKeyHash: wt.CacheKeyHash,
 			LeaderRunID: wt.LeaderRunID, LeaderJobID: wt.LeaderNodeID,
 			CancelTimeout: wt.CancelTimeout, Cost: wt.Cost, Position: wt.Position + 1,

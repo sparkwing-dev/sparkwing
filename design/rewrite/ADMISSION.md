@@ -63,7 +63,11 @@ run-scoped and box-scoped job groups with compute enabled and disabled. Separate
 plan/job namespace coverage lets A hold plan X and wait for job Y while B holds
 plan Y and waits for job X; both runs make progress.
 
-One policy case needs a lead ruling. After plan continuity lapses with work
-already released, reacquisition can refuse but `RunPolicyRefused` requires
-unreleased work. Waiting and cancelling have different policy meanings. The
-shared owner preserves these existing semantics pending that ruling.
+Decisions 37 and 38 fix the two policy cases. Plan and job groups have separate
+namespaces, and acceptance refuses box-scoped plan groups. Once any work has
+been released, plan reacquisition always queues without a queue timeout,
+regardless of the original on-limit policy. Released jobs finish. The host
+revalidates plan capacity before each further release, and controller settlement
+keeps processing terminal work while withholding new releases. Queue views show
+"waiting to reacquire <group>" until admission succeeds. Initial admission can
+still refuse unreleased work under its declared policy.

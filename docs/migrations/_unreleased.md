@@ -2393,6 +2393,12 @@ box scope. A run can span machines, so move that declaration from
 `plan.Concurrency(group)` to the jobs that need a per-machine budget. Use global
 or run scope for a whole-run gate.
 
+If a run loses its plan reservation after releasing work, it waits to reacquire
+the group. Released jobs finish, and no further work releases until capacity
+returns. Reacquisition queues without a timeout, including when the original
+policy was skip, fail or cancel-others. Queue views show
+`waiting to reacquire <group>`.
+
 Read a group through `GET /api/v1/queue/groups/{group}`. Group waiter positions
 are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds. Member
 priority changes use `PUT /api/v1/queue/groups/{group}/priority`.

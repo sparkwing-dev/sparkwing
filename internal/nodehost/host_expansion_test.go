@@ -64,7 +64,8 @@ func TestOwnerExpansion(t *testing.T) {
 			defer cancel()
 			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Name: "trigger", Holder: "owner", Generation: 9}
 			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}}
+			job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}
+			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 			if mode == "cycle" {
 				plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "consumer", Steps: []nodeproto.StepSpec{{ID: "body"}}, NeedsGenerated: []string{"first"}})
 			}

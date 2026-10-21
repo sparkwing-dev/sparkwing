@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -63,7 +64,7 @@ func TestOwnerPreservesIndependentLocalAcquisitionFailures(t *testing.T) {
 	}
 }
 
-func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
+func TestResumedPlanWaitsToReacquireAndPreservesCompletedWork(t *testing.T) {
 	for _, generator := range []bool{false, true} {
 		t.Run(fmt.Sprint(generator), func(t *testing.T) {
 			plan := planGrouped("global", "fail", "finished", "pending")
@@ -109,31 +110,34 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 			}
 			fixture.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 			fixture.Input.Owner = fixture.Actor
-			fixture.Host.Around = (&storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor}).Run
+			waiting := errors.New("waiting for plan reacquisition")
+			fixture.Host.Around = (&storeAdmission{Store: fixture.Tenant, Owner: fixture.Actor, Queued: func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
+				return waiting
+			}}).Run
 			completion, err := fixture.Host.Run(t.Context(), fixture.Input)
-			if err != nil || completion.Outcome != "failed" {
-				t.Errorf("resumed refusal=%+v error=%v", completion, err)
+			if !errors.Is(err, waiting) || completion.Outcome != "" {
+				t.Errorf("resumed wait=%+v error=%v", completion, err)
 			}
 			finished, pending := capacityRow(t, fixture, "finished"), capacityRow(t, fixture, "pending")
 			if finished.Outcome != before.Outcome || finished.Attempt != before.Attempt || finished.Generation != before.Generation || !finished.FinishedAt.Equal(*before.FinishedAt) {
 				t.Errorf("completed result changed: before=%s/%d/%d after=%s/%d/%d", before.Outcome, before.Attempt, before.Generation, finished.Outcome, finished.Attempt, finished.Generation)
 			}
-			if generator && finished.Expansion == store.ExpansionExpected {
-				t.Error("refused plan retained expected generator expansion")
+			if finished.Expansion != before.Expansion {
+				t.Error("waiting plan changed generator expansion")
 			}
-			if pending.Outcome != store.NodeFailed || pending.Attempt != 0 {
+			if pending.Outcome != "" || pending.Attempt != 0 || pending.ReadyAt != nil {
 				t.Errorf("pending result=%s attempt=%d", pending.Outcome, pending.Attempt)
 			}
 			run, err := fixture.Tenant.ReadRun(t.Context(), fixture.Input.RunID)
-			if err != nil || run.State != store.RunFailed || run.FinishedAt == nil {
-				t.Errorf("run remains active: state=%s finished=%v error=%v", run.State, run.FinishedAt, err)
+			if err != nil || run.State != store.RunRunning || run.FinishedAt != nil || run.CancelRequestedAt != nil {
+				t.Errorf("waiting run finished: state=%s finished=%v error=%v", run.State, run.FinishedAt, err)
 			}
 			snapshot, err := fixture.Tenant.ReadSnapshot(t.Context(), fixture.Input.RunID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := snapshot.Scheduling(); err != nil {
-				t.Errorf("refused plan has invalid scheduling projection: %v", err)
+				t.Errorf("waiting plan has invalid scheduling projection: %v", err)
 			}
 		})
 	}

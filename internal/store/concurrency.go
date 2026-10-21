@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func fitsBudget(used, cost, capacity int) bool {
@@ -126,18 +128,19 @@ type ConcurrencyHolder struct {
 	team Team
 }
 
-// ConcurrencyWaiter mirrors the concurrency_waiters row.
+// ConcurrencyWaiter reports persisted membership and derived queue state.
 type ConcurrencyWaiter struct {
-	Key           string
-	RunID         string
-	NodeID        string
-	HolderID      string
-	ArrivedAt     time.Time
-	Policy        string
-	CacheKeyHash  string
-	LeaderRunID   string
-	LeaderNodeID  string
-	CancelTimeout time.Duration
+	BlockingReason string
+	Key            string
+	RunID          string
+	NodeID         string
+	HolderID       string
+	ArrivedAt      time.Time
+	Policy         string
+	CacheKeyHash   string
+	LeaderRunID    string
+	LeaderNodeID   string
+	CancelTimeout  time.Duration
 
 	// Cost is the admission weight this waiter will draw once promoted;
 	// DeclaredCapacity is the capacity this waiter declared, a
@@ -1368,6 +1371,16 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 	}
 	qrank := 0
 	for i := range state.Waiters {
+		w := &state.Waiters[i]
+		if level, _, _, group, ok := runspec.ParseConcurrencyKey(key); ok && level == "plan" && w.NodeID == "" {
+			released, err := planWorkReleasedTx(ctx, tx, t.team, w.RunID)
+			if err != nil {
+				return nil, err
+			}
+			if released {
+				w.BlockingReason = "waiting to reacquire " + group
+			}
+		}
 		if state.Waiters[i].Policy == OnLimitQueue {
 			state.Waiters[i].Position = qrank
 			qrank++

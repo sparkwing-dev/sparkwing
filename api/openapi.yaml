@@ -2815,6 +2815,8 @@ components:
         arrived_at:
           format: date-time
           type: string
+        blocking_reason:
+          type: string
         cache_key_hash:
           type: string
         cancel_timeout_ns:
