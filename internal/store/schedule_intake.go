@@ -24,6 +24,17 @@ type scheduleAdmission struct {
 	caller   *capability.Authorized
 }
 
+func lockScheduleInstallationTx(ctx context.Context, tx *storeTx, schedule CronSchedule) error {
+	if schedule.GitHubInstallationID <= 0 {
+		return nil
+	}
+	return acquireLockSet(ctx, tx, func() lockSet {
+		var set lockSet
+		set.add(lockTeam, true, string(schedule.Team))
+		return tx.operator.discoverInstallationLocks(ctx, tx, set, schedule.GitHubInstallationID)
+	})
+}
+
 func (in scheduleAdmission) authority() capability.AuthorityRef {
 	return capability.AuthorityRef{Kind: "schedule", ID: in.schedule.ID}
 }
@@ -100,6 +111,9 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	if in.consent != "" {
 		var replay AdmissionResult
 		err := t.s.inTx(ctx, func(tx *storeTx) error {
+			if err := lockScheduleInstallationTx(ctx, tx, schedule); err != nil {
+				return err
+			}
 			tx.scheduleAdmission = &in
 			if !schedule.Declared || caller == nil && schedule.Paused {
 				return bindingRefusal()
@@ -157,6 +171,9 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input}
 	var result AdmissionResult
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockScheduleInstallationTx(ctx, tx, schedule); err != nil {
+			return err
+		}
 		tx.scheduleAdmission = &in
 		if !schedule.Declared || caller == nil && schedule.Paused {
 			return bindingRefusal()
@@ -224,13 +241,7 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 		}
 	}
 	if s.GitHubInstallationID > 0 {
-		grant := GitHubAppAutomation{InstallationID: s.GitHubInstallationID, RepositoryID: s.GitHubRepositoryID}
-		var enabled int64
-		if err := tx.QueryRowContext(ctx, `SELECT enabled_at FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, s.Team, grant.InstallationID, grant.RepositoryID).Scan(&enabled); err != nil {
-			return capability.Principal{}, err
-		}
-		grant.EnabledAt = time.Unix(0, enabled)
-		if err := (&Tenant{s: tx.store, team: s.Team}).checkGitHubAppAutomationTx(ctx, tx, grant); err != nil {
+		if err := tenant.checkGitHubAppScheduleTx(ctx, tx, s.GitHubInstallationID, s.GitHubRepositoryID); err != nil {
 			return capability.Principal{}, err
 		}
 	}

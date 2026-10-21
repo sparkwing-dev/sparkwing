@@ -17,6 +17,7 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	before := appCronRows(t, f, olga.team)[0]
 	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
@@ -40,6 +41,7 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 	next := strings.Repeat("b", 40)
 	f.app.SetCommit("acme/renamed", "main", next)
 	f.app.SetFile("acme/renamed", next, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/renamed")
 	if code, _ := f.deliver("repository", map[string]any{
 		"action": "renamed", "installation": map[string]any{"id": 7},
 		"repository": map[string]any{"id": 701, "full_name": "acme/renamed"},
@@ -56,7 +58,7 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 		}
 	}
 	if len(matched) != 1 || matched[0].ID != before.ID || !matched[0].Paused ||
-		matched[0].RepoPath != "https://github.com/acme/renamed.git" || matched[0].LockedRef != next {
+		matched[0].RepoPath != "https://github.com/acme/renamed.git" || matched[0].LockedRef != "" {
 		t.Fatalf("renamed App schedule = %+v, before %+v", matched, before)
 	}
 }
@@ -69,6 +71,7 @@ func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
 			f.connect(olga, 501, 7, acmeAdmin)
 			f.app.SetCommit("acme/widgets", "main", headSHA)
 			f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+			enableCronAutomation(t, f, olga, "acme/widgets")
 			f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 			switch action {
 			case "uninstall":
@@ -125,6 +128,7 @@ func TestGitHubAppCronPushNeverWithdrawsAnotherTeamsSchedule(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	f.app.SetRepos(7, githubRepo(702, "acme/plans"))
 	f.app.SetRepos(8, githubRepo(701, "bob/widgets"))
@@ -132,6 +136,7 @@ func TestGitHubAppCronPushNeverWithdrawsAnotherTeamsSchedule(t *testing.T) {
 	next := strings.Repeat("e", 40)
 	f.app.SetCommit("bob/widgets", "main", next)
 	f.app.SetFile("bob/widgets", next, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, bob, "bob/widgets")
 	if code, _ := f.deliver("push", cronPush(8, 701, "bob/widgets", next, "refs/heads/main"), ""); code != http.StatusAccepted {
 		t.Fatalf("new team's push = %d", code)
 	}
@@ -159,6 +164,7 @@ func TestGitHubAppCronConflictsWithManualControllerSchedule(t *testing.T) {
 	}
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusConflict {
 		t.Fatalf("manual conflict = %d, want 409", code)
 	}
@@ -174,6 +180,7 @@ func TestGitHubAppCronRenameConflictStopsOldAppRow(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	f.app.SetRepos(7, githubRepo(701, "acme/renamed"), githubRepo(702, "acme/plans"))
 	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
@@ -223,6 +230,7 @@ func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
 	f.app.SetRepoAlias("acme/widgets", "acme/renamed")
 	f.app.SetCommit("acme/renamed", "main", headSHA)
 	f.app.SetFile("acme/renamed", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/renamed")
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/renamed", headSHA, "refs/heads/main"), ""); code != http.StatusConflict {
 		t.Fatalf("manual schedule through old redirect = %d, want 409", code)
 	}
@@ -281,6 +289,7 @@ func TestGitHubAppWithdrawnRepoReleasesCapacity(t *testing.T) {
 	}
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
 		t.Fatalf("first arm = %d", code)
 	}
@@ -289,6 +298,7 @@ func TestGitHubAppWithdrawnRepoReleasesCapacity(t *testing.T) {
 	}
 	f.app.SetCommit("acme/plans", "main", headSHA)
 	f.app.SetFile("acme/plans", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/plans")
 	if code, _ := f.deliver("push", cronPush(7, 702, "acme/plans", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
 		t.Fatalf("replacement repo should fit after withdrawal, got %d", code)
 	}
@@ -302,6 +312,7 @@ func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T)
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	repos := make([]githubapptest.Repo, 0, 1001)
 	for i := range 1000 {
@@ -349,6 +360,7 @@ func TestGitHubAppLateRemovalKeepsARepositoryTheCutListingShows(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	repos := []githubapptest.Repo{githubRepo(701, "acme/widgets")}
 	for i := range 1000 {

@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -152,7 +154,22 @@ type queuedClaim struct {
 	score   int
 }
 
+const (
+	launcherProbePerTeam   = 8
+	launcherClaimCursorKey = "launcher_claim_team"
+)
+
+type launcherProbePosition struct {
+	Created    int64  `json:"created"`
+	RunID      string `json:"run_id"`
+	NodeID     string `json:"node_id"`
+	Generation int64  `json:"generation"`
+}
+
 func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+	if capability.CloudLauncher(c) {
+		return queuedLauncherUnitTx(ctx, tx, c, demand, kinds)
+	}
 	var candidates []queuedClaim
 	for _, kind := range kinds {
 		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
@@ -225,6 +242,171 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		return 0
 	})
 	return eligible[0].unit, nil
+}
+
+func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+	now := tx.now().UnixNano()
+	var ready []string
+	var readyArgs []any
+	for _, kind := range kinds {
+		query, args := tx.operator.queuedClaimQuery(c, kind, now)
+		ready = append(ready, `EXISTS (`+query+` AND r.team=teams.name LIMIT 1)`)
+		readyArgs = append(readyArgs, args...)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM teams WHERE `+strings.Join(ready, ` OR `)+` ORDER BY name`, readyArgs...)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	var teams []Team
+	for rows.Next() {
+		var team Team
+		if err := rows.Scan(&team); err != nil {
+			_ = rows.Close()
+			return UnitRef{}, err
+		}
+		teams = append(teams, team)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return UnitRef{}, err
+	}
+	var raw []byte
+	err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, launcherClaimCursorKey).Scan(&raw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return UnitRef{}, err
+	}
+	var cursor Team
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &cursor); err != nil {
+			return UnitRef{}, err
+		}
+	}
+	start := 0
+	for i, team := range teams {
+		if team <= cursor {
+			start = i + 1
+		}
+	}
+	for offset := range teams {
+		team := teams[(start+offset)%len(teams)]
+		if slices.Contains(demand.ExcludedTeamLabels, admission.TeamNodeValue(demand.JobNamespace, string(team))) {
+			continue
+		}
+		var candidates []queuedClaim
+		perKind := max(1, launcherProbePerTeam/len(kinds))
+		for _, kind := range kinds {
+			found, err := launcherKindCandidatesTx(ctx, tx, c, team, kind, perKind)
+			if err != nil {
+				return UnitRef{}, err
+			}
+			candidates = append(candidates, found...)
+		}
+		var best *queuedClaim
+		for i := range candidates {
+			candidate := &candidates[i]
+			standing, err := unitEligibilityTx(ctx, tx, team, candidate.unit, demand, eligibilityChecks{fit: true, billing: true})
+			if err != nil {
+				return UnitRef{}, err
+			}
+			if !standing.ok() {
+				continue
+			}
+			candidate.score = standing.score
+			if best == nil || candidate.score > best.score || candidate.score == best.score && candidate.created < best.created {
+				best = candidate
+			}
+		}
+		if best != nil {
+			value, err := json.Marshal(team)
+			if err != nil {
+				return UnitRef{}, err
+			}
+			if err := setCreditSettingTx(ctx, tx, launcherClaimCursorKey, string(value)); err != nil {
+				return UnitRef{}, err
+			}
+			return best.unit, nil
+		}
+	}
+	return UnitRef{}, notFound("eligible work", "")
+}
+
+func launcherKindCandidatesTx(ctx context.Context, tx *storeTx, c capability.Capability, team Team, kind capability.UnitKind, limit int) ([]queuedClaim, error) {
+	key := "launcher_probe/" + string(team) + "/" + string(kind)
+	var raw []byte
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	var cursor launcherProbePosition
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &cursor); err != nil {
+			return nil, err
+		}
+	}
+	query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
+	query += ` AND r.team=?`
+	args = append(args, team)
+	order := `r.created_at,r.id`
+	if cursor.RunID != "" {
+		switch kind {
+		case capability.UnitNode:
+			query += ` AND (r.created_at,r.id,n.node_id)>(?,?,?)`
+			args = append(args, cursor.Created, cursor.RunID, cursor.NodeID)
+		case capability.UnitEval:
+			query += ` AND (r.created_at,r.id,e.source_node_id,e.source_generation)>(?,?,?,?)`
+			args = append(args, cursor.Created, cursor.RunID, cursor.NodeID, cursor.Generation)
+		default:
+			query += ` AND (r.created_at,r.id)>(?,?)`
+			args = append(args, cursor.Created, cursor.RunID)
+		}
+	}
+	switch kind {
+	case capability.UnitNode:
+		order += `,n.node_id`
+	case capability.UnitEval:
+		order += `,e.source_node_id,e.source_generation`
+	}
+	query += ` ORDER BY ` + order + ` LIMIT ?`
+	args = append(args, limit)
+	read := func(query string, args []any) ([]queuedClaim, error) {
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		var found []queuedClaim
+		for rows.Next() {
+			v := queuedClaim{unit: UnitRef{Kind: kind}}
+			if err := rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.created); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			found = append(found, v)
+		}
+		return found, errors.Join(rows.Err(), rows.Close())
+	}
+	found, err := read(query, args)
+	if err != nil {
+		return nil, err
+	}
+	if len(found) == 0 && cursor.RunID != "" {
+		query, args = tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
+		query += ` AND r.team=? ORDER BY ` + order + ` LIMIT ?`
+		args = append(args, team, limit)
+		found, err = read(query, args)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(found) > 0 {
+		last := found[len(found)-1]
+		value, err := json.Marshal(launcherProbePosition{Created: last.created, RunID: last.unit.RunID, NodeID: last.unit.NodeID, Generation: last.unit.SourceGeneration})
+		if err != nil {
+			return nil, err
+		}
+		if err := setCreditSettingTx(ctx, tx, key, string(value)); err != nil {
+			return nil, err
+		}
+	}
+	return found, nil
 }
 
 func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int64) (string, []any) {

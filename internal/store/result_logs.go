@@ -202,6 +202,11 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		offset += segment.Size
 		stored += segment.StoredBytes
 	}
+	if stored > 0 {
+		if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
+			return err
+		}
+	}
 	_, err := tx.ExecContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
 	return err
 }

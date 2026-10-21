@@ -95,7 +95,7 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *s
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := runtime.Control.Claim(t.Context())
+	award, err := runtime.Control.Claim(t.Context(), "cloud", nil)
 	if err != nil || award == nil {
 		t.Fatalf("claim: %v", err)
 	}

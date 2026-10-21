@@ -80,6 +80,8 @@ type ClaimRequest struct {
 	RunnerVersion        string                `json:"runner_version"`
 	Kinds                []capability.UnitKind `json:"kinds"`
 	Labels               []string              `json:"labels"`
+	JobNamespace         string                `json:"job_namespace,omitempty"`
+	ExcludedTeamLabels   []string              `json:"excluded_team_labels,omitempty"`
 	AvailableCores       float64               `json:"available_cores"`
 	AvailableMemoryBytes int64                 `json:"available_memory_bytes"`
 	RunID                string                `json:"run_id,omitempty"`

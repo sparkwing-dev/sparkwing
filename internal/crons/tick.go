@@ -175,7 +175,8 @@ func (s *Service) minIntervalRefusal(ctx context.Context, sched store.CronSchedu
 	if err != nil {
 		return nil, err
 	}
-	return RefuseBelowMinInterval(sched.Effective().Cron, limits.CronSeconds), nil
+	d := sched.Effective()
+	return RefuseBelowMinInterval(d.Cron, d.TZ, limits.CronSeconds), nil
 }
 
 // safety: a host's override can break a cadence the config validated, and such

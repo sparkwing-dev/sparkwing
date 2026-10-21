@@ -491,7 +491,14 @@ func appReplayKey(input runspec.Request) string {
 	if !input.Git.App.Set {
 		return ""
 	}
-	return fmt.Sprintf("%s:%s", input.Git.App.Value.DeliveryKey, input.Pipeline)
+	return gitHubAppReplayKey(input.Git.App.Value.DeliveryKey, input.Pipeline)
+}
+
+func gitHubAppReplayKey(digest, pipeline string) string {
+	if digest == "" || pipeline == "" {
+		return ""
+	}
+	return digest + ":" + pipeline
 }
 
 // validateChildLineageTx checks a child against every ancestor and returns its depth,

@@ -670,9 +670,25 @@ CREATE TABLE github_app_triggers (
 CREATE TABLE github_app_deliveries (
     admitted_team TEXT NOT NULL DEFAULT '',
     digest TEXT NOT NULL PRIMARY KEY,
-    delivery_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL UNIQUE,
     received_at BIGINT NOT NULL,
-    event TEXT NOT NULL DEFAULT ''
+    event TEXT NOT NULL DEFAULT '',
+    body BLOB,
+    state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','leased','done')),
+    available_at BIGINT NOT NULL DEFAULT 0,
+    lease_until BIGINT NOT NULL DEFAULT 0,
+    lease BIGINT NOT NULL DEFAULT 0,
+    attempts BIGINT NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    CHECK(state != 'done' OR body IS NULL),
+    CHECK(state = 'done' OR body IS NOT NULL)
+);
+
+CREATE INDEX idx_github_app_deliveries_ready ON github_app_deliveries(state,available_at,received_at);
+
+CREATE TABLE github_app_delivery_ids (
+    delivery_id TEXT NOT NULL PRIMARY KEY,
+    digest TEXT NOT NULL REFERENCES github_app_deliveries(digest) ON DELETE CASCADE
 );
 
 CREATE TABLE team_deletions (
@@ -695,7 +711,8 @@ CREATE TABLE invitation_email_log (
 
 CREATE TABLE free_slots (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    taken_at BIGINT NOT NULL
+    taken_at BIGINT NOT NULL,
+    empty_since BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE signup_gate (

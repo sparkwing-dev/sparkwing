@@ -124,4 +124,6 @@ See [CLI schedules](cli-schedules.md) for the generated flag reference and
 Controller fires seal the repository, ref and effective arguments before they
 enter the run queue. Repeating the same due instant returns the original run.
 App-managed schedules require a live installation and repository automation
-consent. A scheduled run does not carry verified-push or default-branch trust.
+consent. They follow the configured
+branch and resolve its commit at fire time. An admin-armed default-branch fire
+without overrides carries verified default-branch trust.

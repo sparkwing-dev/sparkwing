@@ -236,5 +236,5 @@ func cloudCapacityFixture(t *testing.T, tx *storeTx, team Team, cores int64) err
 	if err != nil {
 		return err
 	}
-	return checkCloudCapacityTx(t.Context(), l, cores)
+	return checkCloudCapacityTx(t.Context(), l.view(), cores)
 }

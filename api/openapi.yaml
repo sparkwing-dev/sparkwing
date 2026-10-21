@@ -764,7 +764,15 @@ components:
           anyOf:
             - $ref: '#/components/schemas/pkg.match.Resources'
             - type: "null"
+        excluded_team_labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         job_id:
+          type: string
+        job_namespace:
           type: string
         kinds:
           anyOf:

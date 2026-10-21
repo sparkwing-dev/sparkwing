@@ -29,6 +29,22 @@ type launcherWireFake struct {
 	sync  func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 }
 
+func TestControllerControlSendsFaultedTeamExclusions(t *testing.T) {
+	wire := launcherWireFake{claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+		if request.JobNamespace != "cloud" || !slices.Equal(request.ExcludedTeamLabels, []string{TeamNodeValue("cloud", "faulted")}) {
+			t.Fatalf("excluded node labels = %v in %q", request.ExcludedTeamLabels, request.JobNamespace)
+		}
+		return controllerwire.ClaimResponse{}, nil
+	}}
+	control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if award, err := control.Claim(t.Context(), "cloud", []string{TeamNodeValue("cloud", "faulted")}); err != nil || award != nil {
+		t.Fatalf("award=%v err=%v", award, err)
+	}
+}
+
 func (f launcherWireFake) Claim(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	return f.claim(ctx, request)
 }
@@ -95,7 +111,7 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			award, err := control.Claim(t.Context())
+			award, err := control.Claim(t.Context(), "cloud", nil)
 			if err != nil || award == nil || calls != 1 {
 				t.Fatalf("claim=%+v calls=%d err=%v", award, calls, err)
 			}
@@ -116,7 +132,7 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if award, err := control.Claim(t.Context()); award != nil || !errors.Is(err, failure) || calls != 1 {
+	if award, err := control.Claim(t.Context(), "cloud", nil); award != nil || !errors.Is(err, failure) || calls != 1 {
 		t.Fatalf("lost one-time delivery was replayed: calls=%d err=%v", calls, err)
 	}
 }
@@ -130,7 +146,7 @@ func TestMemoizedSourceGenerationZeroReachesCloudJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := control.Claim(t.Context())
+	award, err := control.Claim(t.Context(), "cloud", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +179,7 @@ func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		award, err := control.Claim(t.Context())
+		award, err := control.Claim(t.Context(), "cloud", nil)
 		if err != nil || award == nil || award.Binding.RunID != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
 			t.Fatalf("retry lost its execution fence or original source: award=%+v error=%v", award, err)
 		}
@@ -185,7 +201,7 @@ func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 				}
 			}
 		}
-		if _, err := control.Claim(t.Context()); (err != nil) != (mutation != 0) {
+		if _, err := control.Claim(t.Context(), "cloud", nil); (err != nil) != (mutation != 0) {
 			t.Fatalf("claim mutation=%d error=%v", mutation, err)
 		}
 		exchanged := unit
@@ -300,7 +316,7 @@ func TestControllerClaimRejectsIncompleteOrConflictingAwards(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if award, err := control.Claim(t.Context()); award != nil || err == nil || strings.Contains(err.Error(), "one-time-bootstrap") {
+			if award, err := control.Claim(t.Context(), "cloud", nil); award != nil || err == nil || strings.Contains(err.Error(), "one-time-bootstrap") {
 				t.Fatalf("invalid award accepted or exposed: %v", err)
 			}
 		})
@@ -328,14 +344,14 @@ func TestControllerControlCapturesDemandAndHonorsCancellation(t *testing.T) {
 	}
 	demand.Kinds[0], demand.Labels[0] = capability.UnitPlan, "os=darwin"
 	for range 2 {
-		if _, err := control.Claim(t.Context()); err != nil {
+		if _, err := control.Claim(t.Context(), "cloud", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cause := errors.New("launcher stopped")
 	cancel(cause)
-	if _, err := control.Claim(ctx); !errors.Is(err, cause) || calls != 2 {
+	if _, err := control.Claim(ctx, "cloud", nil); !errors.Is(err, cause) || calls != 2 {
 		t.Fatalf("cancelled claim reached transport: calls=%d err=%v", calls, err)
 	}
 	if _, err := control.Sync(ctx, nil); !errors.Is(err, cause) {
@@ -461,7 +477,7 @@ func TestPlanAwardRefusesAttemptsBeforeLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if award, err := control.Claim(t.Context()); award != nil || err == nil {
+	if award, err := control.Claim(t.Context(), "cloud", nil); award != nil || err == nil {
 		t.Fatal("plan attempt reached launch")
 	}
 	l, _, boundary, fixtureControl := fixture()

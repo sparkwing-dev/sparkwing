@@ -15,7 +15,7 @@ const minIntervalSamples = 10
 // breaks, or nil when it is at or above the guard. A ceiling of zero is
 // unlimited, and an expression that resolves fewer than two instants is
 // measured as no cadence at all.
-func RefuseBelowMinInterval(expr string, ceilingSeconds int64) error {
+func RefuseBelowMinInterval(expr, tz string, ceilingSeconds int64) error {
 	if expr == "" || ceilingSeconds <= 0 {
 		return nil
 	}
@@ -23,7 +23,15 @@ func RefuseBelowMinInterval(expr string, ceilingSeconds int64) error {
 	if schedule == nil {
 		return nil
 	}
-	shortest, ok := schedule.ShortestInterval(time.Now().UTC(), time.UTC, minIntervalSamples)
+	loc := time.UTC
+	if tz != "" {
+		var err error
+		loc, err = time.LoadLocation(tz)
+		if err != nil {
+			return err
+		}
+	}
+	shortest, ok := schedule.ShortestInterval(time.Now(), loc, minIntervalSamples)
 	if !ok {
 		return nil
 	}

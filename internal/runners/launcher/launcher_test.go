@@ -53,14 +53,16 @@ func (b *boundaryFake) Retire(context.Context, CloudNodeReservation) error {
 }
 
 type controlFake struct {
-	award  *CloudJobAward
-	remove bool
-	claims int
-	fail   error
+	award    *CloudJobAward
+	remove   bool
+	claims   int
+	fail     error
+	excluded []string
 }
 
-func (c *controlFake) Claim(context.Context) (*CloudJobAward, error) {
+func (c *controlFake) Claim(_ context.Context, _ string, excluded []string) (*CloudJobAward, error) {
 	c.claims++
+	c.excluded = append([]string(nil), excluded...)
 	return c.award, c.fail
 }
 
@@ -457,7 +459,7 @@ type retryAfterControl struct {
 	stop    context.CancelFunc
 }
 
-func (c *retryAfterControl) Claim(ctx context.Context) (*CloudJobAward, error) {
+func (c *retryAfterControl) Claim(ctx context.Context, _ string, _ []string) (*CloudJobAward, error) {
 	c.claimed = append(c.claimed, time.Now())
 	if len(c.claimed) > 1 {
 		c.stop()

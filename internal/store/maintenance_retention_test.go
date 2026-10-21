@@ -31,6 +31,7 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,seconds,amount_micro,charged_at) VALUES ('a','charge','old_failure','job','cap',1,30,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO storage_run_usage(team,run_id,period,replica_id,bytes,updated_at) VALUES ('a','old_failure','month','replica',123,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at) VALUES ('expired','old',?),('fresh','new',?)`, old, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,body,state,available_at) VALUES ('pending','pending',?,'push',?,'pending',?)`, old, []byte(`{}`), old)
 	for _, runID := range []string{"pinned", "fresh"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,10,?)`, runID, old)
 		rewriteSchemaExec(t, s.db, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at)
@@ -49,7 +50,7 @@ VALUES ('digest','expired','a','account','one','controller',?,'delegate',1,?,'no
 	if result.Runs != 2 || result.Metrics != 1 || result.Records != 1 || result.Capabilities != 1 || result.Effects != 1 || result.PinnedRuns != 1 || result.PinnedOutputs != 1 || result.ReleasedBytes != 20 {
 		t.Fatalf("retention: %+v", result)
 	}
-	for table, want := range map[string]int{"runs": 3, "blob_records": 1, "credit_charges": 1, "storage_run_usage": 1, "run_effects": 1, "github_app_deliveries": 1} {
+	for table, want := range map[string]int{"runs": 3, "blob_records": 1, "credit_charges": 1, "storage_run_usage": 1, "run_effects": 1, "github_app_deliveries": 2} {
 		rewriteSchemaCount(t, s.db, table, want)
 	}
 	var balance int64

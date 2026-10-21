@@ -44,12 +44,14 @@ func NewControllerControl(client LauncherController, demand controllerwire.Claim
 }
 
 // Claim delivers a bootstrap once; uncertain transport delivery recovers through lease expiry.
-func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
+func (c *ControllerControl) Claim(ctx context.Context, namespace string, excludedTeamLabels []string) (*CloudJobAward, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	demand := c.demand
 	demand.Kinds, demand.Labels = slices.Clone(demand.Kinds), slices.Clone(demand.Labels)
+	demand.JobNamespace = namespace
+	demand.ExcludedTeamLabels = slices.Clone(excludedTeamLabels)
 	response, err := c.client.Claim(ctx, demand)
 	if err != nil || response.Claim == nil {
 		return nil, err

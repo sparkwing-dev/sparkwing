@@ -108,9 +108,9 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 	return p, nil
 }
 
-// safety: callers hold the team's ledger lock, so two claims cannot both take the last vCPU.
-func checkCloudCapacityTx(ctx context.Context, l *ledgerTx, cores int64) error {
-	tx, team := l.storeTx, l.team
+// safety: the claim rechecks under the team's ledger lock before it reserves capacity.
+func checkCloudCapacityTx(ctx context.Context, view ledgerView, cores int64) error {
+	tx, team := view.tx, view.team
 	standing, err := trustStandingTx(ctx, tx, team, tx.now())
 	if err != nil {
 		return err

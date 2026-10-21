@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -152,14 +151,6 @@ func (s *Server) writeComputeLimitRefusal(
 	}
 	writePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: details})
 	return true
-}
-
-func (s *Server) cronIntervalRefusal(r *http.Request, expr string) error {
-	limits, err := s.operator.ComputeLimits(r.Context())
-	if err != nil {
-		return err
-	}
-	return crons.RefuseBelowMinInterval(expr, limits.CronSeconds)
 }
 
 func (s *Server) requestBudgetsView() requestBudgetsJSON {

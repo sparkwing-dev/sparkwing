@@ -168,6 +168,83 @@ func TestScheduleReplacementCapsAndOverrideRollback(t *testing.T) {
 	}
 }
 
+func TestAppScheduleReplacementIsAtomicAndMemberReplaceKeepsAppRows(t *testing.T) {
+	tenant, member, body, _ := consentedScheduleFixture(t)
+	_, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), GitHubAppInstallation{
+		InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization",
+		ConnectedBy: "schedule-owner", GitHubUserID: 501,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES (?,?,?,?,?,?,?)`, tenant.team, "gh:701", 701, "acme/widgets", 7, "schedule-owner", time.Now().UnixNano())
+	repo := "https://github.com/acme/widgets.git"
+	makeInput := func(i int) (CronSchedule, runspec.Request) {
+		pipeline := fmt.Sprintf("nightly-%d", i)
+		row := CronSchedule{
+			ID: fmt.Sprintf("app-%d", i), RepoPath: repo, Pipeline: pipeline, Name: CronScheduleDefaultName,
+			Cron: "0 * * * *", TZ: "UTC", Overlap: CronOverlapSkip, Where: CronWhereController, GitBranch: "main",
+			GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		}
+		request := runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/widgets"}}}
+		return row, request
+	}
+	row, request := makeInput(0)
+	ids, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 7, 701, repo, []CronSchedule{row}, []runspec.Request{request})
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("App arm: %v %v", ids, err)
+	}
+	body.RepoURL, body.Schedules = repo, nil
+	if _, withdrawn, err := tenant.ReplaceAuthorizedSchedules(t.Context(), member, body); err != nil || len(withdrawn) != 0 {
+		t.Fatalf("member replacement withdrew App schedule: %v %v", withdrawn, err)
+	}
+	stored, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil || !stored.Declared || stored.LockedRef != "" {
+		t.Fatalf("App row after member replacement: %+v %v", stored, err)
+	}
+	_, err = tenant.TestOnlySeedGitHubInstallation(t.Context(), GitHubAppInstallation{
+		InstallationID: 8, AccountID: 70, AccountLogin: "acme", AccountType: "Organization",
+		ConnectedBy: "schedule-owner", GitHubUserID: 501,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET installation_id=8,enabled_at=? WHERE team=? AND repository_id=701`, time.Now().UnixNano(), tenant.team)
+	other, otherRequest := makeInput(1)
+	other.ID, other.GitHubInstallationID = "app-other-installation", 8
+	otherIDs, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 8, 701, repo, []CronSchedule{other}, []runspec.Request{otherRequest})
+	if err != nil || len(otherIDs) != 1 {
+		t.Fatalf("other installation arm: %v %v", otherIDs, err)
+	}
+	_, withdrawn, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 8, 701, repo, nil, nil)
+	if err != nil || len(withdrawn) != 1 {
+		t.Fatalf("own installation withdrawal: %v %v", withdrawn, err)
+	}
+	otherStored, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil || !otherStored.Declared {
+		t.Fatalf("replacement withdrew other installation: %+v %v", otherStored, err)
+	}
+	var rows []CronSchedule
+	var requests []runspec.Request
+	for i := 1; i <= 21; i++ {
+		r, q := makeInput(i)
+		r.ID, r.GitHubInstallationID = fmt.Sprintf("app-eight-%d", i), 8
+		rows, requests = append(rows, r), append(requests, q)
+	}
+	if _, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 8, 701, repo, rows, requests); err == nil {
+		t.Fatal("App schedule cap accepted")
+	}
+	after, err := tenant.ListCronSchedules(t.Context())
+	if err != nil || len(after) != 2 {
+		t.Fatalf("partial App replacement: %+v %v", after, err)
+	}
+	for _, current := range after {
+		if current.ID == ids[0] && !current.Declared || current.ID == otherIDs[0] && current.Declared {
+			t.Fatalf("wrong installation after rollback: %+v", after)
+		}
+	}
+}
+
 type scheduleResolutionRace struct {
 	scheduleFixturePolicy
 	before func()
@@ -249,7 +326,7 @@ func TestScheduleLocalSourceRequiresPersistedPeerAuthorityProperty(t *testing.T)
 			t.Fatal(err)
 		}
 		request := runspec.Request{Git: runspec.Git{Repository: repository}, Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: root}}}
-		_, _, err = tenant.replaceConsentedSchedules(t.Context(), a, root, []CronSchedule{row}, []runspec.Request{request}, true)
+		_, _, err = tenant.replaceConsentedSchedules(t.Context(), &a, nil, root, []CronSchedule{row}, []runspec.Request{request}, true)
 		rewriteSchemaCount(t, tenant.s.db, "cron_schedules", 0)
 		return err != nil
 	}

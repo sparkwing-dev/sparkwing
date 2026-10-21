@@ -88,13 +88,19 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		}
 	}
 	c := principal.Capability
+	if (len(body.ExcludedTeamLabels) > 0 || body.JobNamespace != "") && !capability.CloudLauncher(c) {
+		return controllerwire.ClaimResponse{}, invalidEngineBody("only a Cloud launcher can exclude faulted teams")
+	}
+	if len(body.ExcludedTeamLabels) > 0 && body.JobNamespace == "" {
+		return controllerwire.ClaimResponse{}, invalidEngineBody("faulted team labels require the job namespace")
+	}
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
 		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
+	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil

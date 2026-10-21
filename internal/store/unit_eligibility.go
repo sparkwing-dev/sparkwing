@@ -103,7 +103,7 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		return e, nil
 	}
 	if e.metered && checks.billing {
-		funded, err := eligibleUnitBillingTx(ctx, tx, team, unit, e.price, e.launcher)
+		funded, err := eligibleUnitBillingTx(ctx, tx, team, unit, e.price, e.launcher, checks.lock)
 		if err != nil {
 			return e, err
 		}

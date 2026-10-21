@@ -200,20 +200,25 @@ func TestQuarantineWriteFailures(t *testing.T) {
 	}
 }
 
-// A controller fault can refuse every orphaned award at once; past the
-// per-pass budget sync stops claims instead of tainting the whole fleet.
-func TestQuarantineBudgetStopsClaims(t *testing.T) {
-	l, kube, _, _ := fixture()
+// A damaged team's reservations consume only its own quarantine budget.
+func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
+	l, kube, _, control := fixture()
 	for i := range maxQuarantinesPerSync + 1 {
 		binding := boundaryBinding("team")
 		binding.UnitID = "unit-" + string(rune('a'+i))
-		if _, err := kube.CoreV1().Nodes().Create(t.Context(), reservedNode(t, "node-"+string(rune('a'+i)), binding, "garbage"), metav1.CreateOptions{}); err != nil {
+		node := reservedNode(t, "node-"+string(rune('a'+i)), binding, "garbage")
+		delete(node.Annotations, bindingAnnotation)
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
+	other := boundaryBinding("other")
+	if _, err := kube.CoreV1().Nodes().Create(t.Context(), reservedNode(t, "other-node", other, "garbage"), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	err := l.Sync(t.Context())
-	if blocking(err) == nil || !strings.Contains(err.Error(), "claims stop") {
-		t.Fatalf("a fleet-wide fault did not stop claims: %v", err)
+	if blocking(err) != nil || !strings.Contains(err.Error(), "its claims stop") {
+		t.Fatalf("fault was not confined to its team: %v", err)
 	}
 	nodes, err := kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
 	if err != nil {
@@ -225,10 +230,14 @@ func TestQuarantineBudgetStopsClaims(t *testing.T) {
 			tainted++
 		}
 	}
-	if tainted != maxQuarantinesPerSync {
-		t.Fatalf("quarantined %d nodes in one pass, want %d", tainted, maxQuarantinesPerSync)
+	if tainted != maxQuarantinesPerSync+1 {
+		t.Fatalf("quarantined %d nodes in one pass, want %d", tainted, maxQuarantinesPerSync+1)
 	}
-	if err := l.Sync(t.Context()); blocking(err) == nil {
-		t.Fatal("the unquarantined node was released on the next pass")
+	control.award = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
+		t.Fatalf("claim did not exclude only the faulted team: excluded=%v err=%v", control.excluded, err)
+	}
+	if err := l.Sync(t.Context()); blocking(err) != nil {
+		t.Fatalf("the next pass crossed the team boundary: %v", err)
 	}
 }

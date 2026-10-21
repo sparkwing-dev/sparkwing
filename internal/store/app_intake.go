@@ -63,7 +63,7 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 	}
 	app := in.Request.Git.App.Value
 	var event string
-	err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest=?`+tx.forShare(), "event:"+app.DeliveryKey).Scan(&event)
+	err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest=?`+tx.forShare(), app.DeliveryKey).Scan(&event)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && event != in.Event {
 		return refuse()
 	}
@@ -92,7 +92,7 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 			return capability.Principal{}, err
 		}
 	}
-	bound, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET admitted_team=? WHERE digest=? AND (admitted_team='' OR admitted_team=?)`, in.Installation.Team, "event:"+app.DeliveryKey, in.Installation.Team)
+	bound, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET admitted_team=? WHERE digest=? AND (admitted_team='' OR admitted_team=?)`, in.Installation.Team, app.DeliveryKey, in.Installation.Team)
 	if err != nil {
 		return capability.Principal{}, err
 	}

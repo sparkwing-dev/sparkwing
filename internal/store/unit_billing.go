@@ -45,7 +45,7 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			if err := checkOverflowTx(ctx, tx, Team(c.Team), c.Binding.RunID); err != nil {
 				return err
 			}
-			if err := checkCloudCapacityTx(ctx, l, price.Cores); err != nil {
+			if err := checkCloudCapacityTx(ctx, l.view(), price.Cores); err != nil {
 				return err
 			}
 		}
@@ -82,8 +82,16 @@ func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources match.Resour
 	return table.ClassForResource(resources)
 }
 
-func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud bool) (bool, error) {
+func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud, lock bool) (bool, error) {
 	var err error
+	view := ledgerView{tx: tx, team: team}
+	if lock {
+		l, err := lockLedgerTx(ctx, tx, team)
+		if err != nil {
+			return false, err
+		}
+		view = l.view()
+	}
 	if cloud {
 		err = checkOverflowTx(ctx, tx, team, unit.RunID)
 		var overflow *apierr.Error
@@ -93,11 +101,7 @@ func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Uni
 		if err != nil {
 			return false, err
 		}
-		l, err := lockLedgerTx(ctx, tx, team)
-		if err != nil {
-			return false, err
-		}
-		err = checkCloudCapacityTx(ctx, l, price.Cores)
+		err = checkCloudCapacityTx(ctx, view, price.Cores)
 		var refused *apierr.Error
 		if errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) || errors.Is(err, ErrInsufficientCredits) {
 			return false, nil
@@ -106,7 +110,7 @@ func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Uni
 			return false, err
 		}
 	}
-	err = unitCreditRefusalTx(ctx, tx, team, unit, price)
+	err = unitCreditRefusalViewTx(ctx, view, unit, price)
 	if errors.Is(err, ErrInsufficientCredits) {
 		return false, nil
 	}
@@ -114,15 +118,19 @@ func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Uni
 }
 
 func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate) error {
-	amount, err := billingProduct(SliceSeconds, price.MicroPerSecond)
-	if err != nil {
-		return err
-	}
 	l, err := lockLedgerTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
-	return refuseUnfundedTx(ctx, l, amount, unit.RunID, unit.NodeID)
+	return unitCreditRefusalViewTx(ctx, l.view(), unit, price)
+}
+
+func unitCreditRefusalViewTx(ctx context.Context, view ledgerView, unit UnitRef, price CreditRate) error {
+	amount, err := billingProduct(SliceSeconds, price.MicroPerSecond)
+	if err != nil {
+		return err
+	}
+	return refuseUnfundedTx(ctx, view, amount, unit.RunID, unit.NodeID)
 }
 
 func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64) (*billingAward, error) {

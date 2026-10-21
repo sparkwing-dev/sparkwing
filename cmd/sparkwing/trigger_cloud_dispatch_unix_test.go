@@ -309,7 +309,7 @@ type cloudDispatchClaimProbe struct {
 	claims int
 }
 
-func (c *cloudDispatchClaimProbe) Claim(context.Context) (*launcher.CloudJobAward, error) {
+func (c *cloudDispatchClaimProbe) Claim(context.Context, string, []string) (*launcher.CloudJobAward, error) {
 	c.claims++
 	return nil, nil
 }

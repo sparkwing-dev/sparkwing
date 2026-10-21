@@ -42,9 +42,7 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 		}
 		in.Subscription = &sub
 	}
-	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery", *now); err != nil {
-		t.Fatal(err)
-	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event) VALUES (?,?,?,?)`, digest, "delivery", now.UnixNano(), "push")
 	s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (IntakePolicyFacts, error) {
 		delivery, err := VerifiedAppIntake(ctx, resolver, request)
 		location := request.Request.Source.Location
@@ -115,7 +113,7 @@ func TestAppAdmissionRefusesUntypedOriginAndRollsBack(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "runs", 0)
 	rewriteSchemaCount(t, s.db, "triggers", 0)
 	var boundTeam string
-	if err := s.db.QueryRow(`SELECT admitted_team FROM github_app_deliveries WHERE digest='event:signed'`).Scan(&boundTeam); err != nil || boundTeam != "" {
+	if err := s.db.QueryRow(`SELECT admitted_team FROM github_app_deliveries WHERE digest='signed'`).Scan(&boundTeam); err != nil || boundTeam != "" {
 		t.Fatalf("failed intake bound replay team=%q err=%v", boundTeam, err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER fail_run_effect`)

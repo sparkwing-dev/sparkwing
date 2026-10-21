@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## GitHub deliveries enter a durable inbox
+
+GitHub webhooks now answer 202 with `status: queued` after storing the signed
+delivery. Processing results, including duplicate run details and temporary
+admission refusals, are no longer returned to GitHub. The controller retries
+unfinished work after provider errors, admission limits and restarts. Clients
+that post signed deliveries must treat 202 as acceptance for later processing.
+
+The store baseline moves to version 16 for the inbox and idle free-slot
+tracking. Recreate stores from an earlier baseline before starting this build.
+Existing stores are refused rather than opened under the new schema.
+
 ## Cloud billing is prepaid
 
 Cloud usage now draws only on a prepaid balance; a team never owes for usage.

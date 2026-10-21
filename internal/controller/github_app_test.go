@@ -3,7 +3,9 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -41,9 +43,10 @@ const headSHA = "89abcdef0123456789abcdef0123456789abcdef"
 
 type appFixture struct {
 	*identityFixture
-	app     *githubapptest.GitHub
-	logs    *syncBuffer
-	replica func() (*controller.Server, string)
+	app      *githubapptest.GitHub
+	logs     *syncBuffer
+	inboxNow time.Time
+	replica  func() (*controller.Server, string)
 }
 
 func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
@@ -103,7 +106,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 	srv, url := primary, ts.URL
 	return &appFixture{
 		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv},
-		app:             app, replica: replica, logs: logs,
+		app:             app, replica: replica, logs: logs, inboxNow: time.Now().Add(time.Hour),
 	}
 }
 
@@ -547,6 +550,19 @@ func (f *appFixture) deliver(event string, payload any, signature string) (int, 
 	defer func() { _ = resp.Body.Close() }()
 	var out map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if resp.StatusCode == http.StatusAccepted {
+		// Event tests inspect processing separately from the persisted ingress acknowledgement.
+		outcomes, err := controller.ProcessGitHubInboxForTest(f.srv, f.t.Context(), f.inboxNow)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		digest := sha256.Sum256(body)
+		if result, ok := outcomes[hex.EncodeToString(digest[:])]; ok {
+			out = nil
+			_ = json.Unmarshal(result.Body, &out)
+			return result.Status, out
+		}
+	}
 	return resp.StatusCode, out
 }
 
@@ -713,6 +729,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 0}); err != nil {
 		t.Fatal(err)
 	}
+	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
 		t.Fatalf("retry after quota clears = %d %v, want dispatched", code, out)
 	}
@@ -747,6 +764,7 @@ func TestGitHubAppTagPushRequiresTagSubscription(t *testing.T) {
 	if _, out := f.deliver("push", branch, ""); out["status"] != "ignored" {
 		t.Fatalf("tag-only subscription started branch: %v", out)
 	}
+	tag["before"] = strings.Repeat("1", 40)
 	if _, out := f.deliver("push", tag, ""); out["status"] != "dispatched" {
 		t.Fatalf("tag push = %v", out)
 	}
@@ -955,9 +973,8 @@ func TestGitHubAppRedeliveryStartsOneRun(t *testing.T) {
 		t.Fatal("first delivery refused")
 	}
 	_, out := f.deliver("push", payload, "")
-	runs, _ := out["runs"].([]any)
-	if len(runs) != 1 || runs[0].(map[string]any)["status"] != "duplicate" {
-		t.Fatalf("redelivery = %v, want one duplicate", out)
+	if out["status"] != "queued" {
+		t.Fatalf("redelivery = %v, want the inbox acknowledgement", out)
 	}
 	if n := len(f.triggers(olga.team)); n != 1 {
 		t.Fatalf("a redelivery left %d triggers, want 1", n)
@@ -1208,7 +1225,7 @@ func TestGitHubAppReleaseReplayAndCoverage(t *testing.T) {
 	}
 	f.app.SetCommit("acme/widgets", "refs/tags/v1", "")
 	f.app.SetRepos(7)
-	if _, out := f.deliver("release", payload, ""); out["status"] != "duplicate" {
+	if _, out := f.deliver("release", payload, ""); out["status"] != "queued" {
 		t.Fatalf("redelivery = %v", out)
 	}
 	payload["release"].(map[string]any)["tag_name"] = "v2"
@@ -1268,10 +1285,11 @@ func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.subscribe(olga, "acme/widgets", "test", nil)
 	push := pushPayload(7, 701, "acme/widgets", headSHA)
-	if _, out := f.deliver("push", push, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+	if _, out := f.deliver("push", push, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "queued"}) {
 		t.Fatalf("first delivery = %v, want one run and one shed", out)
 	}
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	if code, out := f.deliver("push", push, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
 		t.Fatalf("redelivery with one run of allowance = %d %v, want the shed run started", code, out)
 	}
@@ -1296,11 +1314,12 @@ func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
 		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
 		"release":    map[string]any{"tag_name": "v1", "published_at": time.Now().UTC().Format(time.RFC3339)},
 	}
-	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "queued"}) {
 		t.Fatalf("first release = %v", out)
 	}
 	f.app.SetCommit("acme/widgets", "refs/tags/v1", strings.Repeat("a", 40))
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
 		t.Fatalf("release redelivery = %v", out)
 	}
@@ -1336,11 +1355,11 @@ func TestGitHubAppFloodCapCountsTheTeamsRuns(t *testing.T) {
 	if code, out := f.deliver("push", widgets, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "dispatched"}) {
 		t.Fatalf("first push = %d %v", code, out)
 	}
-	if code, out := f.deliver("push", widgets, ""); code == http.StatusTooManyRequests || !slices.Equal(runStatuses(out), []string{"duplicate", "duplicate"}) {
+	if code, out := f.deliver("push", widgets, ""); code != http.StatusAccepted || out["status"] != "queued" {
 		t.Fatalf("redelivery = %d %v, want duplicates that spend nothing", code, out)
 	}
 	code, out := f.deliver("push", pushPayload(7, 702, "acme/plans", headSHA), "")
-	if code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+	if code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "queued"}) {
 		t.Fatalf("push to another repository = %d %v, want one run and one shed", code, out)
 	}
 	if code, _ := f.deliver("push", pushPayload(7, 702, "acme/plans", strings.Repeat("2", 40)), ""); code != http.StatusTooManyRequests {

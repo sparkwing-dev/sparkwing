@@ -17,7 +17,9 @@ import (
 func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
 	var waiting error
+	var selected *UnitRef
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		out, waiting, selected = UnitClaim{}, nil, nil
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
@@ -46,6 +48,10 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 			if err != nil {
 				return err
 			}
+			if capability.CloudLauncher(p.Capability) {
+				selected = &queued
+				return nil
+			}
 			unit = &queued
 		}
 		out, err = tx.operator.claimUnitTx(ctx, tx, demand, *unit)
@@ -54,6 +60,10 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		}
 		return err
 	})
+	if err == nil && selected != nil {
+		demand.Target = selected
+		return o.claimUnit(ctx, demand)
+	}
 	if err == nil && waiting != nil {
 		return UnitClaim{}, waiting
 	}

@@ -1,12 +1,15 @@
 package controller_test
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -21,6 +24,13 @@ func appCronRows(t *testing.T, f *appFixture, team string) []store.CronSchedule 
 		t.Fatal(err)
 	}
 	return rows
+}
+
+func enableCronAutomation(t *testing.T, f *appFixture, who signedIn, repository string) {
+	t.Helper()
+	if code := f.call("PUT", "/api/v1/team/github-app/automation", who.auth, map[string]string{"repository": repository}, nil); code != http.StatusOK {
+		t.Fatalf("enable repository automation for %s = %d", repository, code)
+	}
 }
 
 func cronPush(installation, repoID int64, repo, sha, ref string) map[string]any {
@@ -51,12 +61,13 @@ func TestGitHubAppDefaultPushArmsAndWithdrawsControllerSchedules(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	payload := cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main")
 	if code, _ := f.deliver("push", payload, ""); code != http.StatusAccepted {
 		t.Fatalf("default push = %d", code)
 	}
 	rows := appCronRows(t, f, olga.team)
-	if len(rows) != 1 || rows[0].Pipeline != "nightly" || rows[0].LockedRef != headSHA || !rows[0].Declared {
+	if len(rows) != 1 || rows[0].Pipeline != "nightly" || rows[0].LockedRef != "" || !rows[0].Declared {
 		t.Fatalf("armed schedules = %+v", rows)
 	}
 	minted := f.app.Minted()
@@ -91,6 +102,7 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 
 	for _, p := range []map[string]any{
@@ -101,7 +113,7 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	} {
 		f.deliver("push", p, "")
 		rows := appCronRows(t, f, olga.team)
-		if len(rows) != 1 || rows[0].LockedRef != headSHA || !rows[0].Declared {
+		if len(rows) != 1 || rows[0].LockedRef != "" || !rows[0].Declared {
 			t.Fatalf("ignored push changed schedule: %+v", rows)
 		}
 	}
@@ -112,21 +124,22 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), ""); code != http.StatusBadGateway {
 		t.Fatalf("GitHub API failure = %d, want 502", code)
 	}
-	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != headSHA {
+	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("GitHub API failure changed schedule: %+v", rows)
 	}
+	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), ""); code < 400 {
 		t.Fatalf("bad config = %d, want failure", code)
 	}
 	rows := appCronRows(t, f, olga.team)
-	if len(rows) != 1 || rows[0].LockedRef != headSHA || !rows[0].Declared {
+	if len(rows) != 1 || rows[0].LockedRef != "" || !rows[0].Declared {
 		t.Fatalf("failed read or parse changed schedule: %+v", rows)
 	}
 	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, ""); code != http.StatusOK {
 		t.Fatalf("uninstall = %d", code)
 	}
 	f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), "")
-	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != headSHA {
+	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("uninstalled push changed schedule: %+v", rows)
 	}
 }
@@ -137,6 +150,7 @@ func TestGitHubAppCronFailureDoesNotSuppressSubscribedPush(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
@@ -162,7 +176,7 @@ func TestGitHubAppCronFailureDoesNotSuppressSubscribedPush(t *testing.T) {
 			t.Fatalf("push %d started %d subscribed runs, want %d", i, got, tc.runs)
 		}
 		rows := appCronRows(t, f, olga.team)
-		if len(rows) != 1 || rows[0].LockedRef != headSHA || !rows[0].Declared {
+		if len(rows) != 1 || rows[0].LockedRef != "" || !rows[0].Declared {
 			t.Fatalf("cron failure changed schedule: %+v", rows)
 		}
 	}
@@ -174,6 +188,7 @@ func TestGitHubAppStaleCronPushStillStartsSubscribedPipeline(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
@@ -186,34 +201,65 @@ func TestGitHubAppStaleCronPushStillStartsSubscribedPipeline(t *testing.T) {
 		t.Fatalf("stale push started %d subscribed runs, want one", n)
 	}
 	rows := appCronRows(t, f, olga.team)
-	if len(rows) != 1 || rows[0].LockedRef != headSHA {
+	if len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("stale push changed schedule: %+v", rows)
 	}
 }
 
-func TestGitHubAppLockedScheduleSealsTheAppPushDisplay(t *testing.T) {
+func TestGitHubAppScheduleResolvesVerifiedDefaultAtFireAndRequiresConsent(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	enableCronAutomation(t, f, olga, "acme/widgets")
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
 		t.Fatalf("default push = %d", code)
 	}
-	enableAutomation(t, f, olga)
 	rows := appCronRows(t, f, olga.team)
-	if len(rows) != 1 || rows[0].LockedRef != headSHA {
+	if len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("armed schedules = %+v", rows)
+	}
+	fireSHA := strings.Repeat("e", 40)
+	f.app.SetCommit("acme/widgets", "main", fireSHA)
+	f.app.SetFile("acme/widgets", fireSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	schedule, err := cronspec.Parse(rows[0].Cron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var due []time.Time
+	for at, now := time.Now().UTC().Add(-72*time.Hour), time.Now().UTC(); ; {
+		next := schedule.Next(at, time.UTC)
+		if next.IsZero() || next.After(now) {
+			break
+		}
+		due = append(due, next)
+		at = next
+	}
+	if len(due) < 2 {
+		t.Fatalf("schedule yielded %d past instants", len(due))
 	}
 	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
 	if err != nil {
 		t.Fatal(err)
 	}
-	admitted, err := tn.AdmitScheduledRun(t.Context(), rows[0], time.Now().Add(-time.Minute))
+	admitted, err := tn.AdmitScheduledRun(t.Context(), rows[0], due[len(due)-2])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repository := admitted.Request.Request.Git.Repository; repository.Key != "gh:701" || repository.Display != "acme/widgets" {
 		t.Fatalf("scheduled run repository = %+v, want gh:701 displayed as acme/widgets", repository)
+	}
+	if got := admitted.Request.Provenance.Trust(); got != runspec.TrustVerifiedDefault {
+		t.Fatalf("App schedule provenance trust = %q, want verified default", got)
+	}
+	if got := admitted.Request.Request.Git.SHA; got != fireSHA {
+		t.Fatalf("fire resolved commit = %q, want %q", got, fireSHA)
+	}
+	if code := f.call("DELETE", "/api/v1/team/github-app/automation?repository_id=701", olga.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("revoke repository automation = %d", code)
+	}
+	if _, err := tn.AdmitScheduledRun(t.Context(), rows[0], due[len(due)-1]); !errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
+		t.Fatalf("fire after automation revocation = %v, want revoked consent", err)
 	}
 }

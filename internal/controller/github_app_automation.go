@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -263,4 +264,35 @@ func automationSubscribes(decl githubAppAutomationPipeline, event, action string
 		return decl.PullRequest && slices.Contains(decl.Actions, action) && runspec.BranchSelector(decl.BaseBranches).Matches(intake.env["GITHUB_BASE_REF"])
 	}
 	return false
+}
+
+func (s *Server) armGitHubAppSchedules(ctx context.Context, tenant *store.Tenant, installationID int64, repo store.GitHubRepo, branch string, entries []crons.Declared) ([]string, []string, error) {
+	repoURL := "https://github.com/" + repo.Slug() + ".git"
+	rows := make([]store.CronSchedule, 0, len(entries))
+	requests := make([]runspec.Request, 0, len(entries))
+	for _, entry := range entries {
+		trigger := entry.Trigger
+		if err := trigger.Validate(entry.Pipeline); err != nil {
+			return nil, nil, err
+		}
+		catchUp, err := trigger.CatchUpDuration()
+		if err != nil {
+			return nil, nil, err
+		}
+		name := trigger.EffectiveName()
+		row := store.CronSchedule{
+			ID:   crons.AppScheduleID(tenant.Team(), installationID, repo.ID, entry.Pipeline, name),
+			Team: tenant.Team(), RepoPath: repoURL, Pipeline: entry.Pipeline, Name: name,
+			Cron: trigger.Cron, TZ: trigger.TZ, Overlap: trigger.OverlapPolicy(), CatchUp: catchUp,
+			Where: store.CronWhereController, GitBranch: branch, Args: trigger.Args,
+			GitHubInstallationID: installationID, GitHubRepositoryID: repo.ID,
+		}
+		repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: repoURL, GitHubRepositoryID: runspec.Optional[int64]{Set: true, Value: repo.ID}})
+		if err != nil {
+			return nil, nil, err
+		}
+		rows = append(rows, row)
+		requests = append(requests, runspec.Request{Git: runspec.Git{Repository: repository}})
+	}
+	return tenant.ReplaceGitHubAppSchedules(ctx, installationID, repo.ID, repoURL, rows, requests)
 }

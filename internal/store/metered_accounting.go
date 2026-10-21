@@ -113,7 +113,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		return authorityError(apierr.Conflict, "capability already has a billing award")
 	}
 	if b.Metered {
-		if err := refuseUnfundedTx(ctx, l, amount, c.Binding.RunID, c.Binding.NodeID); err != nil {
+		if err := refuseUnfundedTx(ctx, l.view(), amount, c.Binding.RunID, c.Binding.NodeID); err != nil {
 			return err
 		}
 	}
@@ -281,7 +281,7 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 	if err != nil {
 		return err
 	}
-	if err := refuseUnfundedTx(ctx, l, max(want-paid, 0), a.run, a.node); err != nil {
+	if err := refuseUnfundedTx(ctx, l.view(), max(want-paid, 0), a.run, a.node); err != nil {
 		return err
 	}
 	ahead := result.BillableSeconds + SliceSeconds - paidSeconds

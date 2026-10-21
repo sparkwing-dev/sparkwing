@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +29,30 @@ type scheduleConsent struct {
 	Version   int                     `json:"version"`
 	Authority capability.AuthorityRef `json:"authority"`
 	Request   runspec.Request         `json:"request"`
+}
+
+type appScheduleScope struct {
+	installationID int64
+	repositoryID   int64
+}
+
+func ownsSchedule(app *appScheduleScope, repo string, row CronSchedule) bool {
+	if app != nil {
+		return row.GitHubInstallationID == app.installationID && row.GitHubRepositoryID == app.repositoryID
+	}
+	return row.GitHubRepositoryID == 0 && row.RepoPath == repo
+}
+
+func (t *Tenant) checkGitHubAppScheduleTx(ctx context.Context, tx *storeTx, installationID, repositoryID int64) error {
+	var enabled int64
+	err := tx.QueryRowContext(ctx, `SELECT enabled_at FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installationID, repositoryID).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrGitHubAppAutomationRevoked
+	}
+	if err != nil {
+		return err
+	}
+	return t.checkGitHubAppAutomationTx(ctx, tx, GitHubAppAutomation{InstallationID: installationID, RepositoryID: repositoryID, EnabledAt: time.Unix(0, enabled)})
 }
 
 func (t *Tenant) scheduleAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (capability.Principal, error) {
@@ -162,7 +189,7 @@ func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Au
 		rows = append(rows, row)
 		requests = append(requests, request)
 	}
-	return t.replaceConsentedSchedules(ctx, a, remote, rows, requests, body.Mode == controllerwire.ScheduleReplace)
+	return t.replaceConsentedSchedules(ctx, &a, nil, remote, rows, requests, body.Mode == controllerwire.ScheduleReplace)
 }
 
 // ReplaceAuthorizedLocalSchedules persists prepared checkout declarations and captured inputs together.
@@ -175,24 +202,55 @@ func (t *Tenant) ReplaceAuthorizedLocalSchedules(ctx context.Context, a capabili
 			return nil, nil, bindingRefusal()
 		}
 	}
-	return t.replaceConsentedSchedules(ctx, a, root, rows, requests, replace)
+	return t.replaceConsentedSchedules(ctx, &a, nil, root, rows, requests, replace)
 }
 
-func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Authorized, repo string, proposed []CronSchedule, requests []runspec.Request, replace bool) ([]string, []string, error) {
-	if a.Target.Team != string(t.team) || len(proposed) != len(requests) {
+// ReplaceGitHubAppSchedules publishes one installation's declarations under its live automation consent.
+func (t *Tenant) ReplaceGitHubAppSchedules(ctx context.Context, installationID, repositoryID int64, repo string, proposed []CronSchedule, requests []runspec.Request) ([]string, []string, error) {
+	remote, err := sourceurl.ValidateCloneURL(repo)
+	if err != nil || installationID <= 0 || repositoryID <= 0 || !strings.HasPrefix(remote, "https://github.com/") {
+		return nil, nil, ErrInvalidInput
+	}
+	if len(proposed) != len(requests) {
+		return nil, nil, ErrInvalidInput
+	}
+	key := runspec.RepoKey("gh:" + strconv.FormatInt(repositoryID, 10))
+	for i, row := range proposed {
+		if row.GitHubInstallationID != installationID || row.GitHubRepositoryID != repositoryID || row.LockedRef != "" || row.RepoPath != remote || row.Where != CronWhereController || requests[i].Git.Repository.Key != key {
+			return nil, nil, ErrInvalidInput
+		}
+	}
+	return t.replaceConsentedSchedules(ctx, nil, &appScheduleScope{installationID, repositoryID}, repo, proposed, requests, true)
+}
+
+func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Authorized, app *appScheduleScope, repo string, proposed []CronSchedule, requests []runspec.Request, replace bool) ([]string, []string, error) {
+	if (a == nil) == (app == nil) || a != nil && a.Target.Team != string(t.team) || len(proposed) != len(requests) {
 		return nil, nil, bindingRefusal()
 	}
 	var ids, withdrawn []string
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		ids, withdrawn = ids[:0], withdrawn[:0]
 		if err := acquireLockSet(ctx, tx, func() lockSet {
-			set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			set := lockSet{}
+			if a != nil {
+				set = discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+			}
 			set.add(lockTeam, true, string(t.team))
+			if app != nil {
+				set = tx.operator.discoverInstallationLocks(ctx, tx, set, app.installationID)
+			}
 			return set
 		}); err != nil {
 			return err
 		}
-		p, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
+		var p capability.Principal
+		var err error
+		if a != nil {
+			p, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
+		} else {
+			err = t.checkGitHubAppScheduleTx(ctx, tx, app.installationID, app.repositoryID)
+			p.Capability.Subject.ID = "github-app:" + strconv.FormatInt(app.installationID, 10)
+		}
 		if err != nil {
 			return err
 		}
@@ -208,10 +266,18 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 		seen := map[string]bool{}
 		for _, row := range existing {
 			if row.Declared {
-				repos[row.RepoPath] = true
+				key := string(row.RepositoryKey)
+				if key == "" {
+					key = row.RepoPath
+				}
+				repos[key] = true
 			}
 		}
-		if p.Capability.Subject.Kind != capability.SubjectLocal && len(proposed) > 0 && !repos[repo] && len(repos) >= limits.MaxScheduledReposPerTeam {
+		repoKey := repo
+		if len(requests) > 0 {
+			repoKey = string(requests[0].Git.Repository.Key)
+		}
+		if p.Capability.Subject.Kind != capability.SubjectLocal && len(proposed) > 0 && !repos[repoKey] && len(repos) >= limits.MaxScheduledReposPerTeam {
 			return authorityError(apierr.Conflict, "team schedule repository limit reached")
 		}
 		guards, err := computeLimitsTx(ctx, tx)
@@ -231,10 +297,30 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 				return ErrInvalidInput
 			}
 			seen[identity] = true
+			if app != nil && row.ID != "" {
+				for _, old := range existing {
+					if old.ID == row.ID && (old.GitHubInstallationID != app.installationID || old.GitHubRepositoryID != app.repositoryID) {
+						return ErrCronScheduleTaken
+					}
+				}
+			}
 			for _, old := range existing {
-				if old.RepoPath == repo && old.Pipeline == row.Pipeline && old.Name == row.Name {
+				if ownsSchedule(app, repo, old) && old.Pipeline == row.Pipeline && old.Name == row.Name {
 					row.ID = old.ID
 					row.Override = old.Override
+				}
+			}
+			if app == nil {
+				for _, old := range existing {
+					if old.GitHubRepositoryID > 0 && (old.RepoPath == repo || old.RepositoryKey == requests[i].Git.Repository.Key) && old.Pipeline == row.Pipeline && old.Name == row.Name {
+						return ErrCronScheduleTaken
+					}
+				}
+			} else {
+				for _, old := range existing {
+					if old.GitHubRepositoryID == 0 && (old.RepoPath == repo || old.RepositoryKey == requests[i].Git.Repository.Key) && old.Pipeline == row.Pipeline && old.Name == row.Name {
+						return ErrCronScheduleTaken
+					}
 				}
 			}
 			if row.ID == "" {
@@ -271,19 +357,22 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 			if err != nil {
 				return err
 			}
-			consent, err := json.Marshal(scheduleConsent{Version: 1, Authority: p.Authority, Request: request})
-			if err != nil {
-				return err
-			}
-			if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET consent_json=?,armed_by=? WHERE team=? AND id=?`, string(consent), p.Capability.Subject.ID, t.team, stored.ID); err != nil {
-				return err
+			if app == nil {
+				consent, err := json.Marshal(scheduleConsent{Version: 1, Authority: p.Authority, Request: request})
+				if err != nil {
+					return err
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET consent_json=?,armed_by=? WHERE team=? AND id=?`, string(consent), p.Capability.Subject.ID, t.team, stored.ID); err != nil {
+					return err
+				}
 			}
 			ids = append(ids, stored.ID)
 			keep[stored.ID] = true
 		}
 		count := len(keep)
 		for _, row := range existing {
-			if row.RepoPath == repo && !keep[row.ID] && row.Declared {
+			owned := ownsSchedule(app, repo, row)
+			if owned && !keep[row.ID] && row.Declared {
 				if replace {
 					if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND id=?`, tx.now().UnixNano(), t.team, row.ID); err != nil {
 						return err
@@ -292,13 +381,18 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 				} else {
 					count++
 				}
+			} else if !owned && !keep[row.ID] && row.Declared && string(row.RepositoryKey) == repoKey {
+				count++
 			}
 		}
 		if p.Capability.Subject.Kind != capability.SubjectLocal && count > limits.MaxSchedulesPerRepo {
 			return authorityError(apierr.BadRequest, "repository schedule limit reached")
 		}
-		_, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
-		return err
+		if a != nil {
+			_, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
+			return err
+		}
+		return t.checkGitHubAppScheduleTx(ctx, tx, app.installationID, app.repositoryID)
 	})
 	if err != nil {
 		return nil, nil, err

@@ -109,7 +109,7 @@ func TestGitHubAppAutomationFailsClosedAndRemovalRevokesConsent(t *testing.T) {
 		t.Fatalf("temporary error=%+v", out)
 	}
 	f.app.FailContents(1)
-	if code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", strings.Repeat("6", 40)), ""); code != http.StatusUnprocessableEntity {
+	if code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", strings.Repeat("6", 40)), ""); code != http.StatusBadGateway {
 		t.Fatalf("unreadable config dispatch=%d,%+v", code, out)
 	}
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte("pipelines: [invalid"))
@@ -191,7 +191,7 @@ func TestGitHubAppAutomationRequiresConsentAndUsesDefaultBranch(t *testing.T) {
 	if _, out := f.deliver("push", main, ""); out["status"] != "dispatched" {
 		t.Fatalf("consented main push=%+v", out)
 	}
-	if _, out := f.deliver("push", main, ""); out["status"] != "duplicate" {
+	if _, out := f.deliver("push", main, ""); out["status"] != "queued" {
 		t.Fatalf("replayed push=%+v", out)
 	}
 	if len(f.triggers(olga.team)) != 1 || len(f.triggers(bob.team)) != 0 {

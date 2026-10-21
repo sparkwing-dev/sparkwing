@@ -431,6 +431,8 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	case metricsSrv != nil && ln.Metrics == nil:
 		return errors.New("controller metrics address " + s.metricsAddr + " has no listener")
 	}
+	ctx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
 	listener := func(h http.Handler) *http.Server {
 		return &http.Server{
 			Handler:           h,
@@ -466,6 +468,15 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runBilling(ctx, BillingInterval)
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
+	inboxDone := make(chan struct{})
+	go func() {
+		defer close(inboxDone)
+		s.runGitHubInbox(ctx)
+	}()
+	defer func() {
+		stopWorkers()
+		<-inboxDone
+	}()
 
 	errCh := make(chan error, len(servers))
 	for _, l := range servers {

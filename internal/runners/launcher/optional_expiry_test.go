@@ -20,7 +20,7 @@ func TestCloudClaimAndPublicationAllowUnexpiringServiceRoot(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			award, err := control.Claim(t.Context())
+			award, err := control.Claim(t.Context(), "cloud", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

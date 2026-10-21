@@ -20,14 +20,16 @@ type UnitRef struct {
 // UnitDemand carries observed capacity and labels. Identity, reservations and team
 // come from C2's capability; requirements and allowed pools come from persisted seals.
 type UnitDemand struct {
-	CapabilityPrefix string
-	Kinds            []capability.UnitKind
-	Labels           []string
-	Target           *UnitRef
-	OS               string
-	Arch             string
-	Capacity         match.Resources
-	Available        match.Resources
+	CapabilityPrefix   string
+	Kinds              []capability.UnitKind
+	Labels             []string
+	JobNamespace       string
+	ExcludedTeamLabels []string
+	Target             *UnitRef
+	OS                 string
+	Arch               string
+	Capacity           match.Resources
+	Available          match.Resources
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.

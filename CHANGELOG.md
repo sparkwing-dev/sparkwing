@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **github-app (Breaking):** Signed webhooks enter a durable inbox and answer 202 with `queued` before calling GitHub. Temporary provider failures and admission limits retry after restart without redelivery. Completed pipelines keep their replay keys, so a partial retry starts only the remaining work. The inbox replaces synchronous processing responses. Store baseline 16 adds the inbox and idle free-slot tracking. See [migration](docs/migrations/_unreleased.md#github-deliveries-enter-a-durable-inbox).
+- **schedules:** App schedules share one installation-filtered arming transaction and retain their own rows during member schedule replacement. Admin-consented default-branch schedules resolve their commit at fire time and receive verified trust.
+- **storage:** Free-tier slots return after thirty consecutive days without runs or stored bytes. New activity restarts the idle clock.
+- **launcher:** Cloud claims rotate across teams with bounded probes per team. Node quarantine stops only the affected team's claims, and the hourly run cap reserves shares while other teams have pending work.
+
 - **auth:** Member tokens keep their reported expiry through the minting session’s idle or absolute timeout. Logout, admin revocation, removal and demotion still end them immediately. Promotion or rejoining cannot revive old authority.
 
 - **auth:** Switching teams preserves each session's original membership fence, so removal and a later rejoin cannot revive an old session's access.

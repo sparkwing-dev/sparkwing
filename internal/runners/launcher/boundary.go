@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 // ErrNoDedicatedNode leaves the award unstarted when no exclusive placement is available.
@@ -257,7 +259,7 @@ func nodeReady(node corev1.Node) bool {
 }
 
 // TeamNodeValue is the collision-resistant value infrastructure must place on the team's dedicated nodes.
-func TeamNodeValue(namespace, team string) string { return labelHash(namespace + "/" + team) }
+func TeamNodeValue(namespace, team string) string { return admission.TeamNodeValue(namespace, team) }
 
 func daemonPod(pod corev1.Pod) bool {
 	for _, owner := range pod.OwnerReferences {

@@ -67,10 +67,6 @@ type githubAppWebhookResp struct {
 	Runs   []githubAppRun `json:"runs,omitempty"`
 }
 
-func githubAppReplayKey(pipeline string, body []byte) string {
-	return githubAppDeliveryDigest(body) + ":" + pipeline
-}
-
 func githubAppIgnored(w http.ResponseWriter, reason string) {
 	writeJSON(w, http.StatusAccepted, githubAppWebhookResp{Status: "ignored", Reason: reason})
 }
@@ -101,16 +97,22 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode delivery: %w", err))
 		return
 	}
-	// safety: GitHub signs the body and not the event header, so a body is
-	// read only as the event it first arrived as.
-	sameEvent, err := s.operator.BindGitHubAppDeliveryEvent(r.Context(), githubAppDeliveryDigest(body), event, delivery, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "github app delivery event", err)
+	if err := s.operator.EnqueueGitHubDelivery(r.Context(), delivery, event, body, time.Now()); err != nil {
+		if errors.Is(err, store.ErrGitHubDeliveryConflict) {
+			writeError(w, http.StatusConflict, err)
+		} else {
+			s.writeInternalError(w, r, "queue github app delivery", err)
+		}
 		return
 	}
-	if !sameEvent {
-		s.logger.Warn("github app delivery re-sent as another event", "event", event, "delivery", delivery)
-		writeError(w, http.StatusConflict, errors.New("this delivery body arrived before as another event"))
+	writeJSON(w, http.StatusAccepted, githubAppWebhookResp{Status: "queued"})
+}
+
+func (s *Server) processGitHubDelivery(w http.ResponseWriter, r *http.Request, queued store.GitHubDelivery) {
+	body, event, delivery := queued.Body, queued.Event, queued.ID
+	var env githubAppDelivery
+	if err := json.Unmarshal(body, &env); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	switch event {
@@ -675,7 +677,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	}
 	// safety: a digest is forgotten one retention after receipt, so an event older than that is a replay
 	// nothing remembers; GitHub redelivers for days, not months, so no real delivery is refused.
-	if time.Since(intake.at) > store.GitHubAppDeliveryRetention-githubAppClockSkew {
+	if received, ok := r.Context().Value(githubDeliveryReceivedKey{}).(time.Time); ok && received.Sub(intake.at) > store.GitHubAppDeliveryRetention-githubAppClockSkew {
 		s.logger.Warn("github app delivery refused: older than the replay window", "team", string(in.Team),
 			"event", event, "repo", repo.Slug(), "event_at", intake.at.UTC(), "delivery", delivery)
 		writeError(w, http.StatusConflict, errors.New("the event is older than the delivery replay window"))
@@ -691,6 +693,9 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	if event == "push" && intake.branch != "" && intake.branch == env.Repository.DefaultBranch {
 		cronStatus, cronSkip, cronErr = s.reconcileGitHubAppCrons(r, in, tenant, repo, intake)
 		if cronErr != nil {
+			if cronStatus >= 500 || cronStatus == http.StatusTooManyRequests {
+				apierr.NoteResponseError(w, cronErr)
+			}
 			s.logger.Warn("github app schedule reconciliation failed", "team", string(in.Team), "repo", repo.Slug(), "err", cronErr)
 		}
 	}
@@ -712,10 +717,17 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		if !intake.at.Add(githubAppClockSkew).Before(grant.EnabledAt) {
 			preview, err := s.githubAppAutomationPreview(ctx, tenant, in, repo)
 			if err != nil || (preview.Status != "ready" && preview.Status != "missing") {
+				if err != nil {
+					apierr.NoteResponseError(w, err)
+				} else if preview.Status == "unavailable" {
+					apierr.NoteResponseError(w, errors.New(preview.Error))
+				}
 				s.logger.Warn("github app repository automation unavailable", "team", string(in.Team), "repo", repo.Slug(), "status", preview.Status, "error", preview.Error, "err", err)
 				if len(planned) == 0 {
 					if err != nil {
 						s.writeInternalError(w, r, "discover repository automation", err)
+					} else if preview.Status == "unavailable" {
+						writeJSON(w, http.StatusBadGateway, preview)
 					} else {
 						writeJSON(w, http.StatusUnprocessableEntity, preview)
 					}
@@ -764,8 +776,10 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	if snapshot.RepositoryID != repo.ID || snapshot.DefaultBranch != intake.branch || snapshot.HeadSHA != intake.sha {
 		return 0, "the push no longer names this repository's default-branch head", nil
 	}
-	if _, err := tenant.WithdrawOtherGitHubCronInstallations(r.Context(), in.InstallationID, repo.ID, time.Now()); err != nil {
-		return http.StatusInternalServerError, "", fmt.Errorf("withdraw former GitHub App schedule bindings: %w", err)
+	if _, err := tenant.GitHubAppAutomation(r.Context(), in.InstallationID, repo.ID); errors.Is(err, store.ErrNotFound) {
+		return 0, "repository automation consent is not enabled", nil
+	} else if err != nil {
+		return http.StatusInternalServerError, "", fmt.Errorf("read repository automation consent: %w", err)
 	}
 	var entries []crons.Declared
 	if snapshot.Found {
@@ -781,62 +795,24 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 			}
 		}
 	}
-	repoURL := "https://github.com/" + repo.Slug() + ".git"
-	svc := s.cronServiceFor(tenant, "github-app:"+strconv.FormatInt(in.InstallationID, 10))
-	if err := s.manualCronConflict(r.Context(), svc, repo, entries); err != nil {
-		if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), in.InstallationID, repo.ID, time.Now()); werr != nil {
-			return http.StatusInternalServerError, "", fmt.Errorf("stop conflicting App schedule: %w", werr)
+	ids, withdrawn, err := s.armGitHubAppSchedules(r.Context(), tenant, in.InstallationID, repo, intake.branch, entries)
+	if err != nil {
+		if errors.Is(err, store.ErrCronScheduleTaken) || errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
+			return http.StatusConflict, "", err
 		}
-		return http.StatusConflict, "", err
-	}
-	for _, entry := range entries {
-		if err := s.cronIntervalRefusal(r, entry.Trigger.Cron); err != nil {
+		var refusal *apierr.Error
+		if errors.As(err, &refusal) {
+			return apierr.Status(refusal.Code), "", err
+		}
+		var minimum *store.ComputeLimitError
+		if errors.As(err, &minimum) || errors.Is(err, store.ErrInvalidInput) {
 			return http.StatusUnprocessableEntity, "", err
 		}
-	}
-	if len(entries) > 0 {
-		if status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, repo.ID, len(entries)); err != nil {
-			return status, "", err
-		}
-	}
-	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{
-		RepoURL: repoURL, Branch: intake.branch, SHA: intake.sha, Entries: entries,
-		GitHubInstallationID: in.InstallationID, GitHubRepositoryID: repo.ID,
-	})
-	if err != nil {
 		return http.StatusInternalServerError, "", fmt.Errorf("arm GitHub App schedules: %w", err)
 	}
 	s.logger.Info("github app schedules reconciled", "team", string(in.Team), "repo", repo.Slug(),
-		"sha", intake.sha, "armed", report.Armed, "refreshed", report.Refreshed, "withdrawn", report.Withdrawn)
+		"sha", intake.sha, "declared", len(ids), "withdrawn", len(withdrawn))
 	return 0, "", nil
-}
-
-func (s *Server) manualCronConflict(ctx context.Context, svc *crons.Service,
-	repo store.GitHubRepo, entries []crons.Declared,
-) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	want := map[string]bool{}
-	for _, entry := range entries {
-		want[entry.Pipeline+"\x00"+entry.Name] = true
-	}
-	rows, err := svc.List(ctx)
-	if err != nil {
-		return err
-	}
-	for _, row := range rows {
-		if row.GitHubRepositoryID != 0 || row.Where != store.CronWhereController || !want[row.Pipeline+"\x00"+row.Name] {
-			continue
-		}
-		if row.RepositoryKey == "" {
-			return fmt.Errorf("manual schedule %s/%s has no resolved repository identity", row.Pipeline, row.Name)
-		}
-		if row.RepositoryKey == runspec.RepoKey(fmt.Sprintf("gh:%d", repo.ID)) {
-			return fmt.Errorf("a manually pushed schedule already owns %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
-		}
-	}
-	return nil
 }
 
 func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery) {
@@ -979,19 +955,6 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	planned []githubAppPlannedRun,
 ) {
 	ctx := r.Context()
-	// safety: the digest is of the signed body and is kept for every team, so
-	// a redelivery spends no run budget and a replay after the installation
-	// moves teams starts nothing in the new one.
-	digest := githubAppDeliveryDigest(body)
-	seen, err := s.operator.GitHubAppDeliverySeen(ctx, digest)
-	if err != nil {
-		s.writeInternalError(w, r, "github app delivery", err)
-		return
-	}
-	if seen {
-		s.writeGitHubAppDuplicate(w, r, tenant, planned, delivery, body)
-		return
-	}
 	// safety: GitHub is asked on every delivery rather than through the cache
 	// the token route keeps, because a cached answer lags a removal that no
 	// installation_repositories delivery has reached this replica for yet.
@@ -1007,8 +970,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	if event == "release" || event == "create" || event == "delete" {
 		sha := ""
 		for _, plan := range planned {
-			existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-				githubAppReplayKey(plan.pipeline, body))
+			existing, err := tenant.FindGitHubAppTrigger(ctx, githubAppDeliveryDigest(body), plan.pipeline)
 			if err == nil && existing != nil && existing.GitSHA != "" {
 				sha = existing.GitSHA
 				break
@@ -1031,12 +993,11 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		}
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
-	shed := 0
+	queued := 0
 	for _, plan := range planned {
 		// safety: a run this delivery already started answers without spending,
-		// so a redelivery after a partial shed pays only for what was shed.
-		if existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-			githubAppReplayKey(plan.pipeline, body)); err == nil && existing != nil {
+		// so a retry after partial admission pays only for the queued runs.
+		if existing, err := tenant.FindGitHubAppTrigger(ctx, githubAppDeliveryDigest(body), plan.pipeline); err == nil && existing != nil {
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
@@ -1048,8 +1009,8 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 					writePolicyError(w, err)
 					return
 				}
-				shed++
-				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "shed"})
+				queued++
+				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "queued"})
 				continue
 			}
 			if s.writeComputeLimitRefusal(w, r, err) {
@@ -1060,18 +1021,11 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		}
 		resp.Runs = append(resp.Runs, run)
 	}
-	// safety: a delivery that shed a run is not recorded, so GitHub's redelivery
-	// can still start it; the runs it did start answer as duplicates.
-	if shed == 0 {
-		if err := s.operator.RecordGitHubAppDelivery(ctx, digest, delivery, time.Now()); err != nil {
-			s.logger.Warn("github app delivery not recorded", "delivery", delivery, "err", err)
-		}
-	}
-	if !githubAppStartedAny(resp.Runs) && shed == 0 {
+	if !githubAppStartedAny(resp.Runs) && queued == 0 {
 		resp.Status, resp.Reason = "ignored", "repository automation consent is no longer current"
 	}
 	s.logger.Info("github app delivery accepted", "team", string(in.Team), "event", event,
-		"repo", repo.Slug(), "sha", planned[0].intake.sha, "runs", len(resp.Runs), "shed", shed, "delivery", delivery)
+		"repo", repo.Slug(), "sha", planned[0].intake.sha, "runs", len(resp.Runs), "queued", queued, "delivery", delivery)
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
@@ -1082,22 +1036,6 @@ func githubAppStartedAny(runs []githubAppRun) bool {
 		}
 	}
 	return false
-}
-
-func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
-	planned []githubAppPlannedRun, delivery string, body []byte,
-) {
-	resp := githubAppWebhookResp{Status: "duplicate"}
-	for _, plan := range planned {
-		run := githubAppRun{Pipeline: plan.pipeline, Status: "duplicate"}
-		existing, err := tenant.FindTriggerByWebhookReplay(r.Context(),
-			githubAppReplayKey(plan.pipeline, body))
-		if err == nil && existing != nil {
-			run.RunID = existing.ID
-		}
-		resp.Runs = append(resp.Runs, run)
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) startGitHubAppRun(

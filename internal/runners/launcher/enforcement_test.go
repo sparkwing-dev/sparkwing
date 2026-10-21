@@ -192,7 +192,7 @@ type claimSignalControl struct {
 	claimed chan struct{}
 }
 
-func (c claimSignalControl) Claim(ctx context.Context) (*CloudJobAward, error) {
+func (c claimSignalControl) Claim(ctx context.Context, _ string, _ []string) (*CloudJobAward, error) {
 	close(c.claimed)
 	<-ctx.Done()
 	return nil, ctx.Err()

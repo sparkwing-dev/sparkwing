@@ -149,14 +149,17 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 		return err
 	}
 	var errs []error
-	budget := maxQuarantinesPerSync
-	// safety: nodes still faulted from earlier passes spend the budget too, so
-	// a fault spreading across the fleet stops claims instead of tainting it.
+	budget := map[string]int{}
+	blocked := map[string]bool{}
+	// safety: the protected node label fixes the budget to a team even when
+	// a kubelet has damaged the reservation annotations.
 	quarantine := func(node *corev1.Node, cause string) error {
-		if budget == 0 {
-			return fmt.Errorf("Cloud node %s: %s; more than %d nodes faulted in one pass, so claims stop until an operator checks the controller and these nodes", node.Name, cause, maxQuarantinesPerSync)
+		label := node.Labels[TeamNodeLabel]
+		if budget[label] >= maxQuarantinesPerSync && label != "" {
+			blocked[label] = true
+			return &nodeFault{node: node.Name, cause: fmt.Sprintf("%s; more than %d nodes faulted for this team, so its claims stop until an operator checks these nodes", cause, maxQuarantinesPerSync)}
 		}
-		budget--
+		budget[label]++
 		return quarantineNode(ctx, l.Kube, node, cause)
 	}
 	for i := range nodes.Items {
@@ -178,6 +181,13 @@ func (l *Launcher) syncReservations(ctx context.Context) error {
 		}
 		errs = append(errs, err)
 	}
+	l.mu.Lock()
+	l.blockedTeamLabels = l.blockedTeamLabels[:0]
+	for label := range blocked {
+		l.blockedTeamLabels = append(l.blockedTeamLabels, label)
+	}
+	slices.Sort(l.blockedTeamLabels)
+	l.mu.Unlock()
 	return errors.Join(errs...)
 }
 
@@ -192,9 +202,7 @@ func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, 
 		held.Award == lease && lease.Kind != "" && lease.ID != "" && lease.Holder != "" && lease.Generation > 0 && held.JobName == jobName(binding) && held.ReservationID != ""
 }
 
-// maxQuarantinesPerSync bounds how many faulted nodes one pass quarantines or
-// keeps quarantined. A controller fault that refuses every orphaned award at
-// once passes it, and sync then stops claims and asks an operator.
+// maxQuarantinesPerSync bounds faulted nodes per team in each pass.
 const maxQuarantinesPerSync = 3
 
 // safety: each orphaned reservation gets its own controller call, so a refused

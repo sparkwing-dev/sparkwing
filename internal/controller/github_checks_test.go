@@ -106,8 +106,8 @@ func TestGitHubAppCheckRunRerequestedRerunsItsPipeline(t *testing.T) {
 	if trig.Pipeline != "build" || trig.GitSHA != headSHA || trig.GitBranch != "refs/heads/main" || trig.Repo != "acme/widgets" {
 		t.Fatalf("re-run trigger = %+v, want build on main at the same commit", trig)
 	}
-	if _, out := f.deliver("check_run", rerun, ""); out["status"] != "duplicate" {
-		t.Fatalf("redelivered rerequested = %v, want duplicate", out)
+	if _, out := f.deliver("check_run", rerun, ""); out["status"] != "queued" {
+		t.Fatalf("redelivered rerequested = %v, want inbox acknowledgement", out)
 	}
 	if n := len(f.triggers(olga.team)); n != 3 {
 		t.Fatalf("the team has %d runs, want the push's 2 and one re-run", n)

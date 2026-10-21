@@ -6,9 +6,10 @@ import (
 	"errors"
 )
 
-// FindTriggerByWebhookReplay returns the trigger in t's team matching the
-// signed material's replay key. An unsigned delivery header cannot select a run.
-func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error) {
+// FindGitHubAppTrigger returns the trigger in t's team matching the
+// signed material's digest and pipeline. An unsigned delivery header cannot select a run.
+func (t *Tenant) FindGitHubAppTrigger(ctx context.Context, digest, pipeline string) (*Trigger, error) {
+	replayKey := gitHubAppReplayKey(digest, pipeline)
 	if replayKey == "" {
 		return nil, notFound("trigger for webhook replay", replayKey)
 	}

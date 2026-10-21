@@ -165,7 +165,7 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := control.Claim(t.Context()); err != nil || got != nil {
+	if got, err := control.Claim(t.Context(), "cloud", nil); err != nil || got != nil {
 		t.Fatalf("empty claim=%v err=%v", got, err)
 	}
 	restarted := launcher.Launcher{Control: control, Kube: kube, Boundary: boundary, Config: config}

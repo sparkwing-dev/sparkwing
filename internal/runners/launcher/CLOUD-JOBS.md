@@ -187,10 +187,12 @@ taint or the annotation, even after it is uncordoned. No NodeClaim is deleted:
 an operator inspects the node, then deletes it or removes the taint and
 annotation.
 
-One pass quarantines or keeps quarantined at most three faulted nodes. A
-fourth means the controller, not a node, is likely at fault, so sync stops
-claims with an error naming the node and asking an operator to check the
-controller and the quarantined nodes.
+One pass quarantines or keeps quarantined at most three faulted nodes per
+team. A fourth stops that team's claims and names the node for operator
+inspection; other teams keep claiming. The protected node label groups faults
+even when both reservation and binding annotations are damaged. The launcher
+sends faulted protected labels with each claim, and the controller excludes
+their matching teams.
 
 A quarantine that has not persisted stops claims, so a 503 or any other failed
 write blocks until a later pass writes it. A conflict is retried with backoff;

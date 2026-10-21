@@ -348,6 +348,9 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
+	if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
 	if err != nil {
 		return err

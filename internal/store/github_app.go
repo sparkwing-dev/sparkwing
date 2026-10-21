@@ -428,56 +428,6 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	return err
 }
 
-// GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
-// The App webhook refuses an event older than this, so a forgotten digest
-// does not readmit a replayed delivery.
-const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
-
-// BindGitHubAppDeliveryEvent ties digest to the first event it arrived as and
-// reports whether event is that one. The binding is kept apart from the
-// processed record, so binding a delivery does not make it seen.
-func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error) {
-	if err := o.s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
-		return false, err
-	}
-	key := "event:" + digest
-	if _, err := o.s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, key, delivery, now.Unix(), event); err != nil {
-		return false, err
-	}
-	var bound string
-	if err := o.s.queryRow(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
-		return false, err
-	}
-	return bound == event, nil
-}
-
-// GitHubAppDeliverySeen reports whether a delivery with digest was processed
-// before, for any team.
-func (o *Operator) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error) {
-	var n int
-	err := o.s.queryRow(ctx, `SELECT COUNT(*) FROM github_app_deliveries WHERE digest = ?`, digest).Scan(&n)
-	return n > 0, err
-}
-
-// RecordGitHubAppDelivery remembers that a delivery with digest was
-// processed. It and [Store.BindGitHubAppDeliveryEvent] forget digests and
-// event bindings older than [GitHubAppDeliveryRetention].
-func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
-	if err := o.s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
-		return err
-	}
-	_, err := o.s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
-	return err
-}
-
-func (s *Store) forgetExpiredGitHubAppDeliveries(ctx context.Context, now time.Time) error {
-	_, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		now.Add(-GitHubAppDeliveryRetention).Unix())
-	return err
-}
-
 // GitHubCheckRun returns the GitHub check run recorded for t's run runID, or
 // 0 when none is. ErrNotFound when t has no trigger runID.
 func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error) {
