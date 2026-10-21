@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -204,8 +206,8 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 			return errors.New("downstream body started during cancellation")
 		}
 		ref := controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: input.NodeID}
-		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
-		started, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: runspec.ClaimGeneration(int64(input.Generation))}
+		started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(input.Attempt)})
 		if err != nil {
 			return err
 		}
@@ -214,7 +216,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		}
 		reportCtx, stopReport := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 		defer stopReport()
-		_, err = f.State.TransitionNode(reportCtx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(started.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}}})
+		_, err = f.State.TransitionNode(reportCtx, store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: store.NodeCancelled, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}})
 		return err
 	})
 	completion, err := f.Host.Run(ctx, f.Input)

@@ -19,7 +19,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 		return nil, errors.New("reaper limit must be positive")
 	}
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		return assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now())
+		return assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.time)
 	}); err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 	for _, target := range targets {
 		var result *ReapedUnit
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			now := tx.now()
+			now := tx.time
 			var holder string
 			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
@@ -125,7 +125,7 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err != nil {
 		return nil, err
 	}
-	now = tx.now()
+	now = tx.time
 	if row.Status == StatusDone {
 		return nil, nil
 	}
@@ -145,14 +145,14 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	} else if row.Status == StatusRunning && row.Disruptions+1 >= limits.MaxDisruptions {
 		to = NodeFailed
 	}
-	if _, err = transitionNodeTx(ctx, tx, target.team, NodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: CauseLeaseLapse}, now); err != nil {
+	if _, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: CauseLeaseLapse}, now); err != nil {
 		return nil, err
 	}
 	disruptions := row.Disruptions
 	if row.Status == StatusRunning && to != NodeCancelled {
 		disruptions++
 	}
-	return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: string(target.kind), Generation: row.Generation, Disruptions: disruptions, Requeued: to == NodePending, Cancelled: to == NodeCancelled, Failed: to == NodeFailed}, nil
+	return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: string(target.kind), Generation: int64(row.Generation), Disruptions: disruptions, Requeued: to == NodePending, Cancelled: to == NodeCancelled, Failed: to == NodeFailed}, nil
 }
 
 func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, actor Actor, row NodeRow, run RunRow, now time.Time) (*ReapedUnit, error) {
@@ -169,9 +169,7 @@ func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, a
 			return nil, nil
 		}
 		cause = CauseApprovalTimeout
-		if policy == "approve" {
-			to = NodeSuccess
-		}
+		to = approvalTimeoutOutcome(policy)
 	} else {
 		wait := runClaimWait(run)
 		if row.Status != StatusPending || row.QueueStartedAt == nil || !wait.Set || wait.Value <= 0 || row.QueueStartedAt.Add(wait.Value).After(now) {
@@ -181,12 +179,12 @@ func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, a
 	if row.CancelRequestedAt != nil || run.CancelRequestedAt != nil {
 		to, cause = NodeCancelled, CauseCancel
 	}
-	change := NodeTransition{Ref: target.ref, To: to, Cause: cause, Actor: actor}
+	change := nodeTransition{Ref: target.ref, To: to, Cause: cause, Actor: actor}
 	if to == NodeFailed {
 		change.Extra.Result = &NodeResult{Outcome: to, Reason: string(cause)}
 	}
 	if _, err := transitionNodeTx(ctx, tx, target.team, change, now); err != nil {
 		return nil, err
 	}
-	return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: "node", Generation: row.Generation, Disruptions: row.Disruptions, Failed: to == NodeFailed, Cancelled: to == NodeCancelled}, nil
+	return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: "node", Generation: int64(row.Generation), Disruptions: row.Disruptions, Failed: to == NodeFailed, Cancelled: to == NodeCancelled}, nil
 }

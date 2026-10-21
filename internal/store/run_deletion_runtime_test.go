@@ -31,7 +31,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 	if err := tenant.DeleteAuthorizedRun(t.Context(), a); !errors.As(err, &conflict) || conflict.Code != apierr.Conflict {
 		t.Fatalf("active deletion: %v", err)
 	}
-	if _, err := tenant.TransitionRun(t.Context(), finish.Transition); err != nil {
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {

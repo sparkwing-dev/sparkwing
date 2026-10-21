@@ -109,7 +109,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		}
 		principal := parent.Authorities[0].Principal
 		binding := principal.Capability.Binding
-		binding.Attempt = input.Attempt
+		binding.Attempt = int64(input.Attempt)
 		grant, err := processes.Delegate(ctx, lookup, capability.DelegateSpec{
 			Parent: principal.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport},
 			Binding: binding, Repositories: principal.Capability.Repositories, ExpiresAt: principal.Capability.ExpiresAt,
@@ -268,7 +268,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		if err != nil {
 			return JobUpload{}, err
 		}
-		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}}
+		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(input.Attempt), Generation: int64(input.Generation)}}
 		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: request.Team, RunID: input.Accepted.RunID, Principal: blob.Principal(principal.Capability.Subject.ID), CapabilityRef: input.Authority.CapabilityPrefix, Attempt: attempt}
 		run, err := f.Tenant.ReadRun(ctx, input.Accepted.RunID)
 		if err != nil {
@@ -297,7 +297,7 @@ func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, ho
 		t.Fatal(err)
 	}
 	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "output"}
-	if _, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
+	if _, err := f.State.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})

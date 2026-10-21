@@ -92,7 +92,7 @@ func addBlobJob(t *testing.T, s *Store, original blob.UploadIntent, id string) b
 	c.Binding.NodeID = id
 	c.Data.NodeID = id
 	var err error
-	c.UnitID, err = encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: id})
+	c.UnitID, err = encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: runspec.NodeID(id)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,8 +347,8 @@ func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadI
 	}
 	id := intent.Identity.Attempt.Value
 	key := blobOutputRequest(intent).Key
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: id.Generation}
-	_, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: id.RunID, NodeID: id.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(id.Generation)}
+	_, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: id.RunID, NodeID: id.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
 	if err != nil {
 		t.Fatal(err)
 	}

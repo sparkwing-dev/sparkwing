@@ -23,7 +23,7 @@ func payTeam(t *testing.T, tenant *store.Tenant, ref string, dollars int64) time
 
 func billingStanding(t *testing.T, tenant *store.Tenant, now time.Time) store.BillingStanding {
 	t.Helper()
-	b, err := tenant.BillingStanding(context.Background(), now)
+	b, err := tenant.BillingStanding(context.Background())
 	if err != nil {
 		t.Fatalf("standing: %v", err)
 	}

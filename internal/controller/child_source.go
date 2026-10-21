@@ -109,7 +109,7 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 		requestMasker(ctx).Register(token.Token)
 		return source.Credential{Kind: "github_app", Host: host, Secret: token.Token}, nil
 	}
-	return s.intakeStoredCredential(ctx, a.team, string(spec.RepoKey), host, "")
+	return s.intakeStoredCredential(ctx, a.team, spec.RepoKey, host, "")
 }
 
 func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, repository, host, kind string) (source.Credential, error) {

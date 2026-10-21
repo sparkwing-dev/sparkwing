@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -30,7 +31,7 @@ func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool {
 		return p != nil && p.Allowed && p.Owner == owner.Authority && p.Team == Team(c.Team) &&
 			owner.Authority == (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}) &&
 			c.Binding.Kind == capability.BindingTrigger && p.Generation > 0 && p.Generation == c.Binding.Generation &&
-			p.Node.RunID == c.Binding.RunID && p.Node == node.Ref && p.NodeGeneration == node.Generation &&
+			p.Node.RunID == c.Binding.RunID && p.Node == node.Ref && runspec.ClaimGeneration(p.NodeGeneration) == node.Generation &&
 			p.SpecHash != "" && p.SpecHash == node.SpecHash
 	}
 }
@@ -64,7 +65,7 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		if err := json.Unmarshal(body, &poll); err != nil {
 			return UnitDemand{}, err
 		}
-		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.now()) {
+		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.time) {
 			continue
 		}
 		if !validMatchingResources(poll.Capacity) || !validMatchingResources(poll.Available) {
@@ -111,7 +112,7 @@ func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.P
 }
 
 func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand, ref controllerwire.NodeRef) (bool, error) {
-	unit := UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
+	unit := UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}
 	if _, err := claimKinds(owner.Capability, UnitDemand{Target: &unit}); err != nil {
 		return false, nil
 	}

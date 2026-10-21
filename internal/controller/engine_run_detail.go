@@ -126,8 +126,8 @@ func statusAttempts(target capability.Target, nodes map[string]store.NodeRow, ro
 		id := row.Identity
 		node, exists := nodes[id.NodeID]
 		key := attemptKey{id.NodeID, id.Attempt}
-		if !exists || id.Team != target.Team || id.RunID != target.RunID || id.Attempt <= 0 || id.Attempt > node.Attempt ||
-			id.Generation <= 0 || id.Generation > node.Generation || seen[key] {
+		if !exists || id.Team != target.Team || id.RunID != target.RunID || id.Attempt <= 0 || runspec.AttemptOrdinal(id.Attempt) > node.Attempt ||
+			id.Generation <= 0 || runspec.ClaimGeneration(id.Generation) > node.Generation || seen[key] {
 			return nil, errors.New("invalid persisted status attempt")
 		}
 		seen[key] = true

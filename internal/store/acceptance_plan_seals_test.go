@@ -89,7 +89,7 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 }
 
 func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
-	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("planner", "planner@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("planner", "planner@example.test"), store.SignUpConditions{})
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
@@ -125,7 +125,7 @@ func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure fun
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
@@ -182,7 +182,10 @@ func (acceptanceClaimProfile) ResolveClaimProfile(context.Context, capability.Pr
 	return match.Profile{Capacity: capacity}, capacity, nil
 }
 
-func acceptanceAttempt(attempt int64) *int64 { return &attempt }
+func acceptanceAttempt[T ~int | ~int64](attempt T) *runspec.AttemptOrdinal {
+	ordinal := runspec.AttemptOrdinal(attempt)
+	return &ordinal
+}
 
 func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
 	s := storetest.Open(t, store.WithPolicies(sealStorePolicies))

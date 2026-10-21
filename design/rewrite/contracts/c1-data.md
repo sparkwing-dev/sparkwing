@@ -1375,7 +1375,8 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
-`NodeTransition.SourceAttempt` is a required nonnegative ordinal pointer for
+`StartNode`, `RetryNode`, `ReportNode` and `ReleaseNode` carry a
+`SourceAttempt` field. It is a required nonnegative ordinal pointer for
 holder start, retry, report and unstarted release. It names the persisted ordinal
 before the edge. Initial start supplies an explicit zero. A resumed claim supplies
 the last ordinal it retained through disruption. Start and retry return the new
@@ -3221,10 +3222,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `NodeTransitions` | NodeTransitions returns fresh data so callers cannot mutate the store's legal transition table. Insertions start at pending with state_seq=0 through AcceptPlan or AcceptExpansion and are not edges. |
 | `NodeResult` | NodeResult references authorized records; raw digests alone never authorize output attachment. |
 | `MaterializeSource` | MaterializeSource preserves the read edge that permits copying another result. |
-| `TransitionExtra` | TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused. |
 | `ApprovalResolution` | ApprovalResolution records the resolver and policy result in the same transaction as the node edge. |
 | `ClaimAward` | ClaimAward identifies an award already derived by the store; callers cannot choose its team or grants. |
-| `NodeTransition` | NodeTransition has no caller-selected event kind or clock; the edge determines both. |
+| `NodeCommand` | A closed set of named operations fixes each edge and its payload before normalization. |
 | `Applied` | Applied distinguishes an identical replay from a state change or a cooperative cancellation request. |
 | `IllegalTransitionReason` | IllegalTransitionReason maps stale authority to lock_held and invalid edges to illegal_transition. |
 | `ErrIllegalTransition` | ErrIllegalTransition refuses a failed write loudly; a zero-row mutation is never success. |
@@ -4191,3 +4191,31 @@ environments without known provenance. Child intake copies its parent's
 environment and provenance in the ancestry transaction. A supplied snapshot or
 provenance that differs from the parent fails with `spec_drift`. Retry retains
 the original seal. Invocation origin never selects environment storage.
+
+## Fenced completion and transaction clocks
+
+Successful transaction construction captures database time once. Failure to
+read that clock aborts construction before any transaction body runs. Lifecycle,
+identity, billing and schedule mutations read this snapshot instead of a caller
+clock. Schedule due times and provider event timestamps remain domain facts.
+Browser flow expiry and recent sign-in checks use the same snapshot as the
+session authority read.
+
+Runs, nodes and triggers store a generated `drain_deadline_at` from their first
+`cancel_requested_at` plus five minutes. The database derives it in the same
+write, including concurrency supersession. Cancellation clamps existing work and
+slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
+bounds. The schema baseline is version 16.
+
+`Tenant.TransitionNode` accepts the closed `NodeCommand` interface. `StartNode`,
+`RetryNode`, `ReportNode` and `ReleaseNode` carry the captured attempt. Start,
+retry, ready, release and cancel commands fix their destination. Approval timeout
+reads its verdict from the persisted policy. Each command exposes only its own
+payload. `BindNodeCommand` supplies authenticated transport authority without
+changing the operation. The private normalizer retains the transition table as
+the single state owner. The local host adapter rejects fields that the selected
+command cannot carry. Node rows and execution inputs keep claim generations and
+attempt ordinals distinct. Actor generations and command source attempts use
+those same types.
+Run completion carries no requested outcome and derives its verdict from
+persisted state.

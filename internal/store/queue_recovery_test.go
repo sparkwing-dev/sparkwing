@@ -27,10 +27,10 @@ func TestUnstartedNodeRequeuesKeepQueueDeadline(t *testing.T) {
 	ref := controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}
 	initial := *now
 	for i := range 4 {
-		if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
 			t.Fatal(err)
 		}
-		claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+		claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,15 +68,15 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 	}
 	ref := controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}
 	initial := *now
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = claim.Award.LeaseExpiresAt
@@ -84,7 +84,7 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	requeued := *now
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
 	*now = initial.Add(20 * time.Minute)

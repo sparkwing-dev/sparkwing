@@ -211,7 +211,7 @@ func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal st
 }
 
 // GrantFreeSlot gives team a free-tier slot whether or not one is free.
-func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error) {
+func (s *Store) GrantFreeSlot(ctx context.Context, team Team) (err error) {
 	team = NormalizeTeam(team)
 	if err := ValidateSlug(string(team)); err != nil {
 		return err
@@ -233,7 +233,7 @@ func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (er
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO free_slots (team, taken_at) VALUES (?,?)
-ON CONFLICT (team) DO NOTHING`, string(team), now.UnixNano()); err != nil {
+ON CONFLICT (team) DO NOTHING`, string(team), tx.time.UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()

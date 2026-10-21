@@ -215,7 +215,7 @@ func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T)
 			}
 			survivor = a
 		}
-		if _, err := tenant.s.DeleteAccount(t.Context(), first, time.Now()); err != nil {
+		if _, err := tenant.s.DeleteAccount(t.Context(), first); err != nil {
 			t.Fatal(err)
 		}
 		var deleted, survived int

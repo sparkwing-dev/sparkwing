@@ -18,7 +18,7 @@ import (
 type scriptedHostStore struct {
 	readSnapshot     func(context.Context, string) (store.RunSnapshot, error)
 	readNode         func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
-	transitionNode   func(context.Context, store.NodeTransition) (store.Applied, error)
+	transitionNode   func(context.Context, store.NodeCommand) (store.Applied, error)
 	transitionRun    func(context.Context, store.RunTransition) (store.Applied, error)
 	recordStep       func(context.Context, store.StepReport) error
 	renewOwner       func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
@@ -42,7 +42,7 @@ func (s *scriptedHostStore) ReadNode(ctx context.Context, ref controllerwire.Nod
 	return s.readNode(ctx, ref)
 }
 
-func (s *scriptedHostStore) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (s *scriptedHostStore) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	if s.transitionNode == nil {
 		return store.Applied{}, errors.New("unexpected node transition")
 	}
@@ -116,7 +116,7 @@ type claimedHostFixture struct {
 	snapshot store.RunSnapshot
 	beats    atomic.Int64
 	mode     string
-	reports  []store.NodeTransition
+	reports  []capturedNodeCommand
 }
 type executionHostFixtureState struct {
 	*claimedHostFixture
@@ -179,8 +179,8 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 	s.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 		return s.snapshot.Nodes[0], nil
 	}
-	s.transitionNode = func(_ context.Context, transition store.NodeTransition) (store.Applied, error) {
-		s.reports = append(s.reports, transition)
+	s.transitionNode = func(_ context.Context, transition store.NodeCommand) (store.Applied, error) {
+		s.reports = append(s.reports, captureNodeCommand(transition))
 		return store.Applied{}, nil
 	}
 	s.renewNodeClaim = func(_ context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
@@ -206,7 +206,8 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 func newExecutionHostStore(snapshot store.RunSnapshot) *executionHostFixtureState {
 	s := &executionHostFixtureState{claimedHostFixture: newClaimedHostStore(snapshot, "")}
 	s.recordStep = func(context.Context, store.StepReport) error { return nil }
-	s.transitionNode = func(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+	s.transitionNode = func(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+		change := captureNodeCommand(command)
 		row := s.snapshot.Nodes[0]
 		if change.Ref != row.Ref || change.Actor.Kind != store.ActorHolder || change.Actor.Holder != row.ClaimedBy || change.Actor.CapabilityPrefix != row.CapabilityPrefix || change.Actor.Generation != row.Generation || change.Actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) {
 			return store.Applied{}, errors.New("transition changed claim authority")
@@ -218,7 +219,7 @@ func newExecutionHostStore(snapshot store.RunSnapshot) *executionHostFixtureStat
 		if change.Cause == store.CauseRetry || change.Cause == store.CauseStart {
 			s.attempt++
 		}
-		return store.Applied{Generation: row.Generation, Attempt: s.attempt}, nil
+		return store.Applied{Generation: row.Generation, Attempt: runspec.AttemptOrdinal(s.attempt)}, nil
 	}
 	return s
 }
@@ -267,7 +268,8 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 		}
 		return store.AcceptedExpansion{Source: in.Source, SourceGeneration: in.SourceGeneration, State: s.node.Expansion}, nil
 	}
-	s.transitionNode = func(_ context.Context, in store.NodeTransition) (store.Applied, error) {
+	s.transitionNode = func(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+		in := captureNodeCommand(command)
 		for i := range s.nodes {
 			if s.nodes[i].Ref == in.Ref && in.Extra.Result != nil {
 				s.nodes[i].Status, s.nodes[i].Outcome = store.StatusDone, in.To

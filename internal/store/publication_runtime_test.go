@@ -14,11 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
-func publicationFixture(t *testing.T) (*Tenant, *time.Time, NodeTransition) {
+func publicationFixture(t *testing.T) (*Tenant, *time.Time, nodeTransition) {
 	return publicationFixtureWithDispatch(t, runspec.DispatchHost)
 }
 
-func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*Tenant, *time.Time, NodeTransition) {
+func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*Tenant, *time.Time, nodeTransition) {
 	t.Helper()
 	tenant, intake, now := intakeFixture(t)
 	intake.Request.Mode = runspec.IntakePublish
@@ -45,7 +45,7 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tenant, now, NodeTransition{Ref: controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "imported"}, Actor: actor, To: NodeSuccess, Cause: CausePublish, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	return tenant, now, nodeTransition{Ref: controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "imported"}, Actor: actor, To: NodeSuccess, Cause: CausePublish, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 }
 
 func TestPublicationUsesNoControllerExecution(t *testing.T) {

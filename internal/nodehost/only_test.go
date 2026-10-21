@@ -177,7 +177,7 @@ func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
 				if slices.Contains(state.trace, "acquire") || state.finished.Unit.RunID != "" {
 					t.Fatal("invalid resumed window acquired source or finished its accepted topology")
 				}
-			} else if state.finished.Transition.To != store.RunFailed {
+			} else if state.finished.Transition.RunID == "" {
 				t.Fatal("invalid initial window left its owner unfinished")
 			}
 		})
@@ -202,7 +202,7 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		attempt, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+		attempt, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 		if err != nil {
 			t.Fatal(err)
 		}

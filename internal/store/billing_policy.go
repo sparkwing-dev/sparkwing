@@ -111,7 +111,7 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 // safety: callers hold the team's ledger lock, so two claims cannot both take the last vCPU.
 func checkCloudCapacityTx(ctx context.Context, l *ledgerTx, cores int64) error {
 	tx, team := l.storeTx, l.team
-	standing, err := trustStandingTx(ctx, tx, team, tx.now())
+	standing, err := trustStandingTx(ctx, tx, team, tx.time)
 	if err != nil {
 		return err
 	}

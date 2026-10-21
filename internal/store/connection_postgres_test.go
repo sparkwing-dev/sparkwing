@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -76,7 +75,7 @@ func TestPostgresExistingSessionCannotReconnectAfterVerification(t *testing.T) {
 	if _, err := teststore.SQL(t, admin).ExecContext(t.Context(), `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1`, app); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.HoldByOperator(t.Context(), "test", "lost verified session", time.Now()); err == nil {
+	if _, err := tenant.HoldByOperator(t.Context(), "test", "lost verified session"); err == nil {
 		t.Fatal("admin mutation reconnected after its verified connection was terminated")
 	}
 }

@@ -119,7 +119,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			err = executorError(apierr.SpecDrift, "recovery source is not a failed job")
 			return h.failure(err), err
 		}
-		failure, readErr := h.deps.ReadFailure(ctx, source, row.Generation)
+		failure, readErr := h.deps.ReadFailure(ctx, source, int64(row.Generation))
 		if readErr != nil {
 			return h.failure(readErr), readErr
 		}

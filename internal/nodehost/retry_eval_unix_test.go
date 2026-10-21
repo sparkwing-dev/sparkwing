@@ -13,6 +13,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -172,7 +174,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		Mask:       func(text string) string { return text },
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 		ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
-			if ref.RunID != f.Accepted.RunID || ref.NodeID != "targets" || generation != sourceInput.Generation {
+			if ref.RunID != f.Accepted.RunID || ref.NodeID != "targets" || runspec.ClaimGeneration(generation) != sourceInput.Generation {
 				t.Fatal("reconstruction read outside its accepted source")
 			}
 			return json.RawMessage(`["good","bad"]`), nil

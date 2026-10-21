@@ -57,7 +57,7 @@ func (f *operatorSettingsFixture) SignUpGate(context.Context) (store.SignUpGate,
 	return f.gate, f.failure
 }
 
-func (f *operatorSettingsFixture) SignUpCounts(context.Context, time.Time) (store.SignUpCounts, error) {
+func (f *operatorSettingsFixture) SignUpCounts(context.Context) (store.SignUpCounts, error) {
 	return store.SignUpCounts{LastHour: 2, LastDay: 3, Waitlisted: 1}, f.failure
 }
 

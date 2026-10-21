@@ -227,7 +227,7 @@ func TestEachTeamSkipsDeletionAndContinuesAfterTenantFailure(t *testing.T) {
 	for _, team := range []store.Team{"aaa", "deleted", "zzz"} {
 		tenantFor(t, st, team)
 	}
-	if _, _, err := st.AsOperator().RequestTeamDeletion(t.Context(), "deleted", time.Now()); err != nil {
+	if _, _, err := st.AsOperator().RequestTeamDeletion(t.Context(), "deleted"); err != nil {
 		t.Fatal(err)
 	}
 	var visited []store.Team

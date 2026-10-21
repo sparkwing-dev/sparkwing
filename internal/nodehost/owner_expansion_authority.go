@@ -33,7 +33,7 @@ func (h *OwnerHost) expansionActor(ctx context.Context, input RunInput, row stor
 	if parent.Authority != owner.Authority || binding.Kind != capability.BindingTrigger || binding.RunID != input.RunID || binding.Holder != owner.Owner.Holder || binding.Generation != owner.Owner.Generation {
 		return store.Actor{}, errors.New("expansion parent differs from its current owner")
 	}
-	binding.Kind, binding.NodeID, binding.Generation, binding.Attempt = capability.BindingNode, row.Ref.NodeID, row.Generation, row.Attempt
+	binding.Kind, binding.NodeID, binding.Generation, binding.Attempt = capability.BindingNode, row.Ref.NodeID, int64(row.Generation), int64(row.Attempt)
 	binding.Holder = ""
 	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: input.RunID, Holder: owner.Owner.Holder, Generation: owner.Owner.Generation}
 	expected, err := json.Marshal(binding)

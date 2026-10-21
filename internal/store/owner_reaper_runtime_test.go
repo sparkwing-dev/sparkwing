@@ -254,7 +254,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
 			authorityPersist(t, s, launcher)
 			fundUnitClaim(t, s)
-			claim, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: request.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(request.RunID)}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -280,10 +280,10 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			// safety: another pass can commit recovery and plan acceptance
 			// between candidate selection and the per-unit transaction.
 			err = s.inTx(t.Context(), func(tx *storeTx) error {
-				if err := assertSingletonLeaseTx(t.Context(), tx, lease, "controller.reaper", tx.now()); err != nil {
+				if err := assertSingletonLeaseTx(t.Context(), tx, lease, "controller.reaper", tx.time); err != nil {
 					return err
 				}
-				reaped, err := reapOwnerUnitTx(t.Context(), tx, stale[0], actor, tx.now())
+				reaped, err := reapOwnerUnitTx(t.Context(), tx, stale[0], actor, tx.time)
 				if err == nil && reaped != nil {
 					t.Errorf("stale candidate recovered accepted plan: %+v", reaped)
 				}

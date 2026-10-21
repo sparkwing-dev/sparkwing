@@ -1074,7 +1074,7 @@ SELECT run_id, seq, node_id, kind, ts, payload
 // AppendEvent writes the run's next event in order.
 func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now())
+		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.time)
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("run", runID)
 		}
@@ -1425,7 +1425,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 15
+const expectedSchemaVersion = 16
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

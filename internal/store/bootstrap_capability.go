@@ -141,7 +141,7 @@ func (op *Operator) hasDeploymentAdministratorTx(ctx context.Context, tx *storeT
 			for i, node := range chain {
 				states[i] = capability.AuthorityState{Principal: node.principal}
 			}
-			p, err = capability.ValidateAuthority(states, tx.now())
+			p, err = capability.ValidateAuthority(states, tx.time)
 		}
 		var api *apierr.Error
 		if errors.Is(err, sql.ErrNoRows) || errors.As(err, &api) && api.Code == apierr.Unauthenticated {

@@ -3,6 +3,8 @@ package controller
 import (
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -23,7 +25,7 @@ func TestPrivateNodeRenewalAndStartRetainExactClaimFence(t *testing.T) {
 	if _, err := host.RenewNode(t.Context(), award.Node.Ref, actor, false); err != nil {
 		t.Fatal(err)
 	}
-	started, err := host.TransitionNode(t.Context(), store.NodeTransition{Ref: award.Node.Ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64(0))})
+	started, err := host.TransitionNode(t.Context(), store.StartNode{Ref: award.Node.Ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("source acquisition renewal invalidated the unstarted node claim: %+v %#v", started, err)
 	}

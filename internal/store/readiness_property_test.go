@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
@@ -19,7 +20,7 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 			tenant := &Tenant{s: s, team: owner.Team}
 			ref := controllerwire.NodeRef{RunID: owner.RunID, NodeID: "job"}
 			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Award.CapabilityPrefix}, CapabilityPrefix: owner.Award.CapabilityPrefix, Owner: owner.Owner}
-			change := NodeTransition{Ref: ref, Actor: actor, To: NodePending, Cause: CauseRevoke}
+			change := nodeTransition{Ref: ref, Actor: actor, To: NodePending, Cause: CauseRevoke}
 			for range random.IntN(4) + 1 {
 				applied, err := tenant.TransitionNode(t.Context(), change)
 				if err != nil || applied.Replayed || applied.Attempt != 0 || applied.Generation != 0 {
@@ -29,11 +30,11 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 				if err != nil || !replay.Replayed || replay.StateSeq != applied.StateSeq {
 					t.Fatalf("withdrawal replay: %+v, %v", replay, err)
 				}
-				demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
+				demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}
 				if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 					t.Fatal("withdrawn job remained claimable")
 				}
-				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeReady, Cause: CauseRelease}); err != nil {
 					t.Fatal(err)
 				}
 				*now = now.Add(time.Duration(random.IntN(100)+1) * time.Millisecond)
@@ -56,12 +57,12 @@ func TestReadinessWithdrawalPreservesHolderAndAuthorityProperty(t *testing.T) {
 				}
 				if i%8 >= 5 {
 					holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-					start, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+					start, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 					if err != nil {
 						t.Fatal(err)
 					}
 					if i%8 == 6 {
-						if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(start.Attempt)}); err != nil {
+						if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(int64(start.Attempt))}); err != nil {
 							t.Fatal(err)
 						}
 					}

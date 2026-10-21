@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -49,7 +50,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			ref := controllerwire.NodeRef{RunID: plan.RunID, NodeID: job}
-			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Labels: []string{label}, Available: match.Resources{Cores: 8}}
+			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Labels: []string{label}, Available: match.Resources{Cores: 8}}
 			refuse := func(request store.UnitDemand) {
 				t.Helper()
 				before := readMutationSnapshot(t, tenant, s, plan.RunID)
@@ -62,7 +63,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 				}
 			}
 			refuse(demand)
-			if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: plan.Actor}); err != nil {
 				t.Fatal(err)
 			}
 			bad := demand
@@ -76,7 +77,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			refuse(bad)
 			bad = demand
 			target := *demand.Target
-			target.NodeID = fmt.Sprintf("missing-%x", random.Uint64())
+			target.NodeID = runspec.NodeID(fmt.Sprintf("missing-%x", random.Uint64()))
 			bad.Target = &target
 			refuse(bad)
 			foreign := signIn(t, s, "foreign", "foreign@example.test")
@@ -109,9 +110,9 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			}
 			refuse(demand)
 			holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-			for _, change := range []store.NodeTransition{
-				{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)},
-				{Ref: ref, Actor: holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)},
+			for _, change := range []store.NodeCommand{
+				store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)},
+				store.ReportNode{Ref: ref, Actor: holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)},
 			} {
 				if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 					t.Fatal(err)
@@ -122,7 +123,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			if err != nil || row.SpecHash != sealed.SpecHash {
 				t.Fatalf("award changed accepted spec: %s, %v", row.SpecHash, err)
 			}
-			if _, err := tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunTransition{RunID: ref.RunID, To: store.RunSuccess, Actor: plan.Actor, Cause: store.RunFinish}}); err != nil {
+			if _, err := tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunCompletion{RunID: ref.RunID, Actor: plan.Actor, Cause: store.RunFinish}}); err != nil {
 				t.Fatal(err)
 			}
 			refuse(demand)

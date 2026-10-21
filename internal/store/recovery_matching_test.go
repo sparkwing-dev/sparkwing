@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -27,14 +28,14 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 					t.Fatalf("reap: %+v, %v", reaped, err)
 				}
 				ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: owner, To: NodeReady, Cause: CauseRelease}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: owner, To: NodeReady, Cause: CauseRelease}); err != nil {
 					t.Fatal(err)
 				}
 				waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), now.Add(time.Nanosecond), [2]string{}, 10)
 				if err != nil || len(waiting) != 1 || waiting[0].RunID != ref.RunID || waiting[0].NodeID != ref.NodeID {
 					t.Fatalf("recovered work awaiting a runner: %+v, %v", waiting, err)
 				}
-				demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+				demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 				if queued {
 					demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 				}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -15,7 +16,11 @@ func leaseBoundTx(ctx context.Context, tx *storeTx, prefix string, now time.Time
 	if err != nil {
 		return time.Time{}, err
 	}
-	return leaseBound(now, append(funded, deref(c.ExpiresAt), deref(c.Binding.Deadline), deref(c.RevokedAt))...)
+	drain, err := cancelDrainTx(ctx, tx, Team(c.Team), c.Binding.RunID, c.Binding.NodeID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return leaseBound(now, append(funded, drain, deref(c.ExpiresAt), deref(c.Binding.Deadline), deref(c.RevokedAt))...)
 }
 
 // safety: an absent bound leaves the default lease, and expired authority cannot be renewed.
@@ -69,4 +74,45 @@ func deref(t *time.Time) time.Time {
 		return time.Time{}
 	}
 	return *t
+}
+
+const cancelDrainSources = `SELECT drain_deadline_at AS deadline FROM runs WHERE team=? AND id=?
+ UNION ALL SELECT drain_deadline_at FROM triggers WHERE team=? AND id=?
+ UNION ALL SELECT drain_deadline_at FROM nodes WHERE team=? AND run_id=? AND node_id=`
+
+func cancelDrainTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (time.Time, error) {
+	var deadline sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT MIN(deadline) FROM (`+cancelDrainSources+`?) drains`, team, runID, team, runID, team, runID, nodeID).Scan(&deadline)
+	if err != nil || !deadline.Valid {
+		return time.Time{}, err
+	}
+	return time.Unix(0, deadline.Int64).UTC(), nil
+}
+
+// Existing leases must obey cancellation even if the holder never renews again.
+func clampRunLeasesTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
+	for _, table := range []string{"nodes", "triggers", "eval_units", "concurrency_holders", "concurrency_waiters"} {
+		if nodeID != "" && table == "triggers" {
+			continue
+		}
+		runColumn, nodeColumn := "run_id", "node_id"
+		if table == "triggers" {
+			runColumn, nodeColumn = "id", "''"
+		}
+		if table == "eval_units" {
+			nodeColumn = "source_node_id"
+		}
+		if table != "triggers" {
+			nodeColumn = "leased." + nodeColumn
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE `+table+` AS leased SET lease_expires_at=(
+ SELECT MIN(deadline) FROM (
+ SELECT leased.lease_expires_at AS deadline
+ UNION ALL `+cancelDrainSources+nodeColumn+`
+ ) bounds) WHERE team=? AND `+runColumn+`=? AND lease_expires_at IS NOT NULL AND (?='' OR `+nodeColumn+`=?)`, team, runID, team, runID, team, runID, team, runID, nodeID, nodeID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

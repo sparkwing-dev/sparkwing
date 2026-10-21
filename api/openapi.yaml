@@ -1686,12 +1686,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.apierr.Error'
             - type: "null"
-        outcome:
-          type: string
         reason:
           type: string
-      required:
-        - outcome
       type: object
       x-sparkwing-go-type: controllerwire.FinishRequest
     internal.controllerwire.FireView:

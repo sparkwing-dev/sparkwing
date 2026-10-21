@@ -86,7 +86,7 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
-			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Disruptions != 1 || reaped[0].Generation != claim.Award.Generation {
+			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Disruptions != 1 || reaped[0].Generation != int64(claim.Award.Generation) {
 				t.Fatalf("started unit loss: %+v, %v", reaped, err)
 			}
 			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
@@ -190,7 +190,7 @@ func TestRenewUnitNodeRequiresCommittedStart(t *testing.T) {
 	}
 	tenant := &Tenant{s: s, team: claim.Team}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Second)

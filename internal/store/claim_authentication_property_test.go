@@ -84,7 +84,7 @@ func TestCapabilityResultCannotChangeAfterCompletionOrLossProperty(t *testing.T)
 			}
 			tenant := &Tenant{s: s, team: "a"}
 			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-			change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}
+			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}
 			if i%2 == 0 {
 				if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 					t.Fatal(err)
@@ -94,7 +94,7 @@ func TestCapabilityResultCannotChangeAfterCompletionOrLossProperty(t *testing.T)
 				if err != nil {
 					t.Fatal(err)
 				}
-				change.To, change.Cause, change.SourceAttempt = NodeSuccess, CauseReport, sourceAttempt(started.Attempt)
+				change.To, change.Cause, change.SourceAttempt = NodeSuccess, CauseReport, sourceAttempt(int64(started.Attempt))
 				if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 					t.Fatal(err)
 				}

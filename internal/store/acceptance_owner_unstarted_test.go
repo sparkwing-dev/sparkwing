@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -89,8 +90,8 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if _, err := s.AsOperator().RenewUnit(ctx, plan.Actor.CapabilityPrefix, false); err == nil {
 			return errors.New("former owner renewed after recovery")
 		}
-		claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: rootPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: plan.RunID}, Available: match.Resources{Cores: 8}})
-		if err != nil || claim.Award.Generation != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
+		claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: rootPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(plan.RunID)}, Available: match.Resources{Cores: 8}})
+		if err != nil || int64(claim.Award.Generation) != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
 			return fmt.Errorf("owner reclaim: %+v: %v", claim, err)
 		}
 		plan.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}

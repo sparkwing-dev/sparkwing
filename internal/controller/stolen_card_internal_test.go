@@ -60,7 +60,7 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	}
 	refunds := func() map[string]string {
 		t.Helper()
-		due, err := s.AsOperator().DueCardRefunds(t.Context(), time.Now())
+		due, err := s.AsOperator().DueCardRefunds(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,11 +91,11 @@ func TestAStolenCardIsPinnedRefusedAndRefundedOnWarning(t *testing.T) {
 	if balance(a) != -paid {
 		t.Fatalf("balance after warning = %d; want the spent credit taken back as %d", balance(a), -paid)
 	}
-	standing, err := a.BillingStanding(t.Context(), time.Now())
+	standing, err := a.BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Held" {
 		t.Fatalf("standing after warning = %+v, %v; want Held", standing, err)
 	}
-	if spend, err := a.SpendStanding(t.Context(), time.Now()); err != nil || spend.Card.PaymentMethod != "" {
+	if spend, err := a.SpendStanding(t.Context()); err != nil || spend.Card.PaymentMethod != "" {
 		t.Fatalf("saved card = %+v, %v; want the warned card forgotten", spend.Card, err)
 	}
 	if got := refunds(); len(got) != 2 || got["a/pi_a"] != store.CardRefusedWarning {

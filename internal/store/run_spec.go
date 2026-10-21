@@ -107,7 +107,7 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		t.s.uninstallLocalSecrets(key, &installed)
 		var err error
-		result, err = admitRun(ctx, tx, t.team, request, tx.now())
+		result, err = admitRun(ctx, tx, t.team, request, tx.time)
 		if err == nil {
 			key = localSecretKey{t.team, result.RunID}
 			installed, err = t.validateAdmissionInputsTx(ctx, tx, result, request)
@@ -133,7 +133,7 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 	var result AcceptedPlan
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.now())
+		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.time)
 		if err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		return result, authorityError(apierr.BadRequest, "invalid expansion failure")
 	}
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		now := tx.now()
+		now := tx.time
 		if err := expansionAuthorityTx(ctx, tx, t.team, request, now); err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err != nil {
 			return err
 		}
-		if source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != request.SourceGeneration {
+		if source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != runspec.ClaimGeneration(request.SourceGeneration) {
 			return holderRefusal()
 		}
 		result = AcceptedExpansion{Source: request.Source, SourceGeneration: request.SourceGeneration}
@@ -200,7 +200,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			if err != nil {
 				return err
 			}
-			if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.now()); err != nil {
+			if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.time); err != nil {
 				return err
 			}
 			result.Replayed = true
@@ -215,7 +215,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 				return err
 			}
 		}
-		if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.now()); err != nil {
+		if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.time); err != nil {
 			return err
 		}
 		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, result.BodyHash, accepted.body, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
@@ -280,11 +280,13 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		}
 	case capability.UnitEval:
 		unit, decodeErr := decodeAwardUnit(lease.Kind, lease.ID)
-		if decodeErr != nil || unit.RunID != request.Source.RunID || unit.NodeID != request.Source.NodeID || unit.SourceGeneration != request.SourceGeneration {
+		if decodeErr != nil || string(unit.RunID) != request.Source.RunID || string(unit.NodeID) != request.Source.NodeID || unit.SourceGeneration != request.SourceGeneration {
 			return holderRefusal()
 		}
 		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
-		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration) {
+		stored := OwnerLeaseRef{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: holder, Generation: generation}
+		presented := OwnerLeaseRef{RunID: c.Binding.RunID, SourceNodeID: c.Binding.NodeID, SourceGeneration: c.Binding.Generation, Holder: lease.Holder, Generation: lease.Generation}
+		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || stored.evalFence() != presented.evalFence()) {
 			return holderRefusal()
 		}
 	default:
@@ -493,11 +495,11 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 			return AcceptedPlan{}, err
 		}
 		if run.State == RunPending {
-			if _, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: run.ID, To: RunRunning, Actor: *controller, Cause: RunStart}, tx.now()); err != nil {
+			if _, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: run.ID, To: RunRunning, Actor: *controller, Cause: RunStart}, tx.time); err != nil {
 				return AcceptedPlan{}, err
 			}
 		}
-		if err = settleControllerTx(ctx, tx, team, run.ID, tx.now()); err != nil {
+		if err = settleControllerTx(ctx, tx, team, run.ID, tx.time); err != nil {
 			return AcceptedPlan{}, err
 		}
 		return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: &controller.Owner, Replayed: replay}, nil

@@ -783,7 +783,7 @@ func TestPlanGuardRefusalPersistsSealWithoutOfferingJobs(t *testing.T) {
 					t.Fatalf("guard refusal settlement=%s %+v", snapshot.Run.State, snapshot.Nodes)
 				}
 			} else {
-				_, err = tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor})
+				_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor})
 				if err == nil {
 					t.Fatal("guard-refused job became offerable")
 				}

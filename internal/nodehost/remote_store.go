@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -49,10 +50,10 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	}
 	if result.Kind == store.Execute {
 		claim := wire.Claim
-		if request.MaterializeOnly || claim == nil || claim.Unit != capability.UnitNode || claim.RunID != request.Ref.RunID || claim.JobID != request.Ref.NodeID || claim.Capability == "" || claim.Binding.Kind != capability.BindingNode || claim.Binding.RunID != request.Ref.RunID || claim.Binding.NodeID != request.Ref.NodeID || claim.Binding.Holder != row.ClaimedBy || claim.Binding.Generation != row.Generation || claim.Binding.Attempt != row.Attempt {
+		if request.MaterializeOnly || claim == nil || claim.Unit != capability.UnitNode || claim.RunID != request.Ref.RunID || claim.JobID != request.Ref.NodeID || claim.Capability == "" || claim.Binding.Kind != capability.BindingNode || claim.Binding.RunID != request.Ref.RunID || claim.Binding.NodeID != request.Ref.NodeID || claim.Binding.Holder != row.ClaimedBy || runspec.ClaimGeneration(claim.Binding.Generation) != row.Generation || runspec.AttemptOrdinal(claim.Binding.Attempt) != row.Attempt {
 			return store.ReconciledNode{}, errors.New("reconciliation returned an inconsistent execution award")
 		}
-		result.Claim = &store.ClaimAward{Holder: claim.Binding.Holder, Generation: claim.Binding.Generation, CapabilityPrefix: row.CapabilityPrefix, LeaseExpiresAt: claim.LeaseExpiresAt}
+		result.Claim = &store.ClaimAward{Holder: claim.Binding.Holder, Generation: runspec.ClaimGeneration(claim.Binding.Generation), CapabilityPrefix: row.CapabilityPrefix, LeaseExpiresAt: claim.LeaseExpiresAt}
 		result.Bearer = []byte(claim.Capability)
 		if !reconciledClaimMatches(result) {
 			return store.ReconciledNode{}, errors.New("execution award differs from its persisted claim")
@@ -115,7 +116,7 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (store.NodeRow,
 	}
 	return store.NodeRow{
 		Ref: controllerwire.NodeRef{RunID: runID, NodeID: job.ID}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
-		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, OwnerCapabilityPrefix: job.OwnerCapabilityPrefix, Generation: job.Generation, Attempt: job.Attempt, ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
+		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, OwnerCapabilityPrefix: job.OwnerCapabilityPrefix, Generation: runspec.ClaimGeneration(job.Generation), Attempt: runspec.AttemptOrdinal(job.Attempt), ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
 		ReadyAt: job.ReadyAt, LeaseExpiresAt: job.LeaseExpiresAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, CancelRequestedAt: job.CancelRequestedAt,
 		OutputRecord: job.OutputRecord, ManifestRecord: job.ManifestRecord,
 		StateSeq: job.StateSeq, Expansion: store.ExpansionState(job.Expansion), ExpansionDigest: job.ExpansionDigest, Spec: slices.Clone(job.Spec), SpecHash: job.SpecHash, Execution: job.Execution,

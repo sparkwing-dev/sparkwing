@@ -72,8 +72,10 @@ func (s *EngineController) handleStep(w http.ResponseWriter, r *http.Request, a 
 	if body.SourceAttempt != attempt.Attempt {
 		return &apierr.Error{Code: apierr.LockHeld, Message: "step report names another attempt"}
 	}
-	report := store.StepReport{Attempt: attempt, Actor: engineActor(a), StepID: body.StepID, State: body.State,
-		MaskedError: body.MaskedError, StartedAt: body.StartedAt, FinishedAt: body.FinishedAt}
+	report := store.StepReport{
+		Attempt: attempt, Actor: engineActor(a), StepID: body.StepID, State: body.State,
+		MaskedError: body.MaskedError, StartedAt: body.StartedAt, FinishedAt: body.FinishedAt,
+	}
 	if err := tenant.RecordStep(r.Context(), report); err != nil {
 		return engineLookupError(err)
 	}
@@ -82,8 +84,10 @@ func (s *EngineController) handleStep(w http.ResponseWriter, r *http.Request, a 
 }
 
 func reportingAttempt(ctx context.Context, tenant RunTransactions, a capability.Authorized) (runspec.AttemptIdentity, error) {
-	attempt := runspec.AttemptIdentity{Team: a.Target.Team, RunID: a.Target.RunID, NodeID: a.Target.NodeID,
-		Attempt: a.Binding.Attempt, Generation: a.Binding.Generation}
+	attempt := runspec.AttemptIdentity{
+		Team: a.Target.Team, RunID: a.Target.RunID, NodeID: a.Target.NodeID,
+		Attempt: a.Binding.Attempt, Generation: a.Binding.Generation,
+	}
 	if a.Principal.Capability.Unit != capability.UnitNode {
 		// safety: owners and publishers have no job-attempt fence in their own binding.
 		node, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID})
@@ -93,7 +97,7 @@ func reportingAttempt(ctx context.Context, tenant RunTransactions, a capability.
 		if node.Ref.RunID != a.Target.RunID || node.Ref.NodeID != a.Target.NodeID {
 			return attempt, errors.New("inconsistent persisted reporting job")
 		}
-		attempt.Attempt, attempt.Generation = node.Attempt, node.Generation
+		attempt.Attempt, attempt.Generation = int64(node.Attempt), int64(node.Generation)
 	}
 	if attempt.Attempt <= 0 || attempt.Generation <= 0 {
 		return attempt, &apierr.Error{Code: apierr.IllegalTransition, Message: "job has no reporting attempt"}

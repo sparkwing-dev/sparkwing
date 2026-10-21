@@ -52,10 +52,10 @@ func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized c
 		if current.installation != before.installation || !slices.Equal(current.ids, before.ids) || !slices.Equal(current.names, before.names) {
 			return bindingRefusal()
 		}
-		if token.Token == "" || !token.ExpiresAt.After(tx.now()) {
+		if token.Token == "" || !token.ExpiresAt.After(tx.time) {
 			return authorityError(apierr.Unavailable, "GitHub returned no live source token")
 		}
-		audit, err := capability.AuthorizeSourceRelease(current.request, tx.now())
+		audit, err := capability.AuthorizeSourceRelease(current.request, tx.time)
 		if err != nil {
 			return err
 		}
@@ -112,7 +112,7 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 		return out, err
 	}
 	request.GitHubApp, request.CredentialID = true, fmt.Sprintf("github_app:%d", installation)
-	if _, err := capability.AuthorizeSourceRelease(request, tx.now()); err != nil {
+	if _, err := capability.AuthorizeSourceRelease(request, tx.time); err != nil {
 		return out, err
 	}
 	return githubSourceRelease{request, installation, ids, names}, nil

@@ -33,7 +33,7 @@ func (f *appFixture) launchedRun(who signedIn, runID, owner, name string) string
 	if _, err := tenant.RecordCreditGrant(f.t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "fixture:" + runID, CreatedBy: "fixture"}); err != nil {
 		f.t.Fatal(err)
 	}
-	claim, err := f.store.AsOperator().ClaimUnit(f.t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runID}})
+	claim, err := f.store.AsOperator().ClaimUnit(f.t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(runID)}})
 	if err != nil {
 		f.t.Fatal(err)
 	}

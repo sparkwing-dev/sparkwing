@@ -50,7 +50,8 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	if _, err := teststore.ForTeam(t, st, team).TestOnlyHoldForDispute(ctx, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_1", "", "", now); err != nil || n != 1 {
+	st.SetTestClock(t, func() time.Time { return now })
+	if n, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_1", "", ""); err != nil || n != 1 {
 		t.Fatalf("released = %d, %v", n, err)
 	}
 
@@ -95,7 +96,8 @@ func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
 	if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := st.DeleteAccount(ctx, leaver.Account.ID); err != nil {
 		t.Fatal(err)
 	}
 	if n := countWhere(t, st, "business_events", "account = '"+leaver.Account.ID+"' OR actor = '"+leaver.Account.ID+"'"); n != 0 {
@@ -140,7 +142,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 				t.Fatal(err)
 			}
 		}
-		finish.Transition.To = status
+
 		if _, err := tenant.FinishRunAndUnit(ctx, finish); err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +153,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		claim, err := st.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
+		claim, err := st.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Available: match.Resources{Cores: 8}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -159,7 +161,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: admitted.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 			t.Fatal(err)
 		}
-		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunTransition{RunID: admitted.RunID, Actor: actor, Cause: store.RunFinish}}
+		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunCompletion{RunID: admitted.RunID, Actor: actor, Cause: store.RunFinish}}
 	}
 	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded)
 	if err != nil {

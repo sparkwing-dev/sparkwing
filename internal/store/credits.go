@@ -220,7 +220,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
-		CreatedBy: req.CreatedBy, CreatedAt: tx.now(),
+		CreatedBy: req.CreatedBy, CreatedAt: tx.time,
 	}
 	// safety: the lock is what makes the reference check and the insert one
 	// step, so two deliveries of the same grant cannot both find nothing.

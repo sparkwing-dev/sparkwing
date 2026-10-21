@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
@@ -21,7 +22,7 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			root.Grants = []capability.Grant{capability.NodesClaim}
 			authorityPersist(t, s, root)
 			demand.CapabilityPrefix = root.Prefix
-			demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: owner.RunID, NodeID: "job"}
+			demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(owner.RunID), NodeID: "job"}
 			remote, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)

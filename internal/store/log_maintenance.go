@@ -44,10 +44,10 @@ func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonL
 		return 0, err
 	}
 	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
 		return 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.now()), limit)...)
+	rows, err := tx.QueryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.time), limit)...)
 	if err != nil {
 		return 0, err
 	}
@@ -70,7 +70,7 @@ func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonL
 		}
 		sealed += n
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -86,10 +86,10 @@ func sealAbandonedLogStreamTx(ctx context.Context, tx *storeTx, lease SingletonL
 		return 0, err
 	}
 	// safety: a run-lock wait can cross lease expiry or a writer's final commit.
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
 		return 0, err
 	}
-	now := tx.now()
+	now := tx.time
 	args := append([]any{now.UnixNano(), now.UnixNano(), stream.team, stream.run, stream.id}, abandonedLogStreamArgs(now)...)
 	result, err := tx.ExecContext(ctx, `UPDATE log_streams AS l SET sealed_at=?,updated_at=?,completeness='incomplete',incomplete_reason='writer_lost' WHERE l.team=? AND l.run_id=? AND l.id=? AND `+abandonedLogStreamSQL, args...)
 	if err != nil {

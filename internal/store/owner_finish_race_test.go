@@ -32,7 +32,7 @@ func TestOwnerFinishRaceRejectsStaleAwardProperty(t *testing.T) {
 			tenant := &Tenant{s: s, team: first.Team}
 			finish := func(claim UnitClaim, state RunState) (Applied, error) {
 				actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-				return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunTransition{RunID: claim.RunID, To: state, Cause: RunFinish, Actor: actor}})
+				return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: claim.RunID, Cause: RunFinish, Actor: actor}})
 			}
 			start := make(chan struct{})
 			var wg sync.WaitGroup

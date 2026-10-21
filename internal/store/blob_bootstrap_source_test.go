@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestBootstrapSourceBundleReadStaysBoundBeforeExchange(t *testing.T) {
@@ -130,8 +131,8 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 		}
 		if kind == capability.UnitNode {
 			previousAttempt := int64(offset)
-			started, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeRunning, Cause: CauseStart, SourceAttempt: &previousAttempt, Actor: Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, CapabilityPrefix: exchanged.Capability.Prefix, Holder: exchanged.Capability.Binding.Holder, Generation: exchanged.Capability.Binding.Generation}})
-			if err != nil || started.Attempt != previousAttempt+1 {
+			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeRunning, Cause: CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&previousAttempt), Actor: Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, CapabilityPrefix: exchanged.Capability.Prefix, Holder: exchanged.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(exchanged.Capability.Binding.Generation)}})
+			if err != nil || int64(started.Attempt) != previousAttempt+1 {
 				t.Fatalf("retry execution start: %+v %v", started, err)
 			}
 			active, err := tenant.ResolveBlobAuthority(t.Context(), blob.Authority{CapabilityRef: exchanged.Capability.Prefix}, capability.DataWrite)

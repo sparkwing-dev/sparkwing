@@ -16,16 +16,16 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 	var result ReconciledNode
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		result = ReconciledNode{}
-		if _, err := controllerOwnerTx(ctx, tx, t.team, request.Ref.RunID, tx.now()); err != nil {
+		if _, err := controllerOwnerTx(ctx, tx, t.team, request.Ref.RunID, tx.time); err != nil {
 			return err
 		}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{request.Actor.Authority}); err != nil {
 			return err
 		}
-		if err := prepareStateActorTx(ctx, tx, t.team, request.Ref.RunID, request.Actor, tx.now()); err != nil {
+		if err := prepareStateActorTx(ctx, tx, t.team, request.Ref.RunID, request.Actor, tx.time); err != nil {
 			return err
 		}
-		if err := checkOwnerTx(ctx, tx, t.team, request.Actor, request.Ref.RunID, tx.now()); err != nil {
+		if err := checkOwnerTx(ctx, tx, t.team, request.Actor, request.Ref.RunID, tx.time); err != nil {
 			return err
 		}
 		if err := lockReconcileRunsTx(ctx, tx, t.team, request.Ref, request.Source); err != nil {
@@ -40,7 +40,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 		case result.Node.Status == StatusDone:
 			result.Kind = KeepTerminal
 			return nil
-		case result.Node.ClaimedBy != "" && (request.Source == nil || result.Node.Status != StatusPending || result.Node.OwnerCapabilityPrefix != request.Actor.CapabilityPrefix || result.Node.ClaimedBy != request.Actor.Owner.Holder || result.Node.LeaseExpiresAt == nil || !result.Node.LeaseExpiresAt.After(tx.now())):
+		case result.Node.ClaimedBy != "" && (request.Source == nil || result.Node.Status != StatusPending || result.Node.OwnerCapabilityPrefix != request.Actor.CapabilityPrefix || result.Node.ClaimedBy != request.Actor.Owner.Holder || result.Node.LeaseExpiresAt == nil || !result.Node.LeaseExpiresAt.After(tx.time)):
 			result.Kind = WaitHolder
 			return nil
 		}
@@ -149,7 +149,7 @@ func releaseReconciledNodeTx(ctx context.Context, tx *storeTx, team Team, reques
 	}
 	for _, decision := range Decide(graph).Nodes {
 		if decision.NodeID == request.Ref.NodeID && decision.Kind == DecisionReady {
-			_, err := transitionNodeTx(ctx, tx, team, NodeTransition{Ref: request.Ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}, tx.now())
+			_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}, tx.time)
 			return err
 		}
 	}

@@ -119,18 +119,18 @@ func linkAccountIdentityTx(ctx context.Context, tx *storeTx, claim capability.Id
 	if err != nil {
 		return Identity{}, err
 	}
-	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, tx.now())
+	id, err := linkIdentityTx(ctx, tx, claim.AccountID, p, tx.time)
 	if err != nil {
 		return Identity{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now().UnixNano(), claim.Nonce); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.time.UnixNano(), claim.Nonce); err != nil {
 		return Identity{}, err
 	}
 	return id, nil
 }
 
 func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.IdentityLink) error {
-	now := tx.now()
+	now := tx.time
 	if claim.Authority.Kind != capability.AuthoritySession || claim.Authority.ID == "" || claim.AccountID == "" || claim.Nonce == "" ||
 		claim.Provider != ProviderGoogle && claim.Provider != ProviderGitHub || !claim.ExpiresAt.After(now) {
 		return identityLinkInvalid()
@@ -282,7 +282,7 @@ func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expire
 }
 
 func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, expires time.Time) (bool, error) {
-	if nonce == "" || !expires.After(tx.now()) {
+	if nonce == "" || !expires.After(tx.time) {
 		return false, nil
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())

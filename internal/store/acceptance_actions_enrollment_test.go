@@ -21,7 +21,7 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("actions-owner", "actions-owner@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("actions-owner", "actions-owner@example.test"), store.SignUpConditions{})
 	if err != nil {
 		return err
 	}

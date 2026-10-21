@@ -66,7 +66,7 @@ func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a Gi
 	    enabled_by = excluded.enabled_by, runner = excluded.runner,
 	    enabled_at = CASE WHEN github_app_automation.installation_id = excluded.installation_id
 	        THEN github_app_automation.enabled_at ELSE excluded.enabled_at END`,
-		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, tx.now().UnixNano(), string(runner), string(t.team), a.InstallationID)
+		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, tx.time.UnixNano(), string(runner), string(t.team), a.InstallationID)
 	if err != nil {
 		return err
 	}

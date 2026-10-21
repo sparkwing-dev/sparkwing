@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -28,7 +30,7 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 		if c.Team != string(t.team) || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.DataRead) {
 			return holderRefusal()
 		}
-		if err := prepareStateActorTx(ctx, tx, t.team, source.RunID, actor, tx.now()); err != nil {
+		if err := prepareStateActorTx(ctx, tx, t.team, source.RunID, actor, tx.time); err != nil {
 			return err
 		}
 		if err := lockStateRunTx(ctx, tx, t.team, source.RunID); err != nil {
@@ -42,7 +44,7 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 			return holderRefusal()
 		}
 		if actor.Kind == ActorRunHost {
-			if err := checkOwnerTx(ctx, tx, t.team, actor, source.RunID, tx.now()); err != nil {
+			if err := checkOwnerTx(ctx, tx, t.team, actor, source.RunID, tx.time); err != nil {
 				return err
 			}
 		} else if actor.Kind != ActorHolder || c.Binding.Kind != capability.BindingNode || c.Binding.RunID != source.RunID {
@@ -66,13 +68,13 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 				continue
 			}
 			if actor.Kind == ActorHolder {
-				if err := checkHolderTx(ctx, tx, t.team, *row, actor, tx.now()); err != nil {
+				if err := checkHolderTx(ctx, tx, t.team, *row, actor, tx.time); err != nil {
 					return err
 				}
 			}
 			declared = true
 		}
-		if !declared || parent == nil || parent.Status != StatusDone || parent.Generation != generation {
+		if !declared || parent == nil || parent.Status != StatusDone || parent.Generation != runspec.ClaimGeneration(generation) {
 			return holderRefusal()
 		}
 		if parent.Outcome != NodeFailed {

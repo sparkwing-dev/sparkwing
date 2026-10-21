@@ -75,7 +75,8 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 					payRefill(t, s, next[0], now)
 					wantCount, wantCents = 2, 2_000
 				}
-				st, err := tenant.SpendStanding(t.Context(), now)
+				tenant.s.SetTestClock(t, func() time.Time { return now })
+				st, err := tenant.SpendStanding(t.Context())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -113,7 +114,8 @@ func TestLatePaidRefillReplacesItsEarlierFailureWindow(t *testing.T) {
 			if err != nil || refused && settled.Refused != CardRefusedPinned || !refused && !settled.Granted {
 				t.Fatalf("late paid outcome = %+v: %v", settled, err)
 			}
-			st, err := tenant.SpendStanding(t.Context(), now)
+			tenant.s.SetTestClock(t, func() time.Time { return now })
+			st, err := tenant.SpendStanding(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}

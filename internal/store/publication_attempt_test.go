@@ -11,7 +11,7 @@ import (
 func TestPublicationImportsTerminalAttemptWithoutExecution(t *testing.T) {
 	tenant, now, terminal := publicationFixture(t)
 	attempt := runspec.PublishedAttempt{Attempt: 2, Generation: 3, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}
-	change := NodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: TransitionExtra{Publication: &attempt}}
+	change := nodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: transitionExtra{Publication: &attempt}}
 	for i := range 2 {
 		applied, err := tenant.TransitionNode(t.Context(), change)
 		if err != nil || applied.Replayed != (i == 1) || applied.Attempt != 2 || applied.Generation != 3 {
@@ -40,7 +40,7 @@ func TestPublicationAttemptNeverCreatesAnExecutableAward(t *testing.T) {
 	property := func(kind uint8, value int64) bool {
 		tenant, now, terminal := publicationFixture(t)
 		a := runspec.PublishedAttempt{Attempt: 1, Generation: 1, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}
-		change := NodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: TransitionExtra{Publication: &a}}
+		change := nodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: NodePending, Cause: CausePublishAttempt, Extra: transitionExtra{Publication: &a}}
 		switch kind % 6 {
 		case 0:
 			a.Attempt = -(value & 0x7fffffff)

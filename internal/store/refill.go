@@ -215,7 +215,7 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 		return err
 	}
 	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventRefillSettings, SubjectID: change, Actor: actor, At: tx.now(),
+		Team: team, Kind: BusinessEventRefillSettings, SubjectID: change, Actor: actor, At: tx.time,
 		Attrs: map[string]any{
 			"enabled": s.Enabled, "threshold_cents": s.ThresholdCents, "amount_cents": s.AmountCents,
 			"week_limit_cents": s.WeekLimitCents, "month_limit_cents": s.MonthLimitCents,
@@ -266,7 +266,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := tx.now()
+	now := tx.time
 	st, err := spendStandingTx(ctx, tx, team, now)
 	if err != nil {
 		return nil, err
@@ -410,7 +410,7 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 		if err != nil {
 			return err
 		}
-		now := tx.now()
+		now := tx.time
 		st, err := spendStandingTx(ctx, tx, r.Team, now)
 		if err != nil {
 			return err
@@ -448,7 +448,7 @@ func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
 		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			tx.now().UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
+			tx.time.UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
 		return err
 	})
 }

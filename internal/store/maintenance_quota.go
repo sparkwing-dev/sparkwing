@@ -79,7 +79,7 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 		return QuotaReservation{}, err
 	}
 	defer rollbackOrLog(tx)
-	now := tx.now()
+	now := tx.time
 	period, ceiling, err := quotaPolicyTx(ctx, tx, t.team, quota, now)
 	if err != nil {
 		return QuotaReservation{}, err
@@ -92,7 +92,7 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 	if err := tx.QueryRowContext(ctx, `SELECT period,used,reserved FROM quota_admission WHERE team = ? AND quota = ?`+tx.forUpdate(), t.team, quota).Scan(&prior, &used, &reserved); err != nil {
 		return QuotaReservation{}, err
 	}
-	now = tx.now()
+	now = tx.time
 	if quota == "download" {
 		period = now.UTC().Format("2006-01-02")
 	} else {
@@ -160,11 +160,11 @@ func (t *Tenant) settleQuota(ctx context.Context, id string, used int64) error {
 		}
 		return tx.Commit()
 	}
-	if used > 0 && expires <= tx.now().UnixNano() {
+	if used > 0 && expires <= tx.time.UnixNano() {
 		return ErrLockHeld
 	}
 	if period == currentPeriod {
-		if _, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used = used + ?, reserved = reserved - ?, updated_at = ? WHERE team = ? AND quota = ?`, used, amount, tx.now().UnixNano(), t.team, quota); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used = used + ?, reserved = reserved - ?, updated_at = ? WHERE team = ? AND quota = ?`, used, amount, tx.time.UnixNano(), t.team, quota); err != nil {
 			return err
 		}
 	}

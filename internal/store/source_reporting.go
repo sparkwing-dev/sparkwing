@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -14,7 +16,7 @@ func bindingSourceReportTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		return bindingRefusal()
 	}
 	request := ExpansionSubmission{Source: controllerwire.NodeRef{RunID: b.RunID, NodeID: b.NodeID}, SourceGeneration: b.Generation, Actor: Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix}}
-	if err := expansionAuthorityTx(ctx, tx, Team(c.Team), request, tx.now()); err != nil {
+	if err := expansionAuthorityTx(ctx, tx, Team(c.Team), request, tx.time); err != nil {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, Team(c.Team), b.RunID); err != nil {
@@ -28,7 +30,7 @@ func bindingSourceReportTx(ctx context.Context, tx *storeTx, c capability.Capabi
 	if err != nil {
 		return err
 	}
-	if run.CancelRequestedAt != nil || run.FinishedAt != nil || row.Generation != b.Generation || row.Status != StatusDone || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized {
+	if run.CancelRequestedAt != nil || run.FinishedAt != nil || row.Generation != runspec.ClaimGeneration(b.Generation) || row.Status != StatusDone || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized {
 		return bindingRefusal()
 	}
 	return nil
@@ -52,7 +54,7 @@ func checkMetadataWriterTx(ctx context.Context, tx *storeTx, team Team, ref cont
 		if !slices.Contains(c.Grants, capability.NodeReport) || actor.Kind != ActorRunHost {
 			return NodeRow{}, holderRefusal()
 		}
-		err = checkOwnerLeaseTx(ctx, tx, team, actor, ref.RunID, tx.now())
+		err = checkOwnerLeaseTx(ctx, tx, team, actor, ref.RunID, tx.time)
 		if err == nil {
 			err = lockStateRunTx(ctx, tx, team, ref.RunID)
 		}

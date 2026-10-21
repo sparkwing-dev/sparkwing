@@ -11,6 +11,8 @@ import (
 	"slices"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -138,7 +140,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return tx.Commit()
 	}
 	if !exists {
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, tx.now().UnixNano(), tx.now().UnixNano())
+		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, tx.time.UnixNano(), tx.time.UnixNano())
 		if err != nil {
 			return err
 		}
@@ -150,14 +152,14 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		seal = tx.now().UnixNano()
+		seal = tx.time.UnixNano()
 		completeness = "complete"
 		finalDigest = digest
 		if commit.IncompleteReason != "" {
 			completeness = "incomplete"
 		}
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.now().UnixNano(), t.team, commit.Subject.RunID, identity.id)
+	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.time.UnixNano(), t.team, commit.Subject.RunID, identity.id)
 	if err != nil {
 		return err
 	}
@@ -223,14 +225,14 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return authorityError(apierr.Forbidden, "job log grant is required")
 		}
 		a := subject.Attempt
-		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || a.Generation != c.Binding.Generation || a.Generation != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
+		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || runspec.ClaimGeneration(a.Generation) != runspec.ClaimGeneration(c.Binding.Generation) || runspec.ClaimGeneration(a.Generation) != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
 			return holderRefusal()
 		}
 		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: subject.RunID, NodeID: a.NodeID})
 		if err != nil {
 			return err
 		}
-		if row.Attempt != a.Attempt || row.Generation != a.Generation {
+		if row.Attempt != runspec.AttemptOrdinal(a.Attempt) || row.Generation != runspec.ClaimGeneration(a.Generation) {
 			return holderRefusal()
 		}
 		var holder, prefix string
@@ -244,12 +246,12 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return holderRefusal()
 		}
 		if finished.Valid {
-			if row.Status != StatusDone || (!sealedReplay && tx.now().UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
+			if row.Status != StatusDone || (!sealedReplay && tx.time.UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
 				return holderRefusal()
 			}
 			return nil
 		}
-		return checkHolderTx(ctx, tx, team, row, actor, tx.now())
+		return checkHolderTx(ctx, tx, team, row, actor, tx.time)
 	}
 	if subject.Unit == nil {
 		return holderRefusal()
@@ -290,7 +292,7 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 			return err
 		}
 	}
-	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || generation != unit.Generation || generation != actor.Generation || !lease.Valid || lease.Int64 <= tx.now().UnixNano() {
+	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= tx.time.UnixNano() {
 		return holderRefusal()
 	}
 	return nil
@@ -328,8 +330,8 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 	}
 	if c.Unit == capability.UnitTrigger {
 		owner := actor
-		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: c.Binding.RunID, Holder: actor.Holder, Generation: actor.Generation}
-		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID, tx.now()); err != nil {
+		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: c.Binding.RunID, Holder: actor.Holder, Generation: int64(actor.Generation)}
+		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID, tx.time); err != nil {
 			return result, err
 		}
 	} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {

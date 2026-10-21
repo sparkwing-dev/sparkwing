@@ -16,7 +16,8 @@ import (
 func deleteAndPurge(t *testing.T, st *store.Store, team store.Team, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if _, _, err := st.AsOperator().RequestTeamDeletion(ctx, team, now); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, _, err := st.AsOperator().RequestTeamDeletion(ctx, team); err != nil {
 		t.Fatalf("request deletion of %s: %v", team, err)
 	}
 	purge(t, st, team, now)
@@ -73,12 +74,13 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				st.SetTestClock(t, func() time.Time { return now })
 				var wg sync.WaitGroup
 				for _, id := range []string{a.Account.ID, b.Account.ID} {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						_, _ = st.DeleteAccount(ctx, id, now)
+						_, _ = st.DeleteAccount(ctx, id)
 					}()
 				}
 				wg.Wait()
@@ -118,7 +120,8 @@ func TestInvitationEmailCapSurvivesTeamDeletion(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ok, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID, now)
+		st.SetTestClock(t, func() time.Time { return now })
+		ok, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,10 +183,12 @@ func TestTeamPurgeRemovesOnlyItsReplicaStorageUsage(t *testing.T) {
 func purge(t *testing.T, st *store.Store, team store.Team, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if ok, err := st.AsOperator().ClaimTeamDeletion(ctx, team, "purger", now, time.Minute); err != nil || !ok {
+	st.SetTestClock(t, func() time.Time { return now })
+	if ok, err := st.AsOperator().ClaimTeamDeletion(ctx, team, "purger", time.Minute); err != nil || !ok {
 		t.Fatalf("claim %s = %v, %v", team, ok, err)
 	}
-	if err := st.AsOperator().PurgeTeam(ctx, team, "purger", now, time.Hour); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if err := st.AsOperator().PurgeTeam(ctx, team, "purger", time.Hour); err != nil {
 		t.Fatalf("purge %s: %v", team, err)
 	}
 }
@@ -200,29 +205,35 @@ func TestTeamDeletionLeaseKeepsOnePurger(t *testing.T) {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
-	if _, _, err := op.RequestTeamDeletion(ctx, "acme", now); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, _, err := op.RequestTeamDeletion(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "a", now, time.Minute); err != nil || !ok {
+	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "a", time.Minute); err != nil || !ok {
 		t.Fatalf("first claim = %v, %v", ok, err)
 	}
-	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "b", now.Add(30*time.Second), time.Minute); err != nil || ok {
+	st.SetTestClock(t, func() time.Time { return now.Add(30 * time.Second) })
+	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "b", time.Minute); err != nil || ok {
 		t.Fatalf("second holder during a live lease = %v, %v; want false", ok, err)
 	}
-	if err := op.PurgeTeam(ctx, "acme", "b", now.Add(30*time.Second), time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
+	st.SetTestClock(t, func() time.Time { return now.Add(30 * time.Second) })
+	if err := op.PurgeTeam(ctx, "acme", "b", time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
 		t.Fatalf("purge by a non-holder = %v, want ErrDeletionLeaseLost", err)
 	}
 	later := now.Add(2 * time.Minute)
-	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "b", later, time.Minute); err != nil || !ok {
+	st.SetTestClock(t, func() time.Time { return later })
+	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "b", time.Minute); err != nil || !ok {
 		t.Fatalf("claim after the lease lapsed = %v, %v", ok, err)
 	}
-	if err := op.PurgeTeam(ctx, "acme", "a", later, time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
+	st.SetTestClock(t, func() time.Time { return later })
+	if err := op.PurgeTeam(ctx, "acme", "a", time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
 		t.Fatalf("purge by the holder that lost the lease = %v, want ErrDeletionLeaseLost", err)
 	}
 	if n := countWhere(t, st, "team_deletions", "slug = 'acme' AND state = 'pending'"); n != 1 {
 		t.Fatal("a refused purge marked the deletion done")
 	}
-	if err := op.PurgeTeam(ctx, "acme", "b", later, time.Hour); err != nil {
+	st.SetTestClock(t, func() time.Time { return later })
+	if err := op.PurgeTeam(ctx, "acme", "b", time.Hour); err != nil {
 		t.Fatalf("purge by the holder = %v", err)
 	}
 }
@@ -241,14 +252,17 @@ func TestTeamRecheckPreservesForeignKeyFenceAfterThePurge(t *testing.T) {
 		t.Fatal("deleted team accepted a new usage row")
 	}
 	op := st.AsOperator()
-	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "p", now.Add(30*time.Minute), time.Minute); err != nil || ok {
+	st.SetTestClock(t, func() time.Time { return now.Add(30 * time.Minute) })
+	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "p", time.Minute); err != nil || ok {
 		t.Fatalf("claiming a recheck before it is due = %v, %v; want false", ok, err)
 	}
 	due := now.Add(2 * time.Hour)
-	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "p", due, time.Minute); err != nil || !ok {
+	st.SetTestClock(t, func() time.Time { return due })
+	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "p", time.Minute); err != nil || !ok {
 		t.Fatalf("claiming a due recheck = %v, %v", ok, err)
 	}
-	if err := op.FinishTeamRecheck(ctx, "acme", "p", due); err != nil {
+	st.SetTestClock(t, func() time.Time { return due })
+	if err := op.FinishTeamRecheck(ctx, "acme", "p"); err != nil {
 		t.Fatal(err)
 	}
 	if n := countWhere(t, st, "egress_usage", "team = 'acme'"); n != 0 {
@@ -308,7 +322,8 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		}
 	}
 
-	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := st.DeleteAccount(ctx, leaver.Account.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ table, col string }{

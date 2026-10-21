@@ -26,7 +26,7 @@ func stateFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 func TestTransitionLapseRequeuesInSameRun(t *testing.T) {
 	tenant, _, actor := stateFixture(t)
 	ctx := context.Background()
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}
 	applied, err := tenant.TransitionNode(ctx, change)
 	if err != nil {
 		t.Fatal(err)
@@ -55,10 +55,10 @@ func TestTransitionCancelWinsOverLoss(t *testing.T) {
 	tenant, now, actor := stateFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET cancel_requested_at=? WHERE team='a' AND run_id='run'`, now.UnixNano())
 	ctx := context.Background()
-	if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
+	if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
 		t.Fatal("cancelled work was requeued")
 	}
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}
 	if _, err := tenant.TransitionNode(ctx, change); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestTransitionTenantAndExpiredReaperFence(t *testing.T) {
 		t.Fatalf("cross-team read = %v", err)
 	}
 	*now = now.Add(time.Minute)
-	if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
+	if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodePending, Actor: actor, Cause: CauseLeaseLapse}); err == nil {
 		t.Fatal("expired reaper changed work")
 	}
 	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: "run", NodeID: "job"})
@@ -109,7 +109,7 @@ func TestRunCancellationDrainsBeforeTerminal(t *testing.T) {
 	if _, err = tenant.TransitionRun(ctx, finish); err == nil {
 		t.Fatal("run finished with undrained job")
 	}
-	if _, err = tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}); err != nil {
+	if _, err = tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeCancelled, Actor: actor, Cause: CauseLeaseLapse}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tenant.TransitionRun(ctx, finish); err != nil {
@@ -168,7 +168,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	tenant, _, actor := liveHolderFixture(t)
 	ctx := context.Background()
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-	applied, err := tenant.TransitionNode(ctx, NodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
+	applied, err := tenant.TransitionNode(ctx, nodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	if row.ClaimedBy != "runner" || row.ApplicationRetries != 1 || row.Disruptions != 0 {
 		t.Fatalf("retry row = %+v", row)
 	}
-	result := NodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(4), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	result := nodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(4), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 	if _, err = tenant.TransitionNode(ctx, result); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestTransitionHolderRights(t *testing.T) {
 	authorityPersist(t, tenant.s, owner)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'host','owner',1,?,?,?)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
 	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}}
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Actor: actor, Cause: CauseReport}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Actor: actor, Cause: CauseReport}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("owner finished another holder's job")
 	}

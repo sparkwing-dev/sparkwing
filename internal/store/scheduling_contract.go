@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
@@ -446,7 +448,7 @@ func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
 		return fmt.Errorf("job %q waits for an undeclared approval", job.ID)
 	}
 	node := scheduleDeclaration(job)
-	node.Status, node.Outcome, node.Generation = string(row.Status), string(row.Outcome), row.Generation
+	node.Status, node.Outcome, node.Generation = string(row.Status), string(row.Outcome), int64(row.Generation)
 	node.Ready, node.Claimed = row.Status == StatusPending && row.ClaimedBy == "" && row.ReadyAt != nil, row.ClaimedBy != ""
 	node.CancelRequested, node.CancelReason = row.CancelRequestedAt != nil, row.CancelReason
 	node.Expansion = string(row.Expansion)
@@ -475,7 +477,7 @@ func scheduleDeclaration(job nodeproto.JobSpec) ScheduleNode {
 func (projection *scheduleProjection) expand(expansion AcceptedExpansionRow) error {
 	source, exists := projection.jobs[expansion.Source.NodeID]
 	row := projection.rows[source.ID]
-	if !exists || expansion.Source.RunID != projection.runID || projection.accepted[source.ID] || len(source.Closures.Generate) == 0 || row.Expansion != ExpansionAccepted || row.Generation != expansion.SourceGeneration {
+	if !exists || expansion.Source.RunID != projection.runID || projection.accepted[source.ID] || len(source.Closures.Generate) == 0 || row.Expansion != ExpansionAccepted || row.Generation != runspec.ClaimGeneration(expansion.SourceGeneration) {
 		return fmt.Errorf("expansion source %q disagrees with persisted declaration or generation", expansion.Source.NodeID)
 	}
 	var body struct {

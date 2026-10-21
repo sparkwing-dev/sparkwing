@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
@@ -39,9 +41,20 @@ func (p OwnerPolicyResult) outcome() NodeState {
 	}
 }
 
-func checkNodeOwnerPolicy(row NodeRow, change NodeTransition) error {
+func (p OwnerPolicyResult) runOutcome() (RunState, error) {
+	switch p.Kind {
+	case PolicyAdmissionSkip:
+		return RunSuccess, nil
+	case PolicyAdmissionFail, PolicyQueueTimeout:
+		return RunFailed, nil
+	default:
+		return "", errors.New("invalid plan admission policy result")
+	}
+}
+
+func checkNodeOwnerPolicy(row NodeRow, change nodeTransition) error {
 	policy, result := change.Extra.OwnerPolicy, change.Extra.Result
-	if policy == nil || policy.Generation < 0 || policy.Generation != row.Generation || row.ReadyAt != nil || result == nil || policy.outcome() == "" || policy.outcome() != change.To {
+	if policy == nil || runspec.ClaimGeneration(policy.Generation) < 0 || runspec.ClaimGeneration(policy.Generation) != row.Generation || row.ReadyAt != nil || result == nil || policy.outcome() == "" || policy.outcome() != change.To {
 		return holderRefusal()
 	}
 	if policy.Kind == PolicyQueueTimeout && result.Reason != FailureQueueTimeout {
@@ -64,11 +77,9 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 	if policy == nil || policy.Generation != change.Actor.Owner.Generation || row.Spec == nil || row.CancelRequestedAt != nil {
 		return holderRefusal()
 	}
-	want := RunFailed
-	if policy.Kind == PolicyAdmissionSkip {
-		want = RunSuccess
-	} else if policy.Kind != PolicyAdmissionFail && policy.Kind != PolicyQueueTimeout {
-		return errors.New("invalid plan admission policy result")
+	want, err := policy.runOutcome()
+	if err != nil {
+		return err
 	}
 	if change.To != want {
 		return errors.New("plan verdict disagrees with admission policy")
@@ -84,10 +95,10 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 		if node.Status != StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
 			return errors.New("plan admission refusal requires unreleased work")
 		}
-		_, err := transitionNodeStateTx(ctx, tx, team, NodeTransition{
+		_, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{
 			Ref: node.Ref, Actor: change.Actor, To: policy.outcome(), Cause: CauseOwnerPolicy,
-			Extra: TransitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: node.Generation}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
-		}, tx.now())
+			Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: int64(node.Generation)}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
+		}, tx.time)
 		if err != nil {
 			return err
 		}

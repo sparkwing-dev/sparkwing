@@ -47,7 +47,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		if err != nil {
 			return result, err
 		}
-		if !found || record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now()) {
+		if !found || record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.time) {
 			return result, blob.ErrNotFound
 		}
 		if record.ExpiresAt.Set && !record.Pinned {
@@ -116,11 +116,11 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 	if err := records.verifyMaterializedBlobs(ctx, tx, batch); err != nil {
 		return materializedRecords{}, err
 	}
-	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now()); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.time); err != nil {
 		return materializedRecords{}, err
 	}
 	for _, expiry := range expiries {
-		if !expiry.After(tx.now()) {
+		if !expiry.After(tx.time) {
 			return materializedRecords{}, blob.ErrNotFound
 		}
 	}
@@ -219,7 +219,7 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT materialize_result"); err != nil {
 		return false, err
 	}
-	_, err := transitionNodeTx(ctx, tx, team, NodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: TransitionExtra{Materialize: request.Source}}, tx.now())
+	_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: transitionExtra{Materialize: request.Source}}, tx.time)
 	if err != nil {
 		if !cacheMissError(err) {
 			return false, err

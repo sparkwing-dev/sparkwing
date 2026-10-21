@@ -65,7 +65,7 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		if event.CheckoutID != "" {
 			checkoutID = result.CheckoutID
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), tx.now().UnixNano(), event.ObjectID, string(body), string(encoded))
+		_, err = tx.ExecContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), tx.time.UnixNano(), event.ObjectID, string(body), string(encoded))
 		return err
 	})
 	if err != nil {
@@ -292,7 +292,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		return checkout.result, err
 	case capability.PaymentWarningEvent:
 		w := PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}
-		now := tx.now()
+		now := tx.time
 		if w.WarningID == "" || w.PaymentIntent == "" {
 			return result, fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
 		}
@@ -405,7 +405,7 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 		return team, nil
 	}
 	card.AddedAt = time.Unix(created, 0)
-	if err := saveCardTx(ctx, tx, team, card, "payment_provider", tx.now()); err != nil && !errors.Is(err, ErrStaleCardSetup) {
+	if err := saveCardTx(ctx, tx, team, card, "payment_provider", tx.time); err != nil && !errors.Is(err, ErrStaleCardSetup) {
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)

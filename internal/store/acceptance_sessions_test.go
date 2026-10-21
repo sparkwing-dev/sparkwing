@@ -161,7 +161,7 @@ func checkStoreSessions(t *testing.T) (err error) {
 
 func checkRolelessStoreSession(ctx context.Context, s *store.Store, team store.Team) error {
 	profile := store.SignInProfile{Provider: "github", Subject: "waitlisted", Email: "waitlisted@example.test", EmailVerified: true}
-	member, err := s.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{ForceWaitlist: true}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(ctx, profile, store.SignUpConditions{ForceWaitlist: true})
 	if err != nil {
 		return err
 	}

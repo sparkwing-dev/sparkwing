@@ -6,6 +6,8 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -87,7 +89,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 			break
 		}
 	}
-	if row.Ref.NodeID == "" || row.Generation != generation || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+	if row.Ref.NodeID == "" || row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 		return errors.New("eval source is outside the awarded expansion")
 	}
 	entry, err := h.acquire(ctx, input, snapshot.Run)
@@ -119,7 +121,7 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, acto
 		return errors.New("generator must return declarations or a structured failure")
 	}
 	commit := func() error {
-		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: actor, Body: body, Failure: failure})
+		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: int64(row.Generation), Actor: actor, Body: body, Failure: failure})
 		return err
 	}
 	if h.Masks != nil && failure == nil {

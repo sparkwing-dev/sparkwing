@@ -77,7 +77,8 @@ func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
 					if freeze, err := f.tenant.CreditFreeze(t.Context()); err != nil || freeze.Frozen != warned {
 						t.Fatalf("held = %+v, want held %t: %v", freeze, warned, err)
 					}
-					due, err := f.s.AsOperator().DueCardRefunds(t.Context(), f.now.Add(time.Hour))
+					f.s.SetTestClock(t, func() time.Time { return f.now.Add(time.Hour) })
+					due, err := f.s.AsOperator().DueCardRefunds(t.Context())
 					want := 0
 					if warned && !refunded {
 						want = 1

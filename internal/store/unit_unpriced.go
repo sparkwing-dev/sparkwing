@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -22,13 +23,13 @@ func (o *Operator) failUnpricedClaim(ctx context.Context, demand UnitDemand, ref
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}
-		change := NodeTransition{Ref: controllerwire.NodeRef{RunID: refusal.RunID, NodeID: refusal.NodeID}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}
-		_, err := transitionNodeTx(ctx, tx, team, change, tx.now())
+		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: refusal.RunID, NodeID: refusal.NodeID}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}
+		_, err := transitionNodeTx(ctx, tx, team, change, tx.time)
 		return err
 	})
 }
 
-func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row NodeRow, change NodeTransition) error {
+func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row NodeRow, change nodeTransition) error {
 	if tx.unpricedDemand == nil || tx.unpricedDemand.CapabilityPrefix != change.Actor.CapabilityPrefix {
 		return holderRefusal()
 	}
@@ -40,7 +41,7 @@ func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row NodeRow, change 
 		return err
 	}
 	p := chain[0].principal
-	unit := UnitRef{Kind: capability.UnitNode, RunID: row.Ref.RunID, NodeID: row.Ref.NodeID}
+	unit := UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(row.Ref.RunID), NodeID: runspec.NodeID(row.Ref.NodeID)}
 	if _, err := claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
 		return err
 	}

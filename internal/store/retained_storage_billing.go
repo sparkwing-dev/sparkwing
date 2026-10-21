@@ -15,7 +15,7 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLea
 	var out StorageChargeSweep
 	var rate, free int64
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
 			return err
 		}
 		var err error
@@ -77,14 +77,14 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease,
 		return nil, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
 		return nil, err
 	}
 	charge, err := chargeRetainedTeamTx(ctx, tx, team, rate, free)
 	if err != nil {
 		return nil, err
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.time); err != nil {
 		return nil, err
 	}
 	return charge, tx.Commit()
@@ -102,7 +102,7 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, fre
 	if err != nil {
 		return nil, err
 	}
-	now := tx.now()
+	now := tx.time
 	inventory, err := retainedStorageSampleTx(ctx, tx, team)
 	if err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, fre
 func lockRetainedWatermarksTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
 	var through int64
 	for i, kind := range []StorageKind{StorageCache, StorageLogs} {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO team_storage(team,store,updated_at) VALUES (?,?,?) ON CONFLICT(team,store) DO NOTHING", team, kind, tx.now().UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO team_storage(team,store,updated_at) VALUES (?,?,?) ON CONFLICT(team,store) DO NOTHING", team, kind, tx.time.UnixNano()); err != nil {
 			return 0, err
 		}
 		var stamp int64
@@ -183,7 +183,7 @@ func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (out r
 		return out, err
 	}
 	defer closeRowsInto(rows, &err)
-	out.oldest = tx.now().UnixNano()
+	out.oldest = tx.time.UnixNano()
 	for rows.Next() {
 		var size, created, log int64
 		if err := rows.Scan(&size, &created, &log); err != nil {

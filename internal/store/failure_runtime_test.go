@@ -29,7 +29,7 @@ func recoveryFailureFixture(t *testing.T) (*Tenant, Actor, Actor, *nodeproto.Job
 
 func TestRecoveryReadsExactRecordedFailure(t *testing.T) {
 	tenant, owner, holder, failure := recoveryFailureFixture(t)
-	_, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, MaskedError: failure.Error.Message, Failure: failure}}})
+	_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, MaskedError: failure.Error.Message, Failure: failure}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestRecoveryFailureReadRechecksSourceAndReader(t *testing.T) {
 	for _, problem := range []string{"generation", "nonterminal", "edge", "owner", "revoked", "grant", "foreign_team", "corrupt"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, owner, holder, failure := recoveryFailureFixture(t)
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Failure: failure}}}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Failure: failure}}}); err != nil {
 				t.Fatal(err)
 			}
 			generation := int64(2)
@@ -81,7 +81,7 @@ func TestRecoveryFailureReadRechecksSourceAndReader(t *testing.T) {
 
 func TestRecoveryDoesNotManufactureFailureFromStatus(t *testing.T) {
 	tenant, owner, holder, _ := recoveryFailureFixture(t)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "agent_lost", MaskedError: "text without structured failure"}}}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "agent_lost", MaskedError: "text without structured failure"}}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := tenant.ReadFailure(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"}, 2, owner)
@@ -92,7 +92,7 @@ func TestRecoveryDoesNotManufactureFailureFromStatus(t *testing.T) {
 
 func TestRecoveryFailureReadRequiresTheClaimedJobsDeclaredEdge(t *testing.T) {
 	tenant, owner, holder, failure := recoveryFailureFixture(t)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Failure: failure}}}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Failure: failure}}}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET ready_at=1 WHERE node_id='recover'`)
@@ -127,7 +127,7 @@ func TestInvalidRecordedFailureRollsBackTheResult(t *testing.T) {
 			case "success":
 				outcome = NodeSuccess
 			}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: outcome, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: outcome, Failure: failure}}}); err == nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: outcome, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: outcome, Failure: failure}}}); err == nil {
 				t.Fatal("invalid structured failure was committed")
 			}
 			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})

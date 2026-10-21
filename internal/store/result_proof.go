@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -14,7 +16,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 	if proof == nil {
 		return nil
 	}
-	if proof.Actor != actor.Authority || proof.Method != "POST" || proof.RunID != ref.RunID || proof.NodeID != ref.NodeID || proof.ClaimID != "" || proof.Generation != actor.Generation || len(proof.Digest) != 64 {
+	if proof.Actor != actor.Authority || proof.Method != "POST" || proof.RunID != ref.RunID || proof.NodeID != ref.NodeID || proof.ClaimID != "" || runspec.ClaimGeneration(proof.Generation) != actor.Generation || len(proof.Digest) != 64 {
 		return holderRefusal()
 	}
 	if _, err := hex.DecodeString(proof.Digest); err != nil {

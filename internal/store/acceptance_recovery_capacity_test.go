@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -19,7 +20,7 @@ func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name strin
 	if err != nil {
 		return store.Actor{}, err
 	}
-	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runID}, Available: match.Resources{Cores: 8}})
+	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(runID)}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		return store.Actor{}, err
 	}
@@ -77,17 +78,17 @@ func checkRecoveryCapacity(t *testing.T) error {
 	for _, group := range []struct{ key, node string }{{"node", "job"}, {"plan", ""}} {
 		generation := f.holder.Generation
 		if group.node == "" {
-			generation = owner.Owner.Generation
+			generation = runspec.ClaimGeneration(owner.Owner.Generation)
 		}
-		adopted, err := f.tenant.AdoptCapacity(ctx, group.key, "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: group.node, Generation: generation}, owner)
-		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || adopted.Holder.Binding.Generation != generation {
+		adopted, err := f.tenant.AdoptCapacity(ctx, group.key, "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: group.node, Generation: int64(generation)}, owner)
+		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || runspec.ClaimGeneration(adopted.Holder.Binding.Generation) != generation {
 			return fmt.Errorf("adopt %s: %+v, %v", group.key, adopted, err)
 		}
 		if promoted, err := f.tenant.PromoteNextWaiters(ctx, group.key, time.Hour); err != nil || len(promoted) != 0 {
 			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, promoted, err)
 		}
 	}
-	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}); err != nil {
+	if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}); err != nil {
 		return err
 	}
 	if err := checkCapacityWinner(ctx, f.tenant, "node", competitor); err != nil {
@@ -96,7 +97,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if state, err := f.tenant.GetConcurrencyState(ctx, "plan"); err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].HolderID != "original" {
 		return fmt.Errorf("job completion released plan capacity: %+v, %v", state, err)
 	}
-	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunTransition{RunID: f.ref.RunID, Actor: owner, To: store.RunSuccess, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
+	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: owner, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
 		return err
 	}
 	return checkCapacityWinner(ctx, f.tenant, "plan", competitor)
@@ -147,7 +148,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if err := f.reopen(ctx); err != nil {
 		return err
 	}
-	adopted, err := f.tenant.AdoptCapacity(ctx, "deploy", "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: "job", Generation: f.holder.Generation}, f.owner)
+	adopted, err := f.tenant.AdoptCapacity(ctx, "deploy", "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: "job", Generation: int64(f.holder.Generation)}, f.owner)
 	if err != nil || adopted.Kind != store.AcquireAgain {
 		return fmt.Errorf("expired adoption: %+v, %v", adopted, err)
 	}

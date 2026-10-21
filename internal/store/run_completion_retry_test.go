@@ -24,7 +24,7 @@ func runCompletionFixture(t *testing.T, s *store.Store) (*store.Tenant, store.Fi
 	if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: plan.RunID, Actor: plan.Actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	return tenant, store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunTransition{RunID: plan.RunID, To: store.RunSuccess, Cause: store.RunFinish, Actor: plan.Actor}}
+	return tenant, store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunCompletion{RunID: plan.RunID, Cause: store.RunFinish, Actor: plan.Actor}}
 }
 
 func TestRunCompletionHasOneCommittedWinner(t *testing.T) {
@@ -62,7 +62,7 @@ func TestRunCompletionHasOneCommittedWinner(t *testing.T) {
 	}
 	for _, state := range []store.RunState{store.RunSuccess, store.RunFailed, store.RunCancelled} {
 		retry := finish
-		retry.Transition.To, retry.Transition.MaskedError = state, "late report"
+		retry.Transition.MaskedError = string(state) + " late report"
 		if _, err := other.FinishRunAndUnit(t.Context(), retry); err == nil {
 			t.Fatalf("different terminal report %s accepted", state)
 		}
@@ -78,14 +78,15 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 	tenant, finish := runCompletionFixture(t, s)
 	foreign := tenantFor(t, s, "foreign")
 	before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
-	for _, state := range []store.RunState{"", store.RunPending, store.RunRunning, "invalid"} {
+
+	for _, cause := range []store.RunCause{store.RunStart, store.RunCancel, store.RunPublish, store.RunOwnerLost} {
 		invalid := finish
-		invalid.Transition.To = state
+		invalid.Transition.Cause = cause
 		if _, err := tenant.FinishRunAndUnit(t.Context(), invalid); err == nil {
-			t.Fatalf("nonterminal finish %q accepted", state)
+			t.Fatalf("non-completion cause %s accepted", cause)
 		}
 		if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
-			t.Fatal("invalid finish changed persisted state")
+			t.Fatal("invalid completion changed persisted state")
 		}
 	}
 

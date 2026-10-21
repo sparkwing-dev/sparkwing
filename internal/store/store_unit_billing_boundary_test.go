@@ -40,7 +40,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			startedAt := *now
 			tenant := &Tenant{s: s, team: claim.Team}
 			ref := controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.db.Close(); err != nil {
@@ -61,7 +61,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 				t.Fatalf("reopened billing: award=%d start=%d price=%d reserved=%d: %v", award, began, price, reserved, err)
 			}
 			*now = now.Add(5 * time.Second)
-			change := NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(row.Attempt)}
+			change := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(row.Attempt)}
 			for replay := range 2 {
 				applied, err := tenant.TransitionNode(t.Context(), change)
 				if err != nil || applied.Replayed != (replay == 1) {

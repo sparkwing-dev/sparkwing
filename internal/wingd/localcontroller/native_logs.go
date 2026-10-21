@@ -60,9 +60,11 @@ func (s logHostStore) FinishRunAndUnit(ctx context.Context, request store.Finish
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
-func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeTransition) (store.Applied, error) {
-	if request.Cause == store.CauseReport || request.Cause == store.CauseRetry || request.Cause == store.CauseRelease {
-		if err := s.logs.closeNode(context.WithoutCancel(ctx), request.Ref.NodeID); err != nil {
+func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (store.Applied, error) {
+	switch request.(type) {
+	case store.ReportNode, store.RetryNode, store.ReleaseNode:
+		ref, _ := store.NodeCommandAuthority(request)
+		if err := s.logs.closeNode(context.WithoutCancel(ctx), ref.NodeID); err != nil {
 			return store.Applied{}, err
 		}
 	}
@@ -107,12 +109,12 @@ func (l *localLogs) subject(ctx context.Context, node string) (capability.Princi
 			return p, blob.LogSubject{}, nodeClaimMismatch()
 		}
 		if row.Status == store.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {
-			p, err = l.claims.principal(ctx, node, row.Generation, row.Attempt)
+			p, err = l.claims.principal(ctx, node, int64(row.Generation), int64(row.Attempt))
 			if err != nil {
 				return p, blob.LogSubject{}, err
 			}
 			subject.Kind, subject.Unit = blob.LogJobAttempt, nil
-			subject.Attempt = &runspec.AttemptIdentity{Team: p.Capability.Team, RunID: l.run, NodeID: node, Generation: row.Generation, Attempt: row.Attempt}
+			subject.Attempt = &runspec.AttemptIdentity{Team: p.Capability.Team, RunID: l.run, NodeID: node, Generation: int64(row.Generation), Attempt: int64(row.Attempt)}
 		}
 	}
 	return p, subject, subject.Validate()

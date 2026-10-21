@@ -69,7 +69,7 @@ func (t *Tenant) ReadOverflowControl(ctx context.Context, authority capability.A
 }
 
 func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account string) (OverflowControl, error) {
-	now := tx.now().UTC()
+	now := tx.time.UTC()
 	out := OverflowControl{PeriodStart: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)}
 	var limit int64
 	err := tx.QueryRowContext(ctx, `SELECT monthly_minutes FROM overflow_controls WHERE team=? AND account_id=?`, team, account).Scan(&limit)

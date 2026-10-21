@@ -32,7 +32,8 @@ func accountMutationFixture(t *testing.T) (*Store, capability.Authorized, string
 		t.Fatal(err)
 	}
 	s.csrfCipher, s.csrfKey = cipher, nil
-	result, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "member", Email: "member@example.test", EmailVerified: true}, SignUpConditions{}, now)
+	s.SetTestClock(t, func() time.Time { return now })
+	result, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "member", Email: "member@example.test", EmailVerified: true}, SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,8 @@ func TestAccountUnlinkKeepsSelectedSessionAndRequiresRecentSignIn(t *testing.T) 
 
 func accountMutationInvitation(t *testing.T, s *Store, now time.Time) Invitation {
 	t.Helper()
-	owner, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "owner", Email: "owner@example.test", EmailVerified: true}, SignUpConditions{}, now)
+	s.SetTestClock(t, func() time.Time { return now })
+	owner, err := s.AsOperator().ResolveSignIn(t.Context(), SignInProfile{Provider: ProviderGoogle, Subject: "owner", Email: "owner@example.test", EmailVerified: true}, SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +317,8 @@ func TestAccountMutationsKeepNanosecondTimestamps(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT unlinked_at FROM identity_unlinks WHERE account_id=?`, id).Scan(&at); err != nil || at != now.UnixNano() {
 		t.Fatalf("unlinked=%d, want %d: %v", at, now.UnixNano(), err)
 	}
-	counts, err := s.AsOperator().SignUpCounts(t.Context(), now.Add(time.Hour))
+	s.SetTestClock(t, func() time.Time { return now.Add(time.Hour) })
+	counts, err := s.AsOperator().SignUpCounts(t.Context())
 	if err != nil || counts.LastHour != 0 || counts.LastDay != 1 {
 		t.Fatalf("signup count=%+v: %v", counts, err)
 	}

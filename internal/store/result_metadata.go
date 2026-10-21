@@ -62,7 +62,7 @@ func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref contro
 	if err != nil {
 		return row, err
 	}
-	if err := checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
+	if err := checkHolderTx(ctx, tx, team, row, actor, tx.time); err != nil {
 		return row, err
 	}
 	if row.Attempt <= 0 {
@@ -74,7 +74,7 @@ func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref contro
 	if err != nil {
 		return row, err
 	}
-	if writer != actor.CapabilityPrefix || generation != row.Generation {
+	if writer != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != row.Generation {
 		return row, holderRefusal()
 	}
 	return row, nil
@@ -107,7 +107,7 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 	if err != nil {
 		return err
 	}
-	if row.Attempt != report.Attempt.Attempt || row.Generation != report.Attempt.Generation {
+	if row.Attempt != runspec.AttemptOrdinal(report.Attempt.Attempt) || row.Generation != runspec.ClaimGeneration(report.Attempt.Generation) {
 		return holderRefusal()
 	}
 	return writeStepTx(ctx, tx, t.team, row, report)
@@ -126,11 +126,11 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, repor
 		start = sql.NullInt64{Int64: report.StartedAt.UnixNano(), Valid: true}
 	}
 	if !start.Valid {
-		start = sql.NullInt64{Int64: tx.now().UnixNano(), Valid: true}
+		start = sql.NullInt64{Int64: tx.time.UnixNano(), Valid: true}
 	}
 	end := sql.NullInt64{}
 	if report.State != "running" {
-		end = sql.NullInt64{Int64: tx.now().UnixNano(), Valid: true}
+		end = sql.NullInt64{Int64: tx.time.UnixNano(), Valid: true}
 		if report.FinishedAt != nil {
 			end.Int64 = report.FinishedAt.UnixNano()
 		}

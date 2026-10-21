@@ -56,7 +56,7 @@ func TestReconcileMaterializeOnlyHitCommitsSourceResult(t *testing.T) {
 
 func TestRunHostCancelPreservesHolderResultRights(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeCancelled, Cause: CauseCancel}
+	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeCancelled, Cause: CauseCancel}
 	first, err := tenant.TransitionNode(t.Context(), change)
 	if err != nil || !first.CancelRequested {
 		t.Fatalf("owner cancellation: %+v, %v", first, err)

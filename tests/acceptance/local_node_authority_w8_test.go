@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -36,10 +38,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 		t.Fatal("initial claim:", err)
 	}
 	attempt := int64(0)
-	applied, err := tenant.TransitionNode(ctx, store.NodeTransition{
-		Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &attempt,
-		Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation},
-	})
+	applied, err := tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
 	if err != nil {
 		t.Fatal("start:", err)
 	}
@@ -48,7 +47,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err := auth.Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: unit.Capability}, route)
-	if err != nil || current.Principal.Capability.Binding.Attempt != applied.Attempt || snapshot.Authorities[0].Principal.Capability.Binding.Attempt != 0 || snapshot.Binding.Current.Attempt != applied.Attempt {
+	if err != nil || current.Principal.Capability.Binding.Attempt != int64(applied.Attempt) || snapshot.Authorities[0].Principal.Capability.Binding.Attempt != 0 || snapshot.Binding.Current.Attempt != int64(applied.Attempt) {
 		t.Fatalf("started claim lost its immutable award or current attempt: %+v: %v", current.Principal.Capability.Binding, err)
 	}
 }
@@ -60,15 +59,12 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 		p := binding.Principal
 		attempt := int64(0)
-		applied, err := binding.Tenant.TransitionNode(ctx, store.NodeTransition{
-			Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &attempt,
-			Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation},
-		})
+		applied, err := binding.Tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
 		if err != nil {
 			return runners.NativeServices{}, err
 		}
 		current, err := binding.Refresh(ctx)
-		if err != nil || current.Authority != p.Authority || current.Capability.Binding.Attempt != applied.Attempt || unit.Binding.Attempt != 0 {
+		if err != nil || current.Authority != p.Authority || current.Capability.Binding.Attempt != int64(applied.Attempt) || unit.Binding.Attempt != 0 {
 			t.Fatalf("started host lost its authenticated award: %+v: %v", current.Capability.Binding, err)
 		}
 		refreshed = true

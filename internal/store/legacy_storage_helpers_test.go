@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -14,7 +13,7 @@ import (
 func freeTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	tenant := teamHandle(t, st, team)
-	if err := st.GrantFreeSlot(context.Background(), team, time.Now()); err != nil {
+	if err := st.GrantFreeSlot(context.Background(), team); err != nil {
 		t.Fatalf("%s's free slot: %v", team, err)
 	}
 	return tenant

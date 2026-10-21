@@ -26,7 +26,7 @@ import (
 type NodeTransitionStore interface {
 	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	RecordStep(context.Context, store.StepReport) error
 }
 
@@ -243,8 +243,8 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 		return input, &executorTransitionError{err: errors.New("attempt ordinal exhausted")}
 	}
 	expected := input.Attempt + 1
-	applied, err := h.transition(ctx, input, store.CauseStart, store.NodeRunning, store.TransitionExtra{Attempt: &store.NodeAttempt{
-		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: expected, Generation: input.Generation},
+	applied, err := h.transition(ctx, input, store.StartNode{SourceAttempt: &input.Attempt, Attempt: &store.NodeAttempt{
+		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(expected), Generation: int64(input.Generation)},
 		Holder:   input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, ExecutorName: input.GrantedRunner.Name, ExecutorKind: input.GrantedRunner.Type,
 	}})
 	if err != nil {
@@ -272,7 +272,8 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 		}
 		wait := executorBackoff(input.Execution.RetryBackoff.Value, retry+1)
 		retryAt := time.Now().Add(wait)
-		applied, err := h.transition(ctx, *input, store.CauseRetry, store.NodeRunning, store.TransitionExtra{Result: &result, RetryAt: &retryAt})
+		result = recordNodeFailure(input.NodeID, result, h.deps.Mask)
+		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &input.Attempt, Result: &result, RetryAt: &retryAt})
 		if err != nil {
 			return result, err
 		}
@@ -301,15 +302,12 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 	}
 }
 
-func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause store.TransitionCause, to store.NodeState, extra store.TransitionExtra) (store.Applied, error) {
+func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command store.NodeCommand) (store.Applied, error) {
 	if err := context.Cause(ctx); err != nil {
 		return store.Applied{}, err
 	}
-	if extra.Result != nil {
-		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
-		extra.Result = &result
-	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
+	command = store.BindNodeCommand(command, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, executorActor(input))
+	applied, err := h.deps.Store.TransitionNode(ctx, command)
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}
@@ -341,7 +339,8 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 	// safety: a cancelled context cannot send the final fenced report; the store still verifies current authority.
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := h.transition(reportCtx, input, store.CauseReport, result.Outcome, store.TransitionExtra{Result: &result})
+	result = recordNodeFailure(input.NodeID, result, h.deps.Mask)
+	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
 	return errors.Join(runErr, err)
 }
 
@@ -424,7 +423,7 @@ func (h *nodeExecutor) bindStorage(ctx context.Context, input NodeInput) (NodeIn
 		return input, err
 	}
 	authority := binding.Authority
-	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}
+	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(input.Attempt), Generation: int64(input.Generation)}
 	if binding.Bytes == nil || binding.Records == nil || authority.CapabilityRef == "" || authority.Principal == "" || !authority.Attempt.Set || authority.Attempt.Value != attempt || authority.Repo == "" || spec.Request.Request.Git.Repository.Key != "" && authority.Repo != spec.Request.Request.Git.Repository.Key {
 		return input, errors.New("storage binding differs from its committed job attempt")
 	}

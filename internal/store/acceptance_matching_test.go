@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -75,7 +76,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	enrollment.profile = expectedProfile
 	runID := plan.RunID
-	unit := store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "job"}
+	unit := store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "job"}
 	if scenario == "trigger_requirements" {
 		request := plan.Seal.Request.Request
 		request.Options.Requires.Set, request.Options.Requires.Value = true, []string{"gpu"}
@@ -83,12 +84,12 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		unit = store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}
+		unit = store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}
 	} else {
 		if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "job"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "job"}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -149,7 +150,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	if scenario == "name" {
 		holder = "other"
 	}
-	if claim.Award.Holder != holder || claim.Team != tenant.Team() || claim.RunID != unit.RunID || claim.Kind != unit.Kind || len(claim.Bearer) == 0 {
+	if claim.Award.Holder != holder || claim.Team != tenant.Team() || claim.RunID != string(unit.RunID) || claim.Kind != unit.Kind || len(claim.Bearer) == 0 {
 		t.Fatalf("matched award lost enrolled identity: %+v", claim)
 	}
 }

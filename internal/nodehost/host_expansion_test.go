@@ -114,7 +114,7 @@ func TestOwnerExpansion(t *testing.T) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}
-				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || input.NodeID != row.Ref.NodeID || input.Generation != row.Generation || input.SpecHash != row.SpecHash || input.RouteBinding.RunID != row.Ref.RunID || input.RouteBinding.JobID != row.Ref.NodeID {
+				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || input.NodeID != row.Ref.NodeID || runspec.ClaimGeneration(input.Generation) != row.Generation || input.SpecHash != row.SpecHash || input.RouteBinding.RunID != row.Ref.RunID || input.RouteBinding.JobID != row.Ref.NodeID {
 					t.Fatal("expansion lost acquired code or persisted evaluation identity")
 				}
 				return evaluator.Expand(ctx, input)

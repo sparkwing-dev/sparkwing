@@ -64,7 +64,7 @@ func TestCapturedHostEnvironment(t *testing.T) {
 			case "attempt":
 				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
 			case "eval":
-				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash})
+				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash})
 			}
 			if process != nil || !errors.Is(err, refused) || builds != 1 || revocations != 1 {
 				t.Fatalf("process=%v builds=%d revocations=%d error=%v", process, builds, revocations, err)

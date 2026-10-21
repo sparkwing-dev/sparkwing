@@ -84,7 +84,7 @@ func (op *Operator) refundableBillingSecondsTx(ctx context.Context, tx *storeTx)
 		return 0, err
 	}
 	var refundable int64
-	through := tx.now()
+	through := tx.time
 	for _, p := range pending {
 		// safety: unconfirmed time may be refunded by a later settlement at the persisted lease lapse.
 		intervals, err := readBillingIntervalsTx(ctx, tx, p.award, through, true)

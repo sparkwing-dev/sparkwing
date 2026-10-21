@@ -105,3 +105,33 @@ func TestKeeperStopsOtherExecutionWithoutDelayingSDKCancellation(t *testing.T) {
 		}
 	})
 }
+
+func TestKeeperLeaseStartsWhenRenewalIsSent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		calls := 0
+		keeper := lease.Keeper{
+			Interval: 20 * time.Second, Lease: time.Minute,
+			Renew: func(ctx context.Context) (lease.Beat, error) {
+				calls++
+				if calls == 2 {
+					time.Sleep(15 * time.Second)
+				}
+				if calls <= 2 {
+					return lease.Beat{}, nil
+				}
+				<-ctx.Done()
+				return lease.Beat{}, context.Cause(ctx)
+			},
+		}
+		ctx, stop := keeper.Run(t.Context())
+		defer stop()
+		<-ctx.Done()
+		if got := time.Since(start); got != 80*time.Second {
+			t.Fatalf("lease lasted %v; want 80s including renewal round trip", got)
+		}
+		if !errors.Is(context.Cause(ctx), lease.ErrSilent) {
+			t.Fatalf("cause=%v", context.Cause(ctx))
+		}
+	})
+}

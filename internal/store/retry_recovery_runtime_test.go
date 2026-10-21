@@ -47,7 +47,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 	if err != nil || row.Generation != 2 || row.Attempt != 3 || row.Disruptions != 1 {
 		t.Fatalf("requeued row = %+v, %v", row, err)
 	}
-	oldReport := NodeTransition{Ref: ref, To: NodeSuccess, Actor: oldHolder, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	oldReport := nodeTransition{Ref: ref, To: NodeSuccess, Actor: oldHolder, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err == nil {
 		t.Fatal("reaped holder reported into pending work")
 	}
@@ -95,7 +95,7 @@ func TestRecoveryNeverResetsTerminalJobs(t *testing.T) {
 			if err != nil || before.Status != StatusDone || before.Outcome != want {
 				t.Fatalf("terminal = %+v, %v", before, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, To: NodePending, Actor: reaper, Cause: CauseLeaseLapse}); err == nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: NodePending, Actor: reaper, Cause: CauseLeaseLapse}); err == nil {
 				t.Fatal("terminal job reopened")
 			}
 			after, err := tenant.ReadNode(t.Context(), ref)

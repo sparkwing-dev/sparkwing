@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestReleaseUnitOwnerFenceProperty(t *testing.T) {
@@ -52,7 +53,7 @@ func TestReleaseUnitOwnerFenceProperty(t *testing.T) {
 				case 2:
 					forged.SourceGeneration += 1 + random.Int64N(1000)
 				case 3:
-					forged.Award.Generation += 1 + random.Int64N(1000)
+					forged.Award.Generation += runspec.ClaimGeneration(1 + random.Int64N(1000))
 				case 4:
 					forged.Award.Holder += suffix
 				case 5:
@@ -127,7 +128,7 @@ func releaseFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim) 
 	default:
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET capability_prefix=? WHERE id='run'`, c.Prefix)
 	}
-	return s, UnitClaim{Team: "a", Kind: kind, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: c.Prefix, Holder: "machine", Generation: 7}}
+	return s, UnitClaim{Team: "a", Kind: kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: c.Prefix, Holder: "machine", Generation: 7}}
 }
 
 func TestReleaseUnitReturnsUnstartedWorkWithoutAttempt(t *testing.T) {

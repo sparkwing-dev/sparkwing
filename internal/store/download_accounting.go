@@ -66,7 +66,7 @@ func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCh
 	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
 	}
-	now := tx.now()
+	now := tx.time
 	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,'download',?,?) ON CONFLICT(team,quota) DO NOTHING`, t.team, now.Format("2006-01-02"), now.UnixNano()); err != nil {
 		return DownloadCharged{}, err
 	}
@@ -75,7 +75,7 @@ func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCh
 	if err := tx.QueryRowContext(ctx, "SELECT period,used FROM quota_admission WHERE team=? AND quota='download'"+tx.forUpdate(), t.team).Scan(&prior, &used); err != nil {
 		return DownloadCharged{}, err
 	}
-	now = tx.now()
+	now = tx.time
 	day := now.Format("2006-01-02")
 	if prior != day {
 		used = 0

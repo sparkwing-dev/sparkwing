@@ -98,6 +98,14 @@ type OwnerLeaseRef struct {
 	Generation       int64
 }
 
+func (ref OwnerLeaseRef) evalFence() runspec.EvalFence {
+	return runspec.EvalFence{RunID: runspec.RunID(ref.RunID), SourceNodeID: runspec.NodeID(ref.SourceNodeID), SourceGeneration: runspec.ClaimGeneration(ref.SourceGeneration), Holder: ref.Holder, Generation: runspec.ClaimGeneration(ref.Generation)}
+}
+
+func nodeFence(runID runspec.RunID, nodeID runspec.NodeID, holder string, generation runspec.ClaimGeneration) runspec.NodeFence {
+	return runspec.NodeFence{RunID: runID, NodeID: nodeID, Holder: holder, Generation: generation}
+}
+
 // Actor carries server-derived tagged authority; C2 resolves it through the current
 // transaction. CapabilityPrefix is a separate claim fence and never substitutes
 // for a session, console or peer authority reference.
@@ -108,7 +116,7 @@ type Actor struct {
 	Kind             ActorKind
 	CapabilityPrefix string
 	Holder           string
-	Generation       int64
+	Generation       runspec.ClaimGeneration
 	Owner            OwnerLeaseRef
 }
 
@@ -121,8 +129,8 @@ type NodeRow struct {
 	ClaimedBy             string
 	CapabilityPrefix      string
 	OwnerCapabilityPrefix string
-	Generation            int64
-	Attempt               int64
+	Generation            runspec.ClaimGeneration
+	Attempt               runspec.AttemptOrdinal
 	ApplicationRetries    int
 	Disruptions           int
 	ReadyAt               *time.Time
@@ -286,8 +294,8 @@ type MaterializedResultSource struct {
 	StateSeq int64
 }
 
-// TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
-type TransitionExtra struct {
+// transitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
+type transitionExtra struct {
 	Publication *runspec.PublishedAttempt
 	OwnerPolicy *OwnerPolicyResult
 	Result      *NodeResult
@@ -309,18 +317,18 @@ type ApprovalResolution struct {
 type ClaimAward struct {
 	CapabilityPrefix string
 	Holder           string
-	Generation       int64
+	Generation       runspec.ClaimGeneration
 	LeaseExpiresAt   time.Time
 }
 
-// NodeTransition has no caller-selected event kind or clock; the edge determines both.
-type NodeTransition struct {
+// nodeTransition has no caller-selected event kind or clock; the edge determines both.
+type nodeTransition struct {
 	Ref           controllerwire.NodeRef
 	To            NodeState
 	Actor         Actor
 	Cause         TransitionCause
-	SourceAttempt *int64
-	Extra         TransitionExtra
+	SourceAttempt *runspec.AttemptOrdinal
+	Extra         transitionExtra
 }
 
 // Applied distinguishes an identical replay from a state change or a cooperative cancellation request.
@@ -328,8 +336,8 @@ type Applied struct {
 	Replayed        bool
 	CancelRequested bool
 	StateSeq        int64
-	Generation      int64
-	Attempt         int64
+	Generation      runspec.ClaimGeneration
+	Attempt         runspec.AttemptOrdinal
 }
 
 // IllegalTransitionReason maps stale authority to lock_held and invalid edges to illegal_transition.
@@ -357,11 +365,15 @@ func (e *ErrIllegalTransition) Error() string {
 }
 
 // TransitionNode changes state, attempts, events, expansion barriers, holder release and settlement atomically.
-func (t *Tenant) TransitionNode(ctx context.Context, change NodeTransition) (Applied, error) {
+func (t *Tenant) TransitionNode(ctx context.Context, command NodeCommand) (Applied, error) {
+	if nilNodeCommand(command) {
+		return Applied{}, authorityError(apierr.BadRequest, "node command is required")
+	}
+	change := command.nodeChange()
 	var out Applied
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		var err error
-		out, err = transitionNodeTx(ctx, tx, t.team, change, tx.now())
+		out, err = transitionNodeTx(ctx, tx, t.team, change, tx.time)
 		return err
 	})
 	return out, err
@@ -408,7 +420,7 @@ func nodeState(row NodeRow) (NodeState, error) {
 }
 
 // safety: holder rights and replay digest are rechecked under locks using the store clock before any status write.
-func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
+func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition, now time.Time) (Applied, error) {
 	if err := validateSourceAttempt(change); err != nil {
 		return Applied{}, err
 	}
@@ -425,7 +437,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := lockStateRunTx(ctx, tx, team, change.Ref.RunID); err != nil {
 		return Applied{}, err
 	}
-	now = tx.now()
+	now = tx.time
 	row, err := readNodeTx(ctx, tx, team, change.Ref)
 	if err != nil {
 		return Applied{}, err
@@ -433,6 +445,13 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	from, err := nodeState(row)
 	if err != nil {
 		return Applied{}, err
+	}
+	if change.Cause == CauseApprovalTimeout && change.To == "" {
+		var policy string
+		if err := tx.QueryRowContext(ctx, `SELECT on_timeout FROM approvals WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID).Scan(&policy); err != nil {
+			return Applied{}, err
+		}
+		change.To = approvalTimeoutOutcome(policy)
 	}
 	digest, err := stateHash(change)
 	if err != nil {
@@ -451,7 +470,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		}
 		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 	}
-	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, row.Attempt); err != nil {
+	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, int64(row.Attempt)); err != nil {
 		return Applied{}, err
 	}
 	if change.SourceAttempt != nil && *change.SourceAttempt != row.Attempt {
@@ -530,10 +549,15 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := transitionNodeBillingTx(ctx, tx, team, previous, change, *edge, now); err != nil {
 		return Applied{}, err
 	}
+	if row.CancelRequestedAt != nil {
+		if err := clampRunLeasesTx(ctx, tx, team, change.Ref.RunID, change.Ref.NodeID); err != nil {
+			return Applied{}, err
+		}
+	}
 	return Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 }
 
-func validateSourceAttempt(change NodeTransition) error {
+func validateSourceAttempt(change nodeTransition) error {
 	required := change.Actor.Kind == ActorHolder && slices.Contains([]TransitionCause{CauseStart, CauseRetry, CauseReport, CauseRelease}, change.Cause)
 	if required {
 		if change.SourceAttempt == nil || *change.SourceAttempt < 0 {
@@ -585,7 +609,7 @@ func stateHash(value any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
+func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
 	if change.Extra.Result != nil {
 		if change.Extra.Result.Failure != nil && change.Extra.Result.Outcome != NodeFailed {
 			return authorityError(apierr.BadRequest, "recorded failure requires a failed outcome")
@@ -707,10 +731,11 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 			if err != nil {
 				return err
 			}
-			if change.Actor.CapabilityPrefix != award.CapabilityPrefix || change.Actor.Holder != award.Holder || change.Actor.Generation != award.Generation {
+			awarded := nodeFence(runspec.RunID(row.Ref.RunID), runspec.NodeID(row.Ref.NodeID), award.Holder, award.Generation)
+			if change.Actor.CapabilityPrefix != award.CapabilityPrefix || awarded != nodeFence(runspec.RunID(row.Ref.RunID), runspec.NodeID(row.Ref.NodeID), change.Actor.Holder, change.Actor.Generation) {
 				return holderRefusal()
 			}
-			if cap.Team != string(team) || cap.Binding.RunID != row.Ref.RunID || cap.Binding.NodeID != row.Ref.NodeID || cap.Binding.Generation != award.Generation || cap.Binding.Holder != award.Holder {
+			if cap.Team != string(team) || awarded != nodeFence(runspec.RunID(cap.Binding.RunID), runspec.NodeID(cap.Binding.NodeID), cap.Binding.Holder, runspec.ClaimGeneration(cap.Binding.Generation)) {
 				return holderRefusal()
 			}
 		case GuardQueueDeadline:
@@ -748,7 +773,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	return nil
 }
 
-func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
+func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
 	if change.Cause == CausePublishAttempt {
 		return importPublishedAttemptTx(ctx, tx, team, row, change)
 	}
@@ -802,7 +827,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 	case NodeClaimed:
 		award := change.Extra.Claim
-		if err := rebindCapacityGenerationTx(ctx, tx, team, row.Ref, row.Generation, award.Generation); err != nil {
+		if err := rebindCapacityGenerationTx(ctx, tx, team, row.Ref, int64(row.Generation), int64(award.Generation)); err != nil {
 			return err
 		}
 		row.ClaimedBy = award.Holder
@@ -818,7 +843,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		row.Attempt++
 		row.StartedAt = &now
 		if a := change.Extra.Attempt; a != nil {
-			if a.Identity.Team != string(team) || a.Identity.RunID != row.Ref.RunID || a.Identity.NodeID != row.Ref.NodeID || a.Identity.Attempt != row.Attempt || a.Identity.Generation != row.Generation {
+			if a.Identity.Team != string(team) || a.Identity.RunID != row.Ref.RunID || a.Identity.NodeID != row.Ref.NodeID || runspec.AttemptOrdinal(a.Identity.Attempt) != row.Attempt || runspec.ClaimGeneration(a.Identity.Generation) != row.Generation {
 				return errors.New("attempt identity does not match claim")
 			}
 		}
@@ -920,7 +945,7 @@ func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref control
 	return err
 }
 
-func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, now time.Time) error {
+func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition, now time.Time) error {
 	var requested, timeout int64
 	var policy string
 	var resolved sql.NullInt64
@@ -942,7 +967,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 				return err
 			}
 		}
-		if (policy == "approve") != (change.To == NodeSuccess) {
+		if change.To != approvalTimeoutOutcome(policy) {
 			return errors.New("approval timeout verdict mismatch")
 		}
 		resolution = "timed_out"
@@ -969,4 +994,11 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE approvals SET resolved_at=?,resolution=?,approver=?,comment=? WHERE team=? AND run_id=? AND node_id=? AND resolved_at IS NULL`, now.UnixNano(), resolution, approver, comment, team, row.Ref.RunID, row.Ref.NodeID)
 	return err
+}
+
+func approvalTimeoutOutcome(policy string) NodeState {
+	if policy == "approve" {
+		return NodeSuccess
+	}
+	return NodeFailed
 }

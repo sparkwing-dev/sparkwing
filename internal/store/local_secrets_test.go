@@ -181,7 +181,7 @@ func TestLocalSecretsReleasedOnlyAfterCommittedRunCompletion(t *testing.T) {
 	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: a.Binding.RunID, To: RunRunning, Cause: RunStart, Actor: actor}); err != nil {
 		t.Fatal(err)
 	}
-	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunTransition{RunID: a.Binding.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}}
+	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: a.Binding.RunID, Cause: RunFinish, Actor: actor}}
 	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_local_finish BEFORE UPDATE ON triggers BEGIN SELECT RAISE(ABORT,'failed'); END`)
 	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
 		t.Fatal("finish ignored failed owner write")
@@ -203,7 +203,7 @@ func TestLocalSecretsPurgedOnTeamDeletionAndOwnerLeaseExpiry(t *testing.T) {
 		t.Run(boundary, func(t *testing.T) {
 			tenant, a := localSecretFixture(t, "requester-private-value")
 			if boundary == "team deletion" {
-				if _, _, err := tenant.s.AsOperator().RequestTeamDeletion(t.Context(), tenant.team, tenant.s.now()); err != nil {
+				if _, _, err := tenant.s.AsOperator().RequestTeamDeletion(t.Context(), tenant.team); err != nil {
 					t.Fatal(err)
 				}
 			} else {

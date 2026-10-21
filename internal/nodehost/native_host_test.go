@@ -34,7 +34,7 @@ func (s nativeHostState) ReadSnapshot(ctx context.Context, runID string) (store.
 	return s.ClaimStore.ReadSnapshot(ctx, runID)
 }
 
-func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	return s.ClaimStore.TransitionNode(ctx, change)
 }
 

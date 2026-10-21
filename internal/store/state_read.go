@@ -125,7 +125,7 @@ func stateTime(v sql.NullInt64) *time.Time {
 }
 
 func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (RunSnapshot, error) {
-	out := RunSnapshot{StoreNow: tx.now()}
+	out := RunSnapshot{StoreNow: tx.time}
 	var err error
 	if out.Run, err = readRunTx(ctx, tx, team, id); err != nil {
 		return out, err

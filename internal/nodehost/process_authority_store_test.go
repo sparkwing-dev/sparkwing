@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -22,15 +24,15 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
 	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: job.ID}
-	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
+	if _, err := f.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	award, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}
-	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeRunning, Actor: actor, Cause: store.CauseStart, SourceAttempt: &award.Node.Attempt}); err != nil {
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, Holder: award.Node.ClaimedBy, Generation: runspec.ClaimGeneration(int64(award.Node.Generation))}
+	if _, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
 		t.Fatal(err)
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(award.Bearer)}
@@ -112,7 +114,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	if err := revoke(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, To: store.NodeSuccess, Actor: actor, Cause: store.CauseReport, SourceAttempt: &issued.Capability.Binding.Attempt, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	if _, err := f.Tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&issued.Capability.Binding.Attempt), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	request = httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"ended-value"}`))

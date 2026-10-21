@@ -171,7 +171,7 @@ func TestReportingReadsCurrentJobLifecycle(t *testing.T) {
 	foreign := tenantFor(t, f.s, "foreign")
 	for _, started := range []bool{false, true} {
 		if started {
-			if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}); err != nil {
+			if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -180,7 +180,7 @@ func TestReportingReadsCurrentJobLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		job, err := f.tenant.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID)
-		if err != nil || job.ClaimedBy != current.ClaimedBy || job.ClaimGeneration != current.Generation || job.AttemptsConsumed != int(current.Attempt) || !reflect.DeepEqual(job.StartedAt, current.StartedAt) || !reflect.DeepEqual(job.LeaseExpiresAt, current.LeaseExpiresAt) {
+		if err != nil || job.ClaimedBy != current.ClaimedBy || runspec.ClaimGeneration(job.ClaimGeneration) != current.Generation || job.AttemptsConsumed != int(current.Attempt) || !reflect.DeepEqual(job.StartedAt, current.StartedAt) || !reflect.DeepEqual(job.LeaseExpiresAt, current.LeaseExpiresAt) {
 			t.Fatalf("job report = %+v, current = %+v, %v", job, current, err)
 		}
 		if len(job.ExecutionAttempts) != int(current.Attempt) {

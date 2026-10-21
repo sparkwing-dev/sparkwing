@@ -139,7 +139,7 @@ func checkExecutionUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err != nil {
 		return err
 	}
-	if row.team != c.Team || row.prefix != c.Prefix || row.holder != actor.Holder || row.generation != actor.Generation || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() || row.expiry.Valid && row.expiry.Int64 <= tx.now().UnixNano() {
+	if row.team != c.Team || row.prefix != c.Prefix || row.holder != actor.Holder || runspec.ClaimGeneration(row.generation) != actor.Generation || !row.lease.Valid || row.lease.Int64 <= tx.time.UnixNano() || row.expiry.Valid && row.expiry.Int64 <= tx.time.UnixNano() {
 		return bindingRefusal()
 	}
 	if c.Unit == capability.UnitEval {
@@ -150,7 +150,7 @@ func checkExecutionUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		if state.RunCancelled || state.Expansion == nil || state.Expansion.Lease != *c.Binding.Expansion || state.Expansion.ControllerLeaseExpiresAt == nil || !state.Expansion.ControllerLeaseExpiresAt.After(tx.now()) {
+		if state.RunCancelled || state.Expansion == nil || state.Expansion.Lease != *c.Binding.Expansion || state.Expansion.ControllerLeaseExpiresAt == nil || !state.Expansion.ControllerLeaseExpiresAt.After(tx.time) {
 			return bindingRefusal()
 		}
 	}

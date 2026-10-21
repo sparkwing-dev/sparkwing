@@ -72,5 +72,5 @@ func debugBoundary(input RunInput, accepted AcceptedRun, row store.NodeRow, befo
 	if timeout <= 0 {
 		timeout = defaultDebugPauseTimeout
 	}
-	return &DebugBoundary{Ref: row.Ref, Generation: row.Generation, Actor: input.Owner, Reason: reason, Timeout: timeout}, nil
+	return &DebugBoundary{Ref: row.Ref, Generation: int64(row.Generation), Actor: input.Owner, Reason: reason, Timeout: timeout}, nil
 }

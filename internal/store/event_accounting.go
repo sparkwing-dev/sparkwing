@@ -28,7 +28,7 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 	if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
 		return 0, err
 	}
-	seq, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now())
+	seq, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.time)
 	if err != nil {
 		return 0, err
 	}
@@ -46,7 +46,7 @@ func admitEventStorageTx(ctx context.Context, tx *storeTx, team Team, size int64
 		return err
 	}
 	if holdsFreeAllowance(team) {
-		if err := admitFreeEventsTx(ctx, tx, team, string(team), size, tx.now()); err != nil {
+		if err := admitFreeEventsTx(ctx, tx, team, string(team), size, tx.time); err != nil {
 			return err
 		}
 	}
@@ -62,7 +62,7 @@ func chargeEventStorageTx(ctx context.Context, tx *storeTx, team Team, replica, 
 	if err != nil {
 		return err
 	}
-	dimensions := uploadQuotaDimensions("", run, StorageMonth(tx.now()), size, 0)[:2]
+	dimensions := uploadQuotaDimensions("", run, StorageMonth(tx.time), size, 0)[:2]
 	dimensions[0].ceiling, dimensions[1].ceiling = policy.MaxBytesPerMonth, policy.MaxBytesPerRun
 	var period string
 	for i, dimension := range dimensions {

@@ -84,7 +84,7 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 		state.snapshot.Run.Spec = &unit.Accepted.Spec
 		state.snapshot.Run.Plan = unit.Accepted.Plan
 		state.snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
-		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
+		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
 	}
 	// safety: the store's snapshot must not share mutable objects with the received award.
 	body, err := json.Marshal(state.snapshot)
@@ -111,7 +111,7 @@ func TestNativeInputsUsePersistedAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			if kind == capability.UnitNode {
-				if got.node.Entry != nil || got.node.Authority.CapabilityPrefix != p.Capability.Prefix || got.node.Engine.Identity != *unit.Engine || !reflect.DeepEqual(got.node.GrantedRunner, unit.Runner) || got.node.SpecHash != state.node.SpecHash || got.node.Generation != unit.Binding.Generation || got.node.Attempt != unit.Binding.Attempt {
+				if got.node.Entry != nil || got.node.Authority.CapabilityPrefix != p.Capability.Prefix || got.node.Engine.Identity != *unit.Engine || !reflect.DeepEqual(got.node.GrantedRunner, unit.Runner) || got.node.SpecHash != state.node.SpecHash || got.node.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || got.node.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) {
 					t.Fatalf("node input=%+v", got.node)
 				}
 			} else if got.run.Owner.Authority != p.Authority || got.run.Owner.Owner != *state.snapshot.Run.Owner {

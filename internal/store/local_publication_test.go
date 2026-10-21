@@ -7,6 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestLocalPublicationReadsTenDistinctManifests(t *testing.T) {
@@ -33,8 +34,8 @@ func TestLocalPublicationReadsTenDistinctManifests(t *testing.T) {
 			t.Fatal(err)
 		}
 		a := intent.Identity.Attempt.Value
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: a.Generation}
-		change := NodeTransition{Ref: controllerwire.NodeRef{RunID: a.RunID, NodeID: a.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, ManifestRecord: &request.Key}}}
+		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}
+		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: a.RunID, NodeID: a.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, ManifestRecord: &request.Key}}}
 		if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 			t.Fatal(err)
 		}

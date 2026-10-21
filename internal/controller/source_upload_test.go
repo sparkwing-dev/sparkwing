@@ -97,7 +97,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	}
 	runner := engineHTTPRoot(t, newEngineFixture(s.store, EngineController{}), "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim})
 	s.engine.claimProfiles = engineProfileFake{}
-	claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: created.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(created.RunID)}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil || len(claim.Bearer) == 0 {
 		t.Fatalf("claim: %+v %v", claim, err)
 	}

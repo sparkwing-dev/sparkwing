@@ -134,11 +134,13 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	if !invitation.CreatedAt.Equal(*now) || !invitation.ExpiresAt.Equal(now.Add(7*24*time.Hour)) {
 		t.Fatalf("invitation timestamps: %+v", invitation)
 	}
-	listed, err := s.AsOperator().OpenInvitationsForEmail(t.Context(), invitation.Email, *now)
+	s.SetTestClock(t, func() time.Time { return *now })
+	listed, err := s.AsOperator().OpenInvitationsForEmail(t.Context(), invitation.Email)
 	if err != nil || len(listed) != 1 || !listed[0].CreatedAt.Equal(*now) || !listed[0].ExpiresAt.Equal(invitation.ExpiresAt) {
 		t.Fatalf("invitation read: %+v %v", listed, err)
 	}
-	if claimed, err := s.AsOperator().ClaimInvitationEmail(t.Context(), invitation.ID, *now); err != nil || !claimed {
+	s.SetTestClock(t, func() time.Time { return *now })
+	if claimed, err := s.AsOperator().ClaimInvitationEmail(t.Context(), invitation.ID); err != nil || !claimed {
 		t.Fatalf("invitation email: %v %v", claimed, err)
 	}
 	var created, expires, emailed, sent int64

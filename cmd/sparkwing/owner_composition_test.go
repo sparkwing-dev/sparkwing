@@ -118,8 +118,8 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 						},
 						finish: func(ctx context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
 							_, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
-								Unit: state.actor.Owner, Transition: store.RunTransition{
-									RunID: run, To: store.RunState(body.Outcome), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
+								Unit: state.actor.Owner, Transition: store.RunCompletion{
+									RunID: run, Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
 								},
 							})
 							return controllerwire.Applied{}, err
@@ -155,7 +155,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					state.mu.Lock()
 					defer state.mu.Unlock()
-					if acquired != 1 || closed != 1 || state.renewed == 0 || state.finished == nil || state.finished.Transition.To != store.RunSuccess {
+					if acquired != 1 || closed != 1 || state.renewed == 0 || state.finished == nil || state.finished.Transition.RunID == "" {
 						t.Fatalf("acquired=%d closed=%d renewals=%d finish=%+v", acquired, closed, state.renewed, state.finished)
 					}
 				})

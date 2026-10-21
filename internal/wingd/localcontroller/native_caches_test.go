@@ -98,9 +98,9 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 	case 1:
 		input.NodeID += "-foreign"
 	case 2:
-		input.Generation += int64(delta) + 1
+		input.Generation += runspec.ClaimGeneration(delta) + 1
 	case 3:
-		input.Attempt += int64(delta) + 1
+		input.Attempt += runspec.AttemptOrdinal(delta) + 1
 	case 4, 5:
 		var spec runspec.Spec
 		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {

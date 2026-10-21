@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // WriteMetric records a resource sample under the current reporting authority.
@@ -52,7 +53,7 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 	if err != nil {
 		return err
 	}
-	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: a.Target.RunID}); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(a.Target.RunID)}); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, a.Target.RunID); err != nil {
@@ -71,7 +72,7 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 			continue
 		}
 		if rule.Credential == capability.CredentialClaim {
-			actor := Actor{Authority: p.Authority, CapabilityPrefix: c.Prefix, Holder: b.Holder, Generation: b.Generation}
+			actor := Actor{Authority: p.Authority, CapabilityPrefix: c.Prefix, Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}
 			switch rule.Binding {
 			case capability.BindOwnNode:
 				actor.Kind = ActorHolder
@@ -79,17 +80,17 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 				if err != nil {
 					return err
 				}
-				if err := checkHolderTx(ctx, tx, t.team, row, actor, tx.now()); err != nil {
+				if err := checkHolderTx(ctx, tx, t.team, row, actor, tx.time); err != nil {
 					return err
 				}
-				if row.FinishedAt != nil || row.Attempt != a.Binding.Attempt || b.Attempt > 0 && b.Attempt != row.Attempt {
+				if row.FinishedAt != nil || row.Attempt != runspec.AttemptOrdinal(a.Binding.Attempt) || runspec.AttemptOrdinal(b.Attempt) > 0 && runspec.AttemptOrdinal(b.Attempt) != row.Attempt {
 					return holderRefusal()
 				}
-				b.Attempt = row.Attempt
+				b.Attempt = int64(row.Attempt)
 			case capability.BindRunOfTrigger:
 				actor.Kind = ActorRunHost
 				actor.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: b.RunID, Holder: b.Holder, Generation: b.Generation}
-				if err := checkOwnerTx(ctx, tx, t.team, actor, a.Target.RunID, tx.now()); err != nil {
+				if err := checkOwnerTx(ctx, tx, t.team, actor, a.Target.RunID, tx.time); err != nil {
 					return err
 				}
 			default:

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -118,7 +119,7 @@ func FuzzCloudAwardTransport(f *testing.F) {
 	f.Add("quoted\"\\\n", "other", int64(42), uint8(1))
 	f.Fuzz(func(t *testing.T, sourceSHA, holder string, attempt int64, mutation uint8) {
 		award, resources := transportAward(t)
-		award.Source.SHA, award.Binding.Holder, award.Binding.Attempt = sourceSHA, holder, attempt
+		award.Source.SHA, award.Binding.Holder, award.Binding.Attempt = sourceSHA, holder, runspec.AttemptOrdinal(attempt)
 		metadata, err := json.Marshal(award)
 		if err != nil {
 			t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -64,16 +65,19 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &applied) != nil || !applied.CancelRequested || applied.StateSeq != 9 {
 					t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 				}
-				change := f.nodeChange
+				change, ok := f.nodeChange.(store.CancelNode)
+				if !ok {
+					t.Fatalf("cancel command=%T", f.nodeChange)
+				}
 				p := b.snapshot.Authorities[0].Principal
 				kind := store.ActorRunHost
 				if identity == "member" {
 					kind = store.ActorOperator
 				}
-				if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.To != store.NodeCancelled || change.Cause != store.CauseCancel || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Extra.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
+				if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
 					t.Fatalf("change=%+v", change)
 				}
-				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != p.Capability.Binding.Generation || change.Actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation})) {
+				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != runspec.ClaimGeneration(p.Capability.Binding.Generation) || change.Actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation})) {
 					t.Fatalf("owner fence=%+v", change.Actor)
 				}
 			})
@@ -168,7 +172,11 @@ func TestEngineJobCancelBodyRace(t *testing.T) {
 	w := httptest.NewRecorder()
 	expansionServer(t, b, f).ServeHTTP(w, r)
 	assertEngineError(t, w, 409, apierr.LockHeld)
-	if f.writes != 1 || f.nodeChange.Actor.Generation != 4 || f.nodeChange.Actor.Owner.Generation != 4 || !reflect.DeepEqual(f.nodeChange.Extra.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
+	change, ok := f.nodeChange.(store.CancelNode)
+	if !ok {
+		t.Fatalf("cancel command=%T", f.nodeChange)
+	}
+	if f.writes != 1 || change.Actor.Generation != 4 || change.Actor.Owner.Generation != 4 || !reflect.DeepEqual(change.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
 		t.Fatalf("calls=%d change=%+v", f.writes, f.nodeChange)
 	}
 }

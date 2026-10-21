@@ -34,7 +34,7 @@ func checkNodeOrderAfterStarts(t *testing.T, target *storetest.Target) {
 		}
 		claim := reconciled.Claim
 		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, Holder: claim.Holder, Generation: claim.Generation}
-		if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}); err != nil {
+		if _, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 			t.Fatal(err)
 		}
 	}

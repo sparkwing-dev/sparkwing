@@ -28,7 +28,7 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, prefix string, claimant match.Profile, demand match.Demand) (placementDecision, error) {
 	decision := placementDecision{reason: PlacementNone}
 	policy, _ := ClaimPlacementFromContext(ctx)
-	seal, err := sealedRequestTx(ctx, tx, team, unit.RunID)
+	seal, err := sealedRequestTx(ctx, tx, team, string(unit.RunID))
 	if err != nil {
 		return decision, err
 	}
@@ -42,7 +42,7 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	}
 	preferences := policy.preferencesFor(demand.Prefers)
 	if burst := seal.Request.Burst; burst != nil {
-		preferences, err = burstPreferencesTx(ctx, tx, team, unit.RunID, *burst)
+		preferences, err = burstPreferencesTx(ctx, tx, team, string(unit.RunID), *burst)
 		if err != nil {
 			return decision, err
 		}
@@ -69,7 +69,7 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 			return decision, authorityError(apierr.BadRequest, "placement hold must not be negative")
 		}
 		deadline = deadline.Add(preference.Hold)
-		held[i] = i < rank && tx.now().Before(deadline)
+		held[i] = i < rank && tx.time.Before(deadline)
 	}
 	if !slices.Contains(held, true) {
 		return decision, nil
@@ -106,7 +106,7 @@ func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		return match.Profile{}, match.Demand{}, err
 	}
 	c := chain[0].principal.Capability
-	if !capability.CloudLauncher(c) && (c.Team != string(team) || !registeredClaimant(c) && !actionsClaimant(c) && c.Binding.RunID != unit.RunID) {
+	if !capability.CloudLauncher(c) && (c.Team != string(team) || !registeredClaimant(c) && !actionsClaimant(c) && c.Binding.RunID != string(unit.RunID)) {
 		return match.Profile{}, match.Demand{}, bindingRefusal()
 	}
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {
@@ -119,7 +119,7 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness ti
 	if liveness <= 0 {
 		return nil, nil
 	}
-	now := tx.now()
+	now := tx.time
 	cutoff := now.Add(-liveness)
 	query := `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`
 	args := []any{team}

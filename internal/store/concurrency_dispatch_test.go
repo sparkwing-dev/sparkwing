@@ -23,7 +23,7 @@ func TestConcurrencyControllerDispatchedRunUsesBoundUnitKind(t *testing.T) {
 	claim.Parent = &plan.Seal.Request.AuthorityRef
 	claim.Grants = []capability.Grant{capability.NodeReport}
 	claim.Binding = capability.Binding{Kind: capability.BindingNode, RunID: plan.RunID, NodeID: "job", Holder: "node", Generation: 1}
-	claim.UnitID, _ = encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: plan.RunID, NodeID: "job"})
+	claim.UnitID, _ = encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(plan.RunID), NodeID: "job"})
 	claim.Delivery = capability.DeliveryDirect
 	claim.Billing = &capability.BillingProvenance{PayerTeam: "a", ReservationID: "award:node-holder", ExecutorClass: "runner", Start: capability.BillingAtStart, Unit: capability.BillingJob}
 	authorityPersist(t, tenant.s, claim)

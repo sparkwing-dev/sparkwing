@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -141,17 +140,16 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if verb == "grant" {
 		return adminGrant(ctx, t, *cents, strings.TrimSpace(*key), why, stdout, stderr)
 	}
-	now := time.Now()
 	var changed []string
 	switch {
 	case verb == "freeze":
-		id, err := t.HoldByOperator(ctx, breakGlassActor, why, now)
+		id, err := t.HoldByOperator(ctx, breakGlassActor, why)
 		if err != nil {
 			return err
 		}
 		changed = []string{id}
 	case holdID != "":
-		n, err := t.ReleaseCreditFreezes(ctx, holdID, breakGlassActor, why, now)
+		n, err := t.ReleaseCreditFreezes(ctx, holdID, breakGlassActor, why)
 		if err != nil {
 			return err
 		}
@@ -160,7 +158,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		}
 		changed = []string{holdID}
 	default:
-		if _, err := t.ReleaseOperatorHolds(ctx, breakGlassActor, why, now); err != nil {
+		if _, err := t.ReleaseOperatorHolds(ctx, breakGlassActor, why); err != nil {
 			return err
 		}
 	}

@@ -17,7 +17,7 @@ func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
 				code := 137
 				result.Reason, result.MaskedError, result.ExitCode = store.FailureOOMKilled, "container killed", &code
 			}
-			finish := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: outcome, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: result}}
+			finish := store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: outcome, Result: result}
 			for i := range 2 {
 				applied, err := f.tenant.TransitionNode(t.Context(), finish)
 				if err != nil || applied.Replayed != (i == 1) {
@@ -28,7 +28,7 @@ func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
 			if err != nil || node.Outcome != string(outcome) || node.FailureReason != result.Reason || !reflect.DeepEqual(node.ExitCode, result.ExitCode) || node.Error != result.MaskedError || node.FinishedAt == nil {
 				t.Fatalf("metadata=%+v, %v", node, err)
 			}
-			finish.Extra.Result = &store.NodeResult{Outcome: outcome, MaskedError: "changed"}
+			finish.Result = &store.NodeResult{Outcome: outcome, MaskedError: "changed"}
 			if _, err := f.tenant.TransitionNode(t.Context(), finish); err == nil {
 				t.Fatal("different terminal metadata overwrote result")
 			}

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -63,7 +65,7 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 		}
 		visiting[id] = true
 		row, ok := ownerNode(snapshot, parent.Source.NodeID)
-		if !ok || row.Generation != parent.SourceGeneration || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized {
+		if !ok || row.Generation != runspec.ClaimGeneration(parent.SourceGeneration) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry lost its successful source generation")
 		}
 		declaration := declarations[row.Ref.NodeID]
@@ -81,7 +83,7 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 		if string(hash) != row.SpecHash || persistedHash != hash {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry differs from its persisted source declaration")
 		}
-		replay = append(replay, GeneratorReplay{SourceJob: row.Ref.NodeID, SourceGeneration: row.Generation, GeneratorID: declaration.Closures.Generate[0]})
+		replay = append(replay, GeneratorReplay{SourceJob: row.Ref.NodeID, SourceGeneration: int64(row.Generation), GeneratorID: declaration.Closures.Generate[0]})
 		id = parent.Source.NodeID
 	}
 	slices.Reverse(replay)

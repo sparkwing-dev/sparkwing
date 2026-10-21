@@ -30,8 +30,14 @@ type BillingStanding struct {
 }
 
 // BillingStanding reports the team's history and balance backed standing.
-func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error) {
-	return trustStandingTx(ctx, storeRowQuerier{t.s}, t.team, now)
+func (t *Tenant) BillingStanding(ctx context.Context) (out BillingStanding, err error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackOrLog(tx)
+
+	return trustStandingTx(ctx, tx, t.team, tx.time)
 }
 
 func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (BillingStanding, error) {

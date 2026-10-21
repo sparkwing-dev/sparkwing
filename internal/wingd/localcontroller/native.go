@@ -206,13 +206,13 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			}
 			return artifacts.Prepare(ctx, layer, input, job)
 		}, BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {
-			principal, err := claims.principal(ctx, input.NodeID, input.Generation, input.Attempt)
+			principal, err := claims.principal(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 			if err != nil {
 				return nodehost.StorageBinding{}, err
 			}
 			return cfg.Storage(ctx, principal)
 		}, Bind: func(ctx context.Context, input nodehost.NodeInput) (nodehost.ProcessGrant, error) {
-			return delegate(ctx, input.NodeID, input.Generation, input.Attempt)
+			return delegate(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 		}},
 		Evaluation: nodehost.EvaluationDependencies{
 			Bind: func(ctx context.Context, input nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {

@@ -53,7 +53,7 @@ func TestCloudRenewalBillsHeldTimeRegardlessOfActivityProperty(t *testing.T) {
 				s, claim, actor, now := cloudRenewalBillingFixture(t, kind)
 				*now = now.Add(5 * time.Second)
 				if kind == capability.UnitNode && reports != 0 {
-					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 						t.Fatal(err)
 					}
 				}

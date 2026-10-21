@@ -98,12 +98,12 @@ func seedStoreReferenceBoundary(t *testing.T) (*Store, *Tenant, blob.Authority, 
 		t.Fatal(err)
 	}
 	source := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: source.Generation}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(source.Generation)}
 	{
 		records := &blobRecords{manifests: records.manifests}
 		s.resultRecords, s.materializations = records, records
 	}
-	if _, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: source.RunID, NodeID: source.NodeID}, Actor: actor, Cause: CauseReport, To: NodeSuccess, SourceAttempt: sourceAttempt(source.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key}}}); err != nil {
+	if _, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: source.RunID, NodeID: source.NodeID}, Actor: actor, Cause: CauseReport, To: NodeSuccess, SourceAttempt: sourceAttempt(source.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key}}}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","groups":["generated"]}`))

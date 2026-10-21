@@ -5,9 +5,10 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func importPublishedAttemptTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change NodeTransition) error {
+func importPublishedAttemptTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change nodeTransition) error {
 	a := change.Extra.Publication
 	if a == nil || a.Attempt <= 0 || a.Generation <= 0 || a.StartedAt.IsZero() || a.FinishedAt.Before(a.StartedAt) || a.Executor == "" ||
 		!slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, NodeState(a.Outcome)) || change.Extra.Result != nil || row.Attempt != 0 || row.Generation != 0 {
@@ -17,6 +18,6 @@ func importPublishedAttemptTx(ctx context.Context, tx *storeTx, team Team, row *
 	if err != nil {
 		return err
 	}
-	row.Attempt, row.Generation, row.StartedAt = a.Attempt, a.Generation, &a.StartedAt
+	row.Attempt, row.Generation, row.StartedAt = runspec.AttemptOrdinal(a.Attempt), runspec.ClaimGeneration(a.Generation), &a.StartedAt
 	return nil
 }

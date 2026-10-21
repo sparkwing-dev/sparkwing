@@ -58,7 +58,7 @@ func ProductionRuntime(version string) Runtime {
 		Bootstrap: BootstrapRuntime{
 			Source: func(_ context.Context, options BootstrapOptions) (launcher.SourceInit, error) {
 				return launcher.SourceInit{Bind: func(_ context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
-					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, award.Binding.RunID, award.Source)
+					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, string(award.Binding.RunID), award.Source)
 					return source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}}, nil, err
 				}}, nil
 			},

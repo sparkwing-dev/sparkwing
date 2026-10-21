@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func holderRefusal() error { return &ErrIllegalTransition{Reason: ReasonHolderRights} }
@@ -89,7 +90,7 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor,
 	if err != nil {
 		return err
 	}
-	now = tx.now()
+	now = tx.time
 	if status != "claimed" || holder != ref.Holder || generation != ref.Generation || prefix != actor.CapabilityPrefix || !until.Valid || until.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}
@@ -105,8 +106,9 @@ func checkReaperTx(ctx context.Context, tx *storeTx, actor Actor, now time.Time)
 }
 
 func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, actor Actor, now time.Time) error {
-	now = tx.now()
-	if actor.Kind != ActorHolder || actor.Holder == "" || actor.CapabilityPrefix == "" || row.ClaimedBy != actor.Holder || row.Generation != actor.Generation || row.CapabilityPrefix != actor.CapabilityPrefix || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now) {
+	now = tx.time
+	claimed := nodeFence(runspec.RunID(row.Ref.RunID), runspec.NodeID(row.Ref.NodeID), row.ClaimedBy, row.Generation)
+	if actor.Kind != ActorHolder || actor.Holder == "" || actor.CapabilityPrefix == "" || claimed != nodeFence(runspec.RunID(row.Ref.RunID), runspec.NodeID(row.Ref.NodeID), actor.Holder, actor.Generation) || row.CapabilityPrefix != actor.CapabilityPrefix || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now) {
 		return holderRefusal()
 	}
 	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
@@ -114,7 +116,7 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 		return err
 	}
 	c := principal.Capability
-	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingNode || c.Binding.RunID != row.Ref.RunID || c.Binding.NodeID != row.Ref.NodeID || c.Binding.Generation != row.Generation || c.Binding.Holder != row.ClaimedBy {
+	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingNode || claimed != nodeFence(runspec.RunID(c.Binding.RunID), runspec.NodeID(c.Binding.NodeID), c.Binding.Holder, runspec.ClaimGeneration(c.Binding.Generation)) {
 		return holderRefusal()
 	}
 	return nil

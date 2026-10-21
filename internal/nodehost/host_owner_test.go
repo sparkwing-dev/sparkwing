@@ -111,7 +111,7 @@ func TestOwnerSeals(t *testing.T) {
 				}
 			case "setup_failure", "secret_setup_failure":
 				want = []string{"acquire", "finish"}
-				if err == nil || s.finished.Transition.To != store.RunFailed {
+				if err == nil || s.finished.Transition.RunID == "" {
 					t.Fatalf("finish = %+v error = %v", s.finished, err)
 				}
 			case "rejected_owner":
@@ -133,7 +133,7 @@ func TestOwnerSeals(t *testing.T) {
 			case "cancelled_acquire_success":
 				want = []string{"acquire", "finish"}
 				var cancelled *lease.CancelError
-				if !errors.As(err, &cancelled) || s.finished.Transition.To != store.RunCancelled || s.finished.Unit != owner {
+				if !errors.As(err, &cancelled) || s.finished.Transition.Reason != string(apierr.ReasonCancelled) || s.finished.Unit != owner {
 					t.Fatalf("unaccepted cancellation left its owner unfinished: %+v error=%v", s.finished, err)
 				}
 			}

@@ -85,7 +85,7 @@ func requireBlobMemoTx(ctx context.Context, tx *storeTx, a blobActor) error {
 
 func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Digest) (blob.ReadSet, error) {
 	set := blob.ReadSet{Reader: a.authority.Attempt.Value}
-	rows, err := tx.QueryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now().UnixNano(), digest, digest, digest)
+	rows, err := tx.QueryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.time.UnixNano(), digest, digest, digest)
 	if err != nil {
 		return set, err
 	}
@@ -317,7 +317,7 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
+		if !request.Budget.Deadline.IsZero() && !tx.time.Before(request.Budget.Deadline) {
 			return blob.Presence{}, blob.ErrBudget
 		}
 		if seen[digest] {
@@ -341,7 +341,7 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 			result.Present = append(result.Present, digest)
 		}
 	}
-	if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
+	if !request.Budget.Deadline.IsZero() && !tx.time.Before(request.Budget.Deadline) {
 		return blob.Presence{}, blob.ErrBudget
 	}
 	return result, nil

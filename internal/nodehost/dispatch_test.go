@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -38,7 +39,7 @@ func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 
 func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClaim, NodeInput) {
 	t.Helper()
-	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.Input.RunID, NodeID: node}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 			t.Fatalf("held reconciliation = %+v, error %v", result, err)
 		}
 	}
-	if _, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}}); err == nil {
+	if _, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}}); err == nil {
 		t.Fatal("held node awarded twice")
 	}
 	if err := f.report(t.Context(), input, store.NodeFailed); err != nil {
@@ -122,7 +123,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.State.notify()
-	applied, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Control, To: store.NodeCancelled, Cause: store.CauseCancel})
+	applied, err := f.State.TransitionNode(t.Context(), store.CancelNode{Ref: ref, Actor: f.Control})
 	if err != nil || !applied.CancelRequested {
 		t.Fatalf("cancel = %+v, error %v", applied, err)
 	}
@@ -308,7 +309,7 @@ func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
 	f.Add("run", "job", "spec", int64(3), int64(4), false)
 	f.Fuzz(func(t *testing.T, run, job, hash string, generation, sequence int64, terminal bool) {
 		before := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, SpecHash: "spec", Generation: 3, StateSeq: 4}
-		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: generation, StateSeq: sequence, Status: store.StatusPending}
+		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: runspec.ClaimGeneration(generation), StateSeq: sequence, Status: store.StatusPending}
 		if terminal {
 			row.Status, row.Outcome = store.StatusDone, store.NodeSuccess
 		}
@@ -317,7 +318,7 @@ func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
 		}}
 		host := OwnerHost{Store: s, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("not terminal") }}
 		err := host.followRemote(t.Context(), t.Context(), store.Actor{}, before)
-		valid := run == before.Ref.RunID && job == before.Ref.NodeID && hash == before.SpecHash && generation >= before.Generation && sequence >= before.StateSeq && terminal
+		valid := run == before.Ref.RunID && job == before.Ref.NodeID && hash == before.SpecHash && runspec.ClaimGeneration(generation) >= before.Generation && sequence >= before.StateSeq && terminal
 		if (err == nil) != valid {
 			t.Fatalf("foreign, regressed or unfinished job settled: valid=%v error=%v", valid, err)
 		}

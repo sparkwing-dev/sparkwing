@@ -42,10 +42,10 @@ func TestAttemptExecutorComesFromClaimAncestryProperty(t *testing.T) {
 						t.Fatal(err)
 					}
 					actor := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, Kind: ActorHolder, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-					identity := runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Award.Generation}
+					identity := runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: int64(claim.Award.Generation)}
 					forged := fmt.Sprintf("cloud:' OR 1=1 --/%x", random.Uint64())
 					tenant := &Tenant{s: s, team: "a"}
-					_, err = tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: new(int64), Extra: TransitionExtra{Attempt: &NodeAttempt{Identity: identity, ExecutorKind: forged, ExecutorName: forged, ExecutorLocation: forged}}})
+					_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal), Extra: transitionExtra{Attempt: &NodeAttempt{Identity: identity, ExecutorKind: forged, ExecutorName: forged, ExecutorLocation: forged}}})
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -56,7 +56,7 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 		return nil, err
 	}
 	if run.Dispatch == string(runspec.DispatchController) {
-		ref := UnitRef{Kind: unit.Kind, RunID: run.ID, NodeID: unit.NodeID}
+		ref := UnitRef{Kind: unit.Kind, RunID: runspec.RunID(run.ID), NodeID: runspec.NodeID(unit.NodeID)}
 		standings, err := unitStandingsTx(ctx, tx, team, ref, run.Request.Request)
 		if err != nil || slices.ContainsFunc(standings, func(e eligibility) bool { return e.ok() && !e.unobserved }) {
 			return &unit, err
@@ -90,7 +90,7 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		}
 		standings = append(standings, standing)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", tx.now().UnixNano(), tx.now().UnixNano(), limits.RankingObservations)
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", tx.time.UnixNano(), tx.time.UnixNano(), limits.RankingObservations)
 	if err != nil {
 		return nil, err
 	}

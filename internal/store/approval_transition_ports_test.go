@@ -88,7 +88,7 @@ func TestApprovalTransitionsKeepPendingRequestOrder(t *testing.T) {
 	}
 	for _, id := range []string{"a", "b", "c"} {
 		*now = now.Add(time.Second)
-		if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: id}, Actor: request.Actor, To: NodeApprovalPending, Cause: CauseApprovalOpen}); err != nil {
+		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: id}, Actor: request.Actor, To: NodeApprovalPending, Cause: CauseApprovalOpen}); err != nil {
 			t.Fatal(err)
 		}
 	}

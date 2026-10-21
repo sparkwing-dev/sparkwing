@@ -3,7 +3,6 @@ package controller
 import (
 	"net/http"
 	"slices"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -125,12 +124,11 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	now := time.Now()
-	spend, err := t.SpendStanding(ctx, now)
+	spend, err := t.SpendStanding(ctx)
 	if err != nil {
 		return engineLookupError(err)
 	}
-	standing, err := t.BillingStanding(ctx, now)
+	standing, err := t.BillingStanding(ctx)
 	if err != nil {
 		return engineLookupError(err)
 	}

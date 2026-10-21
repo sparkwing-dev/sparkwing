@@ -42,11 +42,11 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			return nil, nil
 		}
 	}
-	now = tx.now()
+	now = tx.time
 	if owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}
-	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: target.kind, RunID: target.ref.RunID}, owner.generation)
+	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: target.kind, RunID: runspec.RunID(target.ref.RunID)}, owner.generation)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err != nil {
 		return nil, err
 	}
-	now = tx.now()
+	now = tx.time
 	if unit.lease.Valid && unit.lease.Int64 > now.UnixNano() {
 		return nil, nil
 	}
@@ -137,7 +137,7 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err != nil {
 		return nil, err
 	}
-	if source.Generation != target.sourceGeneration {
+	if source.Generation != runspec.ClaimGeneration(target.sourceGeneration) {
 		return nil, holderRefusal()
 	}
 	if source.Expansion != ExpansionExpected {
@@ -153,7 +153,7 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 		}
 		return &ReapedUnit{Team: target.team, RunID: target.ref.RunID, NodeID: target.ref.NodeID, Kind: "eval", Generation: unit.generation, Disruptions: unit.disruptions, Cancelled: status == "cancelled", Failed: status == "failed"}, settleControllerTx(ctx, tx, target.team, target.ref.RunID, now)
 	}
-	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}, unit.generation)
+	award, err := unitBillingAwardTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(target.ref.RunID), NodeID: runspec.NodeID(target.ref.NodeID), SourceGeneration: target.sourceGeneration}, unit.generation)
 	if err != nil {
 		return nil, err
 	}

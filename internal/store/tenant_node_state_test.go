@@ -12,7 +12,7 @@ import (
 func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t))
 	foreign := tenantFor(t, f.s, "globex")
-	start := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}
+	start := store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}
 	if _, err := foreign.TransitionNode(t.Context(), start); err == nil {
 		t.Fatal("foreign tenant started the job")
 	}
@@ -83,7 +83,7 @@ func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 func TestTenantFinishRejectsForeignAndMissingJobs(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	foreign := tenantFor(t, f.s, "foreign")
-	change := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}
+	change := store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}
 	before, err := f.tenant.ReadNode(t.Context(), f.ref)
 	if err != nil {
 		t.Fatal(err)

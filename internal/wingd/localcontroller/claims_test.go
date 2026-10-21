@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -170,7 +171,7 @@ func TestLocalAdoptedClaimDelegatesMatchingSDKProcess(t *testing.T) {
 	}
 	claims.readNode = func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) { return row, nil }
 	claims.processes = processes
-	grant, err := claims.delegate(t.Context(), row.Ref.NodeID, row.Generation, row.Attempt)
+	grant, err := claims.delegate(t.Context(), row.Ref.NodeID, int64(row.Generation), int64(row.Attempt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestLocalAdoptedClaimDelegatesMatchingSDKProcess(t *testing.T) {
 	if p.Capability.Parent == nil || p.Capability.Parent.ID != row.CapabilityPrefix || p.Capability.Binding != state.snapshot.Binding.Current {
 		t.Fatalf("SDK process used another authority: %+v", p)
 	}
-	if p.Capability.Data == nil || p.Capability.Data.Attempt != row.Attempt || state.snapshot.Authorities[0].Principal.Capability.Data.Attempt != 0 {
+	if p.Capability.Data == nil || runspec.AttemptOrdinal(p.Capability.Data.Attempt) != row.Attempt || state.snapshot.Authorities[0].Principal.Capability.Data.Attempt != 0 {
 		t.Fatal("process data scope did not narrow the immutable claim to its attempt")
 	}
 	if err := grant.Revoke(); err != nil {

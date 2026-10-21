@@ -82,9 +82,19 @@ type RunTransition struct {
 	MaskedError string
 }
 
+// RunCompletion reports completion facts; the store derives the terminal verdict.
+type RunCompletion struct {
+	OwnerPolicy *OwnerPolicyResult
+	RunID       string
+	Actor       Actor
+	Cause       RunCause
+	Reason      string
+	MaskedError string
+}
+
 // FinishRunRequest binds the terminal verdict to the owner unit that must end in the same transaction.
 type FinishRunRequest struct {
-	Transition RunTransition
+	Transition RunCompletion
 	Unit       OwnerLeaseRef
 }
 
@@ -93,7 +103,7 @@ func (t *Tenant) TransitionRun(ctx context.Context, change RunTransition) (Appli
 	var out Applied
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		out, err = transitionRunTx(ctx, tx, t.team, change, tx.now())
+		out, err = transitionRunTx(ctx, tx, t.team, change, tx.time)
 		return err
 	})
 	return out, err
@@ -101,18 +111,18 @@ func (t *Tenant) TransitionRun(ctx context.Context, change RunTransition) (Appli
 
 // FinishRunAndUnit prevents a terminal run from leaving an executable owner claim behind.
 func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) (Applied, error) {
-	switch finish.Transition.To {
-	case RunSuccess, RunFailed, RunCancelled:
-	default:
-		return Applied{}, errors.New("run finish requires a terminal verdict")
+	if finish.Transition.Cause != RunFinish && finish.Transition.Cause != RunPolicyRefused {
+		return Applied{}, errors.New("run completion requires finish or admission policy result")
 	}
+
 	var out Applied
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		if finish.Unit != finish.Transition.Actor.Owner {
 			return holderRefusal()
 		}
 		var err error
-		out, err = transitionRunTx(ctx, tx, t.team, finish.Transition, tx.now())
+		change := RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: finish.Transition.Cause, OwnerPolicy: finish.Transition.OwnerPolicy, Reason: finish.Transition.Reason, MaskedError: finish.Transition.MaskedError}
+		out, err = transitionRunTx(ctx, tx, t.team, change, tx.time)
 		if err != nil {
 			return err
 		}
@@ -120,7 +130,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) 
 			return errors.New("run still has live work")
 		}
 		if finish.Unit.Kind == OwnerTrigger {
-			result, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=?`, tx.now().UnixNano(), t.team, finish.Unit.RunID, finish.Unit.Generation, finish.Unit.Holder)
+			result, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=?`, tx.time.UnixNano(), t.team, finish.Unit.RunID, finish.Unit.Generation, finish.Unit.Holder)
 			if err != nil {
 				return err
 			}
@@ -131,7 +141,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) 
 			if n != 1 && !out.Replayed {
 				return holderRefusal()
 			}
-			if err := settleOwnerBillingTx(ctx, tx, t.team, finish.Unit.RunID, finish.Unit.Generation, tx.now()); err != nil {
+			if err := settleOwnerBillingTx(ctx, tx, t.team, finish.Unit.RunID, finish.Unit.Generation, tx.time); err != nil {
 				return err
 			}
 		}
@@ -148,7 +158,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	if err := lockStateRunTx(ctx, tx, team, change.RunID); err != nil {
 		return Applied{}, err
 	}
-	now = tx.now()
+	now = tx.time
 	row, err := readRunTx(ctx, tx, team, change.RunID)
 	if err != nil {
 		return Applied{}, err
@@ -163,17 +173,33 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 			if err != nil {
 				return Applied{}, err
 			}
-			if accepted || change.Cause != RunFinish || change.To != RunFailed && change.To != RunCancelled || change.OwnerPolicy != nil {
+			if accepted || change.Cause != RunFinish || change.OwnerPolicy != nil {
 				return Applied{}, holderRefusal()
 			}
+			if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, change.Reason, now); err != nil {
+				return Applied{}, err
+			}
 			change.Reason, change.MaskedError = string(apierr.PlanFailed), "run preparation failed"
-			if change.To == RunCancelled {
+			if row.CancelRequestedAt != nil {
 				change.Reason, change.MaskedError = string(apierr.ReasonCancelled), "cancellation requested"
 			}
 		}
 	}
 	if err := validateResultProofTx(ctx, tx, team, change.Actor, controllerwire.NodeRef{RunID: change.RunID}, 0); err != nil {
 		return Applied{}, err
+	}
+	if change.Cause == RunPolicyRefused && change.OwnerPolicy != nil {
+		change.To, err = change.OwnerPolicy.runOutcome()
+		if err != nil {
+			return Applied{}, err
+		}
+	}
+	if change.Cause == RunFinish || change.Cause == RunPublish {
+		outcome, err := runVerdictTx(ctx, tx, team, row)
+		if err != nil {
+			return Applied{}, err
+		}
+		change.To = outcome
 	}
 	digest, err := stateHash(change)
 	if err != nil {
@@ -258,6 +284,11 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	if n != 1 {
 		return refusal()
 	}
+	if row.CancelRequestedAt != nil {
+		if err := clampRunLeasesTx(ctx, tx, team, row.ID, ""); err != nil {
+			return Applied{}, err
+		}
+	}
 	if err := appendStateEventTx(ctx, tx, team, controllerwire.NodeRef{RunID: row.ID}, kind, row.StateSeq, map[string]string{"reason": change.Reason}, now); err != nil {
 		return Applied{}, err
 	}
@@ -317,18 +348,8 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 				return err
 			}
 		}
-		if change.Actor.Kind == ActorRunHost {
-			principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
-			if err != nil {
-				return err
-			}
-			if principal.Capability.Unit == capability.UnitPlan {
-				if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, change.Reason, now); err != nil {
-					return err
-				}
-			}
-		}
-		return checkRunVerdictTx(ctx, tx, team, row, change.To)
+
+		return nil
 	case RunOwnerLost, RunQueueTimeout:
 		if row.CancelRequestedAt != nil && change.To != RunCancelled {
 			return errors.New("cancellation takes precedence")
@@ -387,42 +408,45 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 		if row.Spec == nil {
 			return errors.New("published run has no accepted plan")
 		}
-		return checkRunVerdictTx(ctx, tx, team, row, change.To)
+		return nil
 	default:
 		return errors.New("unknown run transition cause")
 	}
 }
 
-func checkRunVerdictTx(ctx context.Context, tx *storeTx, team Team, row RunRow, outcome RunState) error {
+func runVerdictTx(ctx context.Context, tx *storeTx, team Team, row RunRow) (RunState, error) {
 	var pending int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND (status<>'done' OR expansion='expected')`, team, row.ID).Scan(&pending); err != nil {
-		return err
+		return "", err
 	}
 	if pending != 0 {
-		return errors.New("run has unsettled jobs or expansions")
+		return "", errors.New("run has unsettled jobs or expansions")
 	}
 	accepted, err := planAcceptedTx(ctx, tx, team, row.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if row.Spec != nil && (row.Dispatch != string(runspec.DispatchController) || row.Request.Request.Mode == runspec.IntakePublish || accepted) {
-		snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
-		if err != nil {
-			return err
+	if row.Spec == nil || row.Dispatch == string(runspec.DispatchController) && row.Request.Request.Mode != runspec.IntakePublish && !accepted {
+		if row.CancelRequestedAt != nil {
+			return RunCancelled, nil
 		}
-		graph, err := snapshot.Scheduling()
-		if err != nil {
-			return err
-		}
-		decision := Decide(graph)
-		if decision.Outcome != string(outcome) {
-			return errors.New("run verdict disagrees with persisted jobs")
-		}
+		return RunFailed, nil
 	}
-	if row.CancelRequestedAt != nil && outcome != RunCancelled {
-		return errors.New("cancellation takes precedence")
+	snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	graph, err := snapshot.Scheduling()
+	if err != nil {
+		return "", err
+	}
+	decision := Decide(graph)
+	switch RunState(decision.Outcome) {
+	case RunSuccess, RunFailed, RunCancelled:
+		return RunState(decision.Outcome), nil
+	default:
+		return "", errors.New("run has no terminal verdict")
+	}
 }
 
 func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, owner ownerRecovery, status string, actor Actor, now time.Time) error {
@@ -477,10 +501,10 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 }
 
 func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance, controller Actor, replay bool) error {
-	if err := checkOwnerTx(ctx, tx, team, controller, request.RunID, tx.now()); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, controller, request.RunID, tx.time); err != nil {
 		return err
 	}
-	write, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now().UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
+	write, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.time.UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
 	if err != nil {
 		return err
 	}
@@ -489,7 +513,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 		return err
 	}
 	if count == 1 {
-		return settleOwnerBillingTx(ctx, tx, team, request.RunID, request.Actor.Owner.Generation, tx.now())
+		return settleOwnerBillingTx(ctx, tx, team, request.RunID, request.Actor.Owner.Generation, tx.time)
 	}
 	if !replay {
 		return holderRefusal()
@@ -505,7 +529,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 }
 
 func writeEvalRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, unit ownerRecovery, status string, now time.Time) error {
-	if err := settleUnitBillingTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}, unit.generation, billingRecoveryEnd(unit, now)); err != nil {
+	if err := settleUnitBillingTx(ctx, tx, target.team, UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(target.ref.RunID), NodeID: runspec.NodeID(target.ref.NodeID), SourceGeneration: target.sourceGeneration}, unit.generation, billingRecoveryEnd(unit, now)); err != nil {
 		return err
 	}
 	var started, finished any
@@ -533,9 +557,9 @@ func startOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef,
 	var result sql.Result
 	var err error
 	if unit.Kind == capability.UnitEval {
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='running',started_at=COALESCE(started_at,?) WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running')`, tx.now().UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.Holder, actor.CapabilityPrefix)
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='running',started_at=COALESCE(started_at,?) WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running')`, tx.time.UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.Holder, actor.CapabilityPrefix)
 	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE triggers SET started_at=COALESCE(started_at,?) WHERE team=? AND id=? AND unit_kind=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now().UnixNano(), team, unit.RunID, unit.Kind, actor.Generation, actor.Holder, actor.CapabilityPrefix)
+		result, err = tx.ExecContext(ctx, `UPDATE triggers SET started_at=COALESCE(started_at,?) WHERE team=? AND id=? AND unit_kind=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.time.UnixNano(), team, unit.RunID, unit.Kind, actor.Generation, actor.Holder, actor.CapabilityPrefix)
 	}
 	if err != nil {
 		return err
@@ -558,7 +582,7 @@ func cancelRunNodesTx(ctx context.Context, tx *storeTx, team Team, runID string,
 	}
 	for _, row := range snapshot.Nodes {
 		if row.Status != StatusDone {
-			if _, err := transitionNodeStateTx(ctx, tx, team, NodeTransition{Ref: row.Ref, To: NodeCancelled, Actor: actor, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}}, now); err != nil {
+			if _, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: row.Ref, To: NodeCancelled, Actor: actor, Cause: CauseCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}}, now); err != nil {
 				return err
 			}
 		}

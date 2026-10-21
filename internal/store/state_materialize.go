@@ -21,7 +21,7 @@ type materializedRecords struct {
 	Output, Manifest *blob.RecordKey
 }
 
-func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition) (NodeTransition, error) {
+func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (nodeTransition, error) {
 	if change.Actor.Kind != ActorRunHost || change.Extra.Materialize == nil || change.Extra.Result != nil {
 		return change, authorityError(apierr.BadRequest, "materialization requires a persisted source without a supplied result")
 	}
@@ -29,7 +29,7 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change Nod
 	if err := validateReconcileRequest(ReconcileRequest{Ref: change.Ref, Actor: change.Actor, Policy: source.Kind, Source: &source}); err != nil {
 		return change, err
 	}
-	if err := checkOwnerTx(ctx, tx, team, change.Actor, change.Ref.RunID, tx.now()); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, change.Actor, change.Ref.RunID, tx.time); err != nil {
 		return change, err
 	}
 	if err := lockReconcileRunsTx(ctx, tx, team, change.Ref, &source); err != nil {
@@ -68,7 +68,7 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change Nod
 	if err != nil {
 		return change, err
 	}
-	if err := checkOwnerTx(ctx, tx, team, change.Actor, change.Ref.RunID, tx.now()); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, change.Actor, change.Ref.RunID, tx.time); err != nil {
 		return change, err
 	}
 	if node.ClaimedBy != "" {
@@ -82,7 +82,7 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change Nod
 }
 
 func checkSelfClaimTx(ctx context.Context, tx *storeTx, team Team, actor Actor, node NodeRow) error {
-	if node.Status != StatusPending || node.OwnerCapabilityPrefix != actor.CapabilityPrefix || node.ClaimedBy != actor.Owner.Holder || node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(tx.now()) {
+	if node.Status != StatusPending || node.OwnerCapabilityPrefix != actor.CapabilityPrefix || node.ClaimedBy != actor.Owner.Holder || node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(tx.time) {
 		return holderRefusal()
 	}
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix}, true)
@@ -94,7 +94,7 @@ func checkSelfClaimTx(ctx context.Context, tx *storeTx, team Team, actor Actor, 
 		return err
 	}
 	claim := chain[0].principal.Capability
-	if chain[len(chain)-1].principal.Authority != owner[len(owner)-1].principal.Authority || claim.Subject != owner[0].principal.Capability.Subject || claim.Team != string(team) || claim.Binding.RunID != node.Ref.RunID || claim.Binding.NodeID != node.Ref.NodeID || claim.Binding.Generation != node.Generation || claim.Binding.Holder != node.ClaimedBy {
+	if chain[len(chain)-1].principal.Authority != owner[len(owner)-1].principal.Authority || claim.Subject != owner[0].principal.Capability.Subject || claim.Team != string(team) || claim.Binding.RunID != node.Ref.RunID || claim.Binding.NodeID != node.Ref.NodeID || runspec.ClaimGeneration(claim.Binding.Generation) != node.Generation || claim.Binding.Holder != node.ClaimedBy {
 		return holderRefusal()
 	}
 	return nil
@@ -137,7 +137,7 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 		if node.StateSeq != source.Result.StateSeq {
 			return NodeResult{}, authorityError(apierr.IllegalTransition, "materialized result fence does not match")
 		}
-	} else if node.Generation != source.Source.Generation || node.Attempt != source.Source.Attempt {
+	} else if node.Generation != runspec.ClaimGeneration(source.Source.Generation) || node.Attempt != runspec.AttemptOrdinal(source.Source.Attempt) {
 		return NodeResult{}, authorityError(apierr.IllegalTransition, "source attempt fence does not match")
 	}
 	if source.Kind == SourceManualRetry && !slices.Contains([]NodeState{NodeSuccess, NodeMemoized}, node.Outcome) {

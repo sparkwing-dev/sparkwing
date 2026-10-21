@@ -53,12 +53,12 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			timeout := int64(1000)
 			f := approvalFixture(t, nodeproto.ApprovalSpec{Message: "ship it?", TimeoutMS: &timeout, OnTimeout: tc.policy})
 			ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "gate"}
-			change := store.NodeTransition{Ref: ref, Actor: f.Control, To: tc.outcome, Cause: store.CauseApprovalResolve, Extra: store.TransitionExtra{Approval: &store.ApprovalResolution{Decision: tc.resolution, Comment: "looks good"}}}
+			var change store.NodeCommand = store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: tc.outcome, Approval: &store.ApprovalResolution{Decision: tc.resolution, Comment: "looks good"}}
 			if tc.resolution == "timed_out" {
 				if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 					t.Fatal(err)
 				}
-				change.Actor, change.Cause, change.Extra = f.Actor, store.CauseApprovalTimeout, store.TransitionExtra{}
+				change = store.TimeoutApprovalNode{Ref: ref, Actor: f.Actor}
 			}
 			if _, err := f.State.TransitionNode(t.Context(), change); err != nil {
 				t.Fatal(err)
@@ -100,7 +100,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 func TestApprovalGateCancelledWithTheRun(t *testing.T) {
 	f := approvalFixture(t, nodeproto.ApprovalSpec{})
 	ref := controllerwire.NodeRef{RunID: f.Input.RunID, NodeID: "gate"}
-	if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Control, To: store.NodeCancelled, Cause: store.CauseCancel}); err != nil {
+	if _, err := f.State.TransitionNode(t.Context(), store.CancelNode{Ref: ref, Actor: f.Control}); err != nil {
 		t.Fatal(err)
 	}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
@@ -120,10 +120,10 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Control, To: store.NodeSuccess, Cause: store.CauseApprovalResolve, Extra: store.TransitionExtra{Approval: &store.ApprovalResolution{Decision: "approved"}}}); err != nil {
+	if _, err := f.State.TransitionNode(t.Context(), store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: store.NodeSuccess, Approval: &store.ApprovalResolution{Decision: "approved"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Actor, To: store.NodeFailed, Cause: store.CauseApprovalTimeout})
+	_, err := f.State.TransitionNode(t.Context(), store.TimeoutApprovalNode{Ref: ref, Actor: f.Actor})
 	var refused *store.ErrIllegalTransition
 	if !errors.As(err, &refused) {
 		t.Fatalf("late timeout = %v, want terminal refusal", err)

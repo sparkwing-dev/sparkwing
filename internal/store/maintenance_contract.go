@@ -40,7 +40,7 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 	if err := tx.QueryRowContext(ctx, `SELECT holder,until,generation FROM leases WHERE name = ?`+tx.forUpdate(), name).Scan(&prior, &until, &generation); err != nil {
 		return SingletonLease{}, err
 	}
-	now := tx.now()
+	now := tx.time
 	if until > now.UnixNano() && prior != holder {
 		return SingletonLease{}, ErrLockHeld
 	}
@@ -70,10 +70,10 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 	if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
 		return SingletonLease{}, err
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name, tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name, tx.time); err != nil {
 		return SingletonLease{}, err
 	}
-	lease.ExpiresAt = tx.now().Add(ttl)
+	lease.ExpiresAt = tx.time.Add(ttl)
 	if _, err := tx.ExecContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
 		return SingletonLease{}, err
 	}
@@ -154,18 +154,20 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error {
 	if err != nil {
 		return err
 	}
-	result, err := t.s.exec(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, t.s.now().UnixNano())
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return fmt.Errorf("usage counter overflow")
-	}
-	return nil
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		result, err := tx.ExecContext(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, tx.time.UnixNano())
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("usage counter overflow")
+		}
+		return nil
+	})
 }
 
 // ReserveQuota locks one shared team/quota row; log reads are exempt from download quota.

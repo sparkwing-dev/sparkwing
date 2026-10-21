@@ -13,7 +13,7 @@ func TestFinishRunAndUnitRefusesNonterminalTransition(t *testing.T) {
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	finish := FinishRunRequest{Unit: request.Actor.Owner, Transition: RunTransition{RunID: request.RunID, To: RunRunning, Cause: RunStart, Actor: request.Actor}}
+	finish := FinishRunRequest{Unit: request.Actor.Owner, Transition: RunCompletion{RunID: request.RunID, Cause: RunStart, Actor: request.Actor}}
 	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
 		t.Fatal("nonterminal transition closed the owner unit")
 	}
@@ -34,7 +34,7 @@ func TestFinishRunAndUnitCommitsTogetherAndReplays(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			tenant := &Tenant{s: s, team: claim.Team}
 			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-			finish := FinishRunRequest{Unit: claim.Owner, Transition: RunTransition{RunID: claim.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}}
+			finish := FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: claim.RunID, Cause: RunFinish, Actor: actor}}
 			if failure == "owner_write" {
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_finish BEFORE UPDATE ON triggers BEGIN SELECT RAISE(ABORT,'owner unavailable'); END`)
 			} else if failure == "outbox_write" {

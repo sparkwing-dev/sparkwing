@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -257,7 +258,7 @@ EXISTS (SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.bind_run AND n.
 OR EXISTS (SELECT 1 FROM triggers t WHERE t.team=c.team AND t.id=c.bind_run AND t.capability_prefix=c.prefix AND t.status='claimed' AND t.finished_at IS NULL)
 OR EXISTS (SELECT 1 FROM eval_units e WHERE e.team=c.team AND e.run_id=c.bind_run AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.status IN ('claimed','running'))) AS live
 FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND c.unit_kind IN ('plan','eval','node')) a WHERE a.live`
-	args := []any{tx.now().UnixNano(), tx.now().UnixNano(), root.Kind, root.ID, subject.Kind, subject.ID}
+	args := []any{tx.time.UnixNano(), tx.time.UnixNano(), root.Kind, root.ID, subject.Kind, subject.ID}
 	var wanted []string
 	for _, fence := range selected {
 		wanted = append(wanted, `(a.unit_kind=? AND a.unit_id=? AND a.bind_holder=? AND a.generation=?)`)
@@ -293,7 +294,7 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if c.Parent == nil || *c.Parent != root.Authority || c.Subject != claimant.Subject || c.Audience != capability.Controller || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, c.Unit) || c.Purpose != claimPurpose(c.Unit) || c.Billing == nil || c.Billing.ExecutorClass != launcherExecutor(claimant) || c.Delivery != capability.DeliveryBootstrap && c.Issuance != capability.Exchange {
 		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "invalid persisted launcher award")
 	}
-	if c.RevokedAt != nil && !c.RevokedAt.After(tx.now()) || c.ExpiresAt != nil && !c.ExpiresAt.After(tx.now()) {
+	if c.RevokedAt != nil && !c.RevokedAt.After(tx.time) || c.ExpiresAt != nil && !c.ExpiresAt.After(tx.time) {
 		return LauncherAward{}, false, nil
 	}
 	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
@@ -312,24 +313,24 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
-	if row.team != c.Team || row.run != c.Binding.RunID || row.node != c.Binding.NodeID || row.holder != fence.Holder || row.generation != fence.Generation || row.prefix != prefix || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() || row.expiry.Valid && row.expiry.Int64 <= tx.now().UnixNano() {
+	if row.team != c.Team || row.run != c.Binding.RunID || row.node != c.Binding.NodeID || row.holder != fence.Holder || row.generation != fence.Generation || row.prefix != prefix || !row.lease.Valid || row.lease.Int64 <= tx.time.UnixNano() || row.expiry.Valid && row.expiry.Int64 <= tx.time.UnixNano() {
 		return LauncherAward{}, false, nil
 	}
-	run, err := readRunTx(ctx, tx, Team(c.Team), unit.RunID)
+	run, err := readRunTx(ctx, tx, Team(c.Team), string(unit.RunID))
 	if errors.Is(err, ErrNotFound) {
 		err = authorityError(apierr.IntegrityFailure, "launcher award has no run")
 	}
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
-	award := LauncherAward{Capability: c, Run: run, ParentCapabilityExpiry: root.Capability.ExpiresAt, Claim: UnitClaim{Team: Team(c.Team), Kind: c.Unit, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: prefix, Holder: fence.Holder, Generation: fence.Generation, LeaseExpiresAt: *stateTime(row.lease)}}}
+	award := LauncherAward{Capability: c, Run: run, ParentCapabilityExpiry: root.Capability.ExpiresAt, Claim: UnitClaim{Team: Team(c.Team), Kind: c.Unit, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: prefix, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation), LeaseExpiresAt: *stateTime(row.lease)}}}
 	if c.Unit == capability.UnitPlan {
-		award.Claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: fence.Holder, Generation: fence.Generation}
+		award.Claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: string(unit.RunID), Holder: fence.Holder, Generation: fence.Generation}
 	} else if c.Unit == capability.UnitEval {
-		award.Claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Holder: fence.Holder, Generation: fence.Generation}
+		award.Claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: string(unit.RunID), SourceNodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Holder: fence.Holder, Generation: fence.Generation}
 	}
 	if c.Unit == capability.UnitNode || c.Unit == capability.UnitEval {
-		award.Node, err = readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
+		award.Node, err = readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: string(unit.RunID), NodeID: string(unit.NodeID)})
 		if errors.Is(err, ErrNotFound) {
 			err = authorityError(apierr.IntegrityFailure, "launcher award has no job")
 		}
@@ -348,11 +349,11 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 }
 
 func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (bool, error) {
-	if award.Node.Generation != award.Claim.SourceGeneration || award.Node.Status != StatusDone || !scheduleSucceeded(string(award.Node.Outcome)) || award.Node.Expansion != ExpansionExpected {
+	if award.Node.Generation != runspec.ClaimGeneration(award.Claim.SourceGeneration) || award.Node.Status != StatusDone || !scheduleSucceeded(string(award.Node.Outcome)) || award.Node.Expansion != ExpansionExpected {
 		return false, nil
 	}
 	var live int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?`, award.Claim.Team, award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration, tx.now().UnixNano()).Scan(&live)
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?`, award.Claim.Team, award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration, tx.time.UnixNano()).Scan(&live)
 	return live == 1, err
 }
 

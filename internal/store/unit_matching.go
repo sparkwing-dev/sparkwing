@@ -112,7 +112,7 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 }
 
 func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef, lock bool) (match.Profile, match.Demand, error) {
-	run := readMatchingRunTx(ctx, tx, request.CapabilityPrefix, unit.RunID, lock)
+	run := readMatchingRunTx(ctx, tx, request.CapabilityPrefix, string(unit.RunID), lock)
 	profile := run.profile
 	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
 	if tx.store.claimProfiles == nil || run.here {
@@ -235,7 +235,7 @@ func launcherClaimant(c capability.Capability) bool {
 }
 
 func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef, reserved *match.Resources) (UnitClaim, error) {
-	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now()); err != nil {
+	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.time); err != nil {
 		return UnitClaim{}, err
 	}
 	p, err := tx.ResolveAuthority(ctx, actor.Authority)
@@ -246,7 +246,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, r
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
+	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)})
 	if err != nil {
 		return UnitClaim{}, err
 	}

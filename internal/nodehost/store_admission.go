@@ -66,7 +66,7 @@ func (a *StoreAdmission) Node(ctx context.Context, accepted AcceptedRun, row sto
 	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" || row.Generation < 0 {
 		return errors.New("store admission requires the accepted job identity")
 	}
-	if err := a.acquire(ctx, accepted.RunID, row.Ref.NodeID, row.Generation, row.Execution.Concurrency); err != nil {
+	if err := a.acquire(ctx, accepted.RunID, row.Ref.NodeID, int64(row.Generation), row.Execution.Concurrency); err != nil {
 		return err
 	}
 	return body(ctx)

@@ -228,9 +228,9 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 			return false
 		}
 		applied, err := state.FinishRunAndUnit(t.Context(), store.FinishRunRequest{
-			Unit: actor.Owner, Transition: store.RunTransition{RunID: "run", Actor: actor, Cause: store.RunFinish, To: store.RunSuccess},
+			Unit: actor.Owner, Transition: store.RunCompletion{RunID: "run", Actor: actor, Cause: store.RunFinish},
 		})
-		if err != nil || !applied.Replayed || applied.StateSeq != 12 || applied.Generation != int64(generation)+1 || applied.Attempt != attempt {
+		if err != nil || !applied.Replayed || applied.StateSeq != 12 || int64(applied.Generation) != int64(generation)+1 || int64(applied.Attempt) != attempt {
 			return false
 		}
 		_, err = state.RenewOwner(t.Context(), actor, executing)
@@ -247,7 +247,7 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 	calls := 0
 	wire := hostStateController{finish: func(_ context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
 		calls++
-		if run != "run" || body.Outcome != "failed" || body.Reason != "plan_failed" || body.Error == nil || body.Error.Message != "safe failure" {
+		if run != "run" || body.Reason != "plan_failed" || body.Error == nil || body.Error.Message != "safe failure" {
 			t.Fatalf("finish = %s %+v", run, body)
 		}
 		return controllerwire.Applied{StateSeq: 10}, want
@@ -256,13 +256,12 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	valid := store.FinishRunRequest{Unit: owner, Transition: store.RunTransition{
-		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunFinish, To: store.RunFailed, Reason: "plan_failed", MaskedError: "safe failure",
+	valid := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
+		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunFinish, Reason: "plan_failed", MaskedError: "safe failure",
 	}}
 	for _, mutate := range []func(*store.FinishRunRequest){
 		func(r *store.FinishRunRequest) { r.Unit.Generation++ },
 		func(r *store.FinishRunRequest) { r.Transition.Cause = store.RunPublish },
-		func(r *store.FinishRunRequest) { r.Transition.To = store.RunRunning },
 	} {
 		request := valid
 		mutate(&request)
@@ -281,9 +280,8 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}
-	request := store.FinishRunRequest{Unit: owner, Transition: store.RunTransition{
-		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, To: store.RunFailed,
-		OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
+	request := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
+		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
 	}}
 	state.Finish = func(_ context.Context, got store.FinishRunRequest) (store.Applied, error) {
 		if !reflect.DeepEqual(got, request) {

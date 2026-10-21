@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -96,7 +97,7 @@ func debugJobResponse(target capability.Target, view store.RunView) (controllerw
 		found := false
 		for _, attempt := range view.Attempts {
 			id := attempt.Identity
-			if id.Team != target.Team || id.RunID != run.ID || id.NodeID != target.NodeID || id.Attempt != selected.Attempt || id.Generation != selected.Generation || attempt.FinishedAt != nil {
+			if id.Team != target.Team || id.RunID != run.ID || id.NodeID != target.NodeID || runspec.AttemptOrdinal(id.Attempt) != selected.Attempt || runspec.ClaimGeneration(id.Generation) != selected.Generation || attempt.FinishedAt != nil {
 				continue
 			}
 			if found || attempt.CapabilityPrefix != selected.CapabilityPrefix || attempt.Holder != selected.ClaimedBy {

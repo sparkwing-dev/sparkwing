@@ -375,7 +375,8 @@ func TestRetainedStorageSweepIsolatesTeamDamageAndDeletion(t *testing.T) {
 				if damage == "watermarks" {
 					rewriteSchemaExec(t, s.db, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store='logs'", badTeam)
 				} else {
-					if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), Team(badTeam), *now); err != nil {
+					s.SetTestClock(t, func() time.Time { return *now })
+					if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), Team(badTeam)); err != nil {
 						t.Fatal(err)
 					}
 				}

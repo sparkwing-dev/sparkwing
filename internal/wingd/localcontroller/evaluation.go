@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -28,7 +29,7 @@ func (c *nodeClaims) evaluate(ctx context.Context, input nodehost.EvaluationInpu
 	if err != nil {
 		return nodehost.ProcessGrant{}, err
 	}
-	if row.Ref != (controllerwire.NodeRef{RunID: b.RunID, NodeID: input.NodeID}) || row.Generation != input.Generation || row.SpecHash != input.SpecHash {
+	if row.Ref != (controllerwire.NodeRef{RunID: b.RunID, NodeID: input.NodeID}) || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
 		return nodehost.ProcessGrant{}, nodeClaimMismatch()
 	}
 	var job nodeproto.JobSpec
@@ -45,7 +46,7 @@ func (c *nodeClaims) evaluate(ctx context.Context, input nodehost.EvaluationInpu
 	if services.RunID != b.RunID || services.Job.ID != job.ID || !completeServices(services) {
 		return nodehost.ProcessGrant{}, errors.New("evaluation services are incomplete or belong to another job")
 	}
-	services.SourceBindings = evaluationBindings{readNode: c.readNode, source: row.Ref, generation: row.Generation, hash: row.SpecHash}
+	services.SourceBindings = evaluationBindings{readNode: c.readNode, source: row.Ref, generation: int64(row.Generation), hash: row.SpecHash}
 	return c.processes.Delegate(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: p.Digest}, capability.DelegateSpec{
 		Parent: principal.Authority, Audience: capability.NodeHost, Grants: p.Grants, Binding: b, Repositories: p.Repositories, Data: p.Data, ExpiresAt: p.ExpiresAt,
 	}, services)
@@ -63,7 +64,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 	if err != nil {
 		return err
 	}
-	if row.Ref != b.source || row.Generation != b.generation || row.SpecHash != b.hash || p.Capability.Binding.RunID != b.source.RunID {
+	if row.Ref != b.source || row.Generation != runspec.ClaimGeneration(b.generation) || row.SpecHash != b.hash || p.Capability.Binding.RunID != b.source.RunID {
 		return nodeClaimMismatch()
 	}
 	if rule == capability.BindReadSet {

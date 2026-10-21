@@ -71,12 +71,12 @@ func outputFixture(t *testing.T, mode string) (NodeInput, OutputRecords, *output
 	st.snapshot.Run.Spec = &spec
 	input.Entry = &source.Entry{Engine: input.Engine}
 	input.Attempt++
-	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
+	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation), Attempt: int64(input.Attempt)}
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: "team", RunID: input.Accepted.RunID, Principal: "principal", CapabilityRef: "live-claim", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}}
 	upload := JobUpload{Identity: identity, Authority: blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Attempt: identity.Attempt, Repo: "example.com/acme/repo"}, Key: blob.ResultRecordKey(attempt, "example.com/acme/repo", blob.RefScope{}, "build", blob.KindOutput)}
 	b := newOutputBackend(mode, upload, []byte(`{"value":7}`))
 	adapter := OutputRecords{Blobs: b, Records: b, Bind: func(_ context.Context, got NodeInput) (JobUpload, error) {
-		if got.Accepted.RunID != attempt.RunID || got.Authority != input.Authority || got.Generation != attempt.Generation || got.Attempt != attempt.Attempt {
+		if got.Accepted.RunID != attempt.RunID || got.Authority != input.Authority || got.Generation != runspec.ClaimGeneration(attempt.Generation) || got.Attempt != runspec.AttemptOrdinal(attempt.Attempt) {
 			return JobUpload{}, errors.New("binding lost the awarded claim")
 		}
 		if mode == "bind" {

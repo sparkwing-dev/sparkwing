@@ -21,11 +21,7 @@ func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorize
 	if a.Access.Credential == capability.CredentialMember {
 		actor.Kind = store.ActorOperator
 	}
-	applied, err := tenant.TransitionNode(ctx, store.NodeTransition{
-		Ref: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
-		To:  store.NodeCancelled, Cause: store.CauseCancel, Actor: actor,
-		Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: body.Reason}},
-	})
+	applied, err := tenant.TransitionNode(ctx, store.CancelNode{Ref: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, Actor: actor, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: body.Reason}})
 	return appliedResponse(applied), engineLookupError(err)
 }
 

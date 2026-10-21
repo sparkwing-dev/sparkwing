@@ -35,7 +35,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	defer func() { cancel(context.Canceled); workers.Wait() }()
 	completed := make(chan ownerExecution)
 	active := map[string]context.CancelCauseFunc{}
-	debugged := map[string]int64{}
+	debugged := map[string]runspec.ClaimGeneration{}
 	project, decide := h.Project, h.Decide
 	if project == nil {
 		project = store.RunSnapshot.Scheduling
@@ -90,7 +90,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				continue
 			}
 			if row.ClaimedBy == "" {
-				applied, err := h.Store.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeCancelled, Cause: store.CauseCancel, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: row.CancelReason}}})
+				applied, err := h.Store.TransitionNode(ctx, store.CancelNode{Ref: row.Ref, Actor: input.Owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: row.CancelReason}})
 				if err != nil {
 					return RunCompletion{}, err
 				}
@@ -108,7 +108,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			if !excluded || row.Status != store.StatusPending || row.ClaimedBy != "" || row.ReadyAt != nil || snapshot.Run.CancelRequestedAt != nil {
 				continue
 			}
-			if _, err := h.Store.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeSkipped, Cause: store.CauseDependency, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: reason}}}); err != nil {
+			if _, err := h.Store.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Outcome: store.NodeSkipped, Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: reason}}); err != nil {
 				return RunCompletion{}, err
 			}
 			selected = true
@@ -152,7 +152,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				continue
 			}
 			row, ok := ownerNode(snapshot, action.NodeID)
-			if !ok || row.Generation != action.Generation {
+			if !ok || row.Generation != runspec.ClaimGeneration(action.Generation) {
 				return RunCompletion{}, errors.New("decision does not match its persisted node")
 			}
 			if action.Kind == store.DecisionCancelHolder && row.CancelRequestedAt != nil {
@@ -253,14 +253,13 @@ func ownerNode(snapshot store.RunSnapshot, id string) (store.NodeRow, bool) {
 }
 
 func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, action store.NodeDecision) error {
-	change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner}
+	var change store.NodeCommand
 	switch action.Kind {
 	case store.DecisionTerminal:
-		change.To, change.Cause = store.NodeState(action.Outcome), store.CauseDependency
-		change.Extra.Result = &store.NodeResult{Outcome: change.To, Reason: action.Reason}
+		outcome := store.NodeState(action.Outcome)
+		change = store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Outcome: outcome, Result: &store.NodeResult{Outcome: outcome, Reason: action.Reason}}
 	case store.DecisionCancelHolder:
-		change.To, change.Cause = store.NodeCancelled, store.CauseCancel
-		change.Extra.Result = &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}
+		change = store.CancelNode{Ref: row.Ref, Actor: input.Owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}}
 	case store.DecisionExpand:
 		return h.expand(ctx, input, accepted, entry, row)
 	default:
@@ -305,8 +304,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			return err
 		}
 		if result.Transition != nil {
-			change := *result.Transition
-			change.Ref, change.Actor = row.Ref, input.Owner
+			change := store.BindNodeCommand(result.Transition, row.Ref, input.Owner)
 			_, err = h.Store.TransitionNode(ctx, change)
 			return err
 		}
@@ -335,9 +333,9 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	burstConcurrency := kind != store.DecisionApproval && spec.Request.Request.Burst != nil && h.retainRemote && hasLocalConcurrency(row.Execution.Concurrency)
 	parent := ctx
 	work := func(ctx context.Context) error {
-		change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeReady, Cause: store.CauseRelease}
+		var change store.NodeCommand = store.ReadyNode{Ref: row.Ref, Actor: input.Owner}
 		if kind == store.DecisionApproval {
-			change.To, change.Cause = store.NodeApprovalPending, store.CauseApprovalOpen
+			change = store.OpenApprovalNode{Ref: row.Ref, Actor: input.Owner}
 		}
 		if _, err := h.Store.TransitionNode(ctx, change); err != nil {
 			return err
@@ -355,11 +353,8 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		err := h.Admit(ctx, accepted, row, work)
 		var refused *AdmissionFailure
 		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
-			policy := admissionPolicy(refused, row.Generation)
-			_, err = h.Store.TransitionNode(ctx, store.NodeTransition{
-				Ref: row.Ref, Actor: input.Owner, To: refused.Outcome, Cause: store.CauseOwnerPolicy,
-				Extra: store.TransitionExtra{OwnerPolicy: &policy, Result: &store.NodeResult{Outcome: refused.Outcome, Reason: refused.Reason}},
-			})
+			policy := admissionPolicy(refused, int64(row.Generation))
+			_, err = h.Store.TransitionNode(ctx, store.OwnerPolicyNode{Ref: row.Ref, Actor: input.Owner, Outcome: refused.Outcome, OwnerPolicy: &policy, Result: &store.NodeResult{Outcome: refused.Outcome, Reason: refused.Reason}})
 		}
 		return err
 	}
@@ -385,10 +380,7 @@ func (h *OwnerHost) followRemote(ctx, parent context.Context, actor store.Actor,
 				return errors.Join(stopped, cause)
 			}
 			stopped = cause
-			_, err := h.Store.TransitionNode(parent, store.NodeTransition{
-				Ref: before.Ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseCancel,
-				Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "admission_cancelled"}},
-			})
+			_, err := h.Store.TransitionNode(parent, store.CancelNode{Ref: before.Ref, Actor: actor, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "admission_cancelled"}})
 			if err != nil {
 				return errors.Join(stopped, err)
 			}
@@ -462,7 +454,7 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) EvaluationInput {
 	return EvaluationInput{
 		Engine: entry.Engine, Accepted: accepted, Entry: entry, GrantedRunner: input.GrantedRunner,
-		NodeID: row.Ref.NodeID, Generation: row.Generation, SpecHash: row.SpecHash,
+		NodeID: row.Ref.NodeID, Generation: int64(row.Generation), SpecHash: row.SpecHash,
 		Storage:      input.Storage,
 		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: row.Ref.NodeID},
 	}
@@ -495,7 +487,7 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 	default:
 		return RunCompletion{}, errors.New("schedule returned an invalid run verdict")
 	}
-	_, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunTransition{RunID: input.RunID, To: store.RunState(decision.Outcome), Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
+	_, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: input.RunID, Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
 	if err != nil {
 		return RunCompletion{}, err
 	}

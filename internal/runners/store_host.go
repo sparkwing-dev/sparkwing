@@ -122,7 +122,7 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.Ref != (controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != unit.Binding.Generation || row.Attempt != unit.Binding.Attempt || !reflect.DeepEqual(row.Execution, *unit.Execution) {
+		if row.Ref != (controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || row.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) || !reflect.DeepEqual(row.Execution, *unit.Execution) {
 			return storeInputs{}, awardMismatch()
 		}
 	} else if unit.Unit == capability.UnitEval {
@@ -131,10 +131,10 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.Generation != unit.SourceGeneration || row.Ref != (controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+		if row.Generation != runspec.ClaimGeneration(unit.SourceGeneration) || row.Ref != (controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 			return storeInputs{}, awardMismatch()
 		}
-		input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation}
+		input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}
 	} else {
 		binding := principal.Capability.Binding
 		owner := snapshot.Run.Owner
@@ -142,7 +142,7 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 			return storeInputs{}, awardMismatch()
 		}
 		input.Owner = store.Actor{
-			Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation,
+			Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation),
 			Owner: *owner,
 		}
 	}

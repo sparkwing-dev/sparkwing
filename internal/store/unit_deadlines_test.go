@@ -19,7 +19,7 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: claim.RunID}
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(claim.RunID)}
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -19,7 +21,7 @@ func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err != nil {
 		return err
 	}
-	if row.Status != StatusDone || row.Generation != b.Generation || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || row.Expansion == ExpansionAbsent || row.Expansion == ExpansionNone {
+	if row.Status != StatusDone || row.Generation != runspec.ClaimGeneration(b.Generation) || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || row.Expansion == ExpansionAbsent || row.Expansion == ExpansionNone {
 		return bindingRefusal()
 	}
 	return nil
@@ -39,7 +41,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if err != nil {
 			return err
 		}
-		if run.FinishedAt == nil || row.Status != StatusDone || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || target.SourceGeneration != 0 && row.Generation != target.SourceGeneration {
+		if run.FinishedAt == nil || row.Status != StatusDone || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || runspec.ClaimGeneration(target.SourceGeneration) != 0 && row.Generation != runspec.ClaimGeneration(target.SourceGeneration) {
 			return bindingRefusal()
 		}
 		return bindingPipelineReferenceTx(ctx, tx, c, capability.Target{Pipeline: run.Request.Request.Pipeline, NodeID: target.NodeID})
@@ -57,11 +59,11 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 			source = &snapshot.Nodes[i]
 		}
 	}
-	if source == nil || target.SourceGeneration != 0 && source.Generation != target.SourceGeneration {
+	if source == nil || runspec.ClaimGeneration(target.SourceGeneration) != 0 && source.Generation != runspec.ClaimGeneration(target.SourceGeneration) {
 		return bindingRefusal()
 	}
 	if b.Expansion != nil {
-		if target.NodeID == b.NodeID && source.Generation == b.Generation {
+		if target.NodeID == b.NodeID && source.Generation == runspec.ClaimGeneration(b.Generation) {
 			return nil
 		}
 		return bindingRefusal()
@@ -106,7 +108,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 	if err != nil {
 		return err
 	}
-	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(tx.now()) {
+	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(tx.time) {
 		return bindingRefusal()
 	}
 	for _, row := range snapshot.Nodes {
@@ -144,12 +146,12 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	}
 	if b.Expansion != nil {
 		lease := state.Expansion
-		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(tx.now()) || lease.Lease.Kind == capability.UnitEval && (lease.ControllerLeaseExpiresAt == nil || !lease.ControllerLeaseExpiresAt.After(tx.now())) {
+		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(tx.time) || lease.Lease.Kind == capability.UnitEval && (lease.ControllerLeaseExpiresAt == nil || !lease.ControllerLeaseExpiresAt.After(tx.time)) {
 			return bindingRefusal()
 		}
 		return nil
 	}
-	if state.RunCancelled || state.FinishedAt != nil || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(tx.now()) {
+	if state.RunCancelled || state.FinishedAt != nil || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(tx.time) {
 		return bindingRefusal()
 	}
 	if b.Kind == capability.BindingNode {

@@ -16,8 +16,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// Session carries presentation and current authority after a committed lookup.
+// Session carries presentation, current authority and store time after a committed lookup.
 type Session struct {
+	Now              time.Time
 	ID               string
 	Principal        string
 	Scopes           []string
@@ -96,7 +97,7 @@ func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, t
 		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {
 			return err
 		}
-		now := tx.now()
+		now := tx.time
 		expires := now.Add(ttl)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
  VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
@@ -105,7 +106,7 @@ func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, t
 		if err := tx.operator.recordSessionMembershipsTx(ctx, tx, sessionDigest(raw)); err != nil {
 			return err
 		}
-		session = &Session{ID: raw, Principal: email, Team: Team(c.Team), AccountID: c.Subject.ID, CapabilityPrefix: prefix, CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
+		session = &Session{Now: now, ID: raw, Principal: email, Team: Team(c.Team), AccountID: c.Subject.ID, CapabilityPrefix: prefix, CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
 		for _, grant := range c.Grants {
 			session.Scopes = append(session.Scopes, string(grant))
 		}
@@ -191,7 +192,8 @@ func (op *Operator) lookupSessionTx(ctx context.Context, tx *storeTx, rawSession
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	now := tx.now()
+	now := tx.time
+	sess.Now = now
 	sess.ID, sess.CSRFToken = rawSession, csrfToken
 	sess.CreatedAt, sess.ExpiresAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC()
 	for _, grant := range chain[0].principal.Capability.Grants {

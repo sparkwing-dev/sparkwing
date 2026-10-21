@@ -28,7 +28,7 @@ func TestEngineLauncherSyncRenewsPreparationBeforeExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fence := capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	fence := capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 	handler := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
 	for exchange := range 2 {
 		original := time.Now().Add(10 * time.Second)

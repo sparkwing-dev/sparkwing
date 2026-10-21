@@ -110,7 +110,7 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 			if _, err := competing.Run(t.Context(), competitor.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
 				t.Fatal(err)
 			}
-			claim, err := fixture.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: fixture.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: fixture.Input.RunID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+			claim, err := fixture.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: fixture.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(fixture.Input.RunID)}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -303,8 +303,7 @@ func TestApprovalSkipPolicyProducesSuccess(t *testing.T) {
 	if result.Transition == nil {
 		t.Fatal("skip policy returned no durable decision")
 	}
-	change := *result.Transition
-	change.Ref, change.Actor = row.Ref, f.Actor
+	change := store.BindNodeCommand(result.Transition, row.Ref, f.Actor)
 	if _, err := f.State.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +333,7 @@ func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
 			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "old", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 			if ready {
 				row := capacityRow(t, f, "old")
-				if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, Actor: f.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+				if _, err := f.State.TransitionNode(t.Context(), store.ReadyNode{Ref: row.Ref, Actor: f.Actor}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -362,7 +361,7 @@ func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
 func TestOwnerExecutionCancellationKeepsIndependentFailure(t *testing.T) {
 	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	row := capacityRow(t, fixture, "job")
-	if _, err := fixture.State.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, Actor: fixture.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	if _, err := fixture.State.TransitionNode(t.Context(), store.ReadyNode{Ref: row.Ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	independent := errors.New("executor cleanup failed")
@@ -396,7 +395,7 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 		fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 		row := capacityRow(t, fixture, "job")
 		if released {
-			if _, err := fixture.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, Actor: fixture.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+			if _, err := fixture.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: row.Ref, Actor: fixture.Actor}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -416,11 +415,8 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 		if kind == string(store.PolicyQueueTimeout) {
 			reason = store.FailureQueueTimeout
 		}
-		_, err = fixture.Tenant.TransitionNode(t.Context(), store.NodeTransition{
-			Ref: row.Ref, Actor: actor, To: outcome, Cause: store.CauseOwnerPolicy,
-			Extra: store.TransitionExtra{OwnerPolicy: &store.OwnerPolicyResult{Kind: store.OwnerPolicyKind(kind), Generation: generation}, Result: &store.NodeResult{Outcome: outcome, Reason: reason}},
-		})
-		valid := ownerDelta == 0 && generation == row.Generation && !released && (kind == string(store.PolicyAdmissionFail) || kind == string(store.PolicyAdmissionSkip) || kind == string(store.PolicyQueueTimeout))
+		_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: actor, Outcome: outcome, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.OwnerPolicyKind(kind), Generation: generation}, Result: &store.NodeResult{Outcome: outcome, Reason: reason}})
+		valid := ownerDelta == 0 && runspec.ClaimGeneration(generation) == row.Generation && !released && (kind == string(store.PolicyAdmissionFail) || kind == string(store.PolicyAdmissionSkip) || kind == string(store.PolicyQueueTimeout))
 		if (err == nil) != valid {
 			t.Fatalf("owner delta=%d generation=%d kind=%q released=%v error=%v", ownerDelta, generation, kind, released, err)
 		}

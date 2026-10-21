@@ -162,7 +162,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if err != nil {
 		return spec, row, job, err
 	}
-	if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != input.NodeID || row.Generation != input.Generation || row.SpecHash != input.SpecHash {
+	if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != input.NodeID || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
 		return spec, row, job, executorError(apierr.SpecDrift, "evaluation source differs from persisted identity")
 	}
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {

@@ -3,16 +3,17 @@ package client
 import (
 	"encoding/hex"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"io"
 	"net/http"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestRunnerSessionPresentationCannotInjectHeadersProperty(t *testing.T) {
 	property := func(input []byte, character uint8) bool {
-		invalid := byte(character % 34)
+		invalid := character % 34
 		if invalid == 33 {
 			invalid = 127
 		}

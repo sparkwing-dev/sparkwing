@@ -139,7 +139,7 @@ func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 		}
 		completion, err := host.Run(t.Context(), input)
 		var cancelled *lease.CancelError
-		if !errors.As(err, &cancelled) || completion.Outcome != "" || state.finished.Transition.To != "" || slices.Contains(state.trace, "remote-joined") {
+		if !errors.As(err, &cancelled) || completion.Outcome != "" || state.finished.Transition.RunID != "" || slices.Contains(state.trace, "remote-joined") {
 			t.Fatalf("scheduling suppressed cancellation or finished live remote work: %+v %v trace=%v", completion, err, state.trace)
 		}
 	})
@@ -212,7 +212,7 @@ func TestOwnerHostCancellationStopsSourcePreparation(t *testing.T) {
 		}
 		_, err := host.Run(t.Context(), input)
 		var cancelled *lease.CancelError
-		if !errors.As(err, &cancelled) || state.finished.Transition.To != store.RunCancelled || slices.Contains(state.trace, "prepare") {
+		if !errors.As(err, &cancelled) || state.finished.Transition.Reason != string(apierr.ReasonCancelled) || slices.Contains(state.trace, "prepare") {
 			t.Fatalf("cancelled preparation reached planning: %v trace=%v", err, state.trace)
 		}
 	})
@@ -254,7 +254,8 @@ func (f *ownerFixture) TransitionRun(_ context.Context, change store.RunTransiti
 	return store.Applied{}, nil
 }
 
-func (f *ownerFixture) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+func (f *ownerFixture) TransitionNode(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+	change := captureNodeCommand(command)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.trace = append(f.trace, string(change.To))
@@ -451,7 +452,7 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	}
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
 		f.record("execute")
-		_, err := f.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: n.Accepted.RunID, NodeID: n.NodeID}, To: store.NodeSuccess})
+		_, err := f.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: n.Accepted.RunID, NodeID: n.NodeID}, Outcome: store.NodeSuccess})
 		return err
 	})
 	if _, err := h.Run(t.Context(), in); err != nil {

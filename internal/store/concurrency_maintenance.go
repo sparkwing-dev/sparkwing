@@ -36,7 +36,7 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 		return ConcurrencyMaintenanceResult{}, err
 	}
 	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.time); err != nil {
 		return ConcurrencyMaintenanceResult{}, err
 	}
 	keys, err := tx.operator.lockMaintenanceCapacityTx(ctx, tx)
@@ -55,7 +55,7 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 			return ConcurrencyMaintenanceResult{}, err
 		}
 		result.StaleHolders = append(result.StaleHolders, holders...)
-		now := tx.now()
+		now := tx.time
 		promoted, err := txPromoteWaiters(ctx, tx, key.team, key.key, now.UnixNano(), now.Add(opts.Lease).UnixNano())
 		if err != nil {
 			return ConcurrencyMaintenanceResult{}, err
@@ -63,11 +63,11 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 		result.Promoted += len(promoted)
 	}
 	for _, key := range keys {
-		if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.now().UnixNano()); err != nil {
+		if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.time.UnixNano()); err != nil {
 			return ConcurrencyMaintenanceResult{}, err
 		}
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.time); err != nil {
 		return ConcurrencyMaintenanceResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -80,7 +80,7 @@ func (op *Operator) lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) 
 	rows, err := tx.QueryContext(ctx, `SELECT team,key FROM concurrency_entries e
 WHERE EXISTS (SELECT 1 FROM concurrency_waiters w WHERE w.team=e.team AND w.key=e.key)
 OR EXISTS (SELECT 1 FROM concurrency_holders h WHERE h.team=e.team AND h.key=e.key AND (h.lease_expires_at<=? OR EXISTS (SELECT 1 FROM runs r WHERE r.team=h.team AND r.id=h.run_id AND r.finished_at IS NOT NULL)))
-ORDER BY team,key`+tx.forUpdate(), tx.now().UnixNano())
+ORDER BY team,key`+tx.forUpdate(), tx.time.UnixNano())
 	if err != nil {
 		return nil, err
 	}

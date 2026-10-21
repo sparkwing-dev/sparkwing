@@ -115,7 +115,7 @@ func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("other", "other@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("other", "other@example.test"), store.SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,7 +35,7 @@ func (t *Tenant) AdmitGitHubAppRun(ctx context.Context, in GitHubAppAdmission) (
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		tx.appAdmission = &in
 		var err error
-		result, err = admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.now())
+		result, err = admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.time)
 		return err
 	})
 	if err != nil {

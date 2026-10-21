@@ -170,7 +170,7 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 	return claimSetupFailure(ctx, input, failure, h.Mask, h.Store.TransitionNode)
 }
 
-func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeTransition) (store.Applied, error)) error {
+func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (store.Applied, error)) error {
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
@@ -185,7 +185,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	result := store.NodeResult{Outcome: store.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
 	var refused *AdmissionFailure
 	if errors.As(failure, &refused) {
-		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
+		result.Outcome, result.Reason = refused.Outcome, refused.Reason
 	}
 	if ctx.Err() != nil {
 		result.Outcome, result.Reason = store.NodeCancelled, string(apierr.ReasonCancelled)
@@ -193,7 +193,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	result = recordNodeFailure(input.NodeID, result, mask)
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := transition(reportCtx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: executorActor(input), To: result.Outcome, Cause: store.CauseReport, SourceAttempt: &input.Attempt, Extra: store.TransitionExtra{Result: &result}})
+	_, err := transition(reportCtx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
 	return errors.Join(context.Cause(ctx), &apierr.Error{Code: code, Message: result.MaskedError}, err)
 }
 
@@ -219,7 +219,7 @@ func keepNode(parent context.Context, keeper lease.Keeper, state interface {
 	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
 }, ref controllerwire.NodeRef, actor store.Actor,
 ) (context.Context, func()) {
-	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: actor.Generation}, func() bool { return true }) {
+	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: int64(actor.Generation)}, func() bool { return true }) {
 		return parent, func() {}
 	}
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {

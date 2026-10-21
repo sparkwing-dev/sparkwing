@@ -33,7 +33,7 @@ func TestTerminalRecordSelectorsProperty(t *testing.T) {
 						tenant.s.resultRecords = nodeResultRecordsFunc(func(context.Context, *storeTx, Team, Actor, NodeRow, NodeResult) error { return nil })
 						holder := Actor{Kind: ActorHolder, Authority: request.Actor.Authority, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
 						holder.Authority.ID = "claim"
-						change := NodeTransition{Ref: request.Ref, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: want.Output, ManifestRecord: want.Manifest}}}
+						change := nodeTransition{Ref: request.Ref, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: want.Output, ManifestRecord: want.Manifest}}}
 						if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 							t.Fatal(err)
 						}

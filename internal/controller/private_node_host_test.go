@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -60,10 +62,9 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 			t.Fatal("node selected the owner's authority")
 		}
 		actor.Generation = award.Node.Generation
-		_, err = host.TransitionNode(t.Context(), store.NodeTransition{Ref: controllerwire.NodeRef{RunID: run, NodeID: node}, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &sourceAttempt})
+		_, err = host.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: run, NodeID: node}, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&sourceAttempt)})
 		if (err == nil) != (run == "run" && node == "build" && sourceAttempt == 0) {
 			t.Fatalf("node transition escaped exact run/node/attempt fence: %v", err)
 		}
-
 	})
 }

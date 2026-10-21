@@ -85,7 +85,7 @@ func TestStoreAdmissionRetainsCapacityAfterOwnerWorkReturns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(probe.requests) != 1 || probe.holder == nil || probe.holder.Binding.Generation != row.Generation {
+	if len(probe.requests) != 1 || probe.holder == nil || runspec.ClaimGeneration(probe.holder.Binding.Generation) != row.Generation {
 		t.Fatalf("capacity continuity lost: %+v", probe)
 	}
 }
@@ -123,7 +123,7 @@ func TestStoreAdmissionAdoptedWaiterKeepsOriginalQueueDeadline(t *testing.T) {
 		admission, probe, accepted, row := capacityFixture(t)
 		budget := int64(10)
 		row.Execution.Concurrency[0].QueueTimeoutMS = &budget
-		probe.waiter = &store.CapacityWaiter{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: "job", Generation: row.Generation}, ArrivedAt: time.Now().Add(-time.Second)}
+		probe.waiter = &store.CapacityWaiter{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: "job", Generation: int64(row.Generation)}, ArrivedAt: time.Now().Add(-time.Second)}
 		probe.resolve = func(context.Context) (store.WaiterResolution, error) {
 			return store.WaiterResolution{Status: store.WaiterExpired}, nil
 		}
@@ -221,7 +221,7 @@ func FuzzStoreAdmissionFencesAdoptedCapacity(f *testing.F) {
 	f.Add("owner", uint8(7))
 	f.Fuzz(func(t *testing.T, value string, field uint8) {
 		admission, probe, accepted, row := capacityFixture(t)
-		expected := store.CapacityHolder{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: row.Ref.NodeID, Generation: row.Generation}, Cost: 1}
+		expected := store.CapacityHolder{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: row.Ref.NodeID, Generation: int64(row.Generation)}, Cost: 1}
 		changed := expected
 		switch field % 8 {
 		case 0:

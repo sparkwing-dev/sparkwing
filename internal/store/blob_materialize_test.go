@@ -107,9 +107,9 @@ func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, outp
 		t.Fatal(err)
 	}
 	attempt := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: attempt.Generation}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: runspec.ClaimGeneration(attempt.Generation)}
 	ref := controllerwire.NodeRef{RunID: attempt.RunID, NodeID: attempt.NodeID}
-	change := NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(attempt.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &out.Key, ManifestRecord: &artifacts.Key}}}
+	change := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(attempt.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &out.Key, ManifestRecord: &artifacts.Key}}}
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestBlobMaterializationSourceScopeProperty(t *testing.T) {
 		case 4:
 			rewriteSchemaExec(t, tx, "UPDATE capabilities SET revoked_at=1 WHERE prefix='target-owner'")
 		}
-		_, err = transitionNodeTx(t.Context(), tx, tenant.team, NodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: TransitionExtra{Materialize: request.Source}}, tx.now())
+		_, err = transitionNodeTx(t.Context(), tx, tenant.team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: transitionExtra{Materialize: request.Source}}, tx.time)
 		return err != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 80, Rand: rand.New(rand.NewSource(701))}); err != nil {

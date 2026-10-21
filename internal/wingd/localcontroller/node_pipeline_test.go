@@ -224,7 +224,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := b.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}})
+	award, err := b.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	}
 	services.Config.Admission.Daemon = pipelineAdmission{}
 	bind := services.Config.Executor.Bind
-	if grant, err := bind(ctx, nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: admitted.RunID}, NodeID: "first", Generation: actor.Owner.Generation, Authority: nodehost.ClaimAuthority{CapabilityPrefix: principal.Capability.Prefix}}); err == nil || grant.Binding.Routes.Bearer != "" {
+	if grant, err := bind(ctx, nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: admitted.RunID}, NodeID: "first", Generation: runspec.ClaimGeneration(actor.Owner.Generation), Authority: nodehost.ClaimAuthority{CapabilityPrefix: principal.Capability.Prefix}}); err == nil || grant.Binding.Routes.Bearer != "" {
 		t.Fatal("owner authority substituted for a missing node award")
 	}
 	var mu sync.Mutex
@@ -313,7 +313,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 			return grant, err
 		}
 		process := snapshot.Authorities[0].Principal.Capability
-		if process.Parent == nil || process.Parent.ID == principal.Capability.Prefix || process.Parent.ID != input.Authority.CapabilityPrefix || process.Binding.Kind != capability.BindingNode || process.Binding.RunID != input.Accepted.RunID || process.Binding.NodeID != input.NodeID || process.Binding.Generation != input.Generation || process.Binding.Attempt != input.Attempt || process.Binding.Holder != input.Authority.Holder {
+		if process.Parent == nil || process.Parent.ID == principal.Capability.Prefix || process.Parent.ID != input.Authority.CapabilityPrefix || process.Binding.Kind != capability.BindingNode || process.Binding.RunID != input.Accepted.RunID || process.Binding.NodeID != input.NodeID || runspec.ClaimGeneration(process.Binding.Generation) != input.Generation || runspec.AttemptOrdinal(process.Binding.Attempt) != input.Attempt || process.Binding.Holder != input.Authority.Holder {
 			return grant, errors.New("process substituted owner or foreign node authority")
 		}
 		bound, err := services.Config.Processes.Authorities.Resolve(ctx, capability.Authorized{Principal: snapshot.Authorities[0].Principal, Binding: process.Binding})

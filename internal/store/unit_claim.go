@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -111,7 +112,7 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 			allowed = kind == capability.UnitPlan || kind == capability.UnitEval || kind == capability.UnitNode
 		}
 		if c.Purpose == capability.PurposeHere {
-			allowed = kind == capability.UnitTrigger && demand.Target != nil && demand.Target.RunID == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
+			allowed = kind == capability.UnitTrigger && demand.Target != nil && string(demand.Target.RunID) == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
 		}
 		if !allowed {
 			return nil, authorityError(apierr.Forbidden, "claimant lacks the unit claim grant")
@@ -124,7 +125,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	defer func() {
 		var unpriced *UnpricedCPUClassError
 		if errors.As(err, &unpriced) {
-			unpriced.RunID, unpriced.NodeID = unit.RunID, unit.NodeID
+			unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
 		}
 	}()
 
@@ -161,7 +162,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	if err = lockStateRunTx(ctx, tx, team, unit.RunID); err != nil {
+	if err = lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
 		return UnitClaim{}, err
 	}
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
@@ -189,7 +190,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	now := tx.now()
+	now := tx.time
 	var deadline time.Time
 	if row.expiry.Valid {
 		deadline = time.Unix(0, row.expiry.Int64).UTC()
@@ -210,10 +211,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if until, err = leaseBoundTx(ctx, tx, issued.Capability.Prefix, now, until, funded); err != nil {
 		return UnitClaim{}, err
 	}
-	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: row.generation, LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
+	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation), LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
 	if unit.Kind == capability.UnitNode {
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: row.generation}
-		_, err = transitionNodeTx(ctx, tx, team, NodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: TransitionExtra{Claim: &claim.Award}}, now)
+		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}
+		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: string(unit.RunID), NodeID: string(unit.NodeID)}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}}, now)
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement.reason, team, unit.RunID, unit.NodeID)
 		}
@@ -233,24 +234,24 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 			deadline = time.Unix(0, ownerUntil).UTC()
 		}
 	}
-	if !deadline.After(tx.now()) {
+	if !deadline.After(tx.time) {
 		return UnitClaim{}, holderRefusal()
 	}
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: row.holder, Generation: row.generation}
+		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: string(unit.RunID), Holder: row.holder, Generation: row.generation}
 	}
 	if unit.Kind == capability.UnitEval {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Holder: row.holder, Generation: row.generation}
+		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: string(unit.RunID), SourceNodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Holder: row.holder, Generation: row.generation}
 	}
 	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
 		observation := demand
 		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
 		observation.Labels = match.SelfAsserted(observation.Labels)
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.time})
 		if err != nil {
 			return UnitClaim{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now().UnixNano(), team, observation.CapabilityPrefix); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.time.UnixNano(), team, observation.CapabilityPrefix); err != nil {
 			return UnitClaim{}, err
 		}
 	}

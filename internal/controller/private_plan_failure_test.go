@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -32,8 +33,9 @@ func TestPrivatePlanFailureClosesPlanAndRunWithBoundedStage(t *testing.T) {
 			message, reason := "run preparation failed", string(apierr.PlanFailed)
 			if outcome == store.RunCancelled {
 				message, reason = "cancellation requested", string(apierr.ReasonCancelled)
+				engineSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=created_at,cancel_reason='cancel_requested' WHERE team='a' AND id='run'`)
 			}
-			body, err := json.Marshal(localhostwire.LocalRunTransition{To: outcome, Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
+			body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -64,11 +66,11 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, mutation uint8, message string) {
 		e, tenant, raw := privatePlanFailureFixture(t)
-		body := localhostwire.LocalRunTransition{To: store.RunFailed, Cause: store.RunFinish, MaskedError: message}
+		body := localhostwire.LocalRunCompletion{Cause: store.RunFinish, MaskedError: message}
 		path := "/api/v1/runs/run/local-host/finish"
 		switch mutation % 6 {
 		case 0:
-			body.To = store.RunSuccess
+			// The typed store request cannot carry a requested verdict.
 		case 1:
 			body.Cause = store.RunStart
 		case 2:
@@ -89,24 +91,38 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 			t.Fatalf("test did not use a persisted plan: %v", err)
 		}
 		binding := principal.Capability.Binding
-		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: binding.RunID, Holder: binding.Holder, Generation: binding.Generation}}
-		change := store.RunTransition{RunID: "run", Actor: actor, To: body.To, Cause: body.Cause, OwnerPolicy: body.OwnerPolicy, MaskedError: body.MaskedError}
+		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation), Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: binding.RunID, Holder: binding.Holder, Generation: binding.Generation}}
+		change := store.RunCompletion{RunID: "run", Actor: actor, Cause: body.Cause, OwnerPolicy: body.OwnerPolicy, MaskedError: body.MaskedError}
 		if mutation%6 == 4 {
 			change.RunID = "foreign"
 		}
-		if _, err := tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: actor.Owner, Transition: change}); err == nil {
-			t.Fatal("direct store call escaped plan failure authority")
+		if mutation%6 != 0 {
+			if _, err := tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: actor.Owner, Transition: change}); err == nil {
+				t.Fatal("direct store call escaped plan failure authority")
+			}
 		}
 		encoded, err := json.Marshal(body)
 		if err != nil {
 			t.Fatal(err)
 		}
+		if mutation%6 == 0 {
+			encoded = append(encoded[:len(encoded)-1], []byte(`,"to":"success"}`)...)
+		}
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(encoded)))
 		request.Header.Set("Authorization", "Bearer "+raw)
+		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		New(e.Store, nil).Handler().ServeHTTP(response, request)
 		if response.Code < 400 {
 			t.Fatalf("plan escaped its failure authority: mutation=%d status=%d", mutation%6, response.Code)
+		}
+		malformed := strings.Contains(response.Body.String(), "invalid engine request")
+		if mutation%6 == 0 {
+			if response.Code != http.StatusBadRequest || !malformed {
+				t.Fatalf("unknown verdict did not fail decoding: %d %s", response.Code, response.Body.String())
+			}
+		} else if malformed {
+			t.Fatalf("authority mutation failed decoding: mutation=%d %s", mutation%6, response.Body.String())
 		}
 		after, err := tenant.ReadSnapshot(t.Context(), "run")
 		before.StoreNow = after.StoreNow
@@ -120,7 +136,7 @@ func TestPrivateRetryPlanFailureClosesCopiedJobs(t *testing.T) {
 	e, tenant, raw := privatePlanFailureFixture(t)
 	engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='carried',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=0`, []byte(`{}`), []byte(`{"jobs":[{"id":"job"}]}`))
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	body, err := json.Marshal(localhostwire.LocalRunTransition{To: store.RunFailed, Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
+	body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}

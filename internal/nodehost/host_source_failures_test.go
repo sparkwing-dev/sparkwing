@@ -55,7 +55,7 @@ func TestSourceBundleFailures(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
-			cause := error(context.Canceled)
+			cause := context.Canceled
 			if mode == "lease-loss" {
 				cause = lease.ErrLeaseLost
 			}

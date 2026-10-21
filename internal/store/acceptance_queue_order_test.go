@@ -44,7 +44,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a-blocked", "job", "z-preferred"} {
-		if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: plan.RunID, NodeID: id}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: plan.RunID, NodeID: id}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}

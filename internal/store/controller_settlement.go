@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
+func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition, now time.Time) (Applied, error) {
 	if _, err := controllerOwnerTx(ctx, tx, team, change.Ref.RunID, now); err != nil {
 		return Applied{}, err
 	}
@@ -17,7 +18,7 @@ func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change NodeTr
 		return Applied{}, err
 	}
 	if !applied.Replayed {
-		if err = settleControllerTx(ctx, tx, team, change.Ref.RunID, tx.now()); err != nil {
+		if err = settleControllerTx(ctx, tx, team, change.Ref.RunID, tx.time); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -41,7 +42,7 @@ func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string
 	if err != nil {
 		return nil, err
 	}
-	if until <= tx.now().UnixNano() {
+	if until <= tx.time.UnixNano() {
 		return nil, nil
 	}
 	return &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", RunID: runID, Holder: holder, Generation: generation}}, nil
@@ -67,7 +68,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 		decision := Decide(graph)
 		changed := false
 		for _, node := range decision.Nodes {
-			change := NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: node.NodeID}, Actor: *actor}
+			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: node.NodeID}, Actor: *actor}
 			switch node.Kind {
 			case DecisionExpand:
 				_, err = tx.ExecContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES (?,?,?,?,'pending',?) ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation, actor.Owner.Generation)

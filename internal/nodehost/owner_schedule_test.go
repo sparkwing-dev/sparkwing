@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -110,7 +111,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 			<-blocked
 			close(released)
 		}
-		return OwnerLayerResult{Transition: &store.NodeTransition{To: store.NodeSkipped, Cause: store.CauseDependency}}, nil
+		return OwnerLayerResult{Transition: store.DependencyNode{Outcome: store.NodeSkipped}}, nil
 	}
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
@@ -303,7 +304,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 		if !reflect.DeepEqual(binding, input.Storage) {
 			t.Fatal("owner policy lost its bound storage clients")
 		}
-		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || evaluation.NodeID != row.Ref.NodeID || evaluation.Generation != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || evaluation.RouteBinding.JobID != row.Ref.NodeID {
+		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || evaluation.NodeID != row.Ref.NodeID || runspec.ClaimGeneration(evaluation.Generation) != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || evaluation.RouteBinding.JobID != row.Ref.NodeID {
 			t.Fatal("owner policy lost acquired code or persisted evaluation identity")
 		}
 		policies++

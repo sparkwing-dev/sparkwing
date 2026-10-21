@@ -104,7 +104,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "operator.refund_recorded", SubjectID: subject, Actor: actor, Attrs: map[string]any{"digest": digest, "result": result, "reason": req.Reason, "payment_id": req.PaymentID, "refund_id": req.RefundID}}); err != nil {
+		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.time, Team: t.team, Kind: "operator.refund_recorded", SubjectID: subject, Actor: actor, Attrs: map[string]any{"digest": digest, "result": result, "reason": req.Reason, "payment_id": req.PaymentID, "refund_id": req.RefundID}}); err != nil {
 			return CreditReversal{}, err
 		}
 		return result, nil

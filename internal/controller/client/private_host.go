@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -172,34 +173,34 @@ func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish store.Fin
 	if c.node != "" || change.RunID != c.run || finish.Unit != change.Actor.Owner {
 		return result, localHostClientRefusal()
 	}
-	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
+	body := localhostwire.LocalRunCompletion{Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
 	err := c.request(ctx, "POST", "/finish", "", body, &result)
 	return result, err
 }
 
 // TransitionNode selects retained holder credentials without sending actor authority.
-func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
+func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
 	var result store.Applied
-	if change.Ref.RunID != c.run || change.Ref.NodeID == "" || change.Extra.Claim != nil {
+	ref, actor := store.NodeCommandAuthority(change)
+	if ref.RunID != c.run || ref.NodeID == "" {
 		return result, localHostClientRefusal()
 	}
 	selected := c
-	if change.Actor.Kind == store.ActorHolder && c.node == "" {
-		transport, award, err := c.nodeTransport(ctx, change.Ref)
+	if actor.Kind == store.ActorHolder && c.node == "" {
+		transport, award, err := c.nodeTransport(ctx, ref)
 		if err != nil {
 			return result, err
 		}
-		if change.Actor.CapabilityPrefix != award.prefix || change.Actor.Generation != award.generation {
+		if actor.CapabilityPrefix != award.prefix || actor.Generation != runspec.ClaimGeneration(award.generation) {
 			return result, localHostClientRefusal()
 		}
 		selected = &LocalHostClient{transport: transport, run: c.run}
 	}
-	extra := change.Extra
-	body := localhostwire.LocalNodeTransition{
-		To: change.To, Cause: change.Cause, SourceAttempt: change.SourceAttempt,
-		Extra: localhostwire.LocalTransitionExtra{OwnerPolicy: extra.OwnerPolicy, Result: extra.Result, Materialize: extra.Materialize, Approval: extra.Approval, RetryAt: extra.RetryAt},
+	body, err := localhostwire.LocalNodeCommand(change)
+	if err != nil {
+		return result, err
 	}
-	err := selected.request(ctx, "POST", "/transition", change.Ref.NodeID, body, &result)
+	err = selected.request(ctx, "POST", "/transition", ref.NodeID, body, &result)
 	return result, err
 }
 
@@ -276,7 +277,7 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 		return err
 	}
 	binding := principal.Capability.Binding
-	if principal.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) || principal.Capability.Subject != owner.Capability.Subject || binding.Kind != capability.BindingNode || binding.RunID != c.run || binding.NodeID != row.Ref.NodeID || binding.Generation != row.Generation || binding.Holder != row.ClaimedBy {
+	if principal.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) || principal.Capability.Subject != owner.Capability.Subject || binding.Kind != capability.BindingNode || binding.RunID != c.run || binding.NodeID != row.Ref.NodeID || runspec.ClaimGeneration(binding.Generation) != row.Generation || binding.Holder != row.ClaimedBy {
 		return localHostClientRefusal()
 	}
 	c.mu.Lock()
@@ -284,7 +285,7 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 	if c.closed {
 		return errors.New("local host client is closed")
 	}
-	c.nodes[row.Ref.NodeID] = localNodeBearer{raw: raw, prefix: row.CapabilityPrefix, generation: row.Generation, unit: principal.Capability.UnitID}
+	c.nodes[row.Ref.NodeID] = localNodeBearer{raw: raw, prefix: row.CapabilityPrefix, generation: int64(row.Generation), unit: principal.Capability.UnitID}
 	return nil
 }
 
@@ -309,7 +310,7 @@ func (c *LocalHostClient) nodeTransport(ctx context.Context, ref controllerwire.
 	if err != nil {
 		return nil, localNodeBearer{}, err
 	}
-	if row.Generation != award.generation || row.CapabilityPrefix != award.prefix && (row.FinishedAt == nil || row.StateActor.CapabilityPrefix != award.prefix) {
+	if row.Generation != runspec.ClaimGeneration(award.generation) || row.CapabilityPrefix != award.prefix && (row.FinishedAt == nil || row.StateActor.CapabilityPrefix != award.prefix) {
 		return nil, localNodeBearer{}, localHostClientRefusal()
 	}
 	transport := *c.transport
@@ -330,7 +331,7 @@ func (c *LocalHostClient) RenewNode(ctx context.Context, ref controllerwire.Node
 		}
 		award.prefix, award.generation, award.unit = principal.Capability.Prefix, principal.Capability.Binding.Generation, principal.Capability.UnitID
 	}
-	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != award.generation {
+	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != runspec.ClaimGeneration(award.generation) {
 		return store.LeaseBeat{}, localHostClientRefusal()
 	}
 	response, err := transport.Renew(ctx, award.unit, controllerwire.RenewalRequest{Executing: executing})
@@ -372,6 +373,6 @@ var (
 		TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	} = (*LocalHostClient)(nil)
 	_ interface {
-		TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+		TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	} = (*LocalHostClient)(nil)
 )

@@ -153,10 +153,10 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatal(err)
 	}
 	claim, actor := meteredUnitClaim(t, s, demand)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, Actor: actor, Cause: CauseStart, To: NodeRunning, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, Actor: actor, Cause: CauseStart, To: NodeRunning, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
-	attempt := runspec.AttemptIdentity{Team: "a", RunID: claim.RunID, NodeID: claim.NodeID, Attempt: 1, Generation: claim.Award.Generation}
+	attempt := runspec.AttemptIdentity{Team: "a", RunID: claim.RunID, NodeID: claim.NodeID, Attempt: 1, Generation: int64(claim.Award.Generation)}
 	if err := tenant.RecordSegments(t.Context(), logCommit(actor, attempt)); err != nil {
 		t.Fatal(err)
 	}
@@ -167,12 +167,12 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatal(err)
 	}
 	*now = now.Add(3 * time.Second)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, Actor: actor, Cause: CauseReport, To: NodeFailed, SourceAttempt: sourceAttempt(1)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}, Actor: actor, Cause: CauseReport, To: NodeFailed, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
-	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: claim.RunID}
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(claim.RunID)}
 	ownerClaim, owner := meteredUnitClaim(t, s, demand)
-	if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Transition: RunTransition{RunID: claim.RunID, To: RunFailed, Actor: owner, Cause: RunFinish}, Unit: owner.Owner}); err != nil {
+	if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Transition: RunCompletion{RunID: claim.RunID, Actor: owner, Cause: RunFinish}, Unit: owner.Owner}); err != nil {
 		t.Fatalf("finish %s: %v", ownerClaim.RunID, err)
 	}
 	if _, err := op.TestOnlyReversePayment(t.Context(), "payment-a", "refund", "provider", 0); err != nil {
@@ -198,11 +198,13 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	if _, err := op.TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: payment}, *now); err != nil {
 		t.Fatal(err)
 	}
-	hold, err := tenant.HoldByOperator(t.Context(), "console", "fixture", *now)
+	s.SetTestClock(t, func() time.Time { return *now })
+	hold, err := tenant.HoldByOperator(t.Context(), "console", "fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "resolved", *now); err != nil {
+	s.SetTestClock(t, func() time.Time { return *now })
+	if _, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "resolved"); err != nil {
 		t.Fatal(err)
 	}
 	completion, err := op.AcquireSingletonLease(t.Context(), "completion", "billing-boundary", time.Hour)

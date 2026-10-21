@@ -310,7 +310,7 @@ func TestLogPersistenceOwnerUnitsHaveIndependentFences(t *testing.T) {
 			s, claim := releaseFixture(t, kind)
 			tenant := &Tenant{s: s, team: "a"}
 			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogUnitKind(kind), Generation: claim.Award.Generation}}
+			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogUnitKind(kind), Generation: int64(claim.Award.Generation)}}
 			if kind == capability.UnitEval {
 				subject.Unit.Source = &blob.LogSource{NodeID: "job", Generation: claim.SourceGeneration}
 				rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation=? WHERE run_id='run' AND node_id='job'", claim.SourceGeneration)
@@ -374,7 +374,7 @@ func TestLogPersistenceTriggerReadRechecksItsOwnerLease(t *testing.T) {
 			s, claim := releaseFixture(t, capability.UnitTrigger)
 			tenant := &Tenant{s: s, team: "a"}
 			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: claim.Award.Generation}}
+			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: int64(claim.Award.Generation)}}
 			if err := tenant.RecordSegments(t.Context(), SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Final: true}); err != nil {
 				t.Fatal(err)
 			}

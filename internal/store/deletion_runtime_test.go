@@ -129,7 +129,8 @@ func TestAccountDeletionRelabelsGrantsAcrossTeamsWithoutChangingBalances(t *test
 	} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_by,created_at) VALUES (?,?,'paid',10,?,1)`, row.team, fmt.Sprint(i), row.creator)
 	}
-	if _, err := s.DeleteAccount(t.Context(), "leaver", time.Unix(10, 0)); err != nil {
+	s.SetTestClock(t, func() time.Time { return time.Unix(10, 0) })
+	if _, err := s.DeleteAccount(t.Context(), "leaver"); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []string{DeletedUserLabel, DeletedUserLabel, "someone-else"} {

@@ -54,7 +54,7 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 		if run.FinishedAt != nil || run.CancelRequestedAt != nil || row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return authorityError(apierr.IllegalTransition, "job cannot be paused")
 		}
-		now := tx.now()
+		now := tx.time
 		if expires.IsZero() {
 			expires = now.Add(limits.DebugPause)
 		}
@@ -121,8 +121,8 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 		if decision.Resolution == "approved" {
 			to = NodeSuccess
 		}
-		change := NodeTransition{Ref: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, To: to, Cause: CauseApprovalResolve, Actor: Actor{Kind: ActorOperator, Authority: p.Authority}, Extra: TransitionExtra{Approval: &ApprovalResolution{Decision: decision.Resolution, Comment: comment}}}
-		if _, err = transitionNodeTx(ctx, tx, t.team, change, tx.now()); err != nil {
+		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, To: to, Cause: CauseApprovalResolve, Actor: Actor{Kind: ActorOperator, Authority: p.Authority}, Extra: transitionExtra{Approval: &ApprovalResolution{Decision: decision.Resolution, Comment: comment}}}
+		if _, err = transitionNodeTx(ctx, tx, t.team, change, tx.time); err != nil {
 			return err
 		}
 		gate, err := scanApproval(tx.QueryRowContext(ctx, `SELECT run_id,node_id,requested_at,message,timeout_ms,on_timeout,approver,resolved_at,resolution,comment FROM approvals WHERE team=? AND run_id=? AND node_id=?`, t.team, a.Target.RunID, a.Target.NodeID))

@@ -92,11 +92,11 @@ func TestStoreDataStandingPreservesFundingAndSlotPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(TeamTierFunded)
-	if _, err := tenant.HoldByOperator(t.Context(), "operator", "held", s.now()); err != nil {
+	if _, err := tenant.HoldByOperator(t.Context(), "operator", "held"); err != nil {
 		t.Fatal(err)
 	}
 	check(TeamTierFree)
-	if _, err := tenant.ReleaseOperatorHolds(t.Context(), "operator", "released", s.now()); err != nil {
+	if _, err := tenant.ReleaseOperatorHolds(t.Context(), "operator", "released"); err != nil {
 		t.Fatal(err)
 	}
 	check(TeamTierFunded)

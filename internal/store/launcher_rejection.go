@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // rejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
@@ -41,7 +42,7 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			if !live {
 				continue
 			}
-			actor := Actor{Kind: ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, Holder: fence.Holder, Generation: fence.Generation}
+			actor := Actor{Kind: ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}
 			target := expiredUnit{team: award.Claim.Team, ref: controllerwire.NodeRef{RunID: award.Claim.RunID, NodeID: award.Claim.NodeID}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}
 			recovery := ownerRecovery{generation: fence.Generation, lease: sql.NullInt64{Valid: true, Int64: award.Claim.Award.LeaseExpiresAt.UnixNano()}}
 			if fence.Kind == capability.UnitPlan {
@@ -54,16 +55,16 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			}
 			switch fence.Kind {
 			case capability.UnitNode:
-				_, err = transitionNodeTx(ctx, tx, target.team, NodeTransition{Ref: target.ref, To: NodeFailed, Actor: actor, Cause: CauseLaunchRejected, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}}, tx.now())
+				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: NodeFailed, Actor: actor, Cause: CauseLaunchRejected, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}}, tx.time)
 			case capability.UnitPlan:
-				_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: target.ref.RunID, To: RunFailed, Actor: actor, Cause: RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}, tx.now())
+				_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: target.ref.RunID, To: RunFailed, Actor: actor, Cause: RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}, tx.time)
 				if err == nil {
-					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, tx.now())
+					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, tx.time)
 				}
 			case capability.UnitEval:
-				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.now())
+				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.time)
 				if err == nil {
-					err = resolveExpansionLossTx(ctx, tx, target, "failed", tx.now())
+					err = resolveExpansionLossTx(ctx, tx, target, "failed", tx.time)
 				}
 			}
 			if err != nil {

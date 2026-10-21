@@ -17,12 +17,12 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: claim.Team}
 			ref := controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID}
-			started, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)
 			}
 			own, err := tenant.ListNodeExecutionAttempts(t.Context(), ref.RunID, ref.NodeID)
-			if err != nil || len(own) != 1 || own[0].Attempt != int(started.Attempt) || own[0].ClaimGeneration != claim.Award.Generation || own[0].HolderID != claim.Award.Holder || own[0].FinishedAt != nil {
+			if err != nil || len(own) != 1 || own[0].Attempt != int(started.Attempt) || own[0].ClaimGeneration != int64(claim.Award.Generation) || own[0].HolderID != claim.Award.Holder || own[0].FinishedAt != nil {
 				t.Fatalf("started history=%+v, %v", own, err)
 			}
 			foreign := &Tenant{s: s, team: Team(fmt.Sprintf("tenant-'\";--%x", i))}
@@ -37,7 +37,7 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			if after, err := tenant.ListNodeExecutionAttempts(t.Context(), ref.RunID, ref.NodeID); err != nil || !reflect.DeepEqual(own, after) {
 				t.Fatalf("refused reads changed history=%+v, %v", after, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(started.Attempt)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}); err != nil {
 				t.Fatal(err)
 			}
 			finished, err := tenant.ListNodeExecutionAttempts(t.Context(), ref.RunID, ref.NodeID)

@@ -32,7 +32,7 @@ type RunTransactions interface {
 	ReadFailure(context.Context, controllerwire.NodeRef, int64, store.Actor) (*nodeproto.JobFailure, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
-	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
 	WriteAnnotation(context.Context, store.AnnotationWrite) error
@@ -181,7 +181,7 @@ func expansionActor(a capability.Authorized) (store.Actor, error) {
 	}
 	return store.Actor{
 		Authority: a.Principal.Authority, Kind: store.ActorRunHost, CapabilityPrefix: a.Principal.Capability.Prefix,
-		Holder: lease.Holder, Generation: lease.Generation,
+		Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation),
 		Owner: store.OwnerLeaseRef{
 			Kind: kind, Name: lease.ID, RunID: a.Target.RunID,
 			SourceNodeID: a.Target.NodeID, SourceGeneration: a.Target.UnitSourceGeneration, Holder: lease.Holder, Generation: lease.Generation,
@@ -236,7 +236,7 @@ func engineActor(a capability.Authorized) store.Actor {
 	actor := store.Actor{
 		Result:    a.Result,
 		Authority: a.Principal.Authority, Kind: store.ActorRunHost,
-		CapabilityPrefix: principalCapabilityPrefix(a.Principal), Holder: b.Holder, Generation: b.Generation,
+		CapabilityPrefix: principalCapabilityPrefix(a.Principal), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation),
 	}
 	if a.Access.Credential == capability.CredentialPublisher {
 		actor.Kind = store.ActorOperator

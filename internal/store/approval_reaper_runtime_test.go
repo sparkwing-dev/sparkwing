@@ -15,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
-func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire.NodeRef, *time.Time, SingletonLease, NodeTransition) {
+func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire.NodeRef, *time.Time, SingletonLease, nodeTransition) {
 	t.Helper()
 	timeout := int64(1000)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
@@ -48,10 +48,10 @@ func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire
 	approver.Grants = []capability.Grant{capability.Grant("approvals.write")}
 	authorityPersist(t, tenant.s, approver)
 	ref := controllerwire.NodeRef{RunID: request.RunID, NodeID: "gate"}
-	resolve := NodeTransition{
+	resolve := nodeTransition{
 		Ref: ref, To: NodeFailed, Cause: CauseApprovalResolve,
 		Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}},
-		Extra: TransitionExtra{Approval: &ApprovalResolution{Decision: "denied", Comment: "declined"}},
+		Extra: transitionExtra{Approval: &ApprovalResolution{Decision: "denied", Comment: "declined"}},
 	}
 	return tenant, ref, now, lease, resolve
 }
@@ -124,7 +124,7 @@ func TestApprovalReaperRecordsLeaseIdentity(t *testing.T) {
 	tenant, ref, now, lease, _ := approvalReaperFixture(t, "approve")
 	*now = now.Add(time.Second)
 	actor := Actor{Kind: ActorReaper, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "forged"}, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, To: NodeSuccess, Cause: CauseApprovalTimeout, Actor: actor}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: NodeSuccess, Cause: CauseApprovalTimeout, Actor: actor}); err != nil {
 		t.Fatal(err)
 	}
 	var approver string

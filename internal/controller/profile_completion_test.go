@@ -45,7 +45,7 @@ func preparedProfileRun(t *testing.T, opts ...store.Option) (*serverFixture, *st
 				t.Fatal(err)
 			}
 		}
-		if _, err := host.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: actor.Owner, Transition: store.RunTransition{RunID: "run", Actor: actor, To: state, Cause: store.RunFinish}}); err != nil {
+		if _, err := host.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: actor.Owner, Transition: store.RunCompletion{RunID: "run", Actor: actor, Cause: store.RunFinish}}); err != nil {
 			t.Fatal(err)
 		}
 	}

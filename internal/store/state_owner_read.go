@@ -63,7 +63,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.now())) {
+	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.time)) {
 		return RunSnapshot{}, bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, t.team, runID)
@@ -90,7 +90,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 				return RunSnapshot{}, err
 			}
 		}
-		node.OwnerExecution = &OwnerExecution{Owner: authority, Team: t.team, Generation: c.Binding.Generation, Node: node.Ref, NodeGeneration: node.Generation, SpecHash: node.SpecHash, Allowed: allowed}
+		node.OwnerExecution = &OwnerExecution{Owner: authority, Team: t.team, Generation: c.Binding.Generation, Node: node.Ref, NodeGeneration: int64(node.Generation), SpecHash: node.SpecHash, Allowed: allowed}
 	}
 	if err := tx.Commit(); err != nil {
 		return RunSnapshot{}, err

@@ -78,7 +78,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 			return response.RunID, err
 		}
 	}
-	_, err = controller.Finish(ctx, response.RunID, controllerwire.FinishRequest{Outcome: string(local.State)})
+	_, err = controller.Finish(ctx, response.RunID, controllerwire.FinishRequest{})
 	return response.RunID, err
 }
 
@@ -128,7 +128,7 @@ func publishLocalJob(ctx context.Context, controller controllerwire.Controller, 
 		if node.StartedAt != nil {
 			started = *node.StartedAt
 		}
-		attempt := runspec.AttemptIdentity{Team: publisher.Team, RunID: publisher.Authority.Upload.Value.RunID, NodeID: id, Attempt: max(1, node.Attempt), Generation: max(1, node.Generation)}
+		attempt := runspec.AttemptIdentity{Team: publisher.Team, RunID: publisher.Authority.Upload.Value.RunID, NodeID: id, Attempt: int64(max(1, node.Attempt)), Generation: int64(max(1, node.Generation))}
 		imported := runspec.PublishedAttempt{Attempt: attempt.Attempt, Generation: attempt.Generation, StartedAt: started, FinishedAt: *node.FinishedAt, Outcome: result.Outcome, Executor: "local"}
 		if _, err := controller.TransitionJob(ctx, attempt.RunID, id, controllerwire.JobTransitionRequest{To: "pending", Cause: "publish_attempt", Publication: &imported}); err != nil {
 			return err

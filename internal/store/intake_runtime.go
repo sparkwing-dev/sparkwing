@@ -293,11 +293,11 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 		if err != nil {
 			return p, err
 		}
-		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}
 		if row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return p, holderRefusal()
 		}
-		if err = checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
+		if err = checkHolderTx(ctx, tx, team, row, actor, tx.time); err != nil {
 			return p, err
 		}
 		var cancelled sql.NullInt64
@@ -559,7 +559,7 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	}
 	var hereKey, owner string
 	err := tx.QueryRowContext(ctx, `SELECT here_proof_public_key,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&hereKey, &owner)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.now()) {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.time) {
 		return "", nil
 	}
 	if err != nil {

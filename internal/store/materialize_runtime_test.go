@@ -104,8 +104,8 @@ func TestReconcileMaterializationRefusesInvalidSource(t *testing.T) {
 
 func TestMaterializationCannotSupplyAnOutcome(t *testing.T) {
 	tenant, request := materializationFixture(t, SourceManualRetry)
-	for _, extra := range []TransitionExtra{{Materialize: request.Source, Result: &NodeResult{Outcome: NodeFailed}}, {Materialize: request.Source}} {
-		_, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, To: NodeFailed, Extra: extra})
+	for _, extra := range []transitionExtra{{Materialize: request.Source, Result: &NodeResult{Outcome: NodeFailed}}, {Materialize: request.Source}} {
+		_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, To: NodeFailed, Extra: extra})
 		if err == nil {
 			t.Fatal("caller selected materialization outcome")
 		}

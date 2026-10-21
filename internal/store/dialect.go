@@ -140,8 +140,7 @@ type storeTx struct {
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
-	clockErr             error
-	ctx                  context.Context
+	time                 time.Time
 	cancelingTeam        Team
 	tx                   *sql.Tx
 	dialect              Dialect
@@ -160,22 +159,21 @@ func (s *Store) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (t *storeTx) now() time.Time {
-	if t.store.pinnedClock != nil {
-		return t.store.pinnedClock().UTC()
+// Read-only decisions may never commit, so clock failure must refuse construction.
+func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeTx, error) {
+	t := &storeTx{operator: &Operator{s: s}, tx: raw, dialect: s.dialect, store: s, snapshotRead: read}
+	if s.pinnedClock != nil {
+		t.time = s.pinnedClock().UTC()
+	} else if s.dialect == DialectSQLite && s.clock != nil {
+		t.time = s.now()
+	} else {
+		var ns int64
+		if err := t.QueryRowContext(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+			return nil, errors.Join(err, raw.Rollback())
+		}
+		t.time = time.Unix(0, ns).UTC()
 	}
-	if t.dialect == DialectSQLite && t.store.clock != nil {
-		return t.store.now()
-	}
-	if t.clockErr != nil {
-		return time.Time{}
-	}
-	var ns int64
-	t.clockErr = t.QueryRowContext(t.ctx, databaseTimeSQL(t.dialect)).Scan(&ns)
-	if t.clockErr != nil {
-		return time.Time{}
-	}
-	return time.Unix(0, ns).UTC()
+	return t, nil
 }
 
 func databaseTimeSQL(d Dialect) string {
@@ -186,17 +184,12 @@ func databaseTimeSQL(d Dialect) string {
 }
 
 func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
-	if s.pinnedClock != nil {
-		return s.pinnedClock().UTC(), nil
-	}
-	if s.dialect == DialectSQLite && s.clock != nil {
-		return s.now(), nil
-	}
-	var ns int64
-	if err := s.queryRow(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+	tx, err := s.beginSnapshotReadTx(ctx)
+	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Unix(0, ns).UTC(), nil
+	defer rollbackOrLog(tx)
+	return tx.time, nil
 }
 
 // safety: Postgres takes a fresh snapshot per statement unless the isolation
@@ -218,7 +211,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{operator: &Operator{s: s}, tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
+	return s.snapshotTx(ctx, tx, true)
 }
 
 var errControllerFenced = errors.New("controller superseded by promotion")
@@ -241,14 +234,10 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 			return nil, err
 		}
 	}
-	return &storeTx{operator: &Operator{s: s}, tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
+	return s.snapshotTx(ctx, tx, false)
 }
 
 func (t *storeTx) Commit() error {
-	if t.clockErr != nil {
-		_ = t.tx.Rollback()
-		return t.clockErr
-	}
 	if err := t.tx.Commit(); err != nil {
 		return err
 	}

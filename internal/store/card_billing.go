@@ -40,8 +40,14 @@ type SpendStanding struct {
 }
 
 // SpendStanding reports what t may spend as of now.
-func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error) {
-	return spendStandingTx(ctx, storeRowQuerier{t.s}, t.team, now)
+func (t *Tenant) SpendStanding(ctx context.Context) (out SpendStanding, err error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackOrLog(tx)
+
+	return spendStandingTx(ctx, tx, t.team, tx.time)
 }
 
 func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (SpendStanding, error) {

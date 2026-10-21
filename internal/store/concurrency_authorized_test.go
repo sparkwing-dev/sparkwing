@@ -50,7 +50,7 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture, operation, id stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "global:deploy", SlotHolderID: id, SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: row.Generation}
+	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, SlotKey: "global:deploy", SlotHolderID: id, SlotRunID: f.ref.RunID, SlotNodeID: f.ref.NodeID, SlotGeneration: int64(row.Generation)}
 	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestAuthorizedConcurrencyCancellationKeepsReportingAndRevocationRefusesAll(
 	release := slotAuthorization(t, f, "/release", "holder")
 	resolve := slotAuthorization(t, f, "/resolve", "")
 	cancel := slotAuthorization(t, f, "/cancel-waiter", "")
-	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.owner, To: store.NodeCancelled, Cause: store.CauseCancel, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "stop"}}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.CancelNode{Ref: f.ref, Actor: f.owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "stop"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.tenant.AcquireAuthorizedSlot(t.Context(), acquire, slotRequest(f, "holder")); err == nil {

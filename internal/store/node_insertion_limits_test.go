@@ -156,7 +156,7 @@ func TestOwnerReadyReplayPreservesQueueAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}
-	change := NodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}
+	change := nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}
 	first, err := tenant.TransitionNode(t.Context(), change)
 	if err != nil {
 		t.Fatal(err)

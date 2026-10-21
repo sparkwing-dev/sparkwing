@@ -65,7 +65,7 @@ func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 		}
 		return json.RawMessage(`{"jobs":[]}`), nil, nil
 	}
-	if err := host.Evaluate(t.Context(), input, row.Ref.NodeID, row.Generation, fence); err != nil {
+	if err := host.Evaluate(t.Context(), input, row.Ref.NodeID, int64(row.Generation), fence); err != nil {
 		t.Fatal(err)
 	}
 	if s.submitted.Actor != input.Owner || s.submitted.Source != row.Ref || s.submitted.SourceGeneration != 0 || string(s.submitted.Body) != `{"jobs":[]}` || state.finished.Transition.RunID != "" {

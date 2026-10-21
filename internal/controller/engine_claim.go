@@ -120,10 +120,10 @@ func engineClaimTarget(body controllerwire.ClaimRequest) (*store.UnitRef, error)
 		}
 		return nil, nil
 	}
-	target := &store.UnitRef{RunID: body.RunID}
+	target := &store.UnitRef{RunID: runspec.RunID(body.RunID)}
 	switch {
 	case body.JobID != "":
-		target.Kind, target.NodeID = capability.UnitNode, body.JobID
+		target.Kind, target.NodeID = capability.UnitNode, runspec.NodeID(body.JobID)
 	case slices.Contains(body.Kinds, capability.UnitTrigger) && !slices.Contains(body.Kinds, capability.UnitPlan):
 		target.Kind = capability.UnitTrigger
 	case slices.Contains(body.Kinds, capability.UnitPlan) && !slices.Contains(body.Kinds, capability.UnitTrigger):
@@ -209,13 +209,13 @@ func (s *EngineController) exchange(ctx context.Context, authorized capability.A
 	if err != nil {
 		return controllerwire.ExchangeResponse{}, err
 	}
-	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: store.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation, LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
+	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: store.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation), LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
 	if c.Unit == capability.UnitEval {
 		if snapshot.Binding.Expansion == nil {
 			return controllerwire.ExchangeResponse{}, invalidEngineBody("exchanged evaluation has no lease")
 		}
 		claim.SourceGeneration = c.Binding.Generation
-		claim.Award.Generation = snapshot.Binding.Expansion.Lease.Generation
+		claim.Award.Generation = runspec.ClaimGeneration(snapshot.Binding.Expansion.Lease.Generation)
 		claim.Award.LeaseExpiresAt = snapshot.Binding.Expansion.ExpiresAt
 	}
 	unit, err := s.claimedUnit(ctx, claim)

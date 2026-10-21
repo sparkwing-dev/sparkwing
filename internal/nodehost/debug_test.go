@@ -168,7 +168,7 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	wait := f.Host.Wait
 	f.Host.Wait = func(ctx context.Context, snapshot store.RunSnapshot) error {
 		if row, ok := ownerNode(snapshot, "gate"); ok && row.Status == store.StatusApprovalPending {
-			_, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, Actor: f.Control, To: store.NodeSuccess, Cause: store.CauseApprovalResolve, Extra: store.TransitionExtra{Approval: &store.ApprovalResolution{Decision: store.ApprovalResolutionApproved}}})
+			_, err := f.State.TransitionNode(ctx, store.ResolveApprovalNode{Ref: row.Ref, Actor: f.Control, Outcome: store.NodeSuccess, Approval: &store.ApprovalResolution{Decision: store.ApprovalResolutionApproved}})
 			return err
 		}
 		return wait(ctx, snapshot)

@@ -35,7 +35,7 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 	if window > 0 {
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE team=? AND charged_at>=?`,
-			t.team, tx.now().Add(-window).UnixNano()).Scan(&out.BurnMicro); err != nil {
+			t.team, tx.time.Add(-window).UnixNano()).Scan(&out.BurnMicro); err != nil {
 			return out, err
 		}
 	}

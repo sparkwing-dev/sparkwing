@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -78,7 +79,7 @@ func (s *Server) logSubmission(r *http.Request, a capability.Authorized, propose
 func logActor(a capability.Authorized, subject blob.LogSubject) store.Actor {
 	actor := engineActor(a)
 	if subject.Unit != nil && subject.Unit.Kind == blob.LogEval {
-		actor.Generation = subject.Unit.Generation
+		actor.Generation = runspec.ClaimGeneration(subject.Unit.Generation)
 	}
 	return actor
 }

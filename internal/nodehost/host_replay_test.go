@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -160,7 +162,7 @@ func TestGeneratorReplay(t *testing.T) {
 				},
 				CanonicalHash: expansionHash, Mask: func(text string) string { return text },
 				ReadFailure: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
-					if recovery == nil || ref != s.nodes["peer"].Ref || generation != s.nodes["peer"].Generation {
+					if recovery == nil || ref != s.nodes["peer"].Ref || runspec.ClaimGeneration(generation) != s.nodes["peer"].Generation {
 						return nil, errors.New("undeclared recovery read")
 					}
 					return recovery, nil

@@ -116,7 +116,7 @@ func recordDefaultTeamTx(ctx context.Context, tx *storeTx) error {
 }
 
 func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
-	now := tx.now().UnixNano()
+	now := tx.time.UnixNano()
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO teams (name, created_at, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (name) DO NOTHING`,

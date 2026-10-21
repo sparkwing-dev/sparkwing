@@ -138,7 +138,7 @@ func TestArmPushed_AppIdentityKeepsStateAcrossRepositoryRename(t *testing.T) {
 	cursor := time.Now().Add(time.Hour)
 	if err := teststore.ForTeam(t, svc.Store, store.DefaultTeam).ResolveCronDue(ctx, id, cursor, nil, &store.CronFire{
 		ID: "crf_rename", Outcome: store.CronOutcomeFired, RunID: "run-before-rename", DecidedAt: cursor,
-	}, cursor); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	push.RepoURL = "https://github.com/acme/renamed.git"

@@ -72,7 +72,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 				t.Fatalf("shared burst owner completion=%+v executed=%v error=%v", completion, executed, err)
 			}
 			row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
-			if err != nil || row.Outcome != store.NodeState(want) || row.Attempt != attempts || row.ClaimedBy != "" {
+			if err != nil || row.Outcome != store.NodeState(want) || row.Attempt != runspec.AttemptOrdinal(attempts) || row.ClaimedBy != "" {
 				t.Fatalf("shared burst owner persisted the wrong result: %+v %v", row, err)
 			}
 			if live, granted, released := daemon.counts(); live != 0 || granted != released {
@@ -182,7 +182,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	if live, _, _ := daemon.counts(); live != 2 {
 		t.Fatalf("ready burst lost its requester concurrency: live=%d", live)
 	}
-	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil || claim.Kind != capability.UnitNode {
 		t.Fatalf("saturated owner's work was not claimable: %+v %v", claim, err)
 	}

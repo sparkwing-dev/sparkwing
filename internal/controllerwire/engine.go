@@ -270,9 +270,8 @@ type AcceptedExpansion struct {
 }
 
 type FinishRequest struct {
-	Outcome string        `json:"outcome"`
-	Reason  string        `json:"reason,omitempty"`
-	Error   *apierr.Error `json:"error,omitempty"`
+	Reason string        `json:"reason,omitempty"`
+	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 type CancelRequest struct {

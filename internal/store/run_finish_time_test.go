@@ -32,10 +32,10 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 				if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: store.RunRunning, Cause: store.RunStart}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeFailed, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeFailed}}}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeFailed, Result: &store.NodeResult{Outcome: store.NodeFailed}}); err != nil {
 					t.Fatal(err)
 				}
-				finish = store.FinishRunRequest{Unit: f.owner.Owner, Transition: store.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: status, Cause: store.RunFinish}}
+				finish = store.FinishRunRequest{Unit: f.owner.Owner, Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: f.owner, Cause: store.RunFinish}}
 			} else {
 				s = storetest.Open(t, store.WithPolicies(sealStorePolicies))
 				tenant, finish = runCompletionFixture(t, s)
@@ -48,7 +48,7 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				finish.Transition.To = status
+
 			}
 			before, err := s.TestOnlyDatabaseTime(t.Context())
 			if err != nil {

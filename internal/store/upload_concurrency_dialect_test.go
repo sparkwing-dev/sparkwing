@@ -27,7 +27,7 @@ func checkUploadCommitAbortContention(t *testing.T, target *storetest.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, Attempt: row.Attempt, Generation: row.Generation}}
+	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}}
 	authority := blob.Authority{CapabilityRef: f.holder.CapabilityPrefix, Attempt: attempt}
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: string(f.tenant.Team()), RunID: f.ref.RunID, Attempt: attempt, Principal: blob.Principal(f.holder.Holder), CapabilityRef: f.holder.CapabilityPrefix}
 	for sample := range 4 {

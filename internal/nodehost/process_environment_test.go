@@ -55,7 +55,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 				}
 				return []string{"BUILT=policy"}, nil
 			}}
-			env, err := policy.job(t.Context(), kind, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+			env, err := policy.job(t.Context(), kind, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 			if err != nil || !called || !reflect.DeepEqual(env, []string{"BUILT=policy"}) {
 				t.Fatalf("environment = %v, error = %v", env, err)
 			}
@@ -113,7 +113,7 @@ func TestSDKEnvironmentRefusesMissingOrChangedPersistedIdentity(t *testing.T) {
 			case "request":
 				input.Accepted.RunID = "other"
 			}
-			env, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+			env, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
 			if err == nil || len(env) != 0 || called != (mode == "build") {
 				t.Fatalf("environment = %v, built = %v, error = %v", env, called, err)
 			}

@@ -46,6 +46,9 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonMissingGrant, "operator console requires the operator's own signed-in account")
 		}
 		p := &snapshot.Authorities[0].Principal
+		if unsafeMethod(evidence.Method) && !recentSignIn(p.Capability.IssuedAt, snapshot.Now) {
+			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
+		}
 		p.Class, p.Capability.Subject.Kind, p.Capability.Team = capability.CredentialConsole, capability.SubjectOperator, ""
 		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	}
@@ -67,9 +70,6 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 	if err != nil {
 		return capability.Authenticated{}, err
 	}
-	if p := authenticated.Principal; p.Class == capability.CredentialConsole && unsafeMethod(route.Method) && !recentSignIn(p.Capability.IssuedAt, time.Now()) {
-		return capability.Authenticated{}, apierr.Authorization(apierr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
-	}
 	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deployment.DeploymentBearer() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
 		return capability.Authenticated{}, sessionUnavailable()
 	}
@@ -78,10 +78,6 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 
 func recentSignIn(at, now time.Time) bool {
 	return !at.After(now) && now.Sub(at) <= store.IdentityChangeSignInWindow
-}
-
-func (s *Server) consoleAccount(p capability.Principal) bool {
-	return s.consoleAuthority(p, time.Now())
 }
 
 func (s *Server) consoleAuthority(p capability.Principal, now time.Time) bool {

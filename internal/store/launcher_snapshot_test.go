@@ -251,7 +251,7 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 			}
 			ref.ID = issued.Capability.Prefix
 		}
-		fence := capability.LeaseRef{Kind: kind, ID: claim.RunID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+		fence := capability.LeaseRef{Kind: kind, ID: claim.RunID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
 		var id string
 		if err := s.db.QueryRowContext(t.Context(), `SELECT unit_id FROM capabilities WHERE prefix=?`, claim.Award.CapabilityPrefix).Scan(&id); err != nil {
 			t.Fatal(err)

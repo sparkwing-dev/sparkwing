@@ -57,7 +57,7 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if row.Ref != ref || row.Generation != generation || row.SpecHash != specHash {
+	if row.Ref != ref || row.Generation != runspec.ClaimGeneration(generation) || row.SpecHash != specHash {
 		return nil, nil, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
 	}
 	var job nodeproto.JobSpec

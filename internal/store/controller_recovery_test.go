@@ -40,14 +40,14 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
 	root := authorityRoot("runner", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)
-	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 	fundUnitClaim(t, tenant.s)
 	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runID, NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	return actor
@@ -57,7 +57,7 @@ func TestControllerReconcileResumesReportsAcrossLeaseGap(t *testing.T) {
 	tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
 	actor := controllerJobActor(t, tenant, request.RunID)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, now.UnixNano())
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
 	next, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "next"})
@@ -210,7 +210,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 				t.Fatalf("retry owner/seal: %+v, %v", run, err)
 			}
 			controller := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", Holder: "controller", Generation: 1, RunID: retry.RunID}}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: retry.RunID, NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: controller}); err == nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: retry.RunID, NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: controller}); err == nil {
 				t.Fatal("controller bypassed retry planner")
 			}
 			lease := SingletonLease{Name: "controller.owner", Holder: "controller", Generation: 1}
@@ -222,7 +222,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			root.Subject.Kind = capability.SubjectService
 			root.Grants = []capability.Grant{capability.ClaimsLaunch}
 			authorityPersist(t, tenant.s, root)
-			demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: retry.RunID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+			demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(retry.RunID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 			fundUnitClaim(t, tenant.s)
 			claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
@@ -293,7 +293,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 		t.Fatalf("initial approval: %+v, %v", before, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, "UPDATE leases SET until=? WHERE name='controller.owner'", now.UnixNano())
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "eval_units", 0)
@@ -324,7 +324,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	root.Grants = []capability.Grant{capability.ClaimsLaunch}
 	authorityPersist(t, tenant.s, root)
 	fundUnitClaim(t, tenant.s)
-	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: request.RunID, NodeID: "job", SourceGeneration: 1}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(request.RunID), NodeID: "job", SourceGeneration: 1}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	approver := authorityRoot("approver", "a")
 	approver.Grants = []capability.Grant{capability.Grant("approvals.write")}
 	authorityPersist(t, tenant.s, approver)
-	_, err = tenant.TransitionNode(t.Context(), NodeTransition{Ref: gate.Ref, To: NodeSuccess, Cause: CauseApprovalResolve, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}}, Extra: TransitionExtra{Approval: &ApprovalResolution{Decision: "approved"}}})
+	_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: gate.Ref, To: NodeSuccess, Cause: CauseApprovalResolve, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}}, Extra: transitionExtra{Approval: &ApprovalResolution{Decision: "approved"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		authorityPersist(t, tenant.s, root)
 		generation := int64(random.IntN(1000) + 1)
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET generation=? WHERE team=? AND id=?`, generation, tenant.team, retry.RunID)
-		demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: retry.RunID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+		demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(retry.RunID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 		fundUnitClaim(t, tenant.s)
 		prior, stale := meteredUnitClaim(t, tenant.s, demand)
 		if err := tenant.s.ReleaseUnit(t.Context(), prior, prior.Award.CapabilityPrefix); err != nil {
@@ -431,17 +431,16 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 			t.Fatalf("retry lost its carried seal: %+v, %v", before.Run, err)
 		}
 		for _, rejected := range []FinishRunRequest{
-			{Unit: stale.Owner, Transition: RunTransition{RunID: retry.RunID, To: RunFailed, Cause: RunFinish, Actor: stale}},
-			{Unit: actor.Owner, Transition: RunTransition{RunID: retry.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}},
+			{Unit: stale.Owner, Transition: RunCompletion{RunID: retry.RunID, Cause: RunFinish, Actor: stale}},
 		} {
 			if _, err := tenant.FinishRunAndUnit(t.Context(), rejected); err == nil {
 				t.Fatalf("invalid planner finished retry: %+v", rejected)
 			}
 		}
-		for _, rejected := range []NodeTransition{
+		for _, rejected := range []nodeTransition{
 			{To: NodeReady, Cause: CauseRelease},
 			{To: NodeSkipped, Cause: CauseDependency},
-			{To: NodeFailed, Cause: CauseOwnerPolicy, Extra: TransitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: PolicyAdmissionFail}, Result: &NodeResult{Outcome: NodeFailed}}},
+			{To: NodeFailed, Cause: CauseOwnerPolicy, Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: PolicyAdmissionFail}, Result: &NodeResult{Outcome: NodeFailed}}},
 			{To: NodeApprovalPending, Cause: CauseApprovalOpen},
 		} {
 			rejected.Ref, rejected.Actor = controllerwire.NodeRef{RunID: retry.RunID, NodeID: "job"}, actor
@@ -453,8 +452,8 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(before, after) {
 			t.Fatalf("refused finish changed retry: %v", err)
 		}
-		actor.Result = &capability.RecordedResult{Actor: actor.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: retry.RunID, Generation: actor.Generation, Digest: strings.Repeat("a", 64)}
-		finish := FinishRunRequest{Unit: current.Owner, Transition: RunTransition{RunID: retry.RunID, To: RunFailed, Cause: RunFinish, Actor: actor, MaskedError: "untrusted planner text"}}
+		actor.Result = &capability.RecordedResult{Actor: actor.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: retry.RunID, Generation: int64(actor.Generation), Digest: strings.Repeat("a", 64)}
+		finish := FinishRunRequest{Unit: current.Owner, Transition: RunCompletion{RunID: retry.RunID, Cause: RunFinish, Actor: actor, MaskedError: "untrusted planner text"}}
 		for replay := range 2 {
 			applied, err := tenant.FinishRunAndUnit(t.Context(), finish)
 			if err != nil || applied.Replayed != (replay == 1) {

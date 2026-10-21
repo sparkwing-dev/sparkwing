@@ -50,9 +50,9 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","source_attempt":0,"result":{"outcome":"failed","reason":"exit","failure":{"job":"job","stage":"body","error":{"code":"sdk_error","message":"masked"}},"exit_code":1}}`
 				switch operation {
 				case "owner finish":
-					b, path, body = ownerBoundary(), "/api/v1/runs/run/finish", `{"outcome":"success"}`
+					b, path, body = ownerBoundary(), "/api/v1/runs/run/finish", `{}`
 				case "published finish":
-					b, path, body = publisherBoundary(), "/api/v1/runs/run/finish", `{"outcome":"failed","reason":"exit","error":{"code":"sdk_error","message":"masked"}}`
+					b, path, body = publisherBoundary(), "/api/v1/runs/run/finish", `{"reason":"exit","error":{"code":"sdk_error","message":"masked"}}`
 				case "cancel":
 					b, path, body = intakeBoundary(), "/api/v1/runs/run/cancel", `{"reason":"user requested"}`
 					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl}
@@ -102,8 +102,11 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				p := b.snapshot.Authorities[0].Principal
 				switch operation {
 				case "transition":
-					change := f.nodeChange
-					if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.Cause != store.CauseReport || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.To != store.NodeFailed || change.Extra.Result.MaskedError != "masked" {
+					change, ok := f.nodeChange.(store.ReportNode)
+					if !ok {
+						t.Fatalf("report command=%T", f.nodeChange)
+					}
+					if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.Outcome != store.NodeFailed || change.Result.MaskedError != "masked" {
 						t.Fatalf("node transition = %+v", change)
 					}
 				case "owner finish":
@@ -146,7 +149,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 func TestEngineLifecycleRefusesMalformedErrors(t *testing.T) {
 	for _, failure := range []string{`{}`, `{"code":"sdk_error"}`, `{"message":"private"}`, `{"error":{"code":"sdk_error","message":"masked"}}`, `{"code":"sdk_error","code":"internal","message":"masked"}`} {
 		b, f := ownerBoundary(), &engineTransactions{}
-		w := engineHTTP(t, b, f, "/api/v1/runs/run/finish", `{"outcome":"failed","error":`+failure+`}`)
+		w := engineHTTP(t, b, f, "/api/v1/runs/run/finish", `{"error":`+failure+`}`)
 		assertEngineError(t, w, 400, apierr.BadRequest)
 		if f.writes != 0 {
 			t.Fatal("invalid error reached transaction")
@@ -163,7 +166,7 @@ func TestEngineResultReplayHTTP(t *testing.T) {
 				body := `{"to":"success","cause":"report","source_attempt":2,"result":{"outcome":"success"}}`
 				if operation == "run" {
 					b = ownerBoundary()
-					path, pattern, node, body = "/api/v1/runs/run/finish", "/api/v1/runs/{run}/finish", "", `{"outcome":"success"}`
+					path, pattern, node, body = "/api/v1/runs/run/finish", "/api/v1/runs/{run}/finish", "", `{}`
 				}
 				finished := b.snapshot.Now.Add(-time.Second)
 				b.snapshot.Binding.FinishedAt = &finished

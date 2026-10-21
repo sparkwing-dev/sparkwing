@@ -54,7 +54,7 @@ func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if name == "" || len(name) > maxDisplayNameLen {
 			return fmt.Errorf("%w: a display name is 1 to %d characters", ErrInvalidInput, maxDisplayNameLen)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET display_name=?,updated_at=? WHERE name=?`, name, tx.now().UnixNano(), t.team); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET display_name=?,updated_at=? WHERE name=?`, name, tx.time.UnixNano(), t.team); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx, `SELECT name,display_name,created_by FROM teams WHERE name=?`, t.team).Scan(&out.Slug, &out.DisplayName, &out.CreatedBy)
@@ -99,7 +99,7 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		out, err = t.createInvitationTx(ctx, tx, p.Capability.Subject.ID, email, role, id, tx.now())
+		out, err = t.createInvitationTx(ctx, tx, p.Capability.Subject.ID, email, role, id, tx.time)
 		return err
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 // DeleteAuthorizedInvitation withdraws an open invitation under current administration.
 func (t *Tenant) DeleteAuthorizedInvitation(ctx context.Context, a capability.Authorized, id string) error {
 	return t.teamMutationTx(ctx, a, func(tx *storeTx, _ capability.Principal) error {
-		result, err := tx.ExecContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.now().UnixNano(), t.team, id)
+		result, err := tx.ExecContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.time.UnixNano(), t.team, id)
 		return credentialRowChanged(result, err)
 	})
 }
@@ -150,7 +150,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if !hasOther {
 			return ErrOnlyTeam
 		}
-		if _, err := t.markForDeletionTx(ctx, tx, p.Capability.Subject.ID, tx.now()); err != nil {
+		if _, err := t.markForDeletionTx(ctx, tx, p.Capability.Subject.ID, tx.time); err != nil {
 			return err
 		}
 		out, err = teamDeletionTx(ctx, tx, t.team)

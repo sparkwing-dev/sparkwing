@@ -79,10 +79,10 @@ func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effe
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "completion", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "completion", tx.time); err != nil {
 		return nil, err
 	}
-	observedAt := tx.now()
+	observedAt := tx.time
 	rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error,
 (SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
@@ -162,7 +162,7 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion", tx.time); err != nil {
 		return err
 	}
 	var desired, delivered int64
@@ -187,12 +187,12 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.now().UnixNano(), t.team, delivery.RunID, delivery.Effect)
+		_, err = tx.ExecContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.time.UnixNano(), t.team, delivery.RunID, delivery.Effect)
 	}
 	if err != nil {
 		return err
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion", tx.time); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -21,7 +21,7 @@ func TestHoldReasonsSurvivePersistenceAsValidText(t *testing.T) {
 		t.Fatal(err)
 	}
 	operator := strings.Repeat("€", store.OperatorReasonLimit)
-	id, err := acme.HoldByOperator(ctx, "korey", operator, time.Now())
+	id, err := acme.HoldByOperator(ctx, "korey", operator)
 	if err != nil {
 		t.Fatal(err)
 	}

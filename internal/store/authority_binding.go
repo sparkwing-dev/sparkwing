@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // CheckBinding checks committed resource relations against current authority in one snapshot.
@@ -188,7 +189,7 @@ func bindingSelectionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 		} else if slices.Contains(target.ClaimKinds, capability.UnitPlan) && !slices.Contains(target.ClaimKinds, capability.UnitTrigger) {
 			kind = capability.UnitPlan
 		}
-		demand.Target = &UnitRef{Kind: kind, RunID: target.RunID, NodeID: target.NodeID}
+		demand.Target = &UnitRef{Kind: kind, RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)}
 	}
 	if _, err := claimKinds(c, demand); err != nil {
 		return err

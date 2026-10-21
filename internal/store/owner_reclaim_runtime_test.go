@@ -35,7 +35,7 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 	tenant := &Tenant{s: s, team: first.Team}
 	finish := func(claim UnitClaim) (Applied, error) {
 		actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-		return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunTransition{RunID: claim.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}})
+		return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: claim.RunID, Cause: RunFinish, Actor: actor}})
 	}
 	if _, err := finish(first); err == nil {
 		t.Fatal("lost owner finished the replacement's run")

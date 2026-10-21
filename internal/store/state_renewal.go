@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // RenewNodeClaim extends only a live exact claim and its continuously retained capacity.
@@ -22,7 +23,7 @@ func (t *Tenant) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef,
 }
 
 func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref controllerwire.NodeRef, actor Actor, beat *LeaseBeat) error {
-	now := tx.now()
+	now := tx.time
 	if err := prepareStateActorTx(ctx, tx, t.team, ref.RunID, actor, now); err != nil {
 		return err
 	}
@@ -33,7 +34,7 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref controll
 	if err != nil {
 		return err
 	}
-	now = tx.now()
+	now = tx.time
 	if err = checkHolderTx(ctx, tx, t.team, row, actor, now); err != nil {
 		return err
 	}
@@ -45,13 +46,13 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref controll
 	if row.CancelRequestedAt != nil {
 		beat.CancelReason = row.CancelReason
 	}
-	unit := UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
+	unit := UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(ref.RunID), NodeID: runspec.NodeID(ref.NodeID)}
 	if !beat.CancelRequested {
-		if err := computeUnitBillingTx(ctx, tx, t.team, unit, row.Generation, row.Attempt, true); err != nil {
+		if err := computeUnitBillingTx(ctx, tx, t.team, unit, int64(row.Generation), int64(row.Attempt), true); err != nil {
 			return err
 		}
 	}
-	funded, err := renewUnitBillingTx(ctx, tx, t.team, unit, row.Generation, beat)
+	funded, err := renewUnitBillingTx(ctx, tx, t.team, unit, int64(row.Generation), beat)
 	if err != nil {
 		return err
 	}
@@ -83,7 +84,7 @@ func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error)
 
 func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, beat *LeaseBeat) error {
 	runID := actor.Owner.RunID
-	now := tx.now()
+	now := tx.time
 	if runID == "" {
 		return errors.New("owner renewal requires a run")
 	}
@@ -100,7 +101,7 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	if err != nil {
 		return err
 	}
-	now = tx.now()
+	now = tx.time
 	if err := checkOwnerLeaseTx(ctx, tx, t.team, actor, runID, now); err != nil {
 		return err
 	}
@@ -135,7 +136,11 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		if err = tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name=?`, actor.Owner.Name).Scan(&until); err != nil {
 			return err
 		}
-		expiry, err = leaseBound(now, append(funded, time.Unix(0, until).UTC())...)
+		drain, drainErr := cancelDrainTx(ctx, tx, t.team, runID, "")
+		if drainErr != nil {
+			return drainErr
+		}
+		expiry, err = leaseBound(now, append(funded, drain, time.Unix(0, until).UTC())...)
 	} else {
 		expiry, err = leaseBoundTx(ctx, tx, actor.CapabilityPrefix, now, funded...)
 	}

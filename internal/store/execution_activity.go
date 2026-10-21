@@ -12,7 +12,7 @@ func (t *Tenant) ExecutionActivity(ctx context.Context) (ExecutionActivity, erro
 		return ExecutionActivity{}, err
 	}
 	defer rollbackOrLog(tx)
-	now := tx.now().UnixNano()
+	now := tx.time.UnixNano()
 	var activity ExecutionActivity
 	err = tx.QueryRowContext(ctx, `WITH executable AS (
  SELECT id FROM runs WHERE team=? AND intake_mode='execute' AND request_json IS NOT NULL
