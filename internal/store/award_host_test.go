@@ -133,3 +133,45 @@ func TestLauncherSealsBoxBeforeExchangeAndRefusesAnotherNode(t *testing.T) {
 	}
 	assertAwardBox(t, s, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, "run", "node:node-uid")
 }
+
+func TestLauncherExpiredUnplacedAwardCanReleaseReservation(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			for name, exchange := range map[string]bool{"bootstrap": false, "exchanged": true} {
+				t.Run(name, func(t *testing.T) {
+					s, demand, claim, now := launcherSnapshotFixture(t, kind)
+					prefix := claim.Award.CapabilityPrefix
+					if exchange {
+						issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: prefix})
+						if err != nil {
+							t.Fatal(err)
+						}
+						prefix = issued.Capability.Prefix
+					}
+					unitID, err := encodeAwardUnit(*demand.Target)
+					if err != nil {
+						t.Fatal(err)
+					}
+					observation := controllerwire.LauncherObservation{
+						Award:   capability.LeaseRef{Kind: kind, ID: unitID, Generation: claim.Award.Generation, Holder: claim.Award.Holder},
+						NodeUID: "node-uid", ReservationID: "reservation",
+					}
+					*now = claim.Award.LeaseExpiresAt
+					awards, prepared, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, []controllerwire.LauncherObservation{observation}, []capability.LeaseRef{observation.Award}, []capability.LeaseRef{observation.Award}, nil)
+					if err != nil || len(awards) != 1 || !awards[0].Gone || awards[0].Fence != observation.Award || len(prepared) != 0 {
+						t.Fatalf("expired reservation (exchange=%t): awards=%+v prepared=%+v: %v", exchange, awards, prepared, err)
+					}
+					if err := s.inTx(t.Context(), func(tx *storeTx) error {
+						c, err := loadCapabilityTx(t.Context(), tx, prefix)
+						if err == nil && c.ExecutionHost != "" {
+							t.Fatalf("expired award acquired host %q", c.ExecutionHost)
+						}
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
+	}
+}

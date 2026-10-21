@@ -52,32 +52,30 @@ func (s *Store) sealLauncherHost(ctx context.Context, authority capability.Autho
 		if row.prefix == "" || row.holder != observation.Award.Holder || row.generation != observation.Award.Generation {
 			return nil
 		}
-		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, row.prefix)
-		if err != nil {
-			return err
-		}
-		if record.Value.Parent == nil || *record.Value.Parent != root.Authority || record.Value.Subject != claimant.Capability.Subject {
-			return nil
-		}
-		if err := launcherReservationAwardTx(ctx, tx, root.Authority, claimant.Capability.Subject, observation.Award); err != nil {
+		award, live, err := readLauncherAwardTx(ctx, tx, row.prefix, claimant.Capability, root)
+		if err != nil || !live {
 			return err
 		}
 		host := "node:" + observation.NodeUID
-		if record.Value.ExecutionHost != "" {
-			if record.Value.ExecutionHost != host {
+		if award.Capability.ExecutionHost != "" {
+			if award.Capability.ExecutionHost != host {
 				return bindingRefusal()
 			}
 			return nil
 		}
-		if record.Value.Delivery != capability.DeliveryBootstrap {
+		if award.Capability.Delivery != capability.DeliveryBootstrap {
 			return bindingRefusal()
+		}
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, row.prefix)
+		if err != nil {
+			return err
 		}
 		record.Value.ExecutionHost = host
 		body, err := json.Marshal(record)
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, row.prefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET authority_json=? WHERE team=? AND prefix=?`, body, award.Capability.Team, row.prefix)
 		return err
 	})
 }
