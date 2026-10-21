@@ -956,3 +956,14 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-20 Korey decision 36: member tokens are decoupled from session timeout
 
 - A member token minted from a session keeps its own expiry (default and ceiling 90 days) and reports that date. The minting session remains its parent only for explicit revocation: logout, membership removal or demotion (epoch fencing), and admin revocation kill it immediately. A session merely timing out (idle or absolute) does not expire its tokens. Matches GitHub personal access tokens.
+
+## 2026-10-20 Korey decision 37: concurrency groups split by level; no run-level box scope
+
+- Run-level (plan) groups and job-level groups live in separate namespaces. The same key declared at both levels names two different groups, so a run holding plan group X can never block on another run's job group X. This removes the plan/job wait cycle that one shared namespace allowed.
+- Run-level groups cannot be box-scoped. A run has no single execution host, so a machine scope at run level has no meaning; declaring one is refused when the pipeline is accepted, with an error that names the group and points at job-level box scope. Box scope stays available for job-level groups.
+- The raw API for acquiring a group directly (`/api/v1/queue/groups/{group}` acquire, heartbeat, release, cancel and resolve) is deleted pre-launch. Every acquisition goes through the single admission owner.
+
+## 2026-10-20 Korey decision 38: a run that loses its run-level group waits to reacquire it
+
+- When a run's hold on a run-level group lapses (controller or host lost contact past the lease) and another run takes the group, the first run is not cancelled. Jobs already released keep running to completion; no further job is released until the run reacquires the group, and it queues for it like any other waiter. The run shows that it is waiting to reacquire the named group.
+- Rationale: once the lease has lapsed the overlap has already happened, so cancelling cannot undo it, and killing a half-finished deploy is usually worse than finishing it. Waiting also keeps the run's remaining work instead of forcing a rerun.
