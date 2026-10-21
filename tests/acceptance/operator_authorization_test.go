@@ -189,6 +189,9 @@ func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close() })
 			teststore.SeedTeam(t, st, "customer")
+			if _, err := teststore.Exec(t.Context(), st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator-account','operator@example.test',1,1)`); err != nil {
+				t.Fatal(err)
+			}
 			b := consoleBoundary()
 			var audit bytes.Buffer
 			s := controller.New(st, slog.New(slog.NewJSONHandler(&audit, nil))).WithAuthorization(consoleAuthorization(b)).WithConsoleWriter(consoleStoreFake{store: st})

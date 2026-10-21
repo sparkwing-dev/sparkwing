@@ -25,10 +25,11 @@ including when a later run reuses the ID.
 
 Human actors and account subjects use account IDs. Non-account claimants are
 identified by capability and holder digests, with no caller-selected actor name.
-System actors use fixed enums. Invitation subjects use invitation
-IDs. One audit writer accepts a closed, typed payload for each kind. Payloads
-contain identifiers, enums, digests and generated receipt IDs. Retained caller
-names and grant keys use digests. Free-form reasons and messages are excluded.
+System actors use fixed enums permitted by each payload kind. Invitation
+subjects use invitation IDs. One audit writer accepts a closed, typed payload
+for each kind. Payloads contain identifiers, enums, digests and generated
+receipt IDs. Retained caller names and grant keys use digests. Free-form reasons
+and messages are excluded.
 Readers render a missing account as "deleted account" without rewriting history.
 The account and operational records own personal details and deletion of them.
 

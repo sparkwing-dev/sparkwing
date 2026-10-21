@@ -43,14 +43,20 @@ func TestAuditWriterRejectsUnregisteredPayload(t *testing.T) {
 }
 
 func TestAuditWriterNeverRetainsCallerSelectedActorName(t *testing.T) {
-	s := authorityStore(t)
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: "Jane-Doe"}, auditSecretRelease{Name: digestAudit("KEY"), Holder: digestAudit("Jane-Doe")})
-	}); err != nil {
-		t.Fatal(err)
-	}
-	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "secret.released", 10, "")
-	if err != nil || len(events) != 1 || events[0].Actor != "" || events[0].Attrs["holder_digest"] != digestAudit("Jane-Doe").String() {
-		t.Fatalf("non-account audit actor: %+v %v", events, err)
+	for _, actor := range []string{"Jane-Doe", "Jane Doe; phone 208-555-0100", "person@example.test", "payment_provider", "system", AuditActorBreakGlass} {
+		t.Run(actor, func(t *testing.T) {
+			s := authorityStore(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','person@example.test',1,1)`)
+			rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('person@example.test','',1,1)`)
+			if err := s.inTx(t.Context(), func(tx *storeTx) error {
+				return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: actor}, auditSecretRelease{Name: digestAudit("KEY"), Holder: digestAudit(actor)})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "secret.released", 10, "")
+			if err != nil || len(events) != 1 || events[0].Actor != "" || events[0].Attrs["holder_digest"] != digestAudit(actor).String() {
+				t.Fatalf("non-account audit actor: %+v %v", events, err)
+			}
+		})
 	}
 }

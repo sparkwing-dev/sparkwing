@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// AuditActorBreakGlass distinguishes in-pod administration from account actions.
+const AuditActorBreakGlass = "sparkwing-controller admin"
+
 // Callers supply occurrence time; only the database supplies recording time.
 type auditContext struct {
 	At    time.Time
@@ -44,6 +47,7 @@ type (
 		AccountID string `json:"-"`
 	}
 )
+
 type auditFirstSuccess struct {
 	RunID string `json:"run_id"`
 }
@@ -64,6 +68,7 @@ type (
 		EventID     auditDigest          `json:"event_id"`
 	}
 )
+
 type (
 	auditCheckoutOutcome string
 	auditPaymentMode     string
@@ -81,6 +86,7 @@ type (
 		Refill         bool           `json:"refill"`
 	}
 )
+
 type auditHold struct {
 	HoldID    auditDigest `json:"-"`
 	Released  bool        `json:"-"`
@@ -103,6 +109,7 @@ type (
 		StandingAfter  auditStanding   `json:"standing_after"`
 	}
 )
+
 type (
 	auditTrustValue      string
 	auditStanding        string
@@ -114,6 +121,7 @@ type (
 		HistoryTier auditStanding     `json:"history_tier,omitempty"`
 	}
 )
+
 type (
 	auditRequestState string
 	auditInstallation struct {
@@ -123,6 +131,7 @@ type (
 		NewTeam        Team   `json:"new_team"`
 	}
 )
+
 type auditTeamSettings struct {
 	ReceiptID                     string           `json:"-"`
 	MembersCanAddMachines         bool             `json:"members_can_add_machines"`
@@ -141,6 +150,7 @@ type (
 		MonthLimitCents int64  `json:"month_limit_cents"`
 	}
 )
+
 type auditRefill struct {
 	RefillID       string `json:"-"`
 	AmountCents    int64  `json:"amount_cents"`
@@ -212,7 +222,7 @@ func auditOneOf[T ~string](value T, choices ...string) bool {
 // Other facts deduplicate by team, kind and subject in the committing transaction.
 func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayload) error {
 	ev := BusinessEvent{At: c.At, Team: c.Team, Actor: c.Actor}
-	valid, repeat := true, false
+	valid, repeat, systemActor := true, false, false
 	switch p := payload.(type) {
 	case auditAdmission:
 		ev.Kind, ev.SubjectID, ev.Account = BusinessEventAccountAdmitted, p.AccountID, p.AccountID
@@ -232,8 +242,10 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		}
 	case auditCheckout:
 		ev.Kind, ev.SubjectID = string(p.Outcome), p.CheckoutID
+		systemActor = ev.Actor == "payment_provider"
 		valid = auditOneOf(p.Outcome, BusinessEventCheckoutOpened, BusinessEventCheckoutFailed, BusinessEventCheckoutExpired, BusinessEventRefillFailed) && auditOneOf(p.PaymentMode, "", "test", "live")
 	case auditGrant:
+		systemActor = auditOneOf(ev.Actor, "payment_provider", AuditActorBreakGlass)
 		valid = auditOneOf(p.ThreeDS, "", "authenticated", "attempt_acknowledged", "attempted", "failed", "not_supported", "processing", "processing_error", "unknown", "required", "unavailable", "exempted")
 		ev.SubjectID = p.GrantID
 		switch p.Kind {
@@ -248,11 +260,13 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		}
 	case auditHold:
 		ev.Kind, ev.SubjectID = BusinessEventTeamFrozen, p.HoldID.String()
+		systemActor = auditOneOf(ev.Actor, "payment_provider", AuditActorBreakGlass)
 		if p.Released {
 			ev.Kind = BusinessEventTeamUnfrozen
 		}
 	case auditCard:
 		ev.Kind, ev.SubjectID = string(p.Operation), p.Reference.String()
+		systemActor = ev.Actor == "payment_provider"
 		valid = auditOneOf(p.Operation, BusinessEventCardAdded, BusinessEventCardRefused, BusinessEventCardBlocked, BusinessEventCardRefundDue)
 	case auditTrust:
 		ev.Kind, ev.SubjectID = BusinessEventBillingTrustChanged, p.ReceiptID
@@ -277,6 +291,7 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 		ev.Kind, ev.SubjectID = BusinessEventRefillSettings, p.ReceiptID
 	case auditRefill:
 		ev.Kind, ev.SubjectID = BusinessEventRefillOpened, p.RefillID
+		systemActor = ev.Actor == "system"
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
 	case auditSourceRelease:
@@ -296,7 +311,7 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	if err != nil {
 		return err
 	}
-	for _, value := range []string{string(ev.Team), ev.Account, ev.Actor, ev.SubjectID, ev.RunID} {
+	for _, value := range []string{string(ev.Team), ev.Account, ev.SubjectID, ev.RunID} {
 		if strings.ContainsAny(value, "@\r\n\t ") {
 			return fmt.Errorf("%w: audit identity must be an identifier", ErrInvalidInput)
 		}
@@ -315,8 +330,9 @@ func (op *Operator) recordAudit(tx *storeTx, c auditContext, payload auditPayloa
 	if ev.Team == "" {
 		team = nil
 	}
+	accountActor := !strings.ContainsAny(ev.Actor, "@\r\n\t ")
 	_, err = tx.Exec(`INSERT INTO audit_events (id,ts,team,account,kind,subject_id,actor,attrs,run_id,actor_is_account,subject_is_account)
- VALUES (?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) OR ? IN ('payment_provider','system') THEN ? ELSE '' END,?,?,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END) ON CONFLICT DO NOTHING`, id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID, ev.Actor, ev.Actor, ev.Actor, string(attrs), ev.RunID, ev.Actor, ev.SubjectID)
+ VALUES (?,?,?,?,?,?,CASE WHEN (? AND EXISTS(SELECT 1 FROM accounts WHERE id=?)) OR ? THEN ? ELSE '' END,?,?,CASE WHEN ? AND EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END) ON CONFLICT DO NOTHING`, id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID, accountActor, ev.Actor, systemActor, ev.Actor, string(attrs), ev.RunID, accountActor, ev.Actor, ev.SubjectID)
 	return err
 }
 

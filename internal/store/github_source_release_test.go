@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,8 +146,8 @@ func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 	}
 	var team, repo, run, node, prefix, credential string
 	var generation, at int64
-	err = tenant.s.db.QueryRow(`SELECT json_extract(attrs, '$.release.Team'),json_extract(attrs, '$.release.RepositoryKey'),json_extract(attrs, '$.release.RunID'),json_extract(attrs, '$.release.NodeID'),json_extract(attrs, '$.release.CapabilityPrefix'),json_extract(attrs, '$.release.CredentialID'),json_extract(attrs, '$.release.Generation'),ts FROM audit_events WHERE kind='git_credential.released'`).Scan(&team, &repo, &run, &node, &prefix, &credential, &generation, &at)
-	if err != nil || team != "a" || repo != "gh:1" || run != "run" || node != "job" || prefix != auth.Principal.Capability.Prefix || credential != "github_app:7" || generation != auth.Binding.Generation || at != tenant.s.clock().UnixNano() {
+	err = tenant.s.db.QueryRow(`SELECT team,json_extract(attrs, '$.repository_digest'),run_id,json_extract(attrs, '$.node_digest'),json_extract(attrs, '$.capability_digest'),json_extract(attrs, '$.credential_digest'),json_extract(attrs, '$.generation'),ts FROM audit_events WHERE kind='git_credential.released'`).Scan(&team, &repo, &run, &node, &prefix, &credential, &generation, &at)
+	if err != nil || team != "a" || repo != fmt.Sprintf("%x", sha256.Sum256([]byte("gh:1"))) || run != "run" || node != fmt.Sprintf("%x", sha256.Sum256([]byte("job"))) || prefix != fmt.Sprintf("%x", sha256.Sum256([]byte(auth.Principal.Capability.Prefix))) || credential != fmt.Sprintf("%x", sha256.Sum256([]byte("github_app:7"))) || generation != auth.Binding.Generation || at != tenant.s.clock().UnixNano() {
 		t.Fatalf("audit: %s %s %s %s %s %s %d %d %v", team, repo, run, node, prefix, credential, generation, at, err)
 	}
 }

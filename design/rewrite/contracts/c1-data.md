@@ -683,8 +683,8 @@ tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
 `capabilities` and `sessions` may carry a nullable team. Audit rows are retained
 after team deletion and expire only by age. Human actors and account subjects use
 account IDs. Non-account claimants use capability and holder digests, with no
-caller-selected actor name. System actors use fixed enums. Invitation subjects
-use invitation IDs, and audit rows contain no
+caller-selected actor name. System actors use fixed enums permitted by each
+payload kind. Invitation subjects use invitation IDs, and audit rows contain no
 email addresses or free-form personal details. Readers render erased accounts
 as "deleted account". One audit writer accepts a closed, typed payload for each
 kind. It retains identifiers, enums, digests and generated receipt IDs. Retained
@@ -3626,8 +3626,9 @@ Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
 grants; capped at $100 without the explicit flag. `sparkwing-controller admin
 grant` refuses more than 10,000 cents per grant unless the pod sets
 `SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1`. It grants once per key with reference
-`admin:<key>` and records `credit.granted` with actor `sparkwing-controller
-admin` and the reason. No remote credential reaches it.
+`admin:<key>` and records `credit.granted` with fixed system actor
+`sparkwing-controller admin` and a digest of the reference. Audit rows exclude
+free-form reasons. No remote credential reaches it.
 
 ## Integrated working-tree source uploads
 

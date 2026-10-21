@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -134,7 +136,7 @@ func (f *gitReleaseFixture) audits(want int) {
 		f.t.Fatalf("audits=%s, want %d", w.Body, want)
 	}
 	for _, row := range got.Releases {
-		if row.RunID != "run" || row.JobID != "job" || row.Generation != 1 || row.Host != "gitlab.example.com" || row.Runner != "runner" || row.CapabilityPrefix == "" || row.Repository != "git:gitlab.example.com/acme/tools" {
+		if row.RunID != "run" || row.JobID != fmt.Sprintf("%x", sha256.Sum256([]byte("job"))) || row.Generation != 1 || row.Host != "" || row.Runner != fmt.Sprintf("%x", sha256.Sum256([]byte("runner"))) || len(row.CapabilityPrefix) != sha256.Size*2 || row.Repository != fmt.Sprintf("%x", sha256.Sum256([]byte("git:gitlab.example.com/acme/tools"))) {
 			f.t.Fatalf("unbound audit: %+v", row)
 		}
 	}

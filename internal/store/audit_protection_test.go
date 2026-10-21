@@ -30,13 +30,13 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,run_id,actor) SELECT id,ts,team,kind,subject_id,run_id,'forged' FROM audit_events`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: "system"}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: "payment_provider"}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,actor) VALUES ('replacement',1,'a','checkout.opened','fact','forged')`)
 	var actor string
-	if err := s.db.QueryRow(`SELECT actor FROM audit_events WHERE kind='checkout.opened' AND id<>'replacement'`).Scan(&actor); err != nil || actor != "system" {
+	if err := s.db.QueryRow(`SELECT actor FROM audit_events WHERE kind='checkout.opened' AND id<>'replacement'`).Scan(&actor); err != nil || actor != "payment_provider" {
 		t.Fatalf("replacement altered audit: %q %v", actor, err)
 	}
 	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='checkout.opened'", 2)
@@ -117,9 +117,6 @@ func TestMemberRemovalRequiresCommittedAudit(t *testing.T) {
 func TestAuditOwnerRejectsEmails(t *testing.T) {
 	s := authorityStore(t)
 	writers := []func(*storeTx) error{
-		func(tx *storeTx) error {
-			return tx.operator.recordAudit(tx, auditContext{Actor: "person@example.test"}, auditAdmission{AccountID: "account", Via: "signup"})
-		},
 		func(tx *storeTx) error {
 			return tx.operator.recordAudit(tx, auditContext{}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
 		},
