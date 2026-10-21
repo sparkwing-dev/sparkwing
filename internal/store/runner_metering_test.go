@@ -42,6 +42,7 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 
 func TestRunnerMeteringChangesOnlyFutureAwards(t *testing.T) {
 	s, demand, authorized := runnerMeteringFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET spec_json=?,spec_hash='fixture',plan_json=?,plan_hash='fixture',sealed_at=1 WHERE id='run'`, []byte(`{}`), []byte(`{"jobs":[{"id":"job"}]}`))
 	ownerDemand := demand
 	ownerDemand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	_, owner := meteredUnitClaim(t, s, ownerDemand)

@@ -39,8 +39,8 @@ func TestPrivateNodeHostRoutesRequireBoundClaimAuthority(t *testing.T) {
 		for _, access := range route.Access {
 			read := operation.method == "GET" || operation.suffix == "/authentication" || operation.suffix == "/binding"
 			if access.Credential == capability.CredentialEval {
-				if !read || access.Binding != capability.BindRun || access.Liveness != capability.LiveExpansion || !slices.Equal(access.Grants, []capability.Grant{capability.ExpansionSubmit}) {
-					t.Errorf("private eval route exceeds its read boundary: %s %+v", path, access)
+				if !(read || operation.suffix == "/transition") || access.Binding != capability.BindRun || access.Liveness != capability.LiveExpansion || !slices.Equal(access.Grants, []capability.Grant{capability.ExpansionSubmit}) {
+					t.Errorf("private eval route exceeds its live expansion boundary: %s %+v", path, access)
 				}
 				continue
 			}

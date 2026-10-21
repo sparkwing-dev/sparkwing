@@ -336,6 +336,7 @@ func fixtureEngine(t *testing.T, accepted AcceptedRun) engine.Identity {
 func storedExecutionInput(t *testing.T, fixture *storeHostFixture, host *ClaimedNodeHost) NodeInput {
 	t.Helper()
 	ctx := t.Context()
+	host.Admission = ComposeStartGate(fixture.Tenant, nil, false)
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"}
 	if _, err := fixture.Tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)

@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **runs:** Return cancellation committed after the owner's last scheduling snapshot in completion output and exit status.
+
 - **concurrency:** Release logical capacity when neither its claim nor owner remains live. After claim replacement, `cancel_others` cancels the current job while preserving the reservation's identity and arrival. Queue promotion grants complete group sets through the store admission owner.
 
 - **memo:** Preserve authorization and fence refusals as errors. Make cached results reusable only with the producer's committed success, so cancelled or refused completion cannot publish a hit.

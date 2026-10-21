@@ -162,7 +162,7 @@ Other actors and causes omit the field. The store refuses a mismatched ordinal
 and replays an identical transition without consuming another attempt.
 
 Run completion returns the committed verdict in `Applied.outcome` and its reason
-in `Applied.reason`. Hosts use that result for completion output and exit status
+in `Applied.reason`. Local and remote hosts use that result for completion output and exit status
 because cancellation can commit after their last scheduling snapshot.
 
 Step reports carry a positive `source_attempt`, step ID, state, optional masked

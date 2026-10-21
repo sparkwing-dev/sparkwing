@@ -315,6 +315,9 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 		}
 	})
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "build"}
+	if decision, err := node.MayStart(ctx, store.CapacityBinding{RunID: admitted.RunID, NodeID: "build", Generation: claim.Claim.Binding.Generation}, store.Actor{}); err != nil || decision.Kind != store.AcquireGranted {
+		t.Fatalf("node admission: %+v: %v", decision, err)
+	}
 	started, err := node.TransitionNode(ctx, store.StartNode{Ref: ref, SourceAttempt: new(runspec.AttemptOrdinal)})
 	if err != nil {
 		t.Fatal("node start:", err)

@@ -448,11 +448,11 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 	default:
 		return RunCompletion{}, errors.New("schedule returned an invalid run verdict")
 	}
-	_, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
+	applied, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
 	if err != nil {
 		return RunCompletion{}, err
 	}
-	return RunCompletion{Outcome: decision.Outcome, Reason: decision.Reason}, nil
+	return RunCompletion{Outcome: string(applied.Outcome), Reason: applied.Reason}, nil
 }
 
 func (h *OwnerHost) wait(ctx context.Context, snapshot store.RunSnapshot, completed <-chan ownerExecution) (*ownerExecution, error) {

@@ -284,7 +284,8 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if native != nil && native.source != nil {
 		host := &nodehost.ClaimedNodeHost{
 			Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: 20 * time.Second},
-			Source: *native.source, Executor: executor, Mask: masker.Mask, Masks: masks,
+			Admission: nodehost.ComposeStartGate(private, nil, false),
+			Source:    *native.source, Executor: executor, Mask: masker.Mask, Masks: masks,
 			Acquire: func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
 				entry, err := native.acquire(ctx, spec, options)
 				if err == nil {
@@ -296,6 +297,12 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		}
 		input.Entry = nil
 		execute = host.Execute
+	}
+	if native == nil || native.source == nil {
+		decision, err := private.MayStart(ctx, store.CapacityBinding{RunID: award.RunID, NodeID: award.JobID, Generation: int64(row.Generation)}, store.Actor{})
+		if err != nil || decision.Kind != store.AcquireGranted {
+			t.Fatalf("SDK start admission: %+v, %v", decision, err)
+		}
 	}
 	if err := execute(ctx, input); err != nil {
 		t.Fatalf("SDK execution: %v; logs: %s", err, logs.String())

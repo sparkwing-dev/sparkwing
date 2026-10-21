@@ -340,9 +340,10 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: unit}}
 	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
-	h := OwnerHost{executionAdmission: ComposeStartGate(f,nil,false),
-		Mask:  func(value string) string { return value },
-		Store: f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+	h := OwnerHost{
+		executionAdmission: ComposeStartGate(f, nil, false),
+		Mask:               func(value string) string { return value },
+		Store:              f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Delegator: ownerDelegatorFixture{actor: in.Owner},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
@@ -471,7 +472,7 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "admission", "ready", "claim", "node_renew", "execute", "success", "finish"}
+	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "ready", "claim", "node_renew", "admission", "execute", "success", "finish"}
 	if !reflect.DeepEqual(f.trace, want) {
 		t.Fatalf("trace=%v", f.trace)
 	}
@@ -566,8 +567,15 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 	}
 }
 
-func (f *ownerFixture) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied,error) { return store.Applied{}, nil }
+func (f *ownerFixture) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, nil
+}
 
-func (*ownerFixture) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse,error) { return store.AcquireSlotResponse{Kind:store.AcquireGranted},nil }
+func (f *ownerFixture) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
+	f.record("admission")
+	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+}
 
-func (*ownerFixture) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error { return errors.New("unexpected provisional award relinquishment") }
+func (*ownerFixture) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
+}

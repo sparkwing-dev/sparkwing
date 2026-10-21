@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -21,6 +20,10 @@ import (
 type nativeHostState struct {
 	OwnerStore
 	ClaimStore
+}
+
+func (s nativeHostState) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, nil
 }
 
 func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
@@ -44,8 +47,9 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 	}
 	authorities, _, _, _, _ := processAuthorityFixture(t)
 	t.Cleanup(func() { _ = authorities.Close() })
-	config := NativeHostConfig{Admission: ComposeStartGate(state, nil, false),
-		Store: nativeHostState{ClaimStore: state}, Lease: claimed.Lease, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
+	config := NativeHostConfig{
+		Admission: ComposeStartGate(state, nil, false),
+		Store:     nativeHostState{ClaimStore: state}, Lease: claimed.Lease, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source:    source.Options{Engines: claimEngine{resolved: input.Engine}},
 		Masks:     NewMaskRegistry(secrets.NewMasker()),
 		Router:    &serviceRegistrar{},
@@ -161,10 +165,10 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 				t.Fatal(err)
 			}
 			request, err := releasedRequest(owner, t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionReady)
-			if request != nil || (err != nil) != (mode != "remote") {
+			if (request != nil) != (mode == "local") || (err != nil) != (mode == "debug" || mode == "debug-after") {
 				t.Fatalf("request=%+v error=%v", request, err)
 			}
-			if mode == "remote" && (len(state.changes) != 1 || state.changes[0].To != store.NodeReady) || mode != "remote" && len(state.changes) != 0 {
+			if (mode == "remote" || mode == "concurrency" || mode == "local") && (len(state.changes) != 1 || state.changes[0].To != store.NodeReady) || (mode == "debug" || mode == "debug-after") && len(state.changes) != 0 {
 				t.Fatalf("changes=%+v", state.changes)
 			}
 		})
@@ -194,8 +198,7 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 	}
 	run := RunInput{GrantedRunner: input.GrantedRunner}
 	request, err := releasedRequest(owner, t.Context(), run, input.Accepted, input.Entry, state.row, store.DecisionReady)
-	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SDKError || failure.Message != refused.Error() || request != nil || len(layers) != 0 || len(state.changes) != 0 {
+	if err != nil || request != nil || len(layers) != 0 || len(state.changes) != 1 || state.changes[0].To != store.NodeFailed || state.changes[0].Extra.Result.MaskedError != refused.Error() {
 		t.Fatalf("request=%+v layers=%v changes=%+v error=%v", request, layers, state.changes, err)
 	}
 }

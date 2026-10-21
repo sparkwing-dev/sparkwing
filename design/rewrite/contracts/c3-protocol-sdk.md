@@ -336,7 +336,7 @@ are part of this contract.
 | `nodehost.AcceptedRun` | Carries canonical accepted spec/plan bytes and their sealed hashes. |
 | `nodehost.RunInput` | Gives a new or resumed owner the sealed request and existing acceptance. |
 | `nodehost.NewRunInput` | Captures an authenticated award's sealed inputs, owner fence and granted runner before placement preparation. |
-| `nodehost.RunCompletion` | Reports the verdict after atomic run/unit finish. |
+| `nodehost.RunCompletion` | Reports the committed verdict and reason returned by atomic run/unit finish, including cancellation after the scheduling snapshot. |
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
 | `nodehost.DebugBoundary`, `DebugBoundaryWaiter`, `OwnerHost.Debug` | Wait at sealed owner pause boundaries under the current owner and job generation. Released boundaries remain released on replay. Persistence and timeout release require an authority-bearing adapter. |

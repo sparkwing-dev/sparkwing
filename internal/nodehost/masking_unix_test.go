@@ -75,6 +75,9 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 		t.Fatal(err)
 	}
 	input.Entry = entry
+	if response, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || response.Kind != store.AcquireGranted {
+		t.Fatalf("admission=%+v error=%v", response, err)
+	}
 	_, _, deps, _ := executorFixture(t)
 	deps.Store = f.State
 	masker := secrets.NewMasker()

@@ -153,6 +153,7 @@ func TestLocalAdoptedClaimDelegatesMatchingSDKProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.snapshot.Binding.Current.Attempt = 1
+	state.snapshot.Binding.StartPermitted = true
 	authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{Parent: state, Bindings: state})
 	if err != nil {
 		t.Fatal(err)

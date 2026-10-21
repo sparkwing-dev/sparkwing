@@ -22,6 +22,8 @@ permit with the authenticated running attempt. SkipIf and memo run first on the
 executing host after job admission and compute, under that award. A predicate skip
 settles the job and releases its reservations. Admission skip or failure commits
 the terminal outcome through the existing state machine and verdict owner.
+Owners return the committed finish verdict, including cancellation committed
+after their final scheduling snapshot.
 
 Approval-only predicates have no execution host. Store admission releases a
 fenced evaluation without job groups or compute. An owner evaluator, or an
@@ -53,5 +55,7 @@ results. Successful cache records survive producer retention.
 The real-store seeded simulation varies host and store interleavings and checks
 complete grants, capacity, FIFO, award permits, host scope and settlement after
 every operation. Native recovery tests couple ready work, approvals and expansions.
-Focused mutation regressions cover recovery-entry gating, owner/claim horizon,
-handoff arrival and partial grants. Both store dialects use the same fixtures.
+Mutation regressions reject coordinator predicates, recovery-entry gating,
+lost handoff arrivals, claim-first liveness, changed approval outcomes, memo
+refusals treated as misses and publication before success. The grant-owner guard
+rejects a second allocator. Both store dialects use the same fixtures.
