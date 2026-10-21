@@ -131,6 +131,9 @@ sparkwing queue list --profile prod --group deploy -o json
 sparkwing runs status --run RUN_ID --profile prod
 ```
 
+New metered claims account for billable time that begins during issuance when
+computing the funded lease bound.
+
 Queue wait defaults to 24 hours and also ends at a finite owner deadline.
 Execution and approval wait are separate budgets. A local run has no default
 execution deadline. Operator ceilings refuse excessive explicit values, naming

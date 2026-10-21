@@ -139,7 +139,8 @@ type cloudResourceFixture struct {
 
 func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	now := time.Now().UTC()
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }), store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ClaimProfiles: cloudResourceProfile(func(context.Context, capability.Principal) (match.Profile, error) {
 			return match.Profile{}, nil
 		})}, nil

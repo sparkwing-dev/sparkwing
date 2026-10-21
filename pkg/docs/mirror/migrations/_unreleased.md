@@ -39,6 +39,7 @@ needs credits. A placement policy permitting unmetered execution can wait for
 its runner. Cloud-only work still needs funds at intake. Private owner placement snapshots
 use the same eligibility and funding checks as awards. Reading a snapshot
 leaves readiness, asks, reservations and fair-share accounting unchanged.
+Metered claim leases account for billable time that begins during issuance.
 
 The store baseline is 21. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted

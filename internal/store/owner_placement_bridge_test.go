@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -12,6 +13,11 @@ import (
 func (s *Store) TestOnlyOwnerSnapshotFunding(t *testing.T) {
 	t.Helper()
 	demand := s.TestOnlyUnitDemand(t)
+	now := s.now()
+	s.SetTestClock(t, func() time.Time {
+		now = now.Add(time.Microsecond)
+		return now
+	})
 	s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	root := authorityRoot("metered-owner", "a")
 	root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}

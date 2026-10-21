@@ -221,6 +221,8 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
+	// Issuance can start a billable interval after the initial lease check.
+	now = tx.now(ctx)
 	funded, err := fundedBoundTx(ctx, tx, team, unit, row.generation, now)
 	if err != nil {
 		return UnitClaim{}, err

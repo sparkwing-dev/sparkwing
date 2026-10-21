@@ -4257,6 +4257,8 @@ Successful transaction construction captures database time. Failure to read that
 clock aborts construction before any transaction body runs. Read transactions
 keep that instant and one database snapshot. Mutation authority and lease checks
 read fresh database time after lock waits or policy work through `storeTx.now`.
+Claim funding and final lease bounds read time after issuance, including any
+billable intervals it opened.
 A failed clock read poisons the transaction: later SQL returns that error,
 commit rolls back, and transaction callbacks cannot hide it behind success
 or a different refusal. Mutation transactions expose no stored snapshot
