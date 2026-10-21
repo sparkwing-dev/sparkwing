@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -187,13 +188,11 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:3"}}), 403)
 			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 403)
 			w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
-			var result struct {
-				Request runspec.SealedRequest `json:"request"`
-			}
+			var result controllerwire.CreateRunResponse
 			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			p := result.Request.Provenance
+			p := storedIntake(t, e.Store, result.RunID).Provenance
 			trigger, repo, ref, sha := p.OIDC()
 			if p.Trust() != runspec.TrustAsserted || !p.SharedSecretsOnly() || trigger != "manual" || repo != 0 || ref != "" || sha != "" {
 				t.Fatalf("explicit child inherited identity: %+v", p)

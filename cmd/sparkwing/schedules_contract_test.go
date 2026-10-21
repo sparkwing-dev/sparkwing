@@ -167,7 +167,7 @@ func TestScheduleManagementListKeepsSelectionMetadataAndShowKeepsDetails(t *test
 	if err := manageSchedules(t.Context(), inv, f, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "detail-only") || !strings.Contains(out.String(), "original-sha") {
+	if strings.Contains(out.String(), "detail-only") || !strings.Contains(out.String(), `"oversized":"***"`) || !strings.Contains(out.String(), "original-sha") {
 		t.Fatalf("show projection: %s", out.String())
 	}
 }

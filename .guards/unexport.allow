@@ -71,7 +71,7 @@ internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
 internal/runspec	4
-internal/secrets	7
+internal/secrets	6
 internal/secretsource	2
 internal/sessionledger	8
 internal/settings	55
