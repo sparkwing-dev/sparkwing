@@ -2,12 +2,10 @@ package store
 
 import (
 	"errors"
-	"math"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
@@ -42,28 +40,6 @@ func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
 			rewriteSchemaCount(t, s.db, "billing_awards", 0)
 			rewriteSchemaCount(t, s.db, "events", 0)
 		})
-	}
-}
-
-func TestClaimRechecksRegisteredCapacityAtAward(t *testing.T) {
-	s, demand := unitClaimFixture(t)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 2}}}
-	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
-		t.Fatal("caller observation widened enrolled capacity")
-	}
-	rewriteSchemaCount(t, s.db, "billing_awards", 0)
-}
-
-func TestClaimRejectsInvalidObservationsEvenWithAnEmptyQueue(t *testing.T) {
-	for _, resources := range []match.Resources{{Cores: -1}, {Cores: math.Inf(1)}, {Cores: math.NaN()}, {MemoryBytes: -1}} {
-		s, demand := unitClaimFixture(t)
-		demand.Target, demand.Kinds, demand.Available = nil, []capability.UnitKind{capability.UnitNode}, resources
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL`)
-		_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.BadRequest {
-			t.Fatalf("invalid empty-queue observations: %v", err)
-		}
 	}
 }
 

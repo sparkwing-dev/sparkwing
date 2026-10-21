@@ -13,7 +13,8 @@ import (
 
 func signUpAt(t *testing.T, st *store.Store, p store.SignInProfile, c store.SignUpConditions, now time.Time) store.SignInResult {
 	t.Helper()
-	res, err := st.AsOperator().ResolveSignIn(context.Background(), p, c, now)
+	st.SetTestClock(t, func() time.Time { return now })
+	res, err := st.AsOperator().ResolveSignIn(context.Background(), p, c)
 	if err != nil {
 		t.Fatalf("ResolveSignIn(%s): %v", p.Email, err)
 	}
@@ -66,7 +67,7 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 		`DELETE FROM memberships WHERE account_id = ?`), orphan.Account.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SetSignUpMode(ctx, store.SignUpWaitlist, "launch", "root", time.Now()); err != nil {
+	if _, err := st.SetSignUpMode(ctx, store.SignUpWaitlist, "launch", "root"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +81,7 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 	}
 	if _, err := st.AsOperator().ResolveSignIn(ctx, store.SignInProfile{
 		Provider: store.ProviderGitHub, Subject: "99", Email: "old@example.com", EmailVerified: true,
-	}, store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
+	}, store.SignUpConditions{}); !errors.Is(err, store.ErrAccountExists) {
 		t.Fatalf("a new identity on an existing account's address = %v, want ErrAccountExists", err)
 	}
 
@@ -93,7 +94,7 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 		t.Fatalf("waitlisted CreateTeam = %v, want ErrWaitlisted", err)
 	}
 
-	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "", "root", time.Now()); err != nil {
+	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "", "root"); err != nil {
 		t.Fatal(err)
 	}
 	requireAdmitted(t, signIn(t, st, "s-next", "next@example.com"))
@@ -105,7 +106,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	owner := signIn(t, st, "s-owner", "owner@example.com")
-	if _, err := st.SetSignUpMode(ctx, store.SignUpWaitlist, "", "root", time.Now()); err != nil {
+	if _, err := st.SetSignUpMode(ctx, store.SignUpWaitlist, "", "root"); err != nil {
 		t.Fatal(err)
 	}
 	waiting := signIn(t, st, "s-w", "w@example.com")
@@ -127,7 +128,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 		t.Fatalf("CreateTeam after accepting = %v, want ErrWaitlisted", err)
 	}
 
-	approved, err := st.ApproveWaitlisted(ctx, []string{acct.ID}, "", time.Now())
+	approved, err := st.ApproveWaitlisted(ctx, []string{acct.ID}, "")
 	if err != nil || len(approved) != 1 || approved[0].ActiveTeam != owner.Account.ActiveTeam {
 		t.Fatalf("approve = %+v, %v", approved, err)
 	}
@@ -163,7 +164,8 @@ func TestTheGateClosesItselfPastTheHourlyLimit(t *testing.T) {
 	}
 
 	reopened := now.Add(2 * time.Hour)
-	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "reviewed", "root", reopened); err != nil {
+	st.SetTestClock(t, func() time.Time { return reopened })
+	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "reviewed", "root"); err != nil {
 		t.Fatal(err)
 	}
 	requireAdmitted(t, signUpAt(t, st, googleProfile("h5", "h5@example.com"), store.SignUpConditions{}, reopened))
@@ -286,12 +288,12 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 	if err != nil || len(page) != 2 || page[0].ID != ids[1] || page[1].ID != ids[0] || page[0].Provider != store.ProviderGoogle {
 		t.Fatalf("newest page after one = %+v, %v", page, err)
 	}
-	counts, err := st.AsOperator().SignUpCounts(ctx, time.Now())
+	counts, err := st.AsOperator().SignUpCounts(ctx)
 	if err != nil || counts.Waitlisted != 3 || counts.LastHour != 3 || counts.LastDay != 3 {
 		t.Fatalf("counts = %+v, %v", counts, err)
 	}
 
-	approved, err := st.ApproveOldestWaitlisted(ctx, 2, "", time.Now())
+	approved, err := st.ApproveOldestWaitlisted(ctx, 2, "")
 	if err != nil || len(approved) != 2 || approved[0].ID != ids[0] || approved[1].ID != ids[1] {
 		t.Fatalf("approve oldest = %+v, %v", approved, err)
 	}
@@ -303,7 +305,7 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 			t.Fatalf("an approved account cannot create a team: %v", err)
 		}
 	}
-	again, err := st.ApproveWaitlisted(ctx, []string{ids[0], ids[2]}, "", time.Now())
+	again, err := st.ApproveWaitlisted(ctx, []string{ids[0], ids[2]}, "")
 	if err != nil || len(again) != 1 || again[0].ID != ids[2] {
 		t.Fatalf("approving an admitted account again = %+v, %v", again, err)
 	}
@@ -325,7 +327,7 @@ func TestSignUpInputsAreValidated(t *testing.T) {
 	if _, err := st.SetSignUpLimits(ctx, store.SignUpLimits{HourlyLimit: -1}); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("negative limit = %v", err)
 	}
-	if _, err := st.ApproveOldestWaitlisted(ctx, 0, "", time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+	if _, err := st.ApproveOldestWaitlisted(ctx, 0, ""); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("approve zero = %v", err)
 	}
 }
@@ -352,7 +354,8 @@ func TestReopeningCountsAdmissionsInTheSameSecond(t *testing.T) {
 	st := storetest.Open(t)
 	setLimits(t, st, store.SignUpLimits{HourlyLimit: 2})
 	reopen := time.Now().Truncate(time.Second).Add(100 * time.Millisecond)
-	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "", "root", reopen); err != nil {
+	st.SetTestClock(t, func() time.Time { return reopen })
+	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "", "root"); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 2 {
@@ -370,12 +373,13 @@ func TestConcurrentSignUpsAdmitExactlyTheLimit(t *testing.T) {
 	const limit, n = 4, 20
 	setLimits(t, st, store.SignUpLimits{HourlyLimit: limit})
 	now := time.Now()
+	st.SetTestClock(t, func() time.Time { return now })
 	results := make(chan store.SignInResult, n)
 	errs := make(chan error, n)
 	for i := range n {
 		go func() {
 			res, err := st.AsOperator().ResolveSignIn(context.Background(),
-				googleProfile(fmt.Sprintf("c%d", i), fmt.Sprintf("c%d@example.com", i)), store.SignUpConditions{}, now)
+				googleProfile(fmt.Sprintf("c%d", i), fmt.Sprintf("c%d@example.com", i)), store.SignUpConditions{})
 			errs <- err
 			results <- res
 		}()

@@ -215,7 +215,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	}
 	input := snapshot.request.Request
 	if input.Mode == runspec.IntakeExecute {
-		result.OwnerUnit = &OwnerLeaseRef{Kind: OwnerTrigger, RunID: id}
+		result.OwnerUnit = &OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		if input.Options.Runner.Set && input.Options.Runner.Value.Kind == runspec.RunnerHere {
 			issued, err := tx.store.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: request.Authority, Unit: capability.UnitTrigger, UnitID: id, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect, HereRunID: id}})
 			if err != nil {
@@ -259,7 +259,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			if snapshot.execution.Retry != nil {
 				return AdmissionResult{}, authorityError(apierr.Conflict, creditRefusal)
 			}
-			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: id, To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}, now); err != nil {
+			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(id), To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}); err != nil {
 				return AdmissionResult{}, err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
@@ -271,22 +271,26 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	return result, nil
 }
 
-// Credit admission judges the sealed placement even before a Cloud launcher is registered.
+// Credit admission judges sealed placement policy, including when every free runner is offline or busy.
 func intakeCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, run RunRow) (string, error) {
 	request := run.Request.Request
 	if request.Mode != runspec.IntakeExecute || request.Dispatch != runspec.DispatchController || request.Burst != nil {
-		return "", nil
-	}
-	if runner := request.Options.Runner; runner.Set && runner.Value.Kind != runspec.RunnerAny {
 		return "", nil
 	}
 	options := request.Options
 	if run.Spec != nil {
 		options = run.Spec.Resolved.Settings.Options
 	}
-	// Observed labels and platform can change when capacity registers; only granted placement facts exclude Cloud.
+	if runner := options.Runner; runner.Set && runner.Value.Kind != runspec.RunnerAny && runner.Value.Kind != runspec.RunnerLabel {
+		return "", nil
+	}
+	terms := slices.Clone(options.Requires.Value)
+	if runner := options.Runner; runner.Set && runner.Value.Kind == runspec.RunnerLabel {
+		terms = append(terms, runner.Value.Value)
+	}
+	// Observed labels and platform never make an otherwise free placement paid-only.
 	var selector []string
-	for _, term := range options.Requires.Value {
+	for _, term := range terms {
 		placementOnly := true
 		for _, alternative := range strings.Split(term, ",") {
 			key, _, _ := strings.Cut(strings.TrimSpace(alternative), "=")
@@ -301,31 +305,26 @@ func intakeCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, run RunR
 	if !match.Evaluate(match.Profile{Class: match.ClassCloud, Location: TierCloud}, match.Demand{Selector: selector}).OK() {
 		return "", nil
 	}
+	paidOnly := !match.Evaluate(match.Profile{Class: match.ClassAgent, Location: "local"}, match.Demand{Selector: selector}).OK() &&
+		!match.Evaluate(match.Profile{Class: match.ClassCoordinator, Location: "local"}, match.Demand{Selector: selector}).OK()
 	if rankedUnit(request, match.Demand{Selector: options.Requires.Value}) {
 		ranking, err := claimRankingTx(ctx, tx, team)
 		if err != nil {
 			return "", err
 		}
-		if len(ranking) > 0 && !slices.Contains(ranking, TierCloud) {
-			return "", nil
+		if len(ranking) > 0 {
+			if !slices.Contains(ranking, TierCloud) {
+				return "", nil
+			}
+			paidOnly = paidOnly || len(ranking) == 1
 		}
+	}
+	if !paidOnly {
+		return "", nil
 	}
 	unit, err := ownerUnitTx(ctx, tx, team, run.ID)
 	if err != nil {
 		return "", err
-	}
-	polls, err := placementRunnersTx(ctx, tx, team, claimLiveness(ctx, request), true)
-	if err != nil {
-		return "", err
-	}
-	for _, poll := range polls {
-		eligible, err := unitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand, eligibilityChecks{fit: true})
-		if err != nil {
-			return "", err
-		}
-		if eligible.ok() && !eligible.metered {
-			return "", nil
-		}
 	}
 	return unitCreditHoldTx(ctx, tx, team, run, unit)
 }
@@ -371,15 +370,16 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 		if err = lockStateRunTx(ctx, tx, team, c.Binding.RunID); err != nil {
 			return p, err
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return p, err
 		}
-		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 		if row.Status == StatusDone || row.CancelRequestedAt != nil {
 			return p, holderRefusal()
 		}
-		if err = checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
+
+		if err = checkHolderTx(ctx, tx, team, row, actor); err != nil {
 			return p, err
 		}
 		var cancelled sql.NullInt64
@@ -648,7 +648,7 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	}
 	var hereKey, owner string
 	err := tx.QueryRowContext(ctx, `SELECT here_proof_public_key,created_by FROM capabilities WHERE team=? AND prefix=?`, team, prefix).Scan(&hereKey, &owner)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.now()) {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.VerifyHereProof(proof, hereKey, idempotencyKey, tx.now(ctx)) {
 		return "", nil
 	}
 	if err != nil {

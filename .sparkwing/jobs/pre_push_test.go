@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -59,11 +58,6 @@ func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
 	if prepush.Priority <= gate.Priority {
 		t.Fatalf("pre-push priority %d, gate priority %d: a tier a human waits on, queued behind a ten-minute one, is not a fast tier",
 			prepush.Priority, gate.Priority)
-	}
-	hints := prepush.Resources
-	if hints == nil || hints.Cores != float64(prePushReservationCores(runtime.NumCPU())) {
-		t.Fatalf("pre-push reserved cores = %#v, want %v for its three concurrent compiler tasks",
-			hints, float64(prePushReservationCores(runtime.NumCPU())))
 	}
 }
 

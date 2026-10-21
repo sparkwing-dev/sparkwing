@@ -7,7 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -19,7 +18,7 @@ func (h *OwnerHost) executeBurst(ctx context.Context, run RunInput, accepted Acc
 		if err != nil {
 			return err
 		}
-		row, ok := ownerNode(before, request.Ref.NodeID)
+		row, ok := ownerNode(before, string(request.Ref.NodeID))
 		if !ok {
 			return errors.New("burst admission lost its job")
 		}
@@ -42,10 +41,8 @@ func (h *OwnerHost) executeBurst(ctx context.Context, run RunInput, accepted Acc
 			continue
 		}
 		dispatched := false
-		err = h.reserveBurst(ctx, accepted, row, func(ctx context.Context, resources wingwire.HostResources) error {
-			claimRequest := request
-			claimRequest.Reserved = &match.Resources{Cores: resources.Cores, MemoryBytes: resources.MemoryBytes}
-			result, err := FollowReconciliation(ctx, h.Store, claimRequest, func(context.Context, controllerwire.NodeRef, int64) error { return errBurstProgress })
+		err = h.reserveBurst(ctx, accepted, row, func(ctx context.Context) error {
+			result, err := FollowReconciliation(ctx, h.Store, request, func(context.Context, controllerwire.NodeRef, int64) error { return errBurstProgress })
 			if err != nil {
 				return err
 			}
@@ -67,7 +64,7 @@ func (h *OwnerHost) executeBurst(ctx context.Context, run RunInput, accepted Acc
 	}
 }
 
-func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context, wingwire.HostResources) error) error {
+func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
 	ctx, cancel := context.WithCancelCause(parent)
 	defer cancel(nil)
 	watchCtx, stop := context.WithCancel(ctx)
@@ -95,11 +92,11 @@ func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, r
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
-		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID),
-		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
-		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
+		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID)),
+		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
+		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
-	return a.hold(ctx, row.Ref, request, func(ctx context.Context, held Lease) error {
+	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error {
 		stop()
 		err := <-changed
 		joined = true
@@ -109,6 +106,6 @@ func (h *OwnerHost) reserveBurst(parent context.Context, accepted AcceptedRun, r
 		if cause := context.Cause(ctx); cause != nil {
 			return cause
 		}
-		return body(ctx, held.Resources())
+		return body(ctx)
 	})
 }

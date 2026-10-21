@@ -32,16 +32,13 @@ func TestCloudWorkUsesRunnerExecutionIdentityW8(t *testing.T) {
 	_, cfg, award := cloudFixture(launcher.CloudWork)
 	unit := runnerAuthorityAwardW8(capability.UnitNode)
 	binding := award.Binding
-	unit.UnitID, unit.RunID, unit.JobID = binding.UnitID, binding.RunID, binding.NodeID
-	unit.Binding = capability.Binding{Kind: capability.BindingNode, RunID: binding.RunID, NodeID: binding.NodeID, Holder: binding.Holder, Generation: binding.Generation, Attempt: binding.Attempt}
+	unit.UnitID, unit.RunID, unit.JobID = binding.UnitID, string(binding.RunID), string(binding.NodeID)
+	unit.Binding = capability.Binding{Kind: capability.BindingNode, RunID: string(binding.RunID), NodeID: string(binding.NodeID), Holder: binding.Holder, Generation: int64(binding.Generation), Attempt: int64(binding.Attempt)}
 	unit.CloudResources = &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}
 	unit.Engine = award.Engine
 	unit.Accepted.Spec.Resolved.Engine = *award.Engine
 	unit.OwnerDeadline, unit.AttemptDeadline, unit.ParentCapabilityExpiry = &binding.OwnerDeadline, &binding.AttemptDeadline, &binding.ParentCapabilityExpiry
-	unit.Execution = &runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-		Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: award.CPUCores}},
-		MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: award.Memory}},
-	}}}}
+	unit.Execution = &runspec.JobExecutionSettings{}
 	unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)}
 	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo.git", PipelineDir: ".sparkwing"}
 	unit.Accepted.Spec.Request = unit.Request

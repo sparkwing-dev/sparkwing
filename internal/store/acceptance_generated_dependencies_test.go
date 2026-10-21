@@ -11,10 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func checkStoreGeneratedDependencies(t *testing.T) (err error) {
@@ -51,8 +51,8 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 		return err
 	}
 	binding := owner.Capability.Binding
-	binding.Kind, binding.NodeID, binding.Generation = capability.BindingNode, "alpha", source.Generation
-	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: plan.Actor.Owner.Generation}
+	binding.Kind, binding.NodeID, binding.Generation = capability.BindingNode, "alpha", int64(source.Generation)
+	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: int64(plan.Actor.Owner.Generation)}
 	expander, err := s.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{
 		Parent: plan.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
 		Binding: binding, ExpiresAt: owner.Capability.ExpiresAt, Repositories: owner.Capability.Repositories,
@@ -140,20 +140,20 @@ func checkStoreGeneratedMembership(ctx context.Context, s *store.Store, plan sto
 }
 
 func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *store.Tenant, plan store.PlanAcceptance, id string) (store.NodeRow, error) {
-	ref := controllerwire.NodeRef{RunID: plan.RunID, NodeID: id}
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: plan.Actor}); err != nil {
 		return store.NodeRow{}, err
 	}
-	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
 	if err != nil {
 		return store.NodeRow{}, err
 	}
-	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	start, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)})
+	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	start, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return store.NodeRow{}, err
 	}
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(start.Attempt)}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(int64(start.Attempt)), Outcome: store.NodeSuccess}); err != nil {
 		return store.NodeRow{}, err
 	}
 	return tenant.ReadNode(ctx, ref)

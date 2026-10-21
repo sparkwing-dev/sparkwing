@@ -68,8 +68,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 	if !s.redirectAllowed(browserURL(r, oauthCallbackPath(name))) {
 		return nil, nil, invalidEngineBody("redirect_uri is not on this controller's allowlist")
 	}
-	now := time.Now().UTC()
-	if !recentSignIn(session.CreatedAt, now) {
+	if !recentSignIn(session.CreatedAt, session.Now) {
 		return nil, nil, identityLinkRefusal(apierr.Forbidden, "reauth_required", "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
 	}
 	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
@@ -139,7 +138,7 @@ func (s *Server) newIdentityLink(ctx context.Context, session *store.Session, na
 	}
 	state, err := signFlowState(key, identityLinkState{
 		Account: session.AccountID, Session: sessionBinding(key, session.ID), Provider: name,
-		Expires: time.Now().Add(identityLinkStateTTL).Unix(), Nonce: nonce, Verifier: verifierDigest(verifier),
+		Expires: session.Now.Add(identityLinkStateTTL).Unix(), Nonce: nonce, Verifier: verifierDigest(verifier),
 	})
 	if err != nil {
 		return oauthGrant{}, identityLinkError(err)
@@ -162,7 +161,7 @@ func (s *Server) verifyIdentityLinkComplete(r *http.Request) error {
 	}
 	var state identityLinkState
 	if !openFlowState(key, flow.State, &state) || state.Account != session.AccountID || state.Provider != flow.Provider || state.Nonce == "" ||
-		time.Now().Unix() >= state.Expires || !constantTimeEqual(state.Session, sessionBinding(key, session.ID)) || !constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier)) {
+		session.Now.Unix() >= state.Expires || !constantTimeEqual(state.Session, sessionBinding(key, session.ID)) || !constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier)) {
 		return invalidIdentityLink()
 	}
 	if err := s.admitIdentityLink(session); err != nil {

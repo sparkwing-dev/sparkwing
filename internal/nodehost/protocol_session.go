@@ -59,7 +59,7 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 	}
 	cfg.Debug = debug
 	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, sdkWorkingDirectory(input.Entry), activity
-	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
+	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
 	}

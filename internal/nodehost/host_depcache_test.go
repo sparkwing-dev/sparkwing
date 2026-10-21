@@ -94,7 +94,7 @@ func TestExecutorDepcache(t *testing.T) {
 					return start(ctx, in, activity)
 				}
 				deps.BindStorage = func(_ context.Context, in NodeInput) (StorageBinding, error) {
-					backend.upload.Identity.Attempt.Value = runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: in.Generation, Attempt: in.Attempt}
+					backend.upload.Identity.Attempt.Value = runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: int64(in.Generation), Attempt: int64(in.Attempt)}
 					backend.upload.Authority.Attempt = backend.upload.Identity.Attempt
 					return StorageBinding{Bytes: backend, Records: backend, Authority: backend.upload.Authority}, nil
 				}

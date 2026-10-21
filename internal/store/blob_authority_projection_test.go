@@ -112,7 +112,7 @@ func TestDataCancellationClosesSensitiveAccessWithoutEndingHolder(t *testing.T) 
 				if err != nil {
 					return err
 				}
-				return checkHolderTx(t.Context(), tx, tenant.team, row, actor, tx.now())
+				return checkHolderTx(t.Context(), tx, tenant.team, row, actor)
 			}); err != nil {
 				t.Fatalf("data cancellation ended holder rights: %v", err)
 			}

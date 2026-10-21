@@ -9,6 +9,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -56,7 +58,7 @@ func (f *githubCompletionFixture) addReportingNode(id string, outcome store.Node
 	if err := teststore.SeedNode(f.server.store, f.t.Context(), store.Node{RunID: "run", NodeID: id, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := teststore.SeedNodeFinish(f.server.store, f.t.Context(), "a", controllerwire.NodeRef{RunID: "run", NodeID: id}, store.NodeResult{Outcome: outcome, MaskedError: text}); err != nil {
+	if err := teststore.SeedNodeFinish(f.server.store, f.t.Context(), "a", controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, store.NodeResult{Outcome: outcome, MaskedError: text}); err != nil {
 		f.t.Fatal(err)
 	}
 }

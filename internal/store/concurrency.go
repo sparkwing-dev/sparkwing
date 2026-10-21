@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func fitsBudget(used, cost, capacity int) bool {
@@ -187,7 +190,7 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 	if err != nil {
 		return AcquireSlotResponse{}, err
 	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, req.Key}); err != nil {
+	if err := txCommitChecked(ctx, tx, tx.now(ctx).UnixNano(), concurrencyKey{t.team, req.Key}); err != nil {
 		return AcquireSlotResponse{}, err
 	}
 	return result, nil
@@ -242,7 +245,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	// safety: read the clock only after the tx holds the write lock; a
 	// pre-BEGIN timestamp goes stale while waiting and revives expired
 	// holders whose budget was already reassigned.
-	now := tx.now()
+	now := tx.now(ctx)
 	if !deadline.IsZero() {
 		req.Lease = slotLease(now, deadline, req.Lease)
 	}
@@ -327,7 +330,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		string(t.team), req.Key, req.HolderID,
 	).Scan(&existingLeaseNS, &existingSuperInt)
 	if err == nil && holderCountsForBudget(existingSuperInt == 1, existingLeaseNS, nowNS) {
-		newExpires := now.Add(req.Lease).UnixNano()
+		newExpires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, now.Add(req.Lease).UnixNano())
+		if err != nil {
+			return AcquireSlotResponse{}, err
+		}
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE concurrency_holders SET lease_expires_at = ? WHERE team = ? AND key = ? AND holder_id = ?`,
@@ -586,7 +592,7 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 		if err != nil {
 			return false, err
 		}
-		if !deadline.IsZero() && !deadline.After(tx.now()) {
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
 			continue
 		}
 		if currentQueued && w.ArrivedAt.UnixNano() >= currentArrivedNS {
@@ -634,7 +640,7 @@ func txQueueWaiterArrivedAt(ctx context.Context, tx *storeTx, team Team, key, ru
 		ctx,
 		`SELECT arrived_at FROM concurrency_waiters
 		  WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND policy = ? AND lease_expires_at > ?`,
-		string(team), key, runID, nodeID, OnLimitQueue, tx.now().UnixNano(),
+		string(team), key, runID, nodeID, OnLimitQueue, tx.now(ctx).UnixNano(),
 	).Scan(&arrivedNS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
@@ -684,10 +690,10 @@ func txLockEntry(ctx context.Context, tx *storeTx, forUpdate string, team Team, 
 		ctx,
 		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+forUpdate, string(team), key,
 	).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
-	return err
+	return nil
 }
 
 func txEntryCapacity(ctx context.Context, tx *storeTx, team Team, key string) (int, error) {
@@ -784,7 +790,7 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key str
 		if err != nil {
 			return nil, err
 		}
-		if !deadline.IsZero() && !deadline.After(tx.now()) {
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
 			continue
 		}
 		if !live[w.RunID] && !polling.matches(w) {
@@ -953,19 +959,35 @@ type holderRow struct {
 
 func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, job string, expires int64) (int64, error) {
 	var lease sql.NullInt64
-	var err error
-	if job != "" {
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
-	} else {
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END FROM runs r WHERE team=? AND id=?`, team, run).Scan(&lease)
-	}
+	err := tx.QueryRowContext(ctx, `SELECT MAX(deadline) FROM (
+ SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner' AND holder<>'') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id AND status='claimed') END AS deadline FROM runs r WHERE team=? AND id=?
+ UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL AND (?='' OR node_id=?)
+) live`, team, run, team, run, job, job).Scan(&lease)
 	if err != nil {
 		return 0, err
 	}
-	if lease.Valid && lease.Int64 < expires {
-		return lease.Int64, nil
+	if !lease.Valid {
+		return 0, holderRefusal()
 	}
-	return expires, nil
+	drain, err := cancelDrainTx(ctx, tx, team, run, job)
+	if err != nil {
+		return 0, err
+	}
+	now := tx.now(ctx)
+	bounds := []time.Time{time.Unix(0, expires), drain, time.Unix(0, lease.Int64)}
+	if job != "" {
+		generation, err := capacityGenerationTx(ctx, tx, team, run, job)
+		if err != nil {
+			return 0, err
+		}
+		funded, err := fundedBoundTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, generation, now)
+		if err != nil {
+			return 0, err
+		}
+		bounds = append(bounds, funded)
+	}
+	bound, err := leaseBound(now, bounds...)
+	return bound.UnixNano(), err
 }
 
 func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expiresNS int64) error {
@@ -1026,7 +1048,7 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID 
 		return false, "", "", err
 	}
 
-	now := tx.now()
+	now := tx.now(ctx)
 
 	if nodeID == "" && queueArrivedNS > 0 {
 		if err := txSupersede(ctx, tx, team, key, holderID); err != nil {
@@ -1065,6 +1087,10 @@ func txNodeOutcome(ctx context.Context, tx *storeTx, team Team, runID, nodeID st
 
 func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, arrivedNS, expiresNS int64) error {
 	generation, err := capacityGenerationTx(ctx, tx, team, w.RunID, w.NodeID)
+	if err != nil {
+		return err
+	}
+	expiresNS, err = capacityLeaseCeilingTx(ctx, tx, team, w.RunID, w.NodeID, expiresNS)
 	if err != nil {
 		return err
 	}
@@ -1187,7 +1213,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRu
 	if err != nil {
 		return WaiterResolution{}, err
 	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
+	if err := txCommitChecked(ctx, tx, tx.now(ctx).UnixNano(), concurrencyKey{t.team, key}); err != nil {
 		return WaiterResolution{}, err
 	}
 	return result, nil
@@ -1197,7 +1223,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, leaderRu
 // It decides only a promoted holder or a still-waiting queue entry; anything
 // else falls through to the locked path.
 func (t *Tenant) observeWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID string) (WaiterResolution, bool, error) {
-	nowNS := tx.now().UnixNano()
+	nowNS := tx.now(ctx).UnixNano()
 	var holderID string
 	var leaseNS int64
 	err := tx.QueryRowContext(ctx,
@@ -1222,7 +1248,7 @@ func (t *Tenant) observeWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		return WaiterResolution{}, false, err
 	}
 	deadline, err := capacityQueueDeadlineTx(ctx, tx, t.team, waiter)
-	if err != nil || (!deadline.IsZero() && !deadline.After(tx.now())) {
+	if err != nil || (!deadline.IsZero() && !deadline.After(tx.now(ctx))) {
 		return WaiterResolution{}, false, err
 	}
 	var position, queueLength int
@@ -1254,16 +1280,13 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		}
 	}
 
-	// safety: clock read after BEGIN so liveness answers match what the
-	// serialized writers committed, not a pre-wait snapshot.
-	nowNS := tx.now().UnixNano()
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
 		return WaiterResolution{}, err
 	}
 	if err := checkCapacityMutationTx(ctx, tx, t.team, key, "", fence); err != nil {
 		return WaiterResolution{}, err
 	}
-	nowNS = tx.now().UnixNano()
+	nowNS := tx.now(ctx).UnixNano()
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, t.team, key); err != nil {
 		return WaiterResolution{}, err
 	}
@@ -1299,7 +1322,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 		if err != nil {
 			return WaiterResolution{}, err
 		}
-		if !deadline.IsZero() && !deadline.After(tx.now()) {
+		if !deadline.IsZero() && !deadline.After(tx.now(ctx)) {
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
 				return WaiterResolution{}, err
 			}
@@ -1319,7 +1342,7 @@ func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, n
 			shouldPromote = holderCount == 0
 		}
 		if shouldPromote {
-			now := tx.now()
+			now := tx.now(ctx)
 			promoted, err := txPromotePollingWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(lease).UnixNano())
 			if err != nil {
 				return WaiterResolution{}, err
@@ -1409,7 +1432,7 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 
 	state := &ConcurrencyState{Key: key, Capacity: capacity, EffectiveCapacity: capacity}
 
-	nowNS := tx.now().UnixNano()
+	nowNS := tx.now(ctx).UnixNano()
 	hrows, err := tx.QueryContext(
 		ctx,
 		`SELECT `+holderColumns+`
@@ -1506,7 +1529,7 @@ func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, team Tea
 }
 
 func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, key string) ([]ConcurrencyHolder, error) {
-	now := tx.now().UnixNano()
+	now := tx.now(ctx).UnixNano()
 
 	rows, err := tx.QueryContext(
 		ctx,
@@ -1536,7 +1559,7 @@ func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, 
 }
 
 func reapStaleConcurrencyWaitersTx(ctx context.Context, tx *storeTx, team Team, key string, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
-	now := tx.now()
+	now := tx.now(ctx)
 	ns := now.UnixNano()
 	rows, err := tx.QueryContext(ctx, `SELECT `+prefixColumns(waiterColumns, "w.")+`
 FROM concurrency_waiters w WHERE w.team=? AND w.key=? AND (w.lease_expires_at<=?

@@ -162,9 +162,7 @@ func TestLoad_KeepsEveryClaimModeSetting(t *testing.T) {
 	path := writePrivateConfig(t, `controller: http://localhost:4344
 holder_prefix: dev-laptop
 max_concurrent: 2
-contribution: 4,8gb
 local_admission: true
-keep_free: 1,2gb
 labels:
   - linux
 `)
@@ -178,7 +176,7 @@ labels:
 	}
 	if cfg.Controller != "http://localhost:4344" ||
 		cfg.HolderPrefix != "dev-laptop" || cfg.MaxConcurrent != 2 ||
-		cfg.Contribution != "4,8gb" || cfg.LocalReserve != "1,2gb" ||
+
 		cfg.LocalAdmission == nil || !*cfg.LocalAdmission || len(cfg.Labels) != 1 {
 		t.Fatalf("claim-mode config = %+v", cfg)
 	}

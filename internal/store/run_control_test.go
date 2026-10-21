@@ -23,7 +23,7 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(tenant.team), RunID: ref.RunID}}
+		a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(tenant.team), RunID: string(ref.RunID)}}
 		switch selector % 6 {
 		case 1:
 			a.Target.Team = "b"
@@ -36,14 +36,14 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 		case 5:
 			a.Target.NodeID = fmt.Sprint(suffix)
 		}
-		err = tenant.CreateAuthorizedDebugPause(t.Context(), a, ref.NodeID, "manual", time.Time{}, "pause")
+		err = tenant.CreateAuthorizedDebugPause(t.Context(), a, string(ref.NodeID), "manual", time.Time{}, "pause")
 		allowed := selector%6 == 0
 		if (err == nil) != allowed {
 			t.Logf("selector=%d pause=%v", selector%6, err)
 			return false
 		}
 		rewriteSchemaCount(t, tenant.s.db, "debug_pauses", map[bool]int{true: 1, false: 0}[allowed])
-		a.Target.NodeID = ref.NodeID
+		a.Target.NodeID = string(ref.NodeID)
 		if selector%6 == 5 {
 			a.Target.NodeID = fmt.Sprint(suffix)
 		}
@@ -75,16 +75,16 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 		tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, _ Secret) (string, error) { return secret, nil })
 		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES ('a','KEY','sealed','owner','p',1,0,1,1)`)
 		text := "note " + secret + " encoded " + base64.StdEncoding.EncodeToString([]byte(secret)) + " end"
-		a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(tenant.team), RunID: ref.RunID}}
+		a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(tenant.team), RunID: string(ref.RunID)}}
 		for range 2 {
-			if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, ref.NodeID, text, time.Time{}, "pause"); err != nil {
+			if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, string(ref.NodeID), text, time.Time{}, "pause"); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, ref.NodeID, text+"changed", time.Time{}, "pause"); err == nil {
+		if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, string(ref.NodeID), text+"changed", time.Time{}, "pause"); err == nil {
 			return false
 		}
-		a.Target.NodeID = ref.NodeID
+		a.Target.NodeID = string(ref.NodeID)
 		decision := controllerwire.ApprovalDecision{Resolution: "approved", Comment: text, IdempotencyKey: "approval"}
 		first, err := tenant.ResolveAuthorizedApproval(t.Context(), a, decision)
 		if err != nil {
@@ -138,7 +138,7 @@ func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			a := capability.Authorized{Principal: p, Target: capability.Target{Team: "a", RunID: ref.RunID, NodeID: ref.NodeID}}
+			a := capability.Authorized{Principal: p, Target: capability.Target{Team: "a", RunID: string(ref.RunID), NodeID: string(ref.NodeID)}}
 			var events int
 			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&events); err != nil {
 				t.Fatal(err)
@@ -151,7 +151,7 @@ func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 				}
 			} else {
 				rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER reject_event BEFORE INSERT ON events WHEN NEW.kind='debug.paused' BEGIN SELECT RAISE(ABORT,'event rejected'); END`)
-				if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, ref.NodeID, "manual", time.Time{}, "request"); err == nil {
+				if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, string(ref.NodeID), "manual", time.Time{}, "request"); err == nil {
 					t.Fatal("failed pause committed")
 				}
 			}
@@ -162,7 +162,7 @@ func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 			if err != nil || row.Status != StatusApprovalPending || row.StatusDetail != "" {
 				t.Fatalf("failed control changed job: %+v %v", row, err)
 			}
-			gate, err := tenant.GetApproval(t.Context(), ref.RunID, ref.NodeID)
+			gate, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
 			if err != nil || gate.ResolvedAt != nil {
 				t.Fatalf("failed decision changed approval: %+v %v", gate, err)
 			}
@@ -209,13 +209,13 @@ func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			a := capability.Authorized{Principal: p, Target: capability.Target{Team: "a", RunID: ref.RunID}}
-			if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, ref.NodeID, "manual", time.Time{}, "same-key"); err != nil {
+			a := capability.Authorized{Principal: p, Target: capability.Target{Team: "a", RunID: string(ref.RunID)}}
+			if err := tenant.CreateAuthorizedDebugPause(t.Context(), a, string(ref.NodeID), "manual", time.Time{}, "same-key"); err != nil {
 				t.Fatal(err)
 			}
 			survivor = a
 		}
-		if _, err := tenant.s.DeleteAccount(t.Context(), first, time.Now()); err != nil {
+		if _, err := tenant.s.DeleteAccount(t.Context(), first); err != nil {
 			t.Fatal(err)
 		}
 		var deleted, survived int
@@ -229,7 +229,7 @@ func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T)
 			t.Logf("receipts deleted-account=%d survivor=%d", deleted, survived)
 			return false
 		}
-		return tenant.CreateAuthorizedDebugPause(t.Context(), survivor, ref.NodeID, "manual", time.Time{}, "same-key") == nil
+		return tenant.CreateAuthorizedDebugPause(t.Context(), survivor, string(ref.NodeID), "manual", time.Time{}, "same-key") == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)

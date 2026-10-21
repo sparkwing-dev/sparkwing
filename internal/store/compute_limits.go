@@ -168,7 +168,7 @@ var computeLimitsSQL, computeLimitKeyArgs = func() (string, []any) {
 		strings.Join(keys, ",") + `)`, args
 }()
 
-func scanComputeLimits(rows *sql.Rows) (ComputeLimits, error) {
+func scanComputeLimits(rows rowCursor) (ComputeLimits, error) {
 	var out ComputeLimits
 	for rows.Next() {
 		var key, raw string

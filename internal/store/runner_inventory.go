@@ -19,7 +19,7 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 		return capability.RunnerSnapshot{}, err
 	}
 	defer rollbackOrLog(tx)
-	out := capability.RunnerSnapshot{Now: tx.now(), Runners: []capability.RunnerObservation{}}
+	out := capability.RunnerSnapshot{Now: tx.now(ctx), Runners: []capability.RunnerObservation{}}
 	indices := map[string]int{}
 	agents, err := registeredAgentsTx(ctx, tx, t.team)
 	if err != nil {
@@ -29,9 +29,6 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 		row := capability.RunnerObservation{Team: string(t.team), Runner: nodeproto.RunnerIdentity{Name: agent.Name, Type: "runner", Labels: slices.Clone(agent.Profile.Labels)}, Location: agent.Profile.Location, LastSeen: agent.LastSeen, ActiveJobs: []string{}}
 		if row.LastSeen.After(out.Now) {
 			return capability.RunnerSnapshot{}, authorityError(apierr.IntegrityFailure, "runner observation is in the future")
-		}
-		if poll := agent.poll; poll != nil {
-			row.Headroom = &capability.RunnerHeadroom{Cores: poll.Available.Cores, MemoryBytes: poll.Available.MemoryBytes, ObservedAt: poll.ObservedAt}
 		}
 		indices[agent.CapabilityPrefix] = len(out.Runners)
 		out.Runners = append(out.Runners, row)
@@ -61,6 +58,7 @@ func unavailableRunner(err error) bool {
 }
 
 func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]string, error) {
+	now := tx.now(ctx)
 	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c JOIN runs r ON r.team=c.team AND r.id=c.bind_run
 	WHERE c.team=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND r.finished_at IS NULL AND r.status IN ('pending','running')
  AND `+liveCredentialSQL("c.")+` AND (
@@ -73,7 +71,7 @@ func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]strin
 	WHERE c.unit_kind='eval' AND e.team=c.team AND e.run_id=c.bind_run AND n.status='done' AND n.outcome IN ('success','memoized') AND n.expansion='expected'
  AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.generation=c.eval_unit_generation
  AND e.claimed_by=c.bind_holder AND e.status IN ('claimed','running') AND e.lease_expires_at>? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?))
- ORDER BY c.prefix`, team, tx.now().UnixNano(), tx.now().UnixNano(), tx.now().UnixNano(), tx.now().UnixNano(), tx.now().UnixNano(), tx.now().UnixNano())
+ ORDER BY c.prefix`, team, now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +110,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 	if at.Valid {
 		seen = time.Unix(0, at.Int64).UTC()
 	}
-	if seen.After(tx.now()) {
+	if seen.After(tx.now(ctx)) {
 		return authorityError(apierr.IntegrityFailure, "runner observation is in the future")
 	}
 	i, found := indices[key]
@@ -146,7 +144,7 @@ func observeUnitTx(ctx context.Context, tx *storeTx, prefix string) error {
 			continue
 		}
 		c := ancestor.principal.Capability
-		result, err := tx.ExecContext(ctx, `UPDATE capabilities SET last_used_at=? WHERE prefix=? AND COALESCE(team,'')=?`, tx.now().UnixNano(), c.Prefix, c.Team)
+		result, err := tx.ExecContext(ctx, `UPDATE capabilities SET last_used_at=? WHERE prefix=? AND COALESCE(team,'')=?`, tx.now(ctx).UnixNano(), c.Prefix, c.Team)
 		if err != nil {
 			return err
 		}

@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
@@ -73,7 +72,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	ordinal := int64(0)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: &ordinal}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
@@ -143,7 +142,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	}
 	claim := func(kind capability.UnitKind) capability.Capability {
 		t.Helper()
-		demand := UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+		demand := UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{kind}}
 		award, err := s.AsOperator().ClaimUnit(ctx, demand)
 		if err != nil {
 			t.Fatal(err)
@@ -185,7 +184,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		if i > 0 {
 			cause = CauseReport
 		}
-		if _, err := tenant.TransitionNode(ctx, NodeTransition{Ref: controllerwire.NodeRef{RunID: admitted.RunID, NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
 			t.Fatal(err)
 		}
 	}

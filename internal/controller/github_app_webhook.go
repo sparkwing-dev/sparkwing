@@ -264,7 +264,7 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 		if row.GitHubInstallationID != env.Installation.ID || row.GitHubRepositoryID == 0 || covered[row.GitHubRepositoryID] {
 			continue
 		}
-		if _, err := tenant.WithdrawGitHubCronRepository(ctx, env.Installation.ID, row.GitHubRepositoryID, time.Now()); err != nil {
+		if _, err := tenant.WithdrawGitHubCronRepository(ctx, env.Installation.ID, row.GitHubRepositoryID); err != nil {
 			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
 			return
 		}
@@ -279,7 +279,7 @@ func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Re
 	installation int64, body []byte, listed []githubapp.Repository, listErr error,
 ) bool {
 	if !errors.Is(listErr, githubapp.ErrTooManyRepositories) {
-		if _, err := tenant.WithdrawGitHubCronInstallation(r.Context(), installation, time.Now()); err != nil {
+		if _, err := tenant.WithdrawGitHubCronInstallation(r.Context(), installation); err != nil {
 			s.writeInternalError(w, r, "withdraw unreadable installation schedules", err)
 			return false
 		}
@@ -300,7 +300,7 @@ func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Re
 		if covered[repo.ID] {
 			continue
 		}
-		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), installation, repo.ID, time.Now()); err != nil {
+		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), installation, repo.ID); err != nil {
 			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
 			return false
 		}
@@ -329,7 +329,7 @@ func (s *Server) handleGitHubAppInstallationEvent(w http.ResponseWriter, r *http
 			s.logger.Info("github app installation uninstalled", "team", string(team), "installation_id", id, "delivery", delivery)
 		}
 	case "suspend", "unsuspend":
-		err = op.SetGitHubAppInstallationSuspended(r.Context(), id, env.Action == "suspend", time.Now())
+		err = op.SetGitHubAppInstallationSuspended(r.Context(), id, env.Action == "suspend")
 	default:
 		githubAppIgnored(w, "installation "+env.Action+" changes no binding")
 		return
@@ -763,10 +763,30 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInstallation,
 	tenant *store.Tenant, repo store.GitHubRepo, intake githubAppIntake,
 ) (int, string, error) {
-	// safety: two push handlers on one controller must check GitHub's current
-	// head and write in the same order, or an older delivery can restore its pin.
-	s.githubApp.cronMu.Lock()
-	defer s.githubApp.cronMu.Unlock()
+	publication, replay, err := tenant.PrepareGitHubAppPublication(r.Context(), in.InstallationID, repo.ID)
+	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
+		return 0, "repository automation consent is not current for this delivery", nil
+	}
+	if err != nil {
+		return http.StatusConflict, "", err
+	}
+	if replay {
+		_, _, err := tenant.ReplaceGitHubAppSchedules(r.Context(), publication, "https://github.com/"+repo.Slug()+".git", nil, nil)
+		if err != nil {
+			return http.StatusInternalServerError, "", err
+		}
+		return 0, "", nil
+	}
+	grant, err := tenant.GitHubAppAutomation(r.Context(), in.InstallationID, repo.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return 0, "repository automation consent is not enabled", nil
+	}
+	if err != nil {
+		return http.StatusInternalServerError, "", err
+	}
+	if intake.at.Add(githubAppClockSkew).Before(grant.EnabledAt) {
+		return 0, "the push predates repository automation consent", nil
+	}
 	snapshot, err := s.githubApp.client.FileAtDefaultHead(r.Context(), in.InstallationID, repo.Owner, repo.Name,
 		".sparkwing/"+projectconfig.Filename)
 	if err != nil {
@@ -774,11 +794,6 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	}
 	if snapshot.RepositoryID != repo.ID || snapshot.DefaultBranch != intake.branch || snapshot.HeadSHA != intake.sha {
 		return 0, "the push no longer names this repository's default-branch head", nil
-	}
-	if _, err := tenant.GitHubAppAutomation(r.Context(), in.InstallationID, repo.ID); errors.Is(err, store.ErrNotFound) {
-		return 0, "repository automation consent is not enabled", nil
-	} else if err != nil {
-		return http.StatusInternalServerError, "", fmt.Errorf("read repository automation consent: %w", err)
 	}
 	var entries []crons.Declared
 	if snapshot.Found {
@@ -794,9 +809,9 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 			}
 		}
 	}
-	ids, withdrawn, err := s.armGitHubAppSchedules(r.Context(), tenant, in.InstallationID, repo, intake.branch, entries)
+	ids, withdrawn, err := s.armGitHubAppSchedules(r.Context(), tenant, in.InstallationID, publication, repo, intake.branch, entries)
 	if err != nil {
-		if errors.Is(err, store.ErrCronScheduleTaken) || errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
+		if errors.Is(err, store.ErrCronScheduleTaken) || errors.Is(err, store.ErrGitHubAppAutomationRevoked) || errors.Is(err, store.ErrGitHubPublicationStale) {
 			return http.StatusConflict, "", err
 		}
 		var refusal *apierr.Error
@@ -828,7 +843,7 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 			s.writeInternalError(w, r, "revoke deleted repository automation", err)
 			return
 		}
-		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID); err != nil {
 			s.writeInternalError(w, r, "withdraw deleted GitHub repository schedule", err)
 			return
 		}
@@ -846,7 +861,7 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 				s.writeInternalError(w, r, "revoke transferred repository automation", err)
 				return
 			}
-			if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+			if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID); err != nil {
 				s.writeInternalError(w, r, "withdraw transferred GitHub repository schedule", err)
 				return
 			}
@@ -879,14 +894,14 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 		s.writeInternalError(w, r, "rename repository automation", err)
 		return
 	}
-	if _, err := tenant.WithdrawOtherGitHubCronInstallations(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+	if _, err := tenant.WithdrawOtherGitHubCronInstallations(r.Context(), env.Installation.ID, repo.ID); err != nil {
 		s.writeInternalError(w, r, "withdraw former GitHub repository schedule", err)
 		return
 	}
 	if err := tenant.RenameGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID,
-		"https://github.com/"+repo.Slug()+".git", time.Now()); err != nil {
+		"https://github.com/"+repo.Slug()+".git"); err != nil {
 		if errors.Is(err, store.ErrCronScheduleTaken) {
-			if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); werr != nil {
+			if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID); werr != nil {
 				s.writeInternalError(w, r, "withdraw conflicting GitHub repository schedule", werr)
 				return
 			}

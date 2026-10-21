@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -38,7 +37,7 @@ func (f *accountReads) AccountMemberships(_ context.Context, id string) ([]store
 	return []store.Membership{{AccountID: id, Team: "team", Role: store.RoleEditor}}, f.err
 }
 
-func (f *accountReads) OpenInvitationsForEmail(_ context.Context, email string, _ time.Time) ([]store.Invitation, error) {
+func (f *accountReads) OpenInvitationsForEmail(_ context.Context, email string) ([]store.Invitation, error) {
 	f.email = email
 	return []store.Invitation{{ID: "invite", Team: "inviting", Role: store.RoleReader}}, f.err
 }

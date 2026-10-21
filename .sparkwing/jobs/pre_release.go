@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -111,19 +110,8 @@ func (PreRelease) Examples() []sparkwing.Example {
 }
 
 func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
-	plan.Resources(sparkwing.Cores(preReleaseCoreReservation(runtime.NumCPU())))
 	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout).Cache(lintCache())
 	return nil
-}
-
-func preReleaseCoreReservation(cpus int) float64 {
-	if cpus < 4 {
-		return 1
-	}
-	if cpus == 4 {
-		return 3
-	}
-	return 4
 }
 
 type preReleaseCheck struct {

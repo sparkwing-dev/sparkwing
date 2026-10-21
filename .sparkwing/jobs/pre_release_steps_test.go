@@ -3,7 +3,6 @@ package jobs
 import (
 	"context"
 	"errors"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -22,25 +21,6 @@ func TestPreReleasePlanAllowsStoreRace(t *testing.T) {
 	}
 	if got, want := time.Duration(nodes[0].TimeoutMS)*time.Millisecond, 120*time.Minute; got != want {
 		t.Fatalf("pre-release node timeout = %s, want %s for the sharded store race and later checks", got, want)
-	}
-}
-
-func TestPreReleaseReservesShardCapacity(t *testing.T) {
-	for _, tc := range []struct {
-		cpus int
-		want float64
-	}{
-		{1, 1}, {3, 1}, {4, 3}, {16, 4},
-	} {
-		if got := preReleaseCoreReservation(tc.cpus); got != tc.want {
-			t.Errorf("%d CPUs reserve %g cores, want %g", tc.cpus, got, tc.want)
-		}
-	}
-	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&PreRelease{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-release"})
-	})
-	if got := plan.Resources; got == nil || got.Cores != preReleaseCoreReservation(runtime.NumCPU()) {
-		t.Fatalf("pre-release resource pin = %+v", got)
 	}
 }
 

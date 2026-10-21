@@ -22,7 +22,7 @@ func metricAuthorization(t *testing.T, f *storeRecoveryFixture, kind string) cap
 	if !ok {
 		t.Fatal("missing metric route")
 	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID}
+	target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID)}
 	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestMetricTransactionsRecheckReportingAuthorityProperty(t *testing.T) {
 			t.Fatalf("forged usage %d committed", i)
 		}
 	}
-	samples, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
+	samples, err := f.tenant.ListNodeMetrics(t.Context(), string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil || len(samples) != 0 {
 		t.Fatalf("refused metrics = %v, %v", samples, err)
 	}
@@ -102,14 +102,14 @@ func TestMetricTransactionsRecheckReportingAuthorityProperty(t *testing.T) {
 func TestMetricReportsFollowAttemptAndCancellation(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
 	before := metricAuthorization(t, f, "metrics")
-	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseRetry, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeFailed}}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.RetryNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Result: &store.NodeResult{Outcome: store.NodeFailed}}); err != nil {
 		t.Fatal(err)
 	}
 	sample := store.MetricSample{TS: time.Unix(1800000000, 0), MemoryBytes: 100}
 	if err := f.tenant.WriteMetric(t.Context(), before, sample); err == nil {
 		t.Fatal("previous attempt wrote a sample")
 	}
-	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.owner, To: store.NodeCancelled, Cause: store.CauseCancel, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "stop"}}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.CancelNode{Ref: f.ref, Actor: f.owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "stop"}}); err != nil {
 		t.Fatal(err)
 	}
 	current := metricAuthorization(t, f, "metrics")
@@ -119,7 +119,7 @@ func TestMetricReportsFollowAttemptAndCancellation(t *testing.T) {
 	if err := f.tenant.WriteUsage(t.Context(), metricAuthorization(t, f, "usage"), store.NodeUsage{CPUTime: 1, Wall: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(2), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled}}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(2), Outcome: store.NodeCancelled, Result: &store.NodeResult{Outcome: store.NodeCancelled}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.tenant.WriteMetric(t.Context(), current, sample); err == nil {
@@ -132,7 +132,7 @@ func TestMetricReportsFollowAttemptAndCancellation(t *testing.T) {
 
 func TestMetricRunHostReportsFinishedJobsUnderItsOwnFence(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
-	if _, err := f.tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	principal, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.owner.Authority)
@@ -150,7 +150,7 @@ func TestMetricRunHostReportsFinishedJobsUnderItsOwnFence(t *testing.T) {
 				live = append(live, capability.LiveAccess{RuleIndex: i})
 			}
 		}
-		target := capability.Target{Team: string(f.tenant.Team()), RunID: f.ref.RunID, NodeID: f.ref.NodeID}
+		target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID)}
 		a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, capability.Authenticated{Principal: principal, Method: route.Method, Pattern: route.Path, Live: live}, target)
 		if err != nil {
 			t.Fatal(err)

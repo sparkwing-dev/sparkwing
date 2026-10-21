@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -37,7 +36,7 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 		t.Fatalf("with a free slot: %s, %v", got, err)
 	}
 	teststore.SeedTeam(t, s, "first")
-	if err := s.GrantFreeSlot(t.Context(), "first", time.Now()); err != nil {
+	if err := s.GrantFreeSlot(t.Context(), "first"); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := server.SignUpFreeTier(t.Context()); err != nil || got != FreeTierClosed {

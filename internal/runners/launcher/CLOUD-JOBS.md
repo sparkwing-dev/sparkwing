@@ -187,8 +187,11 @@ taint or the annotation, even after it is uncordoned. No NodeClaim is deleted:
 an operator inspects the node, then deletes it or removes the taint and
 annotation.
 
-One pass quarantines or keeps quarantined at most three faulted nodes per
-team. A fourth stops that team's claims and names the node for operator
+One per-team fault ledger owns attribution, deduplication, quarantine permission
+and claim blocking. A pass permits quarantine for at most three distinct nodes
+per team. Counted faults and permitted quarantines are separate sets: teardown
+or release faults consume the fault budget without authorizing more writes.
+A fourth fault stops that team's claims and names the node for operator
 inspection; other teams keep claiming. The protected node label groups faults
 even when both reservation and binding annotations are damaged. The launcher
 sends faulted protected labels with each claim, and the controller excludes

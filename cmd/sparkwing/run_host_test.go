@@ -89,7 +89,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 				},
 				claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					*observed = append(*observed, "claim")
-					if detached || request.RunID != award.RunID || request.RunnerVersion != "v1.2.3" || request.AvailableCores <= 0 || !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger}) {
+					if detached || request.RunID != award.RunID || request.RunnerVersion != "v1.2.3" || !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger}) {
 						t.Fatalf("invalid local owner claim: %+v", request)
 					}
 					return controllerwire.ClaimResponse{Claim: &award}, nil
@@ -652,7 +652,7 @@ func FuzzDetachedIntakeDiagnosticsNeverExposeArguments(f *testing.F) {
 		deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 			runtime, err := resolve(ctx, options)
 			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-				cause := error(errors.New("intake failed: " + secret))
+				cause := errors.New("intake failed: " + secret)
 				if canonical {
 					cause = &apierr.Error{Code: apierr.InvalidArgs, Message: "intake failed: " + secret}
 				}

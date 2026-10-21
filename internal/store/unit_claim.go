@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -23,16 +24,8 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 			return err
 		}
 		claimant := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-		if demand.Target == nil {
-			chain, err := authorityChainTx(ctx, tx, claimant, false)
-			if err != nil {
-				return err
-			}
-			if capability.CloudLauncher(chain[0].principal.Capability) {
-				if err := lockLauncherQueueTx(ctx, tx); err != nil {
-					return err
-				}
-			}
+		if err := lockClaimQueueTx(ctx, tx); err != nil {
+			return err
 		}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{claimant}); err != nil {
 			return err
@@ -45,48 +38,25 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if err != nil {
 			return err
 		}
-		if !validMatchingResources(demand.Capacity) || !validMatchingResources(demand.Available) {
-			return authorityError(apierr.BadRequest, "invalid claim resources")
-		}
-		unit := demand.Target
-		if unit == nil {
-			queued, err := queuedUnitTx(ctx, tx, p.Capability, demand, kinds)
-			if errors.Is(err, ErrNotFound) {
-				waiting = err
-				return nil
+		unit, err := queuedUnitTx(ctx, tx, p.Capability, demand, kinds)
+		if errors.Is(err, ErrNotFound) {
+			waiting = err
+			if demand.Target != nil {
+				waiting = claimRefusalTx(ctx, tx, demand, *demand.Target)
 			}
-			if err != nil {
-				return err
-			}
-			unit = &queued
+			return nil
 		}
-		queuedLauncher := demand.Target == nil && capability.CloudLauncher(p.Capability)
-		if queuedLauncher {
-			// Cursor progress survives a refused award without exposing a selected unit between transactions.
-			if _, err := tx.ExecContext(ctx, "SAVEPOINT launcher_award"); err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
-		out, err = tx.operator.claimUnitTx(ctx, tx, demand, *unit)
+		out, err = tx.operator.claimUnitTx(ctx, tx, demand, unit)
 		if err == errRankingHold {
 			waiting, err = err, nil
 			if demand.Target == nil {
 				waiting = notFound("eligible work", "")
 			}
 		}
-		if queuedLauncher {
-			if err != nil {
-				if isPGConflict(err) || errors.Is(err, errAuthorityChanged) {
-					return err
-				}
-				if _, rollback := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT launcher_award"); rollback != nil {
-					return errors.Join(err, rollback)
-				}
-				waiting, err = err, nil
-			}
-			_, released := tx.ExecContext(ctx, "RELEASE SAVEPOINT launcher_award")
-			return released
-		}
+
 		return err
 	})
 	if err == nil {
@@ -146,7 +116,7 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 			allowed = kind == capability.UnitPlan || kind == capability.UnitEval || kind == capability.UnitNode
 		}
 		if c.Purpose == capability.PurposeHere {
-			allowed = kind == capability.UnitTrigger && demand.Target != nil && demand.Target.RunID == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
+			allowed = kind == capability.UnitTrigger && demand.Target != nil && string(demand.Target.RunID) == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
 		}
 		if !allowed {
 			return nil, authorityError(apierr.Forbidden, "claimant lacks the unit claim grant")
@@ -159,11 +129,14 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	defer func() {
 		var unpriced *UnpricedCPUClassError
 		if errors.As(err, &unpriced) {
-			unpriced.RunID, unpriced.NodeID = unit.RunID, unit.NodeID
+			unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
 		}
 	}()
 
 	if err := validateClaimUnit(unit); err != nil {
+		return UnitClaim{}, err
+	}
+	if err := lockClaimQueueTx(ctx, tx); err != nil {
 		return UnitClaim{}, err
 	}
 	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
@@ -179,14 +152,14 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	}
 	named := demand
 	named.Kinds = nil
-	standing, err := unitEligibilityTx(ctx, tx, team, unit, named, eligibilityChecks{lock: true, fit: true, claim: true})
+	named.Target = &unit
+	if _, err := queuedUnitTx(ctx, tx, p.Capability, named, []capability.UnitKind{unit.Kind}); err != nil {
+		return UnitClaim{}, err
+	}
+	profile, requirements, err := readMatchingInputsTx(ctx, tx, named, unit, true)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if !standing.ok() {
-		return UnitClaim{}, standing.refused
-	}
-	profile, requirements := standing.profile, standing.demand
 	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
 		return UnitClaim{}, err
 	}
@@ -196,18 +169,20 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	if err = lockStateRunTx(ctx, tx, team, unit.RunID); err != nil {
+	if err = lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
 		return UnitClaim{}, err
 	}
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	placement, err := unitPlacementTx(ctx, tx, team, unit, demand.CapabilityPrefix, profile, requirements)
-	if err != nil {
-		return UnitClaim{}, err
-	}
-	if placement.hold {
-		return UnitClaim{}, errRankingHold
+	policy, _ := ClaimPlacementFromContext(ctx)
+	preferences := policy.preferencesFor(requirements.Prefers)
+	placement := placementDecision{reason: PlacementNone}
+	if unit.Kind == capability.UnitNode && len(preferences) > 0 && len(preferences[0].Prefers) > 0 {
+		placement.reason = PlacementFallback
+		if placementRank(profile, requirements, preferences) == 0 {
+			placement.reason = PlacementPreferred
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=?`, team, unit.RunID, unit.Kind, unit.NodeID); err != nil {
 		return UnitClaim{}, err
@@ -224,7 +199,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	var deadline time.Time
 	if row.expiry.Valid {
 		deadline = time.Unix(0, row.expiry.Int64).UTC()
@@ -232,6 +207,17 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	until, err := leaseBound(now, deadline, deref(p.Capability.ExpiresAt))
 	if err != nil {
 		return UnitClaim{}, err
+	}
+	chain, err := authorityChainTx(ctx, tx, p.Authority, false)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	if meteredPlacement(p.Capability, chain[len(chain)-1].principal.Capability) {
+		selected, err := unitBillingPriceTx(ctx, tx, requirements.Selector, profile)
+		if err != nil {
+			return UnitClaim{}, err
+		}
+		row.selectedPrice = &selected
 	}
 	row.holder, row.generation, row.lease = p.Capability.Subject.ID, row.generation+1, sql.NullInt64{Int64: until.UnixNano(), Valid: true}
 	issued, err := tx.store.issueTx(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &spec}, &row)
@@ -245,10 +231,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if until, err = leaseBoundTx(ctx, tx, issued.Capability.Prefix, now, until, funded); err != nil {
 		return UnitClaim{}, err
 	}
-	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: unit.RunID, NodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: row.generation, LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
+	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation), LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
 	if unit.Kind == capability.UnitNode {
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: row.generation}
-		_, err = transitionNodeTx(ctx, tx, team, NodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: TransitionExtra{Claim: &claim.Award}}, now)
+		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
+		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement.reason, team, unit.RunID, unit.NodeID)
 		}
@@ -268,26 +254,30 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 			deadline = time.Unix(0, ownerUntil).UTC()
 		}
 	}
-	if !deadline.After(tx.now()) {
+	current := tx.now(ctx)
+	if !deadline.After(current) {
 		return UnitClaim{}, holderRefusal()
 	}
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: row.holder, Generation: row.generation}
+		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 	}
 	if unit.Kind == capability.UnitEval {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Holder: row.holder, Generation: row.generation}
+		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 	}
 	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
 		observation := demand
 		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
 		observation.Labels = match.SelfAsserted(observation.Labels)
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
 			return UnitClaim{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now().UnixNano(), team, observation.CapabilityPrefix); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now(ctx).UnixNano(), team, observation.CapabilityPrefix); err != nil {
 			return UnitClaim{}, err
 		}
+	}
+	if err := recordClaimAwardTx(ctx, tx, team); err != nil {
+		return UnitClaim{}, err
 	}
 	return claim, nil
 }
@@ -326,4 +316,22 @@ func claimPurpose(kind capability.UnitKind) capability.AwardPurpose {
 	default:
 		return capability.PurposeWork
 	}
+}
+
+func claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) error {
+	var team Team
+	if err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
+		return err
+	}
+	diagnostic, err := explainUnitEligibilityTx(ctx, tx, team, unit, demand)
+	if err != nil {
+		return err
+	}
+	if !diagnostic.ok() {
+		return diagnostic.refused
+	}
+	if err := checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
+		return err
+	}
+	return errRankingHold
 }

@@ -97,7 +97,7 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 			e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithGitHubApp(cfg) })
 			engineSQL(t, e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',42,'acme','Organization',1,1)`)
 			engineSQL(t, e.Store, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:701',701,'acme/widgets',7,'owner',1)`)
-			row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "nightly", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701}, time.Now())
+			row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "nightly", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701})
 			if err != nil {
 				t.Fatal(err)
 			}

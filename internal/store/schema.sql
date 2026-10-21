@@ -10,6 +10,7 @@ CREATE TABLE teams (
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
     claim_ranking TEXT NOT NULL DEFAULT '',
+    claim_award_ordinal BIGINT NOT NULL DEFAULT 0 CHECK(claim_award_ordinal >= 0),
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),
@@ -29,6 +30,12 @@ CREATE TABLE teams (
     CHECK((card_payment_method = '') = (card_fingerprint = '') AND (card_payment_method = '') = (card_customer = '')),
     CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_payment_method <> ''))
 );
+
+CREATE TABLE claim_awards (
+    singleton BIGINT PRIMARY KEY CHECK(singleton=1),
+    ordinal BIGINT NOT NULL DEFAULT 0 CHECK(ordinal >= 0)
+);
+INSERT INTO claim_awards(singleton,ordinal) VALUES (1,0);
 
 CREATE TABLE runs (
     team TEXT NOT NULL REFERENCES teams(name),
@@ -52,6 +59,7 @@ CREATE TABLE runs (
     git_sha TEXT NOT NULL DEFAULT '',
     repo_key TEXT NOT NULL,
     repo_display TEXT NOT NULL DEFAULT '',
+    repo_identity TEXT NOT NULL DEFAULT '',
     retry_of TEXT NOT NULL DEFAULT '',
     lineage_json BLOB,
     replay_of_run_id TEXT NOT NULL DEFAULT '',
@@ -71,6 +79,7 @@ CREATE TABLE runs (
     started_at BIGINT,
     finished_at BIGINT,
     cancel_requested_at BIGINT,
+    drain_deadline_at BIGINT GENERATED ALWAYS AS (cancel_requested_at + 300000000000) STORED,
     cancel_reason TEXT NOT NULL DEFAULT '',
     claim_wait_ns BIGINT NOT NULL DEFAULT 0,
     state_seq BIGINT NOT NULL DEFAULT 0 CHECK(state_seq >= 0),
@@ -141,6 +150,7 @@ CREATE TABLE nodes (
     on_failure_of TEXT NOT NULL DEFAULT '',
     continue_on_error BIGINT NOT NULL DEFAULT 0,
     cancel_requested_at BIGINT,
+    drain_deadline_at BIGINT GENERATED ALWAYS AS (cancel_requested_at + 300000000000) STORED,
     cancel_reason TEXT NOT NULL DEFAULT '',
     approval_json BLOB,
     attention_reason TEXT NOT NULL DEFAULT '',
@@ -205,6 +215,7 @@ CREATE TABLE triggers (
     prefers_labels BLOB NOT NULL,
     disruptions BIGINT NOT NULL DEFAULT 0 CHECK(disruptions BETWEEN 0 AND 3),
     cancel_requested_at BIGINT,
+    drain_deadline_at BIGINT GENERATED ALWAYS AS (cancel_requested_at + 300000000000) STORED,
     webhook_delivery TEXT NOT NULL DEFAULT '',
     webhook_replay_key TEXT NOT NULL DEFAULT '',
     github_check_run_id BIGINT NOT NULL DEFAULT 0,
@@ -695,8 +706,16 @@ CREATE TABLE github_app_delivery_ids (
 
 CREATE TABLE github_app_delivery_effects (
     digest TEXT NOT NULL REFERENCES github_app_deliveries(digest) ON DELETE CASCADE,
-    effect TEXT NOT NULL,
+    effect TEXT NOT NULL CHECK(effect <> ''),
+    result TEXT NOT NULL DEFAULT 'null',
     PRIMARY KEY (digest, effect)
+);
+
+CREATE TABLE github_app_publications (
+    team TEXT NOT NULL REFERENCES teams(name),
+    repository_id BIGINT NOT NULL,
+    generation BIGINT NOT NULL DEFAULT 0 CHECK(generation >= 0),
+    PRIMARY KEY(team,repository_id)
 );
 
 CREATE TABLE team_deletions (

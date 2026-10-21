@@ -190,7 +190,7 @@ func TestAppScheduleReplacementIsAtomicAndMemberReplaceKeepsAppRows(t *testing.T
 		return row, request
 	}
 	row, request := makeInput(0)
-	ids, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 7, 701, repo, []CronSchedule{row}, []runspec.Request{request})
+	ids, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 7, 701), repo, []CronSchedule{row}, []runspec.Request{request})
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("App arm: %v %v", ids, err)
 	}
@@ -212,11 +212,11 @@ func TestAppScheduleReplacementIsAtomicAndMemberReplaceKeepsAppRows(t *testing.T
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET installation_id=8,enabled_at=? WHERE team=? AND repository_id=701`, time.Now().UnixNano(), tenant.team)
 	other, otherRequest := makeInput(1)
 	other.ID, other.GitHubInstallationID = "app-other-installation", 8
-	otherIDs, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 8, 701, repo, []CronSchedule{other}, []runspec.Request{otherRequest})
+	otherIDs, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 8, 701), repo, []CronSchedule{other}, []runspec.Request{otherRequest})
 	if err != nil || len(otherIDs) != 1 {
 		t.Fatalf("other installation arm: %v %v", otherIDs, err)
 	}
-	_, withdrawn, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 8, 701, repo, nil, nil)
+	_, withdrawn, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 8, 701), repo, nil, nil)
 	if err != nil || len(withdrawn) != 1 {
 		t.Fatalf("own installation withdrawal: %v %v", withdrawn, err)
 	}
@@ -231,7 +231,7 @@ func TestAppScheduleReplacementIsAtomicAndMemberReplaceKeepsAppRows(t *testing.T
 		r.ID, r.GitHubInstallationID = fmt.Sprintf("app-eight-%d", i), 8
 		rows, requests = append(rows, r), append(requests, q)
 	}
-	if _, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), 8, 701, repo, rows, requests); err == nil {
+	if _, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 8, 701), repo, rows, requests); err == nil {
 		t.Fatal("App schedule cap accepted")
 	}
 	after, err := tenant.ListCronSchedules(t.Context())
@@ -511,4 +511,13 @@ func TestScheduleRepositoryCapCommitsOnlyTenRepositories(t *testing.T) {
 	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil {
 		t.Fatalf("replacement at cap: %v", err)
 	}
+}
+
+func prepareAppPublication(t *testing.T, tenant *Tenant, installation, repository int64) GitHubAppPublication {
+	t.Helper()
+	p, _, err := tenant.PrepareGitHubAppPublication(t.Context(), installation, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

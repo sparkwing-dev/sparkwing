@@ -170,7 +170,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return bindingRefusal()
 		}
 		var err error
-		result, err = admitRun(ctx, tx, t.team, request, tx.now())
+		result, err = admitRun(ctx, tx, t.team, request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -181,26 +181,26 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 			return nil
 		}
 		cursor, next := schedule.CursorAt, schedule.NextDueAt
-		fire := &CronFire{DueAt: due, DecidedAt: tx.now(), Outcome: CronOutcomeFired, RunID: result.RunID, Args: input.RequestedArgs}
+		fire := &CronFire{DueAt: due, DecidedAt: tx.now(ctx), Outcome: CronOutcomeFired, RunID: result.RunID, Args: input.RequestedArgs}
 		if due.IsZero() {
-			fire.DueAt, fire.Detail = tx.now(), "run now"
+			fire.DueAt, fire.Detail = tx.now(ctx), "run now"
 		} else {
 			if in.consent != "" {
 				expected, err := scheduleNext(schedule, due.Add(-time.Nanosecond), 0)
 				if err != nil {
 					return err
 				}
-				if due.After(tx.now()) || !due.After(schedule.CursorAt) || expected == nil || !expected.Equal(due) {
+				if due.After(tx.now(ctx)) || !due.After(schedule.CursorAt) || expected == nil || !expected.Equal(due) {
 					return authorityError(apierr.Conflict, "schedule instant is not due")
 				}
 			}
 			cursor = due
-			next, err = scheduleNext(schedule, tx.now(), 0)
+			next, err = scheduleNext(schedule, tx.now(ctx), 0)
 			if err != nil {
 				return err
 			}
 		}
-		return t.resolveCronDueTx(ctx, tx, schedule.ID, cursor, next, fire, tx.now())
+		return t.resolveCronDueTx(ctx, tx, schedule.ID, cursor, next, fire, tx.now(ctx))
 	})
 	if err != nil {
 		return AdmissionResult{}, err

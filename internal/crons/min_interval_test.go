@@ -43,7 +43,7 @@ func TestTickRefusesAScheduleBelowTheMinInterval(t *testing.T) {
 		Cron: "*/5 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip,
 		Where: store.CronWhereController, GitBranch: "main", NextDueAt: &next,
 		GitHubInstallationID: 7, GitHubRepositoryID: 701,
-	}, time.Now()); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Operator.SetComputeLimits(ctx, map[string]int64{store.ComputeLimitCronSeconds: 900}); err != nil {

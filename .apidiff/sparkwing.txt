@@ -77,7 +77,6 @@ type ConcurrencyLimit struct {
 	CancelTimeout time.Duration
 }
 type ConsumeOption func(*consumeEdge)
-func Cores(n float64) ResourceHint
 func Debug(ctx context.Context, format string, args ...any)
 type Dep interface {
 	depID() string
@@ -197,7 +196,6 @@ func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup
 func (g *JobGroup) Optional() *JobGroup
 func (g *JobGroup) Prefers(labels ...string) *JobGroup
 func (g *JobGroup) Requires(labels ...string) *JobGroup
-func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup
 func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup
 func (g *JobGroup) Timeout(d time.Duration) *JobGroup
@@ -225,7 +223,6 @@ func (n *JobNode) OnFailure(id string, x any) *JobNode
 func (n *JobNode) Optional() *JobNode
 func (n *JobNode) Prefers(labels ...string) *JobNode
 func (n *JobNode) Requires(labels ...string) *JobNode
-func (n *JobNode) Resources(hints ...ResourceHint) *JobNode
 func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode
 func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode
 func (n *JobNode) StartsChildren(pipelines ...string) *JobNode
@@ -256,7 +253,6 @@ type MemoOption func(*memoOptions)
 func MemoTTL(d time.Duration) MemoOption
 type MemoValue string
 const Memoized Outcome = "memoized"
-func MemoryGB(n float64) ResourceHint
 func MustSecret(ctx context.Context, name string) string
 func MustVariable(ctx context.Context, name string) string
 func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup
@@ -286,7 +282,6 @@ func (p *Plan) Checkout(config Checkout) *Plan
 func (p *Plan) ClaimWait(d time.Duration) *Plan
 func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan
 func (p *Plan) Priority(n int) *Plan
-func (p *Plan) Resources(hints ...ResourceHint) *Plan
 type Produces[T any] struct{}
 type PullRequest struct {
 	Number int
@@ -316,12 +311,6 @@ func RefTo[T any](n *JobNode) Ref[T]
 func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T]
 func Register[T any](name string, factory func() Pipeline[T])
 func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])
-type ResourceHint func(*ResourceHints)
-type ResourceHints struct {
-	Cores float64
-
-	MemoryBytes int64
-}
 type RetryConfig struct {
 	Attempts int
 	Backoff  time.Duration

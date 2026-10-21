@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func rankingFixture(t *testing.T, funded bool) *store.RankingFixture {
@@ -275,7 +274,7 @@ func TestRankingReplacesPreferenceHolds(t *testing.T) {
 	f.At(time.Second)
 	f.Poll(t, f.Launcher, capability.UnitNode)
 	ctx := store.WithClaimPlacement(t.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: []string{"name=runner"}, Hold: time.Hour}, {}}, Liveness: time.Hour})
-	claim, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}})
 	if err != nil || claim.NodeID != "job" {
 		t.Fatalf("first-come ranking still applied a preference hold: %+v %v", claim, err)
 	}
@@ -352,7 +351,7 @@ func TestCreditNoticeCountsAnActionsRunner(t *testing.T) {
 
 func TestRankingAnUnpricedCloudClassDoesNotBlockAnotherClaimant(t *testing.T) {
 	f := rankingFixture(t, true)
-	f.JobCores(t, 4)
+	f.RequireOnJobs(t, "sparkwing-4cpu")
 	table := store.CreditRateTable{{Cores: 1, MicroPerSecond: 1}}
 	if _, err := f.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)

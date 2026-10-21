@@ -368,7 +368,7 @@ var errSignInIdentityChanged = errors.New("store: sign-in identity changed durin
 // Only a new account meets the sign-up gate: c and the stored gate decide
 // whether it is admitted or waitlisted. An account that already exists, or an
 // identity that links to one, is never gated.
-func (o *Operator) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
+func (o *Operator) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions) (SignInResult, error) {
 	p.Email = NormalizeEmail(p.Email)
 	switch {
 	case p.Provider == "" || p.Subject == "":
@@ -380,7 +380,7 @@ func (o *Operator) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpC
 	// after a concurrent sign-in or unlink changes the first decision.
 	var last error
 	for range 5 {
-		res, err := o.s.resolveSignInOnce(ctx, p, c, now)
+		res, err := o.s.resolveSignInOnce(ctx, p, c)
 		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken) && !errors.Is(err, errSignInIdentityChanged)) {
 			return res, err
 		}
@@ -389,11 +389,11 @@ func (o *Operator) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpC
 	return SignInResult{}, last
 }
 
-func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
+func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUpConditions) (SignInResult, error) {
 	var result SignInResult
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		result, err = tx.operator.resolveSignInTx(ctx, tx, p, c, now)
+		result, err = tx.operator.resolveSignInTx(ctx, tx, p, c, tx.now(ctx))
 		return err
 	})
 	if err != nil {
@@ -676,11 +676,7 @@ func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ 
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	var out []Membership
 	for rows.Next() {
 		m := Membership{AccountID: accountID}
@@ -696,18 +692,20 @@ func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ 
 
 // OpenInvitationsForEmail lists the unaccepted, unexpired invitations to an
 // address, from every team.
-func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error) {
-	rows, err := o.s.query(ctx, invitationSelect+`
+func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (out []Invitation, err error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackOrLog(tx)
+
+	rows, err := tx.QueryContext(ctx, invitationSelect+`
 		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().UnixNano())
+		ORDER BY i.created_at`, NormalizeEmail(email), tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	return scanInvitations(rows)
 }
 
@@ -715,7 +713,7 @@ const invitationSelect = `
 	SELECT i.id, i.team, t.display_name, i.email, i.role, i.invited_by, i.created_at, i.expires_at
 	FROM invitations i JOIN teams t ON t.name = i.team`
 
-func scanInvitations(rows *sql.Rows) ([]Invitation, error) {
+func scanInvitations(rows rowCursor) ([]Invitation, error) {
 	var out []Invitation
 	for rows.Next() {
 		var inv Invitation
@@ -743,15 +741,13 @@ type InvitationAcceptance struct {
 	GateClosed *SignUpGate
 }
 
-func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
+func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string) (InvitationAcceptance, error) {
 	var none InvitationAcceptance
-	at := now.UTC().UnixNano()
-
 	var team, email, role, inviter string
 	var expires int64
 	var accepted, withdrawn sql.NullInt64
 	err := tx.QueryRowContext(ctx,
-		`SELECT team, email, role, invited_by, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
+		`SELECT team, email, role, invited_by, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`+tx.forUpdate(), invitationID).
 		Scan(&team, &email, &role, &inviter, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return none, ErrNotFound
@@ -768,15 +764,17 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	if !acct.EmailVerified || acct.Email != email {
 		return none, ErrEmailMismatch
 	}
-	if accepted.Valid || withdrawn.Valid || expires <= now.UnixNano() {
-		return none, ErrInvitationClosed
-	}
 	// safety: the gate row is locked before the member count and the admission
 	// count are read, so concurrent acceptances cannot both slip under a limit.
 	gate, err := lockSignUpGateTx(ctx, tx)
 	if err != nil {
 		return none, err
 	}
+	now := tx.now(ctx)
+	if accepted.Valid || withdrawn.Valid || expires <= now.UnixNano() {
+		return none, ErrInvitationClosed
+	}
+	at := now.UTC().UnixNano()
 	if err := checkTeamRoomTx(ctx, tx, Team(team), gate.Limits.FreeTeamMembers); err != nil {
 		return none, err
 	}
@@ -794,7 +792,7 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	// take it.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invitations SET accepted_at = ?, accepted_by = ?
-		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, now.UnixNano(), accountID, invitationID, team)
+		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at>?`, now.UnixNano(), accountID, invitationID, team, now.UnixNano())
 	if err != nil {
 		return none, err
 	}
@@ -922,7 +920,7 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
 			return err
 		}
-		now := tx.now()
+		now := tx.now(ctx)
 		expires := now.Add(ttl)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
  VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
@@ -931,7 +929,7 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 		if err := tx.operator.recordSessionMembershipsTx(ctx, tx, sessionDigest(raw)); err != nil {
 			return err
 		}
-		session = &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
+		session = &Session{Now: now, ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
 		return nil
 	})
 	if err != nil {
@@ -965,11 +963,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	var out []Membership
 	for rows.Next() {
 		m := Membership{Team: t.team}
@@ -1014,7 +1008,7 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 	return err
 }
 
-func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
+func scanPrefixes(rows rowCursor) (_ []string, err error) {
 	defer closeRowsInto(rows, &err)
 	var prefixes []string
 	for rows.Next() {
@@ -1121,17 +1115,19 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 }
 
 // Invitations lists t's open invitations.
-func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error) {
-	rows, err := t.s.query(ctx, invitationSelect+`
+func (t *Tenant) Invitations(ctx context.Context) (out []Invitation, err error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackOrLog(tx)
+
+	rows, err := tx.QueryContext(ctx, invitationSelect+`
 		WHERE i.team = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, string(t.team), now.UTC().UnixNano())
+		ORDER BY i.created_at`, string(t.team), tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeRowsInto(rows, &err)
 	return scanInvitations(rows)
 }

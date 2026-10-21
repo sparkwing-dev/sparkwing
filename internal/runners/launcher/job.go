@@ -237,9 +237,9 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 
 func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Container {
 	b := a.Binding
-	args := []string{verb, "--controller", cfg.ControllerURL, "--run", b.RunID, "--generation", strconv.FormatInt(b.Generation, 10), "--source-dir", "/tmp/source", "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
+	args := []string{verb, "--controller", cfg.ControllerURL, "--run", string(b.RunID), "--generation", strconv.FormatInt(int64(b.Generation), 10), "--source-dir", "/tmp/source", "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
 	if b.NodeID != "" {
-		args = append(args, "--job", b.NodeID)
+		args = append(args, "--job", string(b.NodeID))
 	}
 	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
 }

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
@@ -34,7 +32,6 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 			if err := (&Tenant{s: s, team: "a"}).UpsertProfilePin(t.Context(), sealedRun.Pipeline, "job", 96, 1<<40); err != nil {
 				t.Fatal(err)
 			}
-			demand.Available, demand.Capacity = match.Resources{Cores: 128, MemoryBytes: 1 << 40}, match.Resources{Cores: 128, MemoryBytes: 1 << 40}
 			claim, _ := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: claim.Team}
 			charges, err := tenant.ListCreditCharges(t.Context(), 100)
@@ -85,7 +82,6 @@ func TestMeteredAwardRefusesUnpricedResourcesAtomically(t *testing.T) {
 		t.Run(fmt.Sprint(cores), func(t *testing.T) {
 			s, demand, _ := meteredUnitFixture(t, true)
 			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)))
-			demand.Available, demand.Capacity = match.Resources{Cores: 128}, match.Resources{Cores: 128}
 			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if !errors.Is(err, ErrUnpricedCPUClass) {
 				t.Fatalf("unpriced claim: %v", err)

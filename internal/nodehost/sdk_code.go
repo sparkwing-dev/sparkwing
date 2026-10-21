@@ -39,7 +39,7 @@ func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage Sto
 	if h.ReadOutput == nil {
 		return nil, executorError(apierr.Unavailable, "result storage is not configured")
 	}
-	return h.ReadOutput(ctx, row.Ref, row.Generation)
+	return h.ReadOutput(ctx, row.Ref, int64(row.Generation))
 }
 
 type executorSession struct {

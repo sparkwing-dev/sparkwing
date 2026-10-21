@@ -362,9 +362,6 @@
           },
           "type": "array"
         },
-        "resources": {
-          "$ref": "#/$defs/ResourceSpec"
-        },
         "result_step": {
           "type": "string"
         },
@@ -499,9 +496,6 @@
         "priority": {
           "type": "integer"
         },
-        "resources": {
-          "$ref": "#/$defs/ResourceSpec"
-        },
         "source": {
           "$ref": "#/$defs/SourceSpec"
         }
@@ -509,18 +503,6 @@
       "required": [
         "jobs"
       ],
-      "type": "object"
-    },
-    "ResourceSpec": {
-      "additionalProperties": false,
-      "properties": {
-        "cores": {
-          "type": "number"
-        },
-        "memory_bytes": {
-          "type": "integer"
-        }
-      },
       "type": "object"
     },
     "RetrySpec": {

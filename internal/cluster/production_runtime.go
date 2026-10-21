@@ -41,10 +41,7 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			capacity, err := runnerCapacity(home, version, options.Config, engines)
-			if err != nil {
-				return runners.RuntimeConfig{}, err
-			}
+
 			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept, options.actions)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
@@ -52,13 +49,13 @@ func ProductionRuntime(version string) Runtime {
 			}
 			return runners.RuntimeConfig{
 				Installation: installation, Versions: engines, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-				Hosting: hosting, RequestCapacity: capacity,
+				Hosting: hosting,
 			}, nil
 		}},
 		Bootstrap: BootstrapRuntime{
 			Source: func(_ context.Context, options BootstrapOptions) (launcher.SourceInit, error) {
 				return launcher.SourceInit{Bind: func(_ context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
-					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, award.Binding.RunID, award.Source)
+					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, string(award.Binding.RunID), award.Source)
 					return source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}}, nil, err
 				}}, nil
 			},

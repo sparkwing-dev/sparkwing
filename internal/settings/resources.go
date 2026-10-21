@@ -2,73 +2,11 @@ package settings
 
 import (
 	"fmt"
-	"math"
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
-
-func dimension[T any](in Inputs, key string, field func(runspec.Resources) runspec.Setting[T]) runspec.Setting[T] {
-	for _, source := range sources(in, "resources") {
-		resources := in.options(source).Resources
-		if value := field(resources.Value); resources.Set && value.Set {
-			value.Origin = nestedRunOrigin(value.Origin, resources.Origin, source, key)
-			return value
-		}
-	}
-	return runspec.Setting[T]{}
-}
-
-func resourceSetting(in Inputs) (runspec.Setting[runspec.Resources], error) {
-	cores := dimension(in, "resources.cores", func(v runspec.Resources) runspec.Setting[float64] { return v.Cores })
-	memory := dimension(in, "resources.memory_bytes", func(v runspec.Resources) runspec.Setting[int64] { return v.MemoryBytes })
-	if !cores.Set && !memory.Set {
-		return runspec.Setting[runspec.Resources]{}, nil
-	}
-	origin := cores.Origin
-	if !cores.Set {
-		origin = memory.Origin
-	}
-	out := declaration(runspec.Resources{Cores: cores, MemoryBytes: memory}, origin)
-	op := runspec.Ceilings{}
-	if in.Context.Submitter {
-		var err error
-		op, err = operatorCeilings(in)
-		if err != nil {
-			return out, err
-		}
-	}
-	if cores.Set {
-		from := fromOrigin(cores.Origin)
-		if from.Source == "" || cores.Value <= 0 || math.IsNaN(cores.Value) || math.IsInf(cores.Value, 0) {
-			return out, invalid("resources.cores", from, "must be positive and finite with a known origin")
-		}
-		if ceiling := op.Resources.Value.Cores; op.Resources.Set && ceiling.Set && cores.Value > ceiling.Value {
-			return out, above("resources.cores", from, cores.Value, ceiling.Value, fromOrigin(ceiling.Origin))
-		}
-	}
-	if memory.Set {
-		from := fromOrigin(memory.Origin)
-		if from.Source == "" || memory.Value <= 0 {
-			return out, invalid("resources.memory_bytes", from, "must be positive with a known origin")
-		}
-		if ceiling := op.Resources.Value.MemoryBytes; op.Resources.Set && ceiling.Set && memory.Value > ceiling.Value {
-			return out, above("resources.memory_bytes", from, memory.Value, ceiling.Value, fromOrigin(ceiling.Origin))
-		}
-	}
-	return out, nil
-}
-
-// ResourceLimits merges native dimensions and refuses each excess independently.
-func ResourceLimits(in Inputs) (runspec.Resources, Origin, error) {
-	setting, err := resourceSetting(in)
-	origin := fromOrigin(setting.Origin)
-	if !setting.Set {
-		origin = Origin{Source: Default, Key: "resources.cores"}
-	}
-	return setting.Value, origin, err
-}
 
 func clonePointer[T any](value *T) *T {
 	if value == nil {

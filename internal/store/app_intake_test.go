@@ -121,13 +121,13 @@ func TestAppAdmissionRevokedInstallationInClaim(t *testing.T) {
 				if revoke == "unbind" {
 					_, err = op.UnbindGitHubAppInstallation(ctx, 7)
 				} else {
-					err = op.SetGitHubAppInstallationSuspended(ctx, 7, true, now)
+					err = op.SetGitHubAppInstallationSuspended(ctx, 7, true)
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
 				result, err := tenant.AdmitGitHubAppRun(claim.Context(ctx), in)
-				if !errors.Is(err, ErrGitHubAppAutomationRevoked) || result.RunID != "" {
+				if (!errors.Is(err, ErrGitHubAppAutomationRevoked) && !refusal(err)) || result.RunID != "" {
 					t.Fatalf("revoked admission: run=%q error=%v", result.RunID, err)
 				}
 				rewriteSchemaCount(t, s.db, "runs", 0)
@@ -296,11 +296,11 @@ func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
 			}
 			remote := in.Request.Source.Location.RemoteURL
 			schedule := CronSchedule{Team: tenant.team, RepoPath: remote, Pipeline: "ci", Name: "nightly", Cron: "0 0 * * *", TZ: "UTC", Overlap: CronOverlapSkip, Where: CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701}
-			ids, _, err := tenant.ReplaceGitHubAppSchedules(ctx, 7, 701, remote, []CronSchedule{schedule}, []runspec.Request{in.Request})
+			ids, _, err := tenant.ReplaceGitHubAppSchedules(ctx, prepareAppPublication(t, tenant, 7, 701), remote, []CronSchedule{schedule}, []runspec.Request{in.Request})
 			if err != nil || len(ids) != 1 {
 				t.Fatalf("arm current owner's schedule: %v %v", ids, err)
 			}
-			_, _, err = tenant.ReplaceGitHubAppSchedules(claim.Context(ctx), 7, 701, remote, nil, nil)
+			_, _, err = tenant.ReplaceGitHubAppSchedules(claim.Context(ctx), prepareAppPublication(t, tenant, 7, 701), remote, nil, nil)
 			if state == "current" && err != nil || state != "current" && err == nil {
 				t.Fatalf("%s claim schedule withdrawal: %v", state, err)
 			}

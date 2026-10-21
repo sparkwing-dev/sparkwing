@@ -27,6 +27,7 @@ func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 		if _, err := s.exec(t.Context(), query, args...); err != nil {
 			t.Fatal(err)
 		}
+		projectFixtureClaimRepositories(t, s.db, s.dialect, query)
 	}
 	now := time.Unix(1700000000, 0).UTC()
 	if s.dialect == DialectPostgres {
@@ -43,16 +44,16 @@ func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
 	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','host','execute',?,'account',1,'r30',30)`, request, []byte(`[]`))
 	exec(`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
-	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Value: 4, Set: true}}}, Set: true}}}
+	execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
 	body, err := json.Marshal(execution)
 	if err != nil {
 		t.Fatal(err)
 	}
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), body)
-	return s, UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	return s, UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Labels: []string{"sparkwing-4cpu"}}
 }
 
-func TestClaimUnitNamedAndQueuedUseCapacityAndIdentity(t *testing.T) {
+func TestClaimUnitNamedAndQueuedUseLabelsAndIdentity(t *testing.T) {
 	for _, named := range []bool{true, false} {
 		t.Run(map[bool]string{true: "named", false: "queue"}[named], func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
@@ -60,16 +61,11 @@ func TestClaimUnitNamedAndQueuedUseCapacityAndIdentity(t *testing.T) {
 				demand.Target = nil
 				demand.Kinds = []capability.UnitKind{capability.UnitNode}
 			}
-			demand.Capacity.Cores, demand.Available.Cores = 2, 2
+			demand.Labels = []string{"sparkwing-2cpu"}
 			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
-				t.Fatal("two-core runner claimed four-core job")
+				t.Fatal("runner claimed work without its required size label")
 			}
-			demand.Capacity.Cores, demand.Available.Cores = 8, 0
-			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
-				t.Fatal("busy runner claimed job")
-			}
-			demand.Available.Cores = 8
-			demand.Labels = []string{"name=forged", "class=cloud"}
+			demand.Labels = []string{"sparkwing-4cpu", "name=forged", "class=cloud"}
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
@@ -106,7 +102,7 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				demand.Labels = []string{"pool=prod"}
 			case "name":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["name=other"]}}`))
-				demand.Labels = []string{"name=other"}
+				demand.Labels = []string{"name=other", "sparkwing-4cpu"}
 			case "labels":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["gpu"]}}`))
 			case "expired":
@@ -144,11 +140,11 @@ type claimProfileFake struct {
 	before    func()
 }
 
-func (f claimProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+func (f claimProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
 	if f.before != nil {
 		f.before()
 	}
-	return f.profile, f.available, nil
+	return f.profile, nil
 }
 
 func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.T) {
@@ -499,7 +495,7 @@ func TestClaimUnitInheritsRunnerSelection(t *testing.T) {
 						selected = "gpu"
 					}
 					setClaimRunnerSelection(t, s, runspec.RunnerSelection{Kind: runnerKind, Value: selected})
-					demand.Labels = []string{"name=other"}
+					demand.Labels = []string{"name=other", "sparkwing-4cpu"}
 					if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 						t.Fatal("runner selection was ignored")
 					}

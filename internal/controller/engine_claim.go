@@ -13,7 +13,6 @@ import (
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RunnerAdmissionPolicy checks server-owned software policy before a new award.
@@ -71,7 +70,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
-	profile, _, err := s.authority.ReadClaimProfile(ctx, principal.Authority)
+	profile, err := s.authority.ReadClaimProfile(ctx, principal.Authority)
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
@@ -82,10 +81,6 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	if principal.Capability.Purpose == capability.PurposeHere || principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
 		profile.OS, profile.Arch = body.OS, body.Arch
-		profile.Capacity = match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}
-		if body.Capacity != nil {
-			profile.Capacity = *body.Capacity
-		}
 	}
 	c := principal.Capability
 	if (len(body.ExcludedTeamLabels) > 0 || body.JobNamespace != "") && !capability.Launcher(c) {
@@ -96,11 +91,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
-		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
+		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
+	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil
@@ -126,10 +121,10 @@ func engineClaimTarget(body controllerwire.ClaimRequest) (*store.UnitRef, error)
 		}
 		return nil, nil
 	}
-	target := &store.UnitRef{RunID: body.RunID}
+	target := &store.UnitRef{RunID: runspec.RunID(body.RunID)}
 	switch {
 	case body.JobID != "":
-		target.Kind, target.NodeID = capability.UnitNode, body.JobID
+		target.Kind, target.NodeID = capability.UnitNode, runspec.NodeID(body.JobID)
 	case slices.Contains(body.Kinds, capability.UnitTrigger) && !slices.Contains(body.Kinds, capability.UnitPlan):
 		target.Kind = capability.UnitTrigger
 	case slices.Contains(body.Kinds, capability.UnitPlan) && !slices.Contains(body.Kinds, capability.UnitTrigger):
@@ -155,7 +150,7 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	}
 	var node store.NodeRow
 	if claim.Kind == capability.UnitNode {
-		node, err = tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: claim.RunID, NodeID: claim.NodeID})
+		node, err = tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
 		if err != nil {
 			return controllerwire.ClaimedUnit{}, err
 		}
@@ -167,13 +162,11 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	}
 	switch claim.Kind {
 	case capability.UnitPlan, capability.UnitEval:
-		resources := run.Request.Request.Options.Resources
+		selectors := run.Request.Request.Options.Requires
 		if run.Spec != nil {
-			resources = run.Spec.Resolved.Settings.Options.Resources
+			selectors = run.Spec.Resolved.Settings.Options.Requires
 		}
-		unit.Execution = &runspec.JobExecutionSettings{Resources: resources}
-	case capability.UnitTrigger:
-		unit.Execution = nil
+		unit.Execution = &runspec.JobExecutionSettings{Requires: selectors}
 	}
 	unit.CloudResources, err = s.authority.CloudAwardResources(ctx, principal.Authority)
 	if err != nil {
@@ -215,13 +208,13 @@ func (s *EngineController) exchange(ctx context.Context, authorized capability.A
 	if err != nil {
 		return controllerwire.ExchangeResponse{}, err
 	}
-	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: store.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation, LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
+	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: store.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation), LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
 	if c.Unit == capability.UnitEval {
 		if snapshot.Binding.Expansion == nil {
 			return controllerwire.ExchangeResponse{}, invalidEngineBody("exchanged evaluation has no lease")
 		}
 		claim.SourceGeneration = c.Binding.Generation
-		claim.Award.Generation = snapshot.Binding.Expansion.Lease.Generation
+		claim.Award.Generation = runspec.ClaimGeneration(snapshot.Binding.Expansion.Lease.Generation)
 		claim.Award.LeaseExpiresAt = snapshot.Binding.Expansion.ExpiresAt
 	}
 	unit, err := s.claimedUnit(ctx, claim)

@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testing.T) {
@@ -33,7 +32,7 @@ func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testin
 				kind := []capability.UnitKind{capability.UnitPlan, capability.UnitNode}[i/len(contenders)%2]
 				group.Go(func() {
 					<-start
-					claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+					claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}})
 					var illegal *store.ErrIllegalTransition
 					switch {
 					case err == nil:
@@ -69,7 +68,7 @@ func TestPostgresAnAskInFlightHoldsTheLaterAward(t *testing.T) {
 	f.Poll(t, f.Launcher, capability.UnitNode)
 	claimed := make(chan error, 1)
 	go func() {
-		_, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+		_, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}})
 		claimed <- err
 	}()
 	select {

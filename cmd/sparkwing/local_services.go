@@ -25,7 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
@@ -205,10 +204,6 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 			Bearer:  claimant.Bearer,
 			Loop:    runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
 			OnError: func(err error) { slog.Error("local run host failed", "err", err) },
-			RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-				resources := match.Resources{Cores: float64(runtime.NumCPU())}
-				return resources, resources, nil
-			},
 			Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 				return newLocalNativeServices(ctx, b.Home, b.Store, binding, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
 			},

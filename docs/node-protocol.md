@@ -147,7 +147,7 @@ same rule. Reconstruction cannot change persisted topology.
 ### Plan document
 
 A plan has a required `jobs` array. Its optional top-level declarations are
-`concurrency`, `resources`, `priority`, `claim_wait_ms`, `admission_class` and
+`concurrency`, `priority`, `claim_wait_ms`, `admission_class` and
 `source`. The host resolves these settings and checks operator ceilings when it
 accepts the plan. Run identity, accepted hashes, authorization and computed
 concurrency keys remain host state.
@@ -164,7 +164,7 @@ Each job is flat:
 | `closures`, `skip_if_budget_ms` | Opaque callback IDs and condition budget |
 | `approval` | Manual decision with message, timeout and timeout policy |
 | `memo`, `caches`, `artifacts`, `consumes`, `pipeline_refs` | Result reuse, files and declared read edges |
-| `env`, `requires`, `prefers`, `inline`, `concurrency`, `resources` | Execution declarations |
+| `env`, `requires`, `prefers`, `inline`, `concurrency` | Execution declarations |
 
 Executable jobs declare one or more steps. An approval has no step body. Steps
 have `id`, optional `needs`, `groups`, `finally`, `risks`, `optional`,
@@ -190,7 +190,7 @@ Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
 computes scoped keys and checks consistent group definitions. Scopes are
 `global`, `run` and `box`. Policies are `queue`, `fail`, `skip` and `cancel_others`.
 
-`resources` carries optional `cores` and `memory_bytes`. `source` carries
+Runner size is a `requires` label, such as `sparkwing-4cpu`. `source` carries
 optional checkout declarations `full_history`, `depth`, `tags`, `submodules` and
 `lfs`. Presence is significant for all optional numeric and boolean settings.
 

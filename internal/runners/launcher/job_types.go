@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -33,17 +34,20 @@ type CloudJobConfig struct {
 type CloudJobBinding struct {
 	Kind                           CloudUnitKind
 	UnitID                         string
-	Team, RunID, NodeID, Holder    string
-	Generation, Attempt            int64
-	SourceNodeID                   string
-	SourceGeneration               int64
+	Team, Holder                   string
+	RunID                          runspec.RunID
+	NodeID                         runspec.NodeID
+	Generation                     runspec.ClaimGeneration
+	Attempt                        runspec.AttemptOrdinal
+	SourceNodeID                   runspec.NodeID
+	SourceGeneration               runspec.ClaimGeneration
 	OwnerDeadline, AttemptDeadline time.Time
 	ParentCapabilityExpiry         time.Time
 }
 
 // LeaseRef returns the awarded unit fence, including the eval lease generation.
 func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
-	lease := capability.LeaseRef{ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+	lease := capability.LeaseRef{ID: binding.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}
 	switch binding.Kind {
 	case CloudPlan:
 		lease.Kind = capability.UnitPlan

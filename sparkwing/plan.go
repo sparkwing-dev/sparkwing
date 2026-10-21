@@ -32,8 +32,6 @@ type Plan struct {
 
 	planConcurrency []planConcurrency
 
-	resources *ResourceHints
-
 	priority int
 
 	claimWait time.Duration
@@ -235,8 +233,6 @@ type JobNode struct {
 	concurrency *concurrencyMembership
 
 	dirCaches []DirCache
-
-	resources *ResourceHints
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn

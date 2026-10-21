@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -22,9 +21,6 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 				Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
 				Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "cloud"}}},
 			}
-			request.Options.Resources.Value.Cores.Value = 4
-			request.Options.Resources.Value.Cores.Set = true
-			request.Options.Resources.Set = true
 			request.Options.OwnerExecutionTimeout = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}
 			fixture := newStoreHostFixtureForRequest(t, openStore(t), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, request)
 			daemon := newFakeDaemon()
@@ -34,7 +30,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 					if request.SemaphoresOnly {
 						return daemon.Acquire(ctx, request, queued)
 					}
-					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"})
 					if err != nil || row.ReadyAt == nil || row.ClaimedBy != "" || row.Attempt != 0 {
 						t.Errorf("machine admission consumed the claim before capacity: %+v %v", row, err)
 					}
@@ -46,7 +42,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed = true
 				requests := daemon.requests()
-				if len(requests) != 2 || !requests[0].SemaphoresOnly || requests[1].SemaphoresOnly || requests[1].Resources.Cores != 4 {
+				if len(requests) != 2 || !requests[0].SemaphoresOnly || requests[1].SemaphoresOnly || requests[1].Resources.Cores != 0 {
 					t.Errorf("shared owner lost per-job capacity: %+v", requests)
 				}
 				return fixture.report(ctx, input, store.NodeSuccess)
@@ -59,7 +55,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 				if err == nil || completion.Outcome != "" || executed {
 					t.Fatalf("machine observation failure did not stop safely: %+v %v", completion, err)
 				}
-				row, readErr := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+				row, readErr := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"})
 				if readErr != nil || row.ClaimedBy != "" || row.Attempt != 0 || row.Outcome != "" {
 					t.Fatalf("preclaim failure changed the job: %+v %v", row, readErr)
 				}
@@ -71,8 +67,8 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 			if err != nil || completion.Outcome != want || executed == refuse {
 				t.Fatalf("shared burst owner completion=%+v executed=%v error=%v", completion, executed, err)
 			}
-			row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
-			if err != nil || row.Outcome != store.NodeState(want) || row.Attempt != attempts || row.ClaimedBy != "" {
+			row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"})
+			if err != nil || row.Outcome != store.NodeState(want) || row.Attempt != runspec.AttemptOrdinal(attempts) || row.ClaimedBy != "" {
 				t.Fatalf("shared burst owner persisted the wrong result: %+v %v", row, err)
 			}
 			if live, granted, released := daemon.counts(); live != 0 || granted != released {
@@ -91,37 +87,19 @@ func TestBurstSharedOwnerContentionAfterPlacementLeavesJobUnclaimed(t *testing.T
 }
 
 func burstSharedOwnerContention(t *testing.T, optimistic bool) {
-	burstSharedOwnerContentionResources(t, optimistic, 4, 4096)
+	burstSharedOwnerContentionResources(t, optimistic)
 }
 
-func FuzzBurstMachineWaitNeverConsumesClaim(f *testing.F) {
-	f.Add(uint8(4), uint32(4096))
-	f.Add(uint8(1), uint32(0))
-	f.Fuzz(func(t *testing.T, cpu uint8, memory uint32) {
-		burstSharedOwnerContentionResources(t, true, 0.25+float64(cpu%32)/4, int64(memory))
-	})
-}
-
-func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores float64, memory int64) {
+func burstSharedOwnerContentionResources(t *testing.T, optimistic bool) {
 	t.Helper()
 	request := runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
 		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "name=desktop"}}},
 	}
-	request.Options.Resources.Set = true
-	request.Options.Resources.Value.Cores.Set = true
-	request.Options.Resources.Value.Cores.Value = cores
-	request.Options.Resources.Value.MemoryBytes.Set = memory > 0
-	request.Options.Resources.Value.MemoryBytes.Value = memory
 	request.Options.OwnerExecutionTimeout = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}
 	plan := capacityPlan("queue", 0, "job")
 	plan.Jobs[0].Concurrency[0].Scope = new("run")
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, request)
-	if !optimistic {
-		if err := fixture.Store.AsOperator().RecordHereAvailability(t.Context(), fixture.Actor.Authority, match.Resources{}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	requester, err := fixture.Store.AsOperator().ResolveAuthority(t.Context(), fixture.Control.Authority)
 	if err != nil {
 		t.Fatal(err)
@@ -175,18 +153,18 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	case <-ctx.Done():
 		t.Fatal("saturated machine blocked overflow readiness")
 	}
-	rowBefore, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+	rowBefore, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"})
 	if err != nil || rowBefore.ClaimedBy != "" || rowBefore.Attempt != 0 {
 		t.Fatalf("waiting for machine capacity consumed the overflow claim: %+v %v", rowBefore, err)
 	}
 	if live, _, _ := daemon.counts(); live != 2 {
 		t.Fatalf("ready burst lost its requester concurrency: live=%d", live)
 	}
-	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: fixture.Input.RunID, NodeID: "job"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := fixture.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"}})
 	if err != nil || claim.Kind != capability.UnitNode {
 		t.Fatalf("saturated owner's work was not claimable: %+v %v", claim, err)
 	}
-	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: fixture.Input.RunID, NodeID: "job"})
+	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}

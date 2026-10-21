@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const rankingSHA = "0123456789abcdef0123456789abcdef01234567"
@@ -32,6 +31,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	}
 	_, demand := unitClaimFixtureStore(t, s)
 	f := &RankingFixture{Store: s, Self: demand.CapabilityPrefix, ReadyAt: s.now()}
+	f.RequireOnJobs(t)
 	// Claimants must exist before the polls that establish availability at readiness.
 	f.now = f.ReadyAt.Add(-time.Minute)
 	s.pinnedClock = func() time.Time { return f.now }
@@ -106,7 +106,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 // Poll records the claimant's live observation at the current clock; only a held claim records an ask.
 func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.UnitKind) {
 	t.Helper()
-	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"sparkwing-4cpu"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -115,7 +115,7 @@ func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.U
 func (f *RankingFixture) Claim(t *testing.T, prefix string, kind capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kind)
-	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Labels: []string{"sparkwing-4cpu"}})
 }
 
 // Rank changes the team's claim ranking as the given member.
@@ -153,7 +153,7 @@ func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 func (f *RankingFixture) ClaimKinds(t *testing.T, prefix string, kinds ...capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kinds...)
-	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"sparkwing-4cpu"}})
 }
 
 // LocalQueue registers a local controller queue claimant of the team.
@@ -186,14 +186,4 @@ func (f *RankingFixture) OpenAsk(t *testing.T, prefix string, rank int, askedAt 
 			t.Error(err)
 		}
 	}
-}
-
-// JobCores sets every node's resolved core request.
-func (f *RankingFixture) JobCores(t *testing.T, cores float64) {
-	t.Helper()
-	body, err := json.Marshal(map[string]any{"resources": map[string]any{"set": true, "value": map[string]any{"cores": map[string]any{"set": true, "value": cores}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Store.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, body)
 }

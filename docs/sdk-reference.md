@@ -538,7 +538,6 @@ type JobGroup struct {
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
 - `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers ranks eligible runners for every member without relaxing requirements, reservations or resource bounds.
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires constrains runner claims for every non-inline dispatched member.
-- `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources pins the same peak on every member of the group.
 - `func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup` -- Retry configures every member to be re-attempted up to attempts additional times on failure.
 - `func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup` -- SkipIf registers a predicate on every member.
 - `func (g *JobGroup) Timeout(d time.Duration) *JobGroup` -- Timeout caps the per-attempt duration on every member.
@@ -576,9 +575,10 @@ type JobNode struct {
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
 - `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers ranks eligible runners without relaxing requirements, reservations or resource bounds.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
-- `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
+- `func (n *JobNode) StartsChildren(pipelines ...string) *JobNode` -- StartsChildren appends pipelines in the parent repository that this job may start with RunAndAwait.
+- `func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode` -- StartsChildrenIn declares child pipelines in a canonical repository key such as "gh:123" or "git:host/org/repo".
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
 - `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify checks a postcondition after each successful action attempt.
 
@@ -770,7 +770,6 @@ type Plan struct {
 - `func (p *Plan) ClaimWait(d time.Duration) *Plan` -- ClaimWait declares how long each ready job may wait for a runner claim.
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
 - `func (p *Plan) Priority(n int) *Plan` -- Priority sets this run's local admission priority.
-- `func (p *Plan) Resources(hints ...ResourceHint) *Plan` -- Resources pins the whole run's peak CPU and memory: an explicit, authoritative charge admission uses verbatim instead of measuring the pipeline.
 
 ### type Produces
 
@@ -838,37 +837,6 @@ type RefOption func(*refOpts)
 ```
 
 - `func MaxAge(d time.Duration) RefOption` -- MaxAge bounds cross-pipeline ref resolution to runs whose finished_at is within d.
-
-### type ResourceHint
-
-ResourceHint is one option for Plan.Resources or JobNode.Resources.
-
-```
-type ResourceHint func(*ResourceHints)
-```
-
-- `func Cores(n float64) ResourceHint` -- Cores pins the work's peak to n CPU cores.
-- `func MemoryGB(n float64) ResourceHint` -- MemoryGB pins the work's peak to n gigabytes of resident memory, where one gigabyte is 2^30 bytes.
-
-### type ResourceHints
-
-ResourceHints is the resolved resource pin declared via Plan.Resources or JobNode.Resources.
-
-```
-type ResourceHints struct {
-
-    // Cores is the pinned peak number of CPU cores the work uses.
-    // Fractional values are meaningful (0.5 = half a core). Zero means
-    // cores were not pinned.
-    Cores float64
-    // MemoryBytes is the pinned peak resident memory in bytes. Authors
-    // express this via [MemoryGB]; it is stored in bytes. Zero means
-    // memory was not pinned.
-    MemoryBytes int64
-    // contains filtered or unexported fields
-}
-```
-
 
 ### type RetryConfig
 

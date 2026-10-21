@@ -25,10 +25,11 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if request.Limit <= 0 {
 		return RetentionResult{}, fmt.Errorf("retention limit must be positive")
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
+
+	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
 		return RetentionResult{}, err
 	}
-	now := tx.now()
+	now := tx.now(ctx)
 	runDays, err := numericSettingTx(ctx, tx, "operator.run_retention_days", 0)
 	if err != nil {
 		return RetentionResult{}, err
@@ -83,7 +84,7 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {
+	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
 		return RetentionResult{}, err
 	}
 	return result, nil
@@ -170,12 +171,7 @@ ORDER BY c.prefix LIMIT ?)`, cutoff.UnixNano(), cutoff.UnixNano(), limit)
 	if err != nil {
 		return 0, err
 	}
-	claimant := `json_extract(value,'$.claimant')`
-	if tx.store.dialect == DialectPostgres {
-		claimant = `convert_from(value,'UTF8')::jsonb->>'claimant'`
-	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM settings WHERE key IN (SELECT key FROM settings WHERE key LIKE 'launcher_sweep/%' AND NOT EXISTS (SELECT 1 FROM capabilities WHERE prefix=`+claimant+`) ORDER BY key LIMIT ?)`, limit)
-	return count, err
+	return count, nil
 }
 
 func (op *Operator) deleteRetentionEffectsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, error) {

@@ -123,7 +123,7 @@ func (o *Operator) SampleSealedSecrets(ctx context.Context, sealedPrefix string,
 	return scanTeamSecretRows(rows)
 }
 
-func scanTeamSecretRows(rows *sql.Rows) ([]TeamSecret, error) {
+func scanTeamSecretRows(rows rowCursor) ([]TeamSecret, error) {
 	var out []TeamSecret
 	for rows.Next() {
 		var row TeamSecret
@@ -142,7 +142,7 @@ func scanTeamSecretRows(rows *sql.Rows) ([]TeamSecret, error) {
 	return out, rows.Err()
 }
 
-func scanSecretRows(rows *sql.Rows) ([]Secret, error) {
+func scanSecretRows(rows rowCursor) ([]Secret, error) {
 	var out []Secret
 	for rows.Next() {
 		var sec Secret

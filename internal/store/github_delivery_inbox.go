@@ -181,44 +181,71 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 	return &d, nil
 }
 
-// githubDeliveryMutationTx fences every inbox mutation to its live claim and
-// original connection. Lifecycle receipts make applied effects survive manual replay.
-func githubDeliveryMutationTx(ctx context.Context, tx *storeTx, effect string) (bool, error) {
+func githubDeliveryLeaseTx(ctx context.Context, tx *storeTx) (string, error) {
 	delivery, ok := ctx.Value(githubDeliveryContextKey{}).(GitHubDelivery)
 	if !ok {
-		return true, nil
+		return "", nil
 	}
 	installation := githubDeliveryInstallation(delivery.Body)
 	if installation != 0 {
 		if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation) }); err != nil {
-			return false, err
+			return "", err
 		}
 	}
 	var digest string
-	err := tx.QueryRowContext(ctx, `SELECT digest FROM github_app_deliveries
-		WHERE delivery_id=? AND state='leased' AND lease=? AND lease_until>?`+tx.forUpdate(),
-		delivery.ID, delivery.Lease, tx.now().UnixNano()).Scan(&digest)
+	err := tx.QueryRowContext(ctx, `SELECT digest FROM github_app_deliveries WHERE delivery_id=? AND state='leased' AND lease=? AND lease_until>?`+tx.forUpdate(), delivery.ID, delivery.Lease, tx.now(ctx).UnixNano()).Scan(&digest)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, errGitHubDeliveryLeaseLost
+		return "", errGitHubDeliveryLeaseLost
 	}
 	if err != nil {
-		return false, err
+		return "", err
+	}
+	return digest, nil
+}
+
+// githubDeliveryFenceTx checks the live lease and the connection captured at receipt.
+func githubDeliveryFenceTx(ctx context.Context, tx *storeTx) (string, error) {
+	digest, err := githubDeliveryLeaseTx(ctx, tx)
+	if err != nil || digest == "" {
+		return digest, err
+	}
+	return digest, githubDeliveryConnectionTx(ctx, tx, digest)
+}
+
+func githubDeliveryResultTx[T any](ctx context.Context, tx *storeTx, effect string, apply func() (T, error)) (T, error) {
+	var result T
+	if effect == "" {
+		return result, ErrInvalidInput
+	}
+	digest, err := githubDeliveryLeaseTx(ctx, tx)
+	if err != nil {
+		return result, err
+	}
+	if digest == "" {
+		return apply()
+	}
+	var raw string
+	err = tx.QueryRowContext(ctx, `SELECT result FROM github_app_delivery_effects WHERE digest=? AND effect=?`, digest, effect).Scan(&raw)
+	if err == nil {
+		err = json.Unmarshal([]byte(raw), &result)
+		return result, err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return result, err
 	}
 	if err := githubDeliveryConnectionTx(ctx, tx, digest); err != nil {
-		return false, err
+		return result, err
 	}
-	if effect != "" {
-		result, err := tx.ExecContext(ctx, `INSERT INTO github_app_delivery_effects(digest,effect)
-			VALUES (?,?) ON CONFLICT DO NOTHING`, digest, effect)
-		if err != nil {
-			return false, err
-		}
-		n, err := result.RowsAffected()
-		if err != nil || n == 0 {
-			return false, err
-		}
+	result, err = apply()
+	if err != nil {
+		return result, err
 	}
-	return true, nil
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return result, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO github_app_delivery_effects(digest,effect,result) VALUES (?,?,?)`, digest, effect, string(encoded))
+	return result, err
 }
 
 // A receipt belongs to one connection, even when an installation returns to its former team.
@@ -242,22 +269,32 @@ func githubDeliveryConnectionTx(ctx context.Context, tx *storeTx, digest string)
 }
 
 func (s *Store) githubDeliveryEffect(ctx context.Context, effect string, apply func(*storeTx) error) error {
+	if effect == "" {
+		return ErrInvalidInput
+	}
 	return s.inTx(ctx, func(tx *storeTx) error {
-		applyEffect, err := githubDeliveryMutationTx(ctx, tx, effect)
-		if err != nil || !applyEffect {
-			return err
-		}
-		return apply(tx)
+		_, err := githubDeliveryResultTx(ctx, tx, "lifecycle:"+effect, func() (struct{}, error) { return struct{}{}, apply(tx) })
+		return err
 	})
 }
 
 func (s *Store) githubDeliveryExec(ctx context.Context, effect, query string, args ...any) (sql.Result, error) {
-	var result sql.Result = driver.RowsAffected(0)
-	err := s.githubDeliveryEffect(ctx, effect, func(tx *storeTx) (err error) {
-		result, err = tx.ExecContext(ctx, query, args...)
-		return err
+	if effect == "" {
+		return nil, ErrInvalidInput
+	}
+	affected, err := inTxResult(ctx, s, func(tx *storeTx) (int64, error) {
+		return githubDeliveryResultTx(ctx, tx, "lifecycle:"+effect, func() (int64, error) {
+			result, err := tx.ExecContext(ctx, query, args...)
+			if err != nil {
+				return 0, err
+			}
+			return result.RowsAffected()
+		})
 	})
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+	return driver.RowsAffected(affected), nil
 }
 
 // FinishGitHubDelivery records a fenced success or failure. Failures retain the
@@ -339,7 +376,7 @@ func (t *Tenant) ProcessGitHubDeliveryAgain(ctx context.Context, a capability.Au
 			if n != 1 {
 				return sql.ErrNoRows
 			}
-			return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "github.delivery_reprocessed", SubjectID: deliveryID, Actor: p.Capability.Subject.ID})
+			return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: t.team, Kind: "github.delivery_reprocessed", SubjectID: deliveryID, Actor: p.Capability.Subject.ID})
 		})
 	})
 }

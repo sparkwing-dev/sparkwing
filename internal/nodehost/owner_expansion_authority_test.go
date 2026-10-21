@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -26,7 +28,7 @@ func FuzzOwnerExpansionPreservesDelegatedSource(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, field uint8, value string) {
 		_, host, input := newOwnerFixture(t, true)
-		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "source"}, Generation: 3, Attempt: 7}
+		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "source"}, Generation: 3, Attempt: 7}
 		host.Delegator = expansionDelegatorFixture{ownerDelegatorFixture{actor: input.Owner}, func(child *capability.Capability) {
 			switch field % 12 {
 			case 0:

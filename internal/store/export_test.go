@@ -10,11 +10,11 @@ import (
 // DB exposes the store's own pool to this package's tests.
 func (s *Store) DB() *sql.DB { return s.db }
 
-// SetTestClock overrides the SQLite store clock until the test ends.
+// SetTestClock overrides the store clock until the test ends.
 func (s *Store) SetTestClock(t testing.TB, clock func() time.Time) {
-	original := s.clock
-	t.Cleanup(func() { s.clock = original })
-	s.clock = clock
+	original, pinned := s.clock, s.pinnedClock
+	t.Cleanup(func() { s.clock, s.pinnedClock = original, pinned })
+	s.clock, s.pinnedClock = clock, s.now
 }
 
 // SetTestBusyTimeout makes every SQLite store this process opens use ms as

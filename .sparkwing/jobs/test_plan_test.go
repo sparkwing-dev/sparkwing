@@ -17,15 +17,9 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 		return (&Test{}).Plan(context.Background(), plan, TestArgs{}, sparkwing.RunContext{Pipeline: "test"})
 	})
 
-	if hints := plan.Resources; hints != nil {
-		t.Fatalf("resource pin = %#v, want measured admission", hints)
-	}
 	nodes := plan.Jobs
 	if len(nodes) != 1 {
 		t.Fatalf("planned nodes = %d, want 1", len(nodes))
-	}
-	if hints := nodes[0].Resources; hints != nil {
-		t.Fatalf("node resource pin = %#v, want measured admission", hints)
 	}
 	if got := testGoCommand(hostShape{cpus: 14}); got != "GOMAXPROCS=6 go test -p 6 -timeout 25m ./..." {
 		t.Fatalf("bounded command = %q", got)

@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -129,7 +131,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		t.Fatal(err)
 	}
 	accepted := nodehost.AcceptedRun{RunID: award.RunID, Spec: raw, SpecHash: string(snapshot.Run.Spec.Hash), Plan: plan, PlanHash: snapshot.Run.PlanHash}
-	row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: award.RunID, NodeID: award.JobID})
+	row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(award.RunID), NodeID: runspec.NodeID(award.JobID)})
 	if err != nil {
 		t.Fatal(err)
 	}

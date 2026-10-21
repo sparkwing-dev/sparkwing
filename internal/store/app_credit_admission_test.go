@@ -8,13 +8,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T) {
 	s, tenant, in := appAdmissionFixture(t, true, "unfunded")
 	defer s.Close()
 	in.Request.Dispatch = runspec.DispatchController
+	in.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"class=cloud"}}}
 	result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestUnfundedPushCanStillUseAnEligibleUnmeteredRunner(t *testing.T) {
 		}
 		authorityPersist(t, s, root)
 	}
-	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner", Kinds: []capability.UnitKind{capability.UnitPlan}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner", Kinds: []capability.UnitKind{capability.UnitPlan}}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
@@ -94,14 +94,26 @@ func TestUnfundedPushCanStillUseAnEligibleUnmeteredRunner(t *testing.T) {
 
 func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		requires []string
-		ranking  string
-		failed   bool
+		name        string
+		requires    []string
+		ranking     string
+		runnerLabel string
+		failed      bool
+		funded      bool
+		hold        bool
+		revoked     bool
 	}{
+		{name: "default permits free"},
+		{name: "funded Cloud", requires: []string{"class=cloud"}, funded: true},
+		{name: "held Cloud cannot use positive balance", requires: []string{"class=cloud"}, funded: true, hold: true, failed: true},
+		{name: "revoked Cloud cannot use positive balance", requires: []string{"class=cloud"}, funded: true, revoked: true, failed: true},
+		{name: "exclusive Cloud billing policy", ranking: `["cloud"]`, failed: true},
+		{name: "empty ranking permits free", ranking: `[]`},
 		{name: "Cloud required", requires: []string{"class=cloud"}, failed: true},
-		{name: "Cloud labels before registration", requires: []string{"linux", "arch=arm64"}, failed: true},
-		{name: "mixed class or label can use Cloud", requires: []string{"class=agent,gpu"}, failed: true},
+		{name: "runner label requires Cloud", runnerLabel: "class=cloud", failed: true},
+		{name: "runner label permits free", runnerLabel: "gpu"},
+		{name: "free labels before registration", requires: []string{"linux", "arch=arm64"}},
+		{name: "mixed class or label permits free", requires: []string{"class=agent,gpu"}},
 		{name: "self hosted required", requires: []string{"class=agent"}},
 		{name: "pool required", requires: []string{"pool=private"}},
 		{name: "Cloud excluded from ranking", ranking: `["self-hosted"]`},
@@ -111,8 +123,20 @@ func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
 			defer s.Close()
 			in.Request.Dispatch = runspec.DispatchController
 			in.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: tc.requires}}
+			if tc.runnerLabel != "" {
+				in.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerLabel, Value: tc.runnerLabel}}}
+			}
 			if tc.ranking != "" {
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_ranking=? WHERE name='a'`, tc.ranking)
+			}
+			if tc.funded {
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+			}
+			if tc.hold {
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,created_at,cause,placed_by) VALUES ('hold','a',1,'operator','operator')`)
+			}
+			if tc.revoked {
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='revoked' WHERE name='a'`)
 			}
 			result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 			if err != nil {

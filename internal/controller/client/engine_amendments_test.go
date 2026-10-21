@@ -18,7 +18,7 @@ import (
 )
 
 func TestEngineClientMixedClaimsUseOneQueue(t *testing.T) {
-	input := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}, Labels: []string{"linux"}, AvailableCores: 1.5, AvailableMemoryBytes: 4096}
+	input := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}, Labels: []string{"linux"}}
 	c := testEngine(t, func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/api/v1/runners/claim" {
 			t.Fatalf("queue = %s", req.URL.Path)

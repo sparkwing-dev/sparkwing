@@ -16,7 +16,7 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 	for _, binding := range []bool{false, true} {
 		t.Run(fmt.Sprint("binding=", binding), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, false)
-			s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+			s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 			owner, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
@@ -57,7 +57,7 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 
 func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	first, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)
@@ -77,7 +77,7 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = self.Claim.LeaseExpiresAt.Add(5 * time.Second)

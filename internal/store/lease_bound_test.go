@@ -29,7 +29,7 @@ func TestUnmeteredNodeRenewalKeepsCapabilityExpiry(t *testing.T) {
 				t.Fatalf("claim expiry = %v, want capability expiry %v", claim.Award.LeaseExpiresAt, expiry)
 			}
 			tenant := &Tenant{s: s, team: "a"}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			now = now.Add(time.Second)
@@ -117,7 +117,7 @@ func TestCancelledUnstartedMeteredOwnerCannotRenewRefundedAward(t *testing.T) {
 
 func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
@@ -133,7 +133,7 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", "", "dispute opened", *now); err != nil {
@@ -156,7 +156,7 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 
 func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
@@ -172,7 +172,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120+(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -130,7 +129,7 @@ func TestNativePlanAndFinishReplayKeepDistinctProofs(t *testing.T) {
 	h := New(e.Store, nil).Handler()
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body), 200)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body)+" ", 409)
-	finish := `{"outcome":"success"}`
+	finish := `{}`
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/finish", finish, 200)
 	for _, item := range []struct{ path, body string }{{"/api/v1/runs/run/plan", string(body)}, {"/api/v1/runs/run/finish", finish}} {
 		replay := engineClaimHTTP(t, h, raw, "POST", item.path, item.body, 200)
@@ -199,7 +198,7 @@ func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE capabilities SET repo_scope=?,authority_json=? WHERE prefix='launcher'`, []byte(`["gh:1"]`), envelope)
-	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}})
 	if err != nil {
 		t.Fatal(err)
 	}

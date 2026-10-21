@@ -150,39 +150,8 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 		return errors.Join(prior, err)
 	}
 	errs := []error{prior}
-	budget := map[string]int{}
-	blocked := map[string]bool{}
-	labels := make(map[string]string, len(nodes.Items))
-	for _, node := range nodes.Items {
-		labels[node.Name] = node.Labels[TeamNodeLabel]
-	}
-	seen := map[string]bool{}
-	// safety: only the protected label can attribute damaged node state to a team.
-	var account func(error)
-	account = func(err error) {
-		switch fault := err.(type) { //nolint:errorlint // match blocking's contained-fault classification
-		case *nodeFault:
-			if !seen[fault.node] {
-				seen[fault.node] = true
-				label := labels[fault.node]
-				budget[label]++
-				if label != "" && budget[label] > maxQuarantinesPerSync {
-					blocked[label] = true
-				}
-			}
-		case interface{ Unwrap() []error }:
-			for _, inner := range fault.Unwrap() {
-				account(inner)
-			}
-		}
-	}
-	account(prior)
-	quarantine := func(node *corev1.Node, cause string) error {
-		if budget[node.Labels[TeamNodeLabel]] >= maxQuarantinesPerSync && node.Labels[TeamNodeLabel] != "" && !seen[node.Name] {
-			return &nodeFault{node: node.Name, cause: fmt.Sprintf("%s; more than %d nodes faulted for this team, so its claims stop until an operator checks these nodes", cause, maxQuarantinesPerSync)}
-		}
-		return quarantineNode(ctx, l.Kube, node, cause)
-	}
+	ledger := newTeamFaultLedger(nodes.Items)
+	ledger.record(prior)
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
 		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
@@ -193,24 +162,20 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 		}
 		held, binding, ok := nodeReservation(node)
 		if !ok {
-			err := quarantine(node, "reservation is malformed or does not match its award")
-			account(err)
+			err := ledger.quarantine(ctx, l.Kube, node, "reservation is malformed or does not match its award")
+			ledger.record(err)
 			errs = append(errs, err)
 			continue
 		}
 		refused, err := l.releaseOrphan(ctx, held, binding)
 		if refused {
-			err = quarantine(node, "controller refused the reservation's award")
+			err = ledger.quarantine(ctx, l.Kube, node, "controller refused the reservation's award")
 		}
-		account(err)
+		ledger.record(err)
 		errs = append(errs, err)
 	}
 	l.mu.Lock()
-	l.blockedTeamLabels = l.blockedTeamLabels[:0]
-	for label := range blocked {
-		l.blockedTeamLabels = append(l.blockedTeamLabels, label)
-	}
-	slices.Sort(l.blockedTeamLabels)
+	l.blockedTeamLabels = ledger.blockedLabels()
 	l.mu.Unlock()
 	return errors.Join(errs...)
 }

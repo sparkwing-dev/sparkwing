@@ -13,6 +13,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -73,8 +75,8 @@ func (s retryMissingOutput) ReconcileNode(ctx context.Context, request store.Rec
 	if request.Policy != store.SourceManualRetry {
 		return s.OwnerStore.ReconcileNode(ctx, request)
 	}
-	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, request.Ref.RunID)
-	row, ok := ownerNode(snapshot, request.Ref.NodeID)
+	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, string(request.Ref.RunID))
+	row, ok := ownerNode(snapshot, string(request.Ref.NodeID))
 	if !request.MaterializeOnly || !ok || request.Source == nil {
 		return store.ReconciledNode{}, executorError(apierr.BadRequest, "retry miss requires a materialization probe")
 	}
@@ -172,7 +174,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		Mask:       func(text string) string { return text },
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 		ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
-			if ref.RunID != f.Accepted.RunID || ref.NodeID != "targets" || generation != sourceInput.Generation {
+			if ref.RunID != runspec.RunID(f.Accepted.RunID) || ref.NodeID != "targets" || runspec.ClaimGeneration(generation) != sourceInput.Generation {
 				t.Fatal("reconstruction read outside its accepted source")
 			}
 			return json.RawMessage(`["good","bad"]`), nil

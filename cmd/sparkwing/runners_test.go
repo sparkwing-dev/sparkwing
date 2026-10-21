@@ -169,7 +169,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	out := captureStdout(t, func() {
 		if err := f.run([]string{
 			"add", "--profile", "prod", "--runner", "dev-laptop",
-			"--max-concurrent", "3", "--contribution", "4,8gb", "--label", "linux,arch=amd64",
+			"--max-concurrent", "3", "--label", "linux,arch=amd64",
 			"--config", f.config,
 		}); err != nil {
 			t.Fatalf("runners add: %v", err)
@@ -208,7 +208,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the written config does not load: %v", err)
 	}
-	if raw.HolderPrefix != "dev-laptop" || raw.MaxConcurrent != 3 || raw.Contribution != "4,8gb" {
+	if raw.HolderPrefix != "dev-laptop" || raw.MaxConcurrent != 3 {
 		t.Errorf("config = %+v", raw)
 	}
 	if !slices.Equal(raw.Labels, []string{"linux", "arch=amd64"}) {
@@ -444,7 +444,7 @@ func TestRunnersAddRefusesAnUnreachableServiceManagerBeforeMinting(t *testing.T)
 	}
 }
 
-func TestRunnersAddRefusesAnInvalidContributionBeforeMinting(t *testing.T) {
+func TestRunnersAddRefusesRemovedContributionFlagBeforeMinting(t *testing.T) {
 	f := newRunnersFixture(t)
 	err := f.run([]string{
 		"add", "--profile", "prod", "--runner", "desk",

@@ -39,7 +39,7 @@ func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, in TestArgs, rc spa
 		sparkwing.Job(plan, rc.Pipeline, p.run(testGoCommand(currentHost())))
 		return nil
 	}
-	plan.Resources(sparkwing.Cores(focusedTestCores), sparkwing.MemoryGB(focusedTestMemoryGB))
+
 	cmd := goCommandAt(focusedTestCores, "test", "-count=1 -timeout "+productGoTestTimeout+" "+strings.Join(pkgs, " "))
 	sparkwing.Job(plan, rc.Pipeline, p.run(cmd))
 	return nil

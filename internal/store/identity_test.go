@@ -24,7 +24,7 @@ func googleProfile(sub, email string) store.SignInProfile {
 
 func signIn(t *testing.T, st *store.Store, sub, email string) store.SignInResult {
 	t.Helper()
-	res, err := st.AsOperator().ResolveSignIn(context.Background(), googleProfile(sub, email), store.SignUpConditions{}, time.Now())
+	res, err := st.AsOperator().ResolveSignIn(context.Background(), googleProfile(sub, email), store.SignUpConditions{})
 	if err != nil {
 		t.Fatalf("ResolveSignIn(%s): %v", email, err)
 	}
@@ -76,7 +76,7 @@ func TestIdentitySignInRefusesAnUnverifiedEmail(t *testing.T) {
 	st := storetest.Open(t)
 	p := googleProfile("s1", "u@example.com")
 	p.EmailVerified = false
-	if _, err := st.AsOperator().ResolveSignIn(context.Background(), p, store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrUnverifiedEmail) {
+	if _, err := st.AsOperator().ResolveSignIn(context.Background(), p, store.SignUpConditions{}); !errors.Is(err, store.ErrUnverifiedEmail) {
 		t.Fatalf("ResolveSignIn = %v, want ErrUnverifiedEmail", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestIdentityConcurrentFirstSignInsShareALocalPart(t *testing.T) {
 	for i := range n {
 		go func() {
 			res, err := st.AsOperator().ResolveSignIn(context.Background(),
-				googleProfile(fmt.Sprintf("s-%d", i), fmt.Sprintf("sam@host%d.example", i)), store.SignUpConditions{}, time.Now())
+				googleProfile(fmt.Sprintf("s-%d", i), fmt.Sprintf("sam@host%d.example", i)), store.SignUpConditions{})
 			errs <- err
 			slugs <- res.PersonalTeam
 		}()

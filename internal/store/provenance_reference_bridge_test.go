@@ -213,11 +213,12 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 	t.Helper()
 	tenant := referenceWorld(t, s, "")
 	now := s.now()
+	s.SetTestClock(t, func() time.Time { return now })
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
 		ID: "schedule-9", RepoPath: "https://github.com/acme/repo-9.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
 		GitBranch: "main", ArmedBy: "owner@example.com", Args: map[string]string{"message": "hello"},
-	}, now)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +237,9 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 	switch mode {
 	case "fire", "locked":
 		result, err = tenant.AdmitScheduledRun(t.Context(), sched, now)
+		s.SetTestClock(t, func() time.Time { return now })
 	case "override":
-		if err := tenant.SetCronOverride(t.Context(), sched.ID, CronOverride{TZSet: true, TZ: "Europe/Paris"}, now); err != nil {
+		if err := tenant.SetCronOverride(t.Context(), sched.ID, CronOverride{TZSet: true, TZ: "Europe/Paris"}); err != nil {
 			t.Fatal(err)
 		}
 		if sched, err = tenant.GetCronSchedule(t.Context(), sched.ID); err != nil {

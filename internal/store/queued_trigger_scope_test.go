@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
@@ -71,7 +70,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 				}
 				eligible = append(eligible, admitted.RunID)
 			}
-			demand := store.UnitDemand{CapabilityPrefix: child.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}}
+			demand := store.UnitDemand{CapabilityPrefix: child.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}
 			for _, id := range eligible {
 				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.RunID != id || claim.Team != tenant.Team() || len(claim.Bearer) == 0 {
@@ -115,7 +114,7 @@ func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("other", "other@example.test"), store.SignUpConditions{}, time.Now())
+	member, err := s.AsOperator().ResolveSignIn(t.Context(), googleProfile("other", "other@example.test"), store.SignUpConditions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +162,7 @@ func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 			workers.Go(func() {
 				<-start
 				for {
-					claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}})
+					claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}})
 					if errors.Is(err, store.ErrNotFound) {
 						return
 					}

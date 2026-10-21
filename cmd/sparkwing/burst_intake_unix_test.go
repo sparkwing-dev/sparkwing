@@ -236,7 +236,7 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 4})
+	claimed, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("here owner claim: %+v %v", claimed, err)
 	}

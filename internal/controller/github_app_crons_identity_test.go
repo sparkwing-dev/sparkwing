@@ -24,7 +24,7 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tn.SetCronSchedulePaused(t.Context(), before.ID, true, time.Now()); err != nil {
+	if err := tn.SetCronSchedulePaused(t.Context(), before.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 9 {
@@ -32,7 +32,7 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 			ID: fmt.Sprintf("crn_seed_%d", i), RepoPath: fmt.Sprintf("https://example.com/r%d.git", i),
 			Pipeline: "seed", Name: "default", Cron: "0 1 * * *", TZ: "UTC",
 			Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-		}, time.Now()); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -159,7 +159,7 @@ func TestGitHubAppCronConflictsWithManualControllerSchedule(t *testing.T) {
 		ID: "crn_manual", RepoPath: "git@github.com:acme/widgets.git", Pipeline: "nightly", Name: "default",
 		Cron: "0 3 * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
 		Where: store.CronWhereController,
-	}, time.Now()); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	f.app.SetCommit("acme/widgets", "main", headSHA)
@@ -191,7 +191,7 @@ func TestGitHubAppCronRenameConflictStopsOldAppRow(t *testing.T) {
 		ID: "crn_manual_renamed", RepoPath: "https://github.com/acme/renamed.git",
 		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-	}, time.Now()); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := f.deliver("repository", map[string]any{
@@ -223,7 +223,7 @@ func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
 		ID: "crn_manual_old_url", RepoPath: "git@github.com:acme/widgets.git",
 		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-	}, time.Now()); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	f.app.SetRepos(7, githubRepo(701, "acme/renamed"), githubRepo(702, "acme/plans"))
@@ -257,7 +257,7 @@ func TestGitHubAppCronCannotProveManualGitHubURLDistinct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "unresolved", RepoPath: "git@github.com:acme/old-name.git", Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController}, time.Now()); err == nil {
+	if _, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "unresolved", RepoPath: "git@github.com:acme/old-name.git", Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController}); err == nil {
 		t.Fatal("an unresolved GitHub repository was armed")
 	}
 	if rows := appCronRows(t, f, olga.team); len(rows) != 0 {
@@ -283,7 +283,7 @@ func TestGitHubAppWithdrawnRepoReleasesCapacity(t *testing.T) {
 			ID: fmt.Sprintf("crn_seed_%d", i), RepoPath: fmt.Sprintf("https://example.com/r%d.git", i),
 			Pipeline: "seed", Name: "default", Cron: "0 1 * * *", TZ: "UTC",
 			Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-		}, time.Now()); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -293,7 +293,7 @@ func TestGitHubAppWithdrawnRepoReleasesCapacity(t *testing.T) {
 	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
 		t.Fatalf("first arm = %d", code)
 	}
-	if n, err := tn.WithdrawGitHubCronRepository(t.Context(), 7, 701, time.Now()); err != nil || n != 1 {
+	if n, err := tn.WithdrawGitHubCronRepository(t.Context(), 7, 701); err != nil || n != 1 {
 		t.Fatalf("withdraw = %d, %v", n, err)
 	}
 	f.app.SetCommit("acme/plans", "main", headSHA)

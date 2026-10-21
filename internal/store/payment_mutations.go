@@ -57,7 +57,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 		}
 		grant := CreditGrant{
 			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(),
+			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(ctx),
 		}
 		if err := l.insertGrant(ctx, grant); err != nil {
 			return CreditReversal{}, err

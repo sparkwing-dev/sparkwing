@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -30,31 +32,31 @@ func TestOwnerFinishRaceRejectsStaleAwardProperty(t *testing.T) {
 				t.Fatalf("successor: %+v, %v", second, err)
 			}
 			tenant := &Tenant{s: s, team: first.Team}
-			finish := func(claim UnitClaim, state RunState) (Applied, error) {
+			finish := func(claim UnitClaim) (Applied, error) {
 				actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-				return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunTransition{RunID: claim.RunID, To: state, Cause: RunFinish, Actor: actor}})
+				return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: RunFinish, Actor: actor}})
 			}
 			start := make(chan struct{})
 			var wg sync.WaitGroup
 			wg.Go(func() {
 				<-start
-				if _, err := finish(first, RunFailed); err == nil {
+				if _, err := finish(first); err == nil {
 					t.Error("stale owner completed the successor's run")
 				}
 			})
 			wg.Go(func() {
 				<-start
-				if _, err := finish(second, RunSuccess); err != nil {
+				if _, err := finish(second); err != nil {
 					t.Error(err)
 				}
 			})
 			close(start)
 			wg.Wait()
 			before, err := tenant.ReadSnapshot(t.Context(), first.RunID)
-			if err != nil || before.Run.State != RunSuccess || before.Run.FinishedAt == nil {
+			if err != nil || before.Run.State != RunFailed || before.Run.FinishedAt == nil {
 				t.Fatalf("successor verdict: %+v, %v", before.Run, err)
 			}
-			if _, err := finish(first, RunSuccess); err == nil {
+			if _, err := finish(first); err == nil {
 				t.Fatal("stale owner replayed the successor's verdict")
 			}
 			if err := s.ReleaseUnit(t.Context(), first, first.Award.CapabilityPrefix); err == nil {

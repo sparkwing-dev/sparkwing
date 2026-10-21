@@ -155,7 +155,7 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 	return scanGitHubAppInstallations(rows)
 }
 
-func scanGitHubAppInstallations(rows *sql.Rows) (_ []GitHubAppInstallation, err error) {
+func scanGitHubAppInstallations(rows rowCursor) (_ []GitHubAppInstallation, err error) {
 	defer closeRowsInto(rows, &err)
 	var out []GitHubAppInstallation
 	for rows.Next() {
@@ -185,30 +185,26 @@ func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation i
 // GitHub's uninstall notice and the operator's move both name only the
 // installation.
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error) {
-	var team Team
-	err := o.s.githubDeliveryEffect(ctx, fmt.Sprintf("unbind:%d", installation), func(tx *storeTx) error {
-		if err := acquireLockSet(ctx, tx, func() lockSet {
-			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
-		}); err != nil {
-			return err
-		}
-		owner, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		team = Team(owner)
-		t := &Tenant{s: o.s, team: team}
-		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+	return inTxResult(ctx, o.s, func(tx *storeTx) (Team, error) {
+		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("lifecycle:unbind:%d", installation), func() (Team, error) {
+			if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation) }); err != nil {
+				return "", err
+			}
+			team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", ErrNotFound
+			}
+			if err != nil {
+				return "", err
+			}
+			return team, (&Tenant{s: o.s, team: team}).unbindGitHubAppInstallationTx(ctx, tx, installation)
+		})
 	})
-	return team, err
 }
 
 // SetGitHubAppInstallationSuspended records GitHub's suspension of
 // installation. An unbound installation is ErrNotFound.
-func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error {
+func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool) error {
 	flag := 0
 	if suspended {
 		flag = 1
@@ -227,13 +223,16 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-			WHERE team = ? AND installation_id = ?`, flag, now.UTC().UnixNano(), team, installation); err != nil {
+			WHERE team = ? AND installation_id = ?`, flag, tx.now(ctx).UTC().UnixNano(), team, installation); err != nil {
+			return err
+		}
+		if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, team, installation); err != nil {
 			return err
 		}
 		if suspended {
 			if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-				now.UnixNano(), team, installation); err != nil {
+				tx.now(ctx).UnixNano(), team, installation); err != nil {
 				return err
 			}
 		}
@@ -245,7 +244,7 @@ const githubAppTriggerCols = `repository_id, pipeline, repository, installation_
        branches, base_branches, created_by, created_at, on_pr_closed, on_pr_labeled, pr_labels, on_pr_ready_for_review,
        on_release_published, on_release_prereleased, release_tag_patterns, on_branch_create, on_branch_delete, runner`
 
-func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
+func (t *Tenant) scanGitHubAppTriggers(rows rowCursor) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}
@@ -551,6 +550,9 @@ func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha stri
 }
 
 func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx, installation int64) error {
+	if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, t.team, installation); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
 		string(t.team), installation)
 	if err != nil {
@@ -565,7 +567,7 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		tx.now().UnixNano(), string(t.team), installation); err != nil {
+		tx.now(ctx).UnixNano(), string(t.team), installation); err != nil {
 		return err
 	}
 	return nil

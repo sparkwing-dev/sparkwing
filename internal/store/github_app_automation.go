@@ -66,11 +66,14 @@ func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a Gi
 	    enabled_by = excluded.enabled_by, runner = excluded.runner,
 	    enabled_at = CASE WHEN github_app_automation.installation_id = excluded.installation_id
 	        THEN github_app_automation.enabled_at ELSE excluded.enabled_at END`,
-		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, tx.now().UnixNano(), string(runner), string(t.team), a.InstallationID)
+		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, tx.now(ctx).UnixNano(), string(runner), string(t.team), a.InstallationID)
 	if err != nil {
 		return err
 	}
-	return credentialRowChanged(result, nil)
+	if err := credentialRowChanged(result, nil); err != nil {
+		return err
+	}
+	return bumpGitHubPublicationTx(ctx, tx, t.team, a.RepositoryID)
 }
 
 // GitHubAppAutomation reads live consent for one repository and installation.
@@ -110,8 +113,13 @@ func (t *Tenant) GitHubAppAutomations(ctx context.Context) (_ []GitHubAppAutomat
 
 // WithdrawGitHubAppAutomation removes consent only through its bound installation.
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error {
-	_, err := t.s.githubDeliveryExec(ctx, fmt.Sprintf("withdraw-automation:%s:%d:%d", t.team, installation, repository), `DELETE FROM github_app_automation WHERE team = ? AND installation_id = ? AND repository_id = ?`, string(t.team), installation, repository)
-	return err
+	return t.s.githubDeliveryEffect(ctx, fmt.Sprintf("withdraw-automation:%s:%d:%d", t.team, installation, repository), func(tx *storeTx) error {
+		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repository); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installation, repository)
+		return err
+	})
 }
 
 // RenameGitHubAppAutomation follows a repository's numeric identity after a rename.

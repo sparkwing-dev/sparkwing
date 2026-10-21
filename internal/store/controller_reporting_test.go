@@ -4,6 +4,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -50,7 +52,7 @@ func TestLogSigningProjectionRequiresTheExactCurrentWriter(t *testing.T) {
 
 func TestActivityRequiresTheCurrentWriter(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
-	ref := controllerwire.NodeRef{RunID: attempt.RunID, NodeID: attempt.NodeID}
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
 	if err := tenant.WriteActivity(t.Context(), ref, actor, "compiling"); err != nil {
 		t.Fatal(err)
 	}

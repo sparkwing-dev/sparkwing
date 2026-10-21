@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -12,12 +13,12 @@ import (
 // Eval includes its immutable source generation. Trigger and plan need only RunID.
 type UnitRef struct {
 	Kind             capability.UnitKind
-	RunID            string
-	NodeID           string
+	RunID            runspec.RunID
+	NodeID           runspec.NodeID
 	SourceGeneration int64
 }
 
-// UnitDemand carries observed capacity and labels. Identity, reservations and team
+// UnitDemand carries observed platform and labels. Identity, reservations and team
 // come from C2's capability; requirements and allowed pools come from persisted seals.
 type UnitDemand struct {
 	CapabilityPrefix   string
@@ -28,8 +29,6 @@ type UnitDemand struct {
 	Target             *UnitRef
 	OS                 string
 	Arch               string
-	Capacity           match.Resources
-	Available          match.Resources
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.
@@ -45,11 +44,11 @@ type UnitClaim struct {
 	Bearer []byte `json:"-"`
 }
 
-// ClaimUnit resolves matching inputs and calls match.Evaluate and match.Fits before
+// ClaimUnit selects one eligible unit and rechecks its requirements before
 // C2 Award in the same transaction. Named and queued trigger, plan, eval and job
 // claims use the same path; only launcher service scope can cross teams.
-// ReconcileNode self-claims use the same matching inputs and reservation checks.
-// Each requested kind requires its own live grant before one ordered scan. Empty,
+// ReconcileNode self-claims recheck the same SQL predicate before their award.
+// Each requested kind requires its own live grant before fair-share and arrival ordering. Empty,
 // duplicate, unknown and unauthorized kinds fail instead of being filtered silently.
 // A named trigger Target also accepts the matching here Award's trigger.host after
 // rechecking its first-claim/reclaim window, reservation and requester authority.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // LauncherPreparation reports the committed authority bound for an acknowledged bootstrap fence.
@@ -88,7 +89,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if err != nil {
 		return time.Time{}, err
 	}
-	if !live || award.Claim.Award.Holder != fence.Holder || award.Claim.Award.Generation != fence.Generation {
+	if !live || award.Claim.Award.Holder != fence.Holder || int64(award.Claim.Award.Generation) != fence.Generation {
 		return time.Time{}, nil
 	}
 	if current.Capability.Delivery == capability.DeliveryDirect && current.Capability.Issuance == capability.Exchange {
@@ -97,7 +98,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if current.Capability.Delivery != capability.DeliveryBootstrap || current.Capability.Issuance != capability.Award {
 		return time.Time{}, bindingRefusal()
 	}
-	unitRef := UnitRef{Kind: award.Claim.Kind, RunID: award.Claim.RunID, NodeID: award.Claim.NodeID, SourceGeneration: award.Claim.SourceGeneration}
+	unitRef := UnitRef{Kind: award.Claim.Kind, RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), SourceGeneration: award.Claim.SourceGeneration}
 	if err = lockStateRunTx(ctx, tx, award.Claim.Team, award.Claim.RunID); err != nil {
 		return time.Time{}, err
 	}
@@ -106,9 +107,9 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if err != nil {
 		return time.Time{}, err
 	}
-	expiry := tx.now()
+	expiry := tx.now(ctx)
 	if !beat.CancelRequested {
-		if expiry, err = leaseBoundTx(ctx, tx, current.Capability.Prefix, tx.now(), funded); err != nil {
+		if expiry, err = leaseBoundTx(ctx, tx, current.Capability.Prefix, tx.now(ctx), funded); err != nil {
 			return time.Time{}, err
 		}
 	}
@@ -124,7 +125,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 		args = []any{expiry.UnixNano(), unit.Team, unit.RunID, unit.NodeID, unit.SourceGeneration, current.Capability.Prefix, fence.Generation, fence.Holder}
 	default:
 		query = `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND capability_prefix=? AND generation=? AND claimed_by=?`
-		args = []any{expiry.UnixNano(), tx.now().UnixNano(), unit.Team, unit.RunID, unit.NodeID, current.Capability.Prefix, fence.Generation, fence.Holder}
+		args = []any{expiry.UnixNano(), tx.now(ctx).UnixNano(), unit.Team, unit.RunID, unit.NodeID, current.Capability.Prefix, fence.Generation, fence.Holder}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -136,7 +137,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if beat.CancelRequested {
 		return time.Time{}, nil
 	}
-	if err = renewCapacityTx(ctx, tx, unit.Team, unit.RunID, unit.NodeID, tx.now(), expiry); err != nil {
+	if err = renewCapacityTx(ctx, tx, unit.Team, unit.RunID, unit.NodeID, expiry); err != nil {
 		return time.Time{}, err
 	}
 	return expiry, observeUnitTx(ctx, tx, current.Capability.Prefix)

@@ -44,7 +44,6 @@ func (PrePush) Examples() []sparkwing.Example {
 }
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Resources(sparkwing.Cores(float64(prePushReservationCores(runtime.NumCPU()))))
 	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p).Cache(lintCache())
 	return nil

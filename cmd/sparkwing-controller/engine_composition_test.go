@@ -89,7 +89,7 @@ func composedClaimants(t *testing.T, version string, policy *http.Client) map[st
 
 func claimAs(t *testing.T, claims controllerwire.Controller, version string) error {
 	t.Helper()
-	response, err := claims.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitNode}, OS: "linux", Arch: "amd64", AvailableCores: 2, AvailableMemoryBytes: 4 << 30})
+	response, err := claims.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitNode}, OS: "linux", Arch: "amd64"})
 	if err == nil && response.Claim != nil {
 		t.Fatalf("idle controller awarded %+v", response.Claim)
 	}

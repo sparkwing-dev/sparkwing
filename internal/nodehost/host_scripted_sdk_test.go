@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
@@ -119,7 +121,7 @@ func newExecutionSDK(plan nodeproto.PlanDoc, input NodeInput, mode string, trace
 				result = nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "private verification refused", Hint: "private fix", Details: map[string]any{"output": "private source bytes"}}}
 			}
 		case nodeproto.OpRunStep:
-			if request.Job != p.input.NodeID || int64(request.Attempt) != p.input.Attempt {
+			if request.Job != p.input.NodeID || runspec.AttemptOrdinal(int64(request.Attempt)) != p.input.Attempt {
 				return nodeproto.Reply{}, errors.New("body changed its award or ordinal")
 			}
 			*trace = append(*trace, fmt.Sprintf("body:%d", request.Attempt))

@@ -5,6 +5,12 @@ can turn on automatic refill so a saved card tops the balance up before it runs
 out. Cloud work never runs on credit: when the balance cannot pay for the next
 slice of a running job, the job stops.
 
+Cloud size labels select a fixed allocation and its exact credit class: `sparkwing-2cpu`,
+`sparkwing-4cpu`, `sparkwing-8cpu`, `sparkwing-16cpu`, `sparkwing-32cpu` and
+`sparkwing-64cpu`. Each label bills its corresponding core class; an unpriced
+class cannot be awarded. Without a size label, Cloud uses `sparkwing-2cpu`.
+Self-hosted runner labels do not create a Cloud charge.
+
 ## Standing
 
 Standing caps how much Cloud capacity a team can use at once and how long one

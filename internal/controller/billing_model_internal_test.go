@@ -32,9 +32,8 @@ import (
 
 type billingCloudProfile struct{}
 
-func (billingCloudProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 64}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (billingCloudProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{Labels: []string{"sparkwing-4cpu"}}, nil
 }
 
 func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
@@ -42,7 +41,7 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE triggers SET expires_at=?`, time.Now().Add(24*time.Hour).UnixNano())
 	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp',card_added_at=? WHERE name='a'`, time.Now().UnixNano())
 	engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
-	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 4}}}}}}
+	execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
 	rawExecution, err := json.Marshal(execution)
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +162,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	for _, id := range []string{"chargeback", "chargeback", "chargeback-replayed"} {
 		webhook(id, "charge.dispute.closed", object)
 	}
-	standing, err := tenant.BillingStanding(t.Context(), time.Now())
+	standing, err := tenant.BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Held" {
 		t.Fatalf("chargeback standing=%+v: %v", standing, err)
 	}
@@ -264,7 +263,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	if balance() != 0 {
 		t.Fatalf("the confirmation reply moved money: %d", balance())
 	}
-	standing, err := tenant.SpendStanding(t.Context(), time.Now())
+	standing, err := tenant.SpendStanding(t.Context())
 	if err != nil || !standing.Refill.Open || standing.Refill.DayCount != 1 {
 		t.Fatalf("refill state %+v: %v; want one open refill", standing.Refill, err)
 	}
@@ -278,7 +277,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	if balance() != 2000*store.MicroCreditsPerCent {
 		t.Fatalf("balance after the refill = %d; want $20 granted once", balance())
 	}
-	standing, err = tenant.SpendStanding(t.Context(), time.Now())
+	standing, err = tenant.SpendStanding(t.Context())
 	if err != nil || standing.Refill.Open || standing.Refill.DayCount != 1 || standing.Refill.WeekCents != 2000 {
 		t.Fatalf("refill state %+v: %v; want it settled and counted", standing.Refill, err)
 	}
@@ -308,7 +307,7 @@ func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 	if w := deliver("evt_declined", "payment_intent.payment_failed", refillIntent("pi_declined", "failed")); w.Code != http.StatusNoContent {
 		t.Fatalf("failure webhook = %d %s", w.Code, w.Body)
 	}
-	standing, err := tenant.SpendStanding(t.Context(), time.Now())
+	standing, err := tenant.SpendStanding(t.Context())
 	if err != nil || standing.Refill.Open || standing.Refill.FailedAt.IsZero() || standing.Refill.Failure != "insufficient_funds" {
 		t.Fatalf("refill state %+v: %v; want the refill closed and its failure recorded", standing.Refill, err)
 	}
@@ -523,7 +522,7 @@ func TestRefillRestartReconcilesBeforeConfirmingABlockedCard(t *testing.T) {
 			if response := deliver("evt_warning", "radar.early_fraud_warning.created", stolenCardWarning("issfr_earlier", "pi_earlier")); response.Code != http.StatusNoContent {
 				t.Fatalf("warning: %d %s", response.Code, response.Body)
 			}
-			standing, err := tenant.SpendStanding(t.Context(), time.Now())
+			standing, err := tenant.SpendStanding(t.Context())
 			if err != nil || standing.Refill.Enabled || standing.Card.PaymentMethod != "" || standing.Billing.HoldCause == "" {
 				t.Fatalf("warning did not restrict team: %+v, %v", standing, err)
 			}

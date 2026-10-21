@@ -67,12 +67,12 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-						return match.Profile{Accept: accept, Capacity: match.Resources{Cores: 1}}, match.Resources{Cores: 1}, nil
+					e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, error) {
+						return match.Profile{Accept: accept}, nil
 					})
 					e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 					raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-					body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}, AvailableCores: 1}
+					body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}}
 					if named {
 						body.RunID = "run"
 						if kind == capability.UnitNode {
@@ -153,7 +153,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	}
 	var first controllerwire.Applied
 	for i := range 2 {
-		w = engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{"outcome":"success"}`, http.StatusOK)
+		w = engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{}`, http.StatusOK)
 		var result controllerwire.Applied
 		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Replayed != (i == 1) || i == 1 && result.StateSeq != first.StateSeq {
 			t.Fatalf("finish %d: %s %v", i, w.Body, err)
@@ -165,7 +165,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bodyDigest := sha256.Sum256([]byte(`{"outcome":"success"}`))
+			bodyDigest := sha256.Sum256([]byte(`{}`))
 			snapshot.Binding.Result = &capability.RecordedResult{
 				Actor:  snapshot.Authorities[0].Principal.Authority,
 				Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: "run", Generation: claimed.Claim.Binding.Generation, Digest: hex.EncodeToString(bodyDigest[:]),
@@ -176,10 +176,10 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 			h = server.WithAuthorization(authorization).Handler()
 		}
 	}
-	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{"outcome":"failed"}`, http.StatusUnauthorized)
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/finish", `{"reason":"different"}`, http.StatusUnauthorized)
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/heartbeat", `{}`, http.StatusUnauthorized)
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || string(run.State) != "success" || run.FinishedAt == nil {
+	if err != nil || string(run.State) != "failed" || run.FinishedAt == nil {
 		t.Fatalf("finished run: %+v %v", run, err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
@@ -188,7 +188,7 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 	}
 	var finished int
 	for _, event := range events {
-		if event.Kind == "run_success" {
+		if event.Kind == "run_failed" {
 			finished++
 		}
 	}
@@ -255,7 +255,7 @@ func TestNamedClaimNumericSelectorConvergesAcrossTransports(t *testing.T) {
 				t.Fatal(err)
 			}
 			selector := strconv.FormatInt(number, 10)
-			body := controllerwire.ClaimRequest{RunnerVersion: "v1", RunID: selector, Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 1}
+			body := controllerwire.ClaimRequest{RunnerVersion: "v1", RunID: selector, Kinds: []capability.UnitKind{capability.UnitTrigger}}
 			var response controllerwire.ClaimResponse
 			if transport == "http" {
 				encoded, err := json.Marshal(body)

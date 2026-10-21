@@ -44,7 +44,7 @@ func TestRunnerEnrollmentUsesCompleteMachineSchema(t *testing.T) {
 		Controller: preferencePointer("https://controller.example"), HolderPrefix: preferencePointer("desktop"),
 		MaxConcurrent: preferencePointer(3), Repos: []string{"github.com/acme/*"}, Labels: []string{},
 		AcceptWorkingTree: preferencePointer(false), LocalAdmission: preferencePointer(false),
-		KeepFree: preferencePointer("25%,25%"), Poll: preferencePointer("1s"), Lease: preferencePointer("30s"),
+		Poll: preferencePointer("1s"), Lease: preferencePointer("30s"),
 		Heartbeat: preferencePointer("10s"), SpawnPolicy: preferencePointer("return-to-queue"),
 	}
 	written, err := writeRunnerConfig(path, cfg, "private-runner-token", false)

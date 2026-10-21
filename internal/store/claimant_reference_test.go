@@ -7,7 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type claimantModel struct {
@@ -93,7 +92,7 @@ func TestClaimRankingAndNoticeMatchIndependentClaimantModel(t *testing.T) {
 			if standingEligible != model.eligible() {
 				t.Fatalf("notice %+v; model eligible=%t", view.Waiting, model.eligible())
 			}
-			claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+			claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}})
 			if (err == nil) != model.eligible() {
 				t.Fatalf("claim %+v %v; model eligible=%t", claim, err, model.eligible())
 			}

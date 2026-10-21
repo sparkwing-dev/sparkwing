@@ -19,8 +19,7 @@ func ownerRunInput(run string, award controllerwire.ClaimedUnit, purpose capabil
 		return input, localRunProtocolError("controller returned an invalid owner award")
 	}
 	input.Owner = store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-		Kind: store.OwnerTrigger, RunID: run,
-		Holder: award.Binding.Holder, Generation: award.Binding.Generation,
+		Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
 	}}
 	sealed := award.Request
 	hash, err := runspec.CanonicalHash(sealed)

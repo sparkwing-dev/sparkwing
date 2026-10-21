@@ -35,7 +35,14 @@ func (t *Tenant) AdmitGitHubAppRun(ctx context.Context, in GitHubAppAdmission) (
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		tx.appAdmission = &in
 		var err error
-		result, err = admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.now())
+		applied := false
+		result, err = githubDeliveryResultTx(ctx, tx, "admit:"+in.Request.Pipeline, func() (AdmissionResult, error) {
+			applied = true
+			return admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.now(ctx))
+		})
+		if err == nil && !applied {
+			result.Replayed = true
+		}
 		return err
 	})
 	if err != nil {
@@ -61,7 +68,7 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	if _, err := githubDeliveryMutationTx(ctx, tx, ""); err != nil {
+	if _, err := githubDeliveryFenceTx(ctx, tx); err != nil {
 		return capability.Principal{}, err
 	}
 	app := in.Request.Git.App.Value

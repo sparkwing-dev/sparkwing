@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-
 	"fmt"
 	"sync"
 	"testing"
@@ -50,15 +49,7 @@ func TestPostgresAcquireConcurrencySlot_Serializes(t *testing.T) {
 	const n = 5
 
 	for i := 0; i < n; i++ {
-		runID := fmt.Sprintf("r-%d", i)
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-			ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(),
-		}); err != nil {
-			t.Fatalf("CreateRun %s: %v", runID, err)
-		}
-		if err := teststore.SeedNode(st, ctx, store.Node{RunID: runID, NodeID: "n", Status: "pending"}); err != nil {
-			t.Fatalf("SeedNode %s: %v", runID, err)
-		}
+		createLiveRunT(t, st, fmt.Sprintf("r-%d", i))
 	}
 
 	type result struct {

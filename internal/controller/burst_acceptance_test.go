@@ -24,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestBurstAcceptanceLocalOwnerPersonalWorkerAndCancellation(t *testing.T) {
@@ -41,10 +40,6 @@ func TestBurstAcceptanceSaturatedLocalOwnerCloudWorker(t *testing.T) {
 
 func TestBurstAcceptanceSaturatedLocalOwnerCloudRetryWorker(t *testing.T) {
 	burstAcceptanceFlow(t, true, "cloud-retry")
-}
-
-func TestBurstAcceptanceSelfClaimUsesPrivateReservationWithZeroFreeCapacity(t *testing.T) {
-	burstAcceptanceFlow(t, false, "here-reserved")
 }
 
 func TestBurstAcceptanceLocalOwnerExecutesBeforeOverflow(t *testing.T) {
@@ -108,7 +103,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	worker := newClient(personal, false)
 	cloudBearer := engineHTTPRoot(t, e, "", "burst-launcher", []capability.Grant{capability.ClaimsLaunch})
 	cloud := newClient(cloudBearer, true)
-	poll := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 64}
+	poll := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}}
 	if observed, err := worker.Claim(t.Context(), poll); err != nil || observed.Claim != nil {
 		t.Fatalf("personal machine observation: %+v %v", observed, err)
 	}
@@ -142,11 +137,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		t.Fatalf("Cloud-owned intake with local host: %+v %v", created, err)
 	}
 	here := newClient(created.HereBearer, false)
-	available := float64(64)
-	if saturated {
-		available = 0
-	}
-	claimed, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}, RunID: created.RunID, Capacity: &match.Resources{Cores: 64}, AvailableCores: available})
+	claimed, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}, RunID: created.RunID})
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("local owner claim: %+v %v", claimed, err)
 	}
@@ -188,18 +179,9 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		}
 	}
 	var awarded controllerwire.ClaimResponse
-	if placement == "here" || placement == "here-reserved" {
+	if placement == "here" {
 		request := controllerwire.ReconcileRequest{Policy: "none"}
-		if placement == "here-reserved" {
-			if _, err := owner.Renew(t.Context(), claimed.Claim.UnitID, controllerwire.RenewalRequest{Available: &match.Resources{}}); err != nil {
-				t.Fatal(err)
-			}
-			miss, err := owner.ReconcileJob(t.Context(), created.RunID, "job", request)
-			if err != nil || miss.Kind != string(store.Dispatch) || miss.Claim != nil {
-				t.Fatalf("zero capacity claimed without reservation: %+v %v", miss, err)
-			}
-			request.Reserved = &match.Resources{Cores: 1}
-		}
+
 		result, err := owner.ReconcileJob(t.Context(), created.RunID, "job", request)
 		if err != nil || result.Claim == nil || result.Claim.Runner.Name != claimed.Claim.Runner.Name {
 			t.Fatalf("local owner did not execute before overflow: %+v %v", result, err)

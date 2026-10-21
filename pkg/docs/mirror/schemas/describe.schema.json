@@ -387,9 +387,6 @@
           },
           "type": "array"
         },
-        "resources": {
-          "$ref": "#/$defs/resources"
-        },
         "result_step": {
           "minLength": 1,
           "type": "string"
@@ -530,9 +527,6 @@
         "priority": {
           "type": "integer"
         },
-        "resources": {
-          "$ref": "#/$defs/resources"
-        },
         "source": {
           "$ref": "#/$defs/source"
         }
@@ -569,20 +563,6 @@
         "code",
         "message"
       ],
-      "type": "object"
-    },
-    "resources": {
-      "additionalProperties": false,
-      "properties": {
-        "cores": {
-          "minimum": 0,
-          "type": "number"
-        },
-        "memory_bytes": {
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
       "type": "object"
     },
     "retry": {

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -81,12 +83,13 @@ func FuzzEngineReportedFailureProjection(f *testing.F) {
 		}
 		got, err := captureEngineTransition(t.Context(), report)
 		if err != nil {
-			if got.Extra.Result != nil {
+			if got != nil {
 				t.Fatal("refused failure reached persistence")
 			}
 			return
 		}
-		if got.Extra.Result == nil || !reflect.DeepEqual(got.Extra.Result.Failure, report.Result.Failure) || got.Extra.Result.MaskedError != report.Result.Failure.Error.Message {
+		command, ok := got.(store.ReportNode)
+		if !ok || command.Result == nil || !reflect.DeepEqual(command.Result.Failure, report.Result.Failure) || command.Result.MaskedError != report.Result.Failure.Error.Message {
 			t.Fatalf("failure projection changed: %+v, %v", got, err)
 		}
 	})

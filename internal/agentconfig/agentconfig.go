@@ -15,8 +15,6 @@ import (
 )
 
 type Config struct {
-	Contribution string `yaml:"contribution"`
-
 	Controller     string `yaml:"controller"`
 	CredentialsDir string `yaml:"credentials_dir"`
 	// AllowRepos bounds use of machine-owned source credentials.
@@ -36,8 +34,6 @@ type Config struct {
 	Heartbeat         time.Duration `yaml:"heartbeat"`
 
 	LocalAdmission *bool `yaml:"local_admission"`
-
-	LocalReserve string `yaml:"keep_free"`
 }
 
 // Load validates the machine file and reads runner settings and their private credential.
@@ -92,12 +88,6 @@ func Validate(in Config) (Config, error) {
 		return out, fmt.Errorf("agent: spawn_policy %q is not implemented yet (only return-to-queue is supported in v0)", out.SpawnPolicy)
 	default:
 		return out, fmt.Errorf("agent: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
-	}
-	if _, err := userconfig.ParseBudget(out.LocalReserve); err != nil {
-		return out, fmt.Errorf("agent: local_reserve: %w", err)
-	}
-	if _, err := userconfig.ParseBudget(out.Contribution); err != nil {
-		return out, fmt.Errorf("agent: contribution: %w", err)
 	}
 	if out.LocalAdmission == nil {
 		disabled := false

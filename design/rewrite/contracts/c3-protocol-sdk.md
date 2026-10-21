@@ -3,7 +3,7 @@
 ## Burst release and machine admission
 
 For a sealed burst request, the owner retains run/box concurrency before
-readiness without acquiring compute resources. Run resource settings still
+readiness without acquiring compute resources. Run label requirements still
 flow into each job's sealed settings. A self-claim acquires a job-specific machine lease before the shared store's
 fenced reconciliation. Waiting for machine capacity leaves the job unclaimed.
 A joined state follower cancels that wait when another claimant advances the
@@ -23,16 +23,11 @@ An unclaimed burst job retains its logical concurrency while waiting for
 placement. The owner follows the existing state subscription and retries the
 fenced reconciliation after persisted state or its execution eligibility
 changes. `StateFollower.Wait` includes the private owner's execution projection
-in its change comparison. A capacity observation only wakes reconciliation.
-It never grants an execution award. `WaitNode` retains its state-sequence rule.
+in its change comparison. Only the store grants an execution award. `WaitNode` retains its state-sequence rule.
 
-The internal machine `Lease` exposes its actual granted `Resources`. Every
-production adapter and test lease implements this method. The owner carries that amount in `ReconcileRequest.Reserved`. The store adds
-it to observed free resources within that reconciliation transaction, bounded
-by the authenticated machine's physical capacity. This input does not update
-stored availability. Execution and ordinary heartbeats report only free
-resources. A concurrent heartbeat cannot erase a job's reservation. The additive
-`reserved` wire field adds no persistent reservation or claim-release route.
+Reconciliation carries no CPU or memory request, availability or reservation.
+The store evaluates sealed labels and current authority through the shared
+claim module; a host observation cannot grant an execution award.
 
 ## Declared requester secrets in composed execution
 

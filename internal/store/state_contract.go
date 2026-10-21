@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts.
@@ -81,11 +80,10 @@ const (
 
 // ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit.
 type ReconcileRequest struct {
-	Reserved *match.Resources
-	Ref      controllerwire.NodeRef
-	Actor    Actor
-	Policy   SourcePolicy
-	Source   *MaterializeSource
+	Ref    controllerwire.NodeRef
+	Actor  Actor
+	Policy SourcePolicy
+	Source *MaterializeSource
 	// MaterializeOnly returns Dispatch on a source miss without awarding execution.
 	MaterializeOnly bool
 }
@@ -195,16 +193,16 @@ type StateEventRule struct {
 // Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains.
 func NodeEvents() []StateEventRule {
 	return []StateEventRule{
-		{false, CausePublishAttempt, NodePending, "job_attempt_imported"},
+		{false, CausePublishAttempt, nodePending, "job_attempt_imported"},
 		{false, CauseRelease, NodeReady, "job_ready"},
-		{false, CauseRelease, NodePending, "job_requeued"},
-		{false, CauseRevoke, NodePending, "job_revoked"},
+		{false, CauseRelease, nodePending, "job_requeued"},
+		{false, CauseRevoke, nodePending, "job_revoked"},
 		{false, CauseAward, NodeClaimed, "job_claimed"},
 		{false, CauseApprovalOpen, NodeApprovalPending, "job_approval_pending"},
 		{false, CauseStart, NodeRunning, "job_started"},
 		{false, CauseRetry, NodeRunning, "job_retrying"},
-		{false, CauseLeaseLapse, NodePending, "job_requeued"},
-		{true, CauseCancel, NodeCancelled, "job_cancel_requested"},
+		{false, CauseLeaseLapse, nodePending, "job_requeued"},
+		{true, causeCancel, NodeCancelled, "job_cancel_requested"},
 		{false, "", NodeSuccess, "job_succeeded"},
 		{false, "", NodeFailed, "job_failed"},
 		{false, "", NodeCancelled, "job_cancelled"},

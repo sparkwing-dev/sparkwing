@@ -29,7 +29,7 @@ type OwnerStore interface {
 	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
-	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
 }
 
@@ -45,7 +45,7 @@ type OwnerPlanning struct {
 // OwnerLayerResult either proposes a store transition or an authorized reuse candidate.
 // A transition ends this scheduling pass; a source still needs atomic reconciliation.
 type OwnerLayerResult struct {
-	Transition *store.NodeTransition
+	Transition store.NodeCommand
 	Source     *store.MaterializeSource
 }
 
@@ -114,7 +114,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 		err = maskHostError(err, h.Mask)
 	}()
-	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
+	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != runspec.RunID(input.RunID) {
 		return completion, errors.New("run host requires a bound owner and sealed request")
 	}
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
@@ -186,7 +186,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		return completion, err
 	}
 	if snapshot.Run.State == store.RunPending {
-		_, err = h.Store.TransitionRun(ctx, store.RunTransition{RunID: input.RunID, To: store.RunRunning, Actor: input.Owner, Cause: store.RunStart})
+		_, err = h.Store.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(input.RunID), To: store.RunRunning, Actor: input.Owner, Cause: store.RunStart})
 		if err != nil {
 			return completion, err
 		}
@@ -199,19 +199,15 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		completion, err := h.Around(ctx, accepted, schedule)
 		var refused *AdmissionFailure
 		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
-			policy := admissionPolicy(refused, input.Owner.Owner.Generation)
-			outcome := store.RunFailed
-			if refused.Outcome == store.NodeSkipped {
-				outcome = store.RunSuccess
-			}
-			_, err = h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunTransition{
-				RunID: input.RunID, Actor: input.Owner, To: outcome, Cause: store.RunPolicyRefused,
+			policy := admissionPolicy(refused, int64(input.Owner.Owner.Generation))
+			applied, finishErr := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{
+				RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunPolicyRefused,
 				OwnerPolicy: &policy, Reason: refused.Reason,
 			}})
-			if err != nil {
-				return RunCompletion{}, err
+			if finishErr != nil {
+				return RunCompletion{}, finishErr
 			}
-			completion = RunCompletion{Outcome: string(outcome), Reason: refused.Reason}
+			completion, err = committedRunCompletion(applied)
 		}
 		return completion, err
 	}
@@ -244,7 +240,7 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
-	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: actor.Owner.RunID, Holder: actor.Owner.Holder, Generation: actor.Owner.Generation}, actor, computing)
+	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: string(actor.Owner.RunID), Holder: actor.Owner.Holder, Generation: int64(actor.Owner.Generation)}, actor, computing)
 }
 
 func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, actor store.Actor, computing func() bool) (context.Context, func()) {
@@ -359,14 +355,14 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 	if row.Spec != nil {
 		return failure
 	}
-	state, reason := store.RunFailed, string(apierr.PlanFailed)
+	reason := string(apierr.PlanFailed)
 	message := "run preparation failed"
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
 			return errors.Join(failure, cause)
 		}
-		state, reason = store.RunCancelled, string(apierr.ReasonCancelled)
+		reason = string(apierr.ReasonCancelled)
 		message = "cancellation requested"
 	}
 	// safety: setup errors can contain credentials before describe establishes masking; persist only the stage.
@@ -374,9 +370,9 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 	defer cancel()
 	_, err := h.Store.FinishRunAndUnit(finishCtx, store.FinishRunRequest{
 		Unit: input.Owner.Owner,
-		Transition: store.RunTransition{
-			RunID: input.RunID, Actor: input.Owner,
-			To: state, Cause: store.RunFinish, Reason: reason, MaskedError: message,
+		Transition: store.RunCompletion{
+			RunID: runspec.RunID(input.RunID), Actor: input.Owner,
+			Cause: store.RunFinish, Reason: reason, MaskedError: message,
 		},
 	})
 	return errors.Join(failure, err)

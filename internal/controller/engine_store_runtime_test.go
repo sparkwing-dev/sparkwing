@@ -36,7 +36,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 	profiles := store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		fixture.Server = NewDeployment(st, deploymenttest.Metered(t), nil)
 		policies := fixture.Server.StorePolicies()
-		policies.ClaimProfiles = engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+		policies.ClaimProfiles = engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, error) {
 			return fixture.claimProfiles.ResolveClaimProfile(ctx, p)
 		})
 		return policies, nil
@@ -140,7 +140,7 @@ func engineRuntimeClaim(t *testing.T, server *engineFixture, kind capability.Uni
 		target.NodeID = "job"
 		engineSQL(t, s, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	}
-	claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,8 +191,8 @@ func TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences(t *testing.T) {
 
 type engineProfileFake struct{}
 
-func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	return match.Profile{Capacity: match.Resources{Cores: 1}}, match.Resources{Cores: 1}, nil
+func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
@@ -240,7 +240,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatalf("adoption: %+v, %v", terminal, err)
 	}
 	engineSQL(t, server.Store, `CREATE TRIGGER refuse_owner_finish BEFORE UPDATE OF status ON triggers BEGIN SELECT RAISE(ABORT,'owner unavailable'); END`)
-	if _, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{Outcome: "success"}); err == nil {
+	if _, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{}); err == nil {
 		t.Fatal("finish ignored the owner write failure")
 	}
 	run, err = tenant.ReadRun(t.Context(), "run")
@@ -249,7 +249,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	}
 	engineSQL(t, server.Store, `DROP TRIGGER refuse_owner_finish`)
 	for i := range 2 {
-		result, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{Outcome: "success"})
+		result, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{})
 		if err != nil || result.Replayed != (i == 1) {
 			t.Fatalf("finish %d: %+v, %v", i, result, err)
 		}

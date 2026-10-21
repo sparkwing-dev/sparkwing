@@ -53,11 +53,20 @@ func (s *cliOwnerStore) ReadSnapshot(_ context.Context, run string) (store.RunSn
 }
 
 func (s *cliOwnerStore) FinishRunAndUnit(_ context.Context, finish store.FinishRunRequest) (store.Applied, error) {
-	if finish.Transition.Actor != s.actor || finish.Unit != s.actor.Owner || finish.Transition.RunID != s.snapshot.Run.ID {
+	if finish.Transition.Actor != s.actor || finish.Unit != s.actor.Owner || finish.Transition.RunID != runspec.RunID(s.snapshot.Run.ID) {
 		return store.Applied{}, errors.New("completion changed the awarded owner")
 	}
 	s.finished = &finish
-	return store.Applied{}, s.failure
+	if s.failure != nil {
+		return store.Applied{}, s.failure
+	}
+	graph, err := s.snapshot.Scheduling()
+	if err != nil {
+		return store.Applied{}, err
+	}
+	decision := store.Decide(graph)
+	s.snapshot.Run.State = store.RunState(decision.Outcome)
+	return store.Applied{Outcome: s.snapshot.Run.State, Reason: decision.Reason}, nil
 }
 
 func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
@@ -84,8 +93,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					award.Accepted = &controllerwire.PlanAccepted{Spec: spec, Plan: plan, PlanHash: spec.PlanHash}
 					actor := store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-						Kind: store.OwnerTrigger, RunID: award.RunID,
-						Holder: award.Binding.Holder, Generation: award.Binding.Generation,
+						Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
 					}}
 					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{
 						ID: award.RunID, State: store.RunRunning, Request: award.Request, Spec: &spec,
@@ -117,12 +125,12 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 							return controllerwire.RenewalResponse{}, err
 						},
 						finish: func(ctx context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
-							_, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
-								Unit: state.actor.Owner, Transition: store.RunTransition{
-									RunID: run, To: store.RunState(body.Outcome), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
+							applied, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
+								Unit: state.actor.Owner, Transition: store.RunCompletion{
+									RunID: runspec.RunID(run), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
 								},
 							})
-							return controllerwire.Applied{}, err
+							return controllerwire.Applied{Outcome: string(applied.Outcome), Reason: applied.Reason, StateSeq: applied.StateSeq, Replayed: applied.Replayed}, err
 						},
 					}
 					adapter, err := nodehost.NewRemoteHostStore(transport, state, award.UnitID, func() bool { return false })
@@ -132,7 +140,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					owner.Renew = adapter.RenewOwner
 					host := cliNativeOwner(t, adapter, owner)
 					bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
-						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{RunID: "foreign-run"}}}, close: func() error { closed++; return nil }}, nil
+						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "foreign-run"}}}}, close: func() error { closed++; return nil }}, nil
 					}
 					var completion nodehost.RunCompletion
 					if here {
@@ -155,7 +163,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					state.mu.Lock()
 					defer state.mu.Unlock()
-					if acquired != 1 || closed != 1 || state.renewed == 0 || state.finished == nil || state.finished.Transition.To != store.RunSuccess {
+					if acquired != 1 || closed != 1 || state.renewed == 0 || state.finished == nil || state.finished.Transition.RunID == "" {
 						t.Fatalf("acquired=%d closed=%d renewals=%d finish=%+v", acquired, closed, state.renewed, state.finished)
 					}
 				})

@@ -1,7 +1,6 @@
 export interface PlanDoc {
   jobs: JobSpec[];
   concurrency?: ConcurrencySpec[];
-  resources?: ResourceSpec;
   priority?: number;
   claim_wait_ms?: number;
   admission_class?: string;
@@ -32,7 +31,6 @@ export interface JobSpec {
   memo?: { ttl_ms?: number };
   caches?: CacheSpec[];
   concurrency?: ConcurrencySpec[];
-  resources?: ResourceSpec;
   closures?: ClosureSpec;
   skip_if_budget_ms?: number;
   steps?: StepSpec[];
@@ -72,10 +70,6 @@ export interface ConcurrencySpec {
   cancel_timeout_ms?: number;
 }
 
-export interface ResourceSpec {
-  cores?: number;
-  memory_bytes?: number;
-}
 export interface SourceSpec {
   full_history?: boolean;
   depth?: number;

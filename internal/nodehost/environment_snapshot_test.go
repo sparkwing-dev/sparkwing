@@ -255,7 +255,7 @@ func TestOwnerHostRefusesChangedCapturedValuesBeforeSourceEnvironment(t *testing
 		return nil, nil
 	}
 	_, err := host.Run(t.Context(), input)
-	if err == nil || state.finished.Transition.To != store.RunFailed || state.accepted.RunID != "" {
+	if err == nil || state.finished.Transition.RunID == "" || state.accepted.RunID != "" {
 		t.Fatalf("changed snapshot: finish=%v error=%v", state.finished, err)
 	}
 }

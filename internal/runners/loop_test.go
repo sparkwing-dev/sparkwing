@@ -11,8 +11,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -226,17 +224,13 @@ func TestLoopOwnsAwardReturnedWhileClaimDeadlineCancelsTransport(t *testing.T) {
 	})
 }
 
-func TestLoopPreservesFractionalCapacityAndHereBinding(t *testing.T) {
+func TestLoopPreservesHereBinding(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	loop := &Loop{
 		Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1, RunID: "here-run"},
-		RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-			resources := match.Resources{Cores: .5, MemoryBytes: 100}
-			return resources, resources, nil
-		},
 		Controller: claimFunc(func(_ context.Context, req controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-			if req.AvailableCores != .5 || req.AvailableMemoryBytes != 100 || req.RunID != "here-run" {
+			if req.RunID != "here-run" {
 				t.Errorf("request: %#v", req)
 			}
 			cancel()

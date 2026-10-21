@@ -69,11 +69,6 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 		UnitID: "awarded-unit", RunID: "run", JobID: "job", Capability: "one-time-bootstrap",
 		Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "server-holder", Generation: 3},
 		Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "awarded-team"}},
-		Execution: &runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-			Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 1.5}},
-			MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: 2 << 30}},
-		}}}},
-		OwnerDeadline: &deadline, AttemptDeadline: &deadline, ParentCapabilityExpiry: &deadline, Engine: &identity,
 	}
 	unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "git:github.com/team/repo"}, SHA: strings.Repeat("a", 40)}
 	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
@@ -95,7 +90,7 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			unit := wireAward(kind)
-			demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{kind}, Labels: []string{"os=linux"}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
+			demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{kind}, Labels: []string{"os=linux"}}
 			want := demand
 			want.JobNamespace = "cloud"
 			calls := 0
@@ -187,7 +182,7 @@ func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 			t.Fatal(err)
 		}
 		award, err := control.Claim(t.Context(), "cloud", nil)
-		if err != nil || award == nil || award.Binding.RunID != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
+		if err != nil || award == nil || string(award.Binding.RunID) != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
 			t.Fatalf("retry lost its execution fence or original source: award=%+v error=%v", award, err)
 		}
 		mutation %= 5
@@ -272,7 +267,7 @@ func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				want := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: binding.Generation}}
+				want := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}}
 				if !slices.Equal(request.Observed, []controllerwire.LauncherObservation{want}) {
 					t.Fatalf("observation=%+v", request.Observed)
 				}
@@ -389,7 +384,7 @@ func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
 				unit.Binding.Expansion.ID = "another-eval"
 			}
 			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				want := capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+				want := capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}
 				if len(request.Observed) != 1 || request.Observed[0].Award != want {
 					t.Fatalf("eval observation lost its live award: %+v", request.Observed)
 				}

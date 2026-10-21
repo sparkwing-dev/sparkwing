@@ -135,7 +135,7 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 	}
 	reason := ""
 	if manifest.Status != logseg.StatusComplete {
-		reason = string(manifest.Reason)
+		reason = manifest.Reason
 	}
 	return u.commit(ctx, u.segments, true, reason)
 }

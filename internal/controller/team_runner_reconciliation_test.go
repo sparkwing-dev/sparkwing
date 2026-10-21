@@ -38,7 +38,7 @@ func tenantRunClaim(t *testing.T, f *tenancyFixture) (controllerwire.CreateRunRe
 	if code != http.StatusCreated || json.Unmarshal([]byte(response), &admitted) != nil || admitted.RunID == "" {
 		t.Fatalf("member intake = %d: %s", code, response)
 	}
-	code, response = f.do("POST", "/api/v1/runners/claim?team="+string(f.teamA.Team()), f.runnerB, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 1})
+	code, response = f.do("POST", "/api/v1/runners/claim?team="+string(f.teamA.Team()), f.runnerB, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	var claimed controllerwire.ClaimResponse
 	if code != http.StatusOK || json.Unmarshal([]byte(response), &claimed) != nil || claimed.Claim == nil || claimed.Claim.RunID != admitted.RunID || claimed.Claim.Capability == "" {
 		t.Fatalf("runner claim = %d: %s", code, response)
@@ -62,7 +62,7 @@ func TestTeamBoundary_ARunnerClaimsItsOwnTeamsAdmittedRun(t *testing.T) {
 		}
 		property := func(forged string) bool {
 			for _, named := range []bool{false, true} {
-				body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 1}
+				body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}}
 				want := http.StatusOK
 				if named {
 					body.RunID, want = f.runA, http.StatusForbidden
@@ -112,7 +112,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 		}{
 			{"/plan", body},
 			{"/heartbeat", controllerwire.RenewalRequest{}},
-			{"/finish", controllerwire.FinishRequest{Outcome: "success"}},
+			{"/finish", controllerwire.FinishRequest{}},
 		} {
 			if code, response := f.do("POST", path+step.suffix, auth, step.body); code != http.StatusOK {
 				t.Fatalf("claim %s = %d: %s", step.suffix, code, response)

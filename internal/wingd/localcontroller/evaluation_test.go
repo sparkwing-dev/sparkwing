@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -23,7 +25,7 @@ func FuzzOwnerEvaluationReadsOnlyItsSourceEdges(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: id}, Generation: 3, SpecHash: "source-hash", Spec: raw}
+			return store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Generation: 3, SpecHash: "source-hash", Spec: raw}
 		}
 		source := row("reader", nodeproto.JobSpec{ID: "reader", Needs: []string{"needed"}, NeedsIfPresent: []string{"optional"}, OnFailureOf: "failure", NeedsGenerated: []string{"group"}})
 		rows := map[string]store.NodeRow{
@@ -47,12 +49,12 @@ func FuzzOwnerEvaluationReadsOnlyItsSourceEdges(f *testing.F) {
 		case 3:
 			source.SpecHash += "-" + suffix
 		case 4:
-			source.Ref.NodeID += "-" + suffix
+			source.Ref.NodeID += runspec.NodeID("-" + suffix)
 		case 5:
 			target.RunID += "-" + suffix
 		case 6:
 			output := rows["needed"]
-			output.Ref.RunID += "-" + suffix
+			output.Ref.RunID += runspec.RunID("-" + suffix)
 			rows["needed"] = output
 		case 7:
 			target.NodeID = "generated"
@@ -76,7 +78,7 @@ func FuzzOwnerEvaluationReadsOnlyItsSourceEdges(f *testing.F) {
 			if ref.RunID != "run" {
 				return store.NodeRow{}, store.ErrNotFound
 			}
-			result, ok := rows[ref.NodeID]
+			result, ok := rows[string(ref.NodeID)]
 			if !ok {
 				return store.NodeRow{}, store.ErrNotFound
 			}

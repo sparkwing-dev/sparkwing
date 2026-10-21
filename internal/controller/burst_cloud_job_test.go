@@ -76,7 +76,7 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 			t.Fatal(err)
 		}
 		observed := &burstLauncherWire{Controller: wire}
-		runtime, err = launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: options.URL, CPUCeiling: 64, MemoryCeiling: 64 << 30}, Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 64}, HTTP: options.HTTP, Bearer: options.Bearer, NewController: func(client.EngineOptions) (launcher.LauncherController, error) { return observed, nil }})
+		runtime, err = launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: options.URL, CPUCeiling: 64, MemoryCeiling: 64 << 30}, Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}}, HTTP: options.HTTP, Bearer: options.Bearer, NewController: func(client.EngineOptions) (launcher.LauncherController, error) { return observed, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +122,7 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 	proof.ExchangeCloud = func(options client.EngineOptions, bootstrap controllerwire.ClaimedUnit) controllerwire.ClaimedUnit {
 		destination := filepath.Join(t.TempDir(), "cloud-source")
 		init := launcher.SourceInit{Bind: func(ctx context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
-			access, err := client.NewSourceAccess(options, award.Binding.RunID, award.Source)
+			access, err := client.NewSourceAccess(options, string(award.Binding.RunID), award.Source)
 			return source.Options{Access: access, BundleTransport: options.HTTP.Transport, BuildEnvironment: sourcetest.BuildEnvironment}, nil, err
 		}}
 		if err := init.Run(t.Context(), published, destination); err != nil {

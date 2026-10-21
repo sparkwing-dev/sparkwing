@@ -72,8 +72,8 @@ func (op *Operator) releaseIdleFreeSlotsTx(ctx context.Context, tx *storeTx) (in
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return 0, err
 	}
-	now := tx.now().UnixNano()
-	cutoff := tx.now().Add(-freeSlotIdlePeriod).UnixNano()
+	now := tx.now(ctx).UnixNano()
+	cutoff := tx.now(ctx).Add(-freeSlotIdlePeriod).UnixNano()
 	var released int64
 	for _, slot := range slots {
 		var occupied int64
@@ -277,7 +277,7 @@ func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal st
 }
 
 // GrantFreeSlot gives team a free-tier slot whether or not one is free.
-func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error) {
+func (s *Store) GrantFreeSlot(ctx context.Context, team Team) error {
 	team = NormalizeTeam(team)
 	if err := ValidateSlug(string(team)); err != nil {
 		return err
@@ -285,24 +285,22 @@ func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (er
 	if !holdsFreeAllowance(team) {
 		return fmt.Errorf("%w: the operator's team has no free tier", ErrInvalidInput)
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	exists, err := rowPresentTx(ctx, tx, `SELECT 1 FROM teams WHERE name = ?`, string(team))
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("%w: team %s", ErrNotFound, team)
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO free_slots (team, taken_at, empty_since) VALUES (?,?,?)
-ON CONFLICT (team) DO NOTHING`, string(team), now.UnixNano(), 0); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.inTxOnce(ctx, func(tx *storeTx) error {
+		exists, err := rowPresentTx(ctx, tx, `SELECT 1 FROM teams WHERE name = ?`, string(team))
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("%w: team %s", ErrNotFound, team)
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO free_slots (team, taken_at) VALUES (?,?)
+ON CONFLICT (team) DO NOTHING`, string(team), tx.now(ctx).UnixNano()); err != nil {
+			return err
+		}
+		return nil
+	})
+
 }
 
 // SetFreeTeamSlots sets how many teams without credits may hold a slot.

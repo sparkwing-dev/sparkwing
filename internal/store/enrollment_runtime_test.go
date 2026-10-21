@@ -27,7 +27,7 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 	if err != nil || issued.Raw == "" || issued.Capability.Parent != nil {
 		t.Fatalf("enrollment: %+v, %v", issued.Capability, err)
 	}
-	p, _, err := s.AsOperator().ReadClaimProfile(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	p, err := s.AsOperator().ReadClaimProfile(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
 	if err != nil || p.Name != "machine" || p.Class != "agent" || len(p.ReservedPools) != 1 || p.Accept == nil {
 		t.Fatalf("profile: %+v, %v", p, err)
 	}

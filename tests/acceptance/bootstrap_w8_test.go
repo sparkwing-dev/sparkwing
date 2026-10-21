@@ -64,15 +64,12 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 			unit := controllerwire.ClaimedUnit{
 				CloudResources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory},
 				Unit:           capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect,
-				UnitID: binding.UnitID, RunID: binding.RunID, JobID: binding.NodeID, Capability: "private-work-capability",
-				Binding:        capability.Binding{Kind: capability.BindingNode, RunID: binding.RunID, NodeID: binding.NodeID, Holder: binding.Holder, Generation: binding.Generation, Attempt: binding.Attempt},
-				Request:        runspec.SealedRequest{RunID: binding.RunID, Request: runspec.Request{Team: binding.Team}},
+				UnitID: binding.UnitID, RunID: string(binding.RunID), JobID: string(binding.NodeID), Capability: "private-work-capability",
+				Binding:        capability.Binding{Kind: capability.BindingNode, RunID: string(binding.RunID), NodeID: string(binding.NodeID), Holder: binding.Holder, Generation: int64(binding.Generation), Attempt: int64(binding.Attempt)},
+				Request:        runspec.SealedRequest{RunID: string(binding.RunID), Request: runspec.Request{Team: binding.Team}},
 				LeaseExpiresAt: now.Add(time.Minute), OwnerDeadline: &binding.OwnerDeadline, AttemptDeadline: &binding.AttemptDeadline, ParentCapabilityExpiry: &binding.ParentCapabilityExpiry,
-				Engine: award.Engine,
-				Execution: &runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-					Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: award.CPUCores}},
-					MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: award.Memory}},
-				}}}},
+				Engine:    award.Engine,
+				Execution: &runspec.JobExecutionSettings{},
 			}
 			unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(award.Source.RepoKey)}, SHA: award.Source.SHA}
 			unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: award.Source.RemoteURL, PipelineDir: award.Source.PipelineDir}
@@ -80,9 +77,9 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 			case launcher.CloudPlan:
 				unit.Unit, unit.Purpose, unit.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun
 			case launcher.CloudEval:
-				unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, binding.SourceGeneration
-				unit.Binding.Generation = binding.SourceGeneration
-				unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+				unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, int64(binding.SourceGeneration)
+				unit.Binding.Generation = int64(binding.SourceGeneration)
+				unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}
 			}
 			if award.Engine != nil {
 				unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: *award.Engine}}}
@@ -133,7 +130,7 @@ func TestCloudBootstrapGrammarW8Components(t *testing.T) {
 				boundary := errors.New("service boundary")
 				check := func(options cluster.BootstrapOptions) {
 					called = true
-					if options.RunID != award.Binding.RunID || options.JobID != award.Binding.NodeID || options.Generation != award.Binding.Generation || options.ControllerURL != cfg.ControllerURL || options.SourceDir != "/tmp/source" || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != bootstrapFile {
+					if options.RunID != string(award.Binding.RunID) || options.JobID != string(award.Binding.NodeID) || options.Generation != int64(award.Binding.Generation) || options.ControllerURL != cfg.ControllerURL || options.SourceDir != "/tmp/source" || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != bootstrapFile {
 						t.Fatal("bootstrap entrypoint changed the awarded selectors or private paths")
 					}
 				}

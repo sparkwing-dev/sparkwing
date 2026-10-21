@@ -17,6 +17,7 @@ import (
 func ownerPlacementFixture(t *testing.T) (*Tenant, Actor) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
@@ -68,12 +69,12 @@ func TestOwnerSnapshotPlanAndEvalUseTheirOwnLease(t *testing.T) {
 	}
 }
 
-func TestOwnerSnapshotRechecksCapacityAndLivePreferences(t *testing.T) {
-	for _, change := range []string{"capacity", "preferred", "stale_preferred", "revoked_preferred"} {
+func TestOwnerSnapshotRechecksLabelsAndLivePreferences(t *testing.T) {
+	for _, change := range []string{"labels", "preferred", "stale_preferred", "revoked_preferred"} {
 		t.Run(change, func(t *testing.T) {
 			tenant, actor := ownerPlacementFixture(t)
 			s := tenant.s
-			s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+			s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
 			ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: []PlacementPreference{{Prefers: []string{"name=preferred"}, Hold: time.Hour}, {}}, Liveness: time.Minute})
 			owner, err := s.AsOperator().ResolveAuthority(ctx, actor.Authority)
@@ -84,12 +85,13 @@ func TestOwnerSnapshotRechecksCapacityAndLivePreferences(t *testing.T) {
 			if err != nil || !OwnerCanExecute(owner)(snapshot.Nodes[0]) {
 				t.Fatalf("initial owner eligibility: %v", err)
 			}
-			if change == "capacity" {
-				s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 2}}
+			if change == "labels" {
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["gpu"]}}`))
+				s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 			} else {
 				preferred := authorityRoot("preferred", "a")
 				authorityPersist(t, s, preferred)
-				if err := s.AsOperator().RecordRunnerPoll(ctx, UnitDemand{CapabilityPrefix: preferred.Prefix, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+				if err := s.AsOperator().RecordRunnerPoll(ctx, UnitDemand{CapabilityPrefix: preferred.Prefix}); err != nil {
 					t.Fatal(err)
 				}
 				if change == "stale_preferred" {
@@ -131,12 +133,12 @@ func TestOwnerSnapshotUsesOnlyAuthenticatedAncestorPollForRemoteSelfClaim(t *tes
 				prefix = "other"
 			}
 			if observation != "missing" {
-				if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+				if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if observation == "stale" {
-				raw, err := json.Marshal(runnerPoll{UnitDemand: UnitDemand{Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}, ObservedAt: s.now().Add(-time.Hour)})
+				raw, err := json.Marshal(runnerPoll{UnitDemand: UnitDemand{}, ObservedAt: s.now().Add(-time.Hour)})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -171,7 +173,7 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration'`)
-	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner", Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner"}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Liveness: time.Second})
@@ -200,14 +202,14 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			tenant, actor := ownerPlacementFixture(t)
-			capacity := float64(1 + random.IntN(16))
-			requested := float64(1 + random.IntN(16))
-			execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Value: []string{"tool:git"}, Set: true}}, Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Value: requested, Set: true}}}}}}
+			capacity := fmt.Sprintf("size-%d", random.IntN(4))
+			requested := fmt.Sprintf("size-%d", random.IntN(4))
+			execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"tool:git", requested}}}}
 			raw, err := json.Marshal(execution)
 			if err != nil {
 				t.Fatal(err)
 			}
-			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"tool:git"}, Capacity: match.Resources{Cores: capacity}}, available: match.Resources{Cores: capacity}}
+			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"tool:git", capacity}}}
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=1,spec_hash='declaration',execution_json=?`, raw)
 			owner, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
@@ -228,10 +230,10 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 				t.Fatal("private snapshot did not survive transport")
 			}
 			node := transported.Nodes[0]
-			if got := OwnerCanExecute(owner)(node); got != (requested <= capacity) {
-				t.Fatalf("requested=%g capacity=%g eligible=%v", requested, capacity, got)
+			if got := OwnerCanExecute(owner)(node); got != (requested == capacity) {
+				t.Fatalf("requested=%s capacity=%s eligible=%v", requested, capacity, got)
 			}
-			if requested <= capacity {
+			if requested == capacity {
 				for _, mutate := range []func(*NodeRow){func(n *NodeRow) { n.Generation++ }, func(n *NodeRow) { n.SpecHash += "changed" }, func(n *NodeRow) { n.Ref.NodeID += "other" }} {
 					forged := node
 					mutate(&forged)
@@ -246,7 +248,7 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 			}
 			result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: node.Ref, Actor: actor, Policy: SourceNone})
 			want := Execute
-			if requested > capacity {
+			if requested != capacity {
 				want = Dispatch
 			}
 			if err != nil || result.Kind != want {
@@ -259,7 +261,7 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 func TestOwnerNodeReadsMatchTheSnapshotPlacementDecision(t *testing.T) {
 	tenant, actor := ownerPlacementFixture(t)
 	s := tenant.s
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
 	owner, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
@@ -325,8 +327,9 @@ func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
 
 func TestOwnerNodeReadKeepsARefusedPlacementDecision(t *testing.T) {
 	tenant, actor := ownerPlacementFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["gpu"]}}`))
 	s := tenant.s
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())
 	owner, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {

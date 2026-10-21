@@ -43,10 +43,6 @@ func resolveRun(in Inputs, out runspec.Options) (runspec.Options, error) {
 	if err = resolveSetting(in, Prefers, &out.Prefers); err != nil {
 		return runspec.Options{}, err
 	}
-	out.Resources, err = resourceSetting(in)
-	if err != nil {
-		return out, err
-	}
 	out.Checkout, err = checkoutSetting(in)
 	return out, err
 }
@@ -71,9 +67,6 @@ func planOptions(plan nodeproto.PlanDoc) (runspec.Options, error) {
 	out := runspec.Options{Priority: codeValue(plan.Priority, "priority"), AdmissionClass: codeValue(plan.AdmissionClass, "admission_class")}
 	if plan.Source != nil {
 		out.Checkout = sourceSetting(*plan.Source, Origin{Source: Code, Key: "source"})
-	}
-	if plan.Resources != nil {
-		out.Resources = declaration(runspec.Resources{Cores: codeValue(plan.Resources.Cores, "resources.cores"), MemoryBytes: codeValue(plan.Resources.MemoryBytes, "resources.memory_bytes")}, runspec.SettingOrigin{Layer: runspec.LayerCode, Key: "resources"})
 	}
 	var err error
 	out.ClaimWait, err = codeDuration(plan.ClaimWaitMS, "claim_wait")
@@ -105,16 +98,6 @@ func jobInputs(base Inputs, job nodeproto.JobSpec) (Inputs, error) {
 	if job.Approval != nil {
 		if code.JobDefaults.ApprovalWait, err = codeDuration(job.Approval.TimeoutMS, prefix+"approval.wait"); err != nil {
 			return in, err
-		}
-	}
-	if job.Resources != nil {
-		code.Resources.Set = true
-		code.Resources.Origin = runspec.SettingOrigin{Layer: runspec.LayerCode, Key: prefix + "resources"}
-		if job.Resources.Cores != nil {
-			code.Resources.Value.Cores = codeValue(job.Resources.Cores, prefix+"resources.cores")
-		}
-		if job.Resources.MemoryBytes != nil {
-			code.Resources.Value.MemoryBytes = codeValue(job.Resources.MemoryBytes, prefix+"resources.memory_bytes")
 		}
 	}
 	code.Prefers = runspec.Setting[[]string]{}
@@ -154,10 +137,6 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 			return runspec.JobExecutionSettings{}, err
 		}
 	}
-	out.Resources, err = resourceSetting(in)
-	if err != nil {
-		return runspec.JobExecutionSettings{}, err
-	}
 	out.Requires = run.Requires
 	out.Requires.Value = slices.Clone(run.Requires.Value)
 	for _, requirement := range job.Requires {
@@ -177,7 +156,6 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 	result := out.JobDefaults
 	result.Requires = out.Requires
 	result.Prefers = out.Prefers
-	result.Resources = out.Resources
 	result.Concurrency, err = ResolveConcurrency(job.Concurrency)
 	return result, err
 }
@@ -242,7 +220,6 @@ func ResolveExpansion(in ExpansionInputs) (map[string]runspec.JobExecutionSettin
 	inputs.Code.Priority = accepted.Priority
 	inputs.Code.AdmissionClass = accepted.AdmissionClass
 	inputs.Code.Checkout = accepted.Checkout
-	inputs.Code.Resources = accepted.Resources
 	inputs.Code.ClaimWait = accepted.ClaimWait
 	jobs, err := resolveJobs(inputs, plan.Jobs, in.Spec.Resolved.Settings.Options)
 	if err != nil {

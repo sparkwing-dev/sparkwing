@@ -1059,25 +1059,12 @@ It restores no values and grants no secret reads. Registry loss returns
 unavailable until the owner restores values. Retry requires fresh resolution. Cross-process secret delivery
 still needs a Cloud affinity or unpersisted relay contract.
 
-`ClaimRequest` adds optional `capacity`, `os` and `arch` for authenticated
-here capabilities and unbound registered machines. Existing available CPU/memory fields retain current free
-resources. `RenewalRequest.available` refreshes the here owner's availability.
-The CLI reads the local admission daemon's actual capacity and free resources,
-including explicit zero availability. `RemoteHostStore.Available` supplies
-renewal observations. Canonical store placement decides owner self-execution.
-Burst self-claims reserve machine compute before reconciliation.
-`ReconcileRequest.reserved` carries the actual acquired lease resources to that
-transaction. C1 adds them to the authenticated machine's current free-resource
-observation for this job only. The field is optional, bounded by physical
-capacity, and never saved as shared availability. Ordinary heartbeats continue
-to report free resources. Claim authority, selectors, fences and placement
-holds still apply.
-Here binding supplies the real shared native host, private HTTP state,
-source access, data, logs, process services and leases.
-
-Runner `RequestCapacity` callbacks now take context and return physical capacity,
-current availability and an error. The loop makes no controller claim when
-observation fails. Every claim carries the machine's OS and architecture.
+`ClaimRequest` carries labels, OS and architecture. CPU/memory request,
+capacity, availability and reserved-resource fields are removed. Owner and burst
+self-claims use the same label eligibility and claim fences as every other
+claimant. Private snapshot eligibility captures those facts without reserving
+machine compute. Here binding supplies the shared native host, private HTTP
+state, source access, data, logs and process services.
 Physical capacity remains nonzero when contribution or keep-free settings leave
 zero availability. Registration identity, pools and repository grants still
 come from authenticated capabilities. Trusted profile ceilings remain enforced
@@ -1220,14 +1207,17 @@ producer rows into the persisted job namespace used by mask initialization.
 
 ## Owner cancellation drain
 
-Once scheduling starts, owner renewal keeps its lease live after a run
-cancellation request. The persisted scheduling graph cancels each executor and
-waits for terminal results before owner completion. Cancellation during source
-preparation still stops preparation. Lost authority, renewal silence, the parent
-deadline and an explicit host stop still terminate the owner context. Claimed
-executor renewal continues to cancel its execution context on a cancellation beat.
-An owner waits for a holder with persisted cancellation intent instead of
-submitting the same cancellation again on each scheduling pass.
+Cancellation records a stored drain deadline five minutes after the first
+request. Node, owner, eval and concurrency-slot leases use the same lease bound,
+which is the earliest authority, cancellation and funded deadline. Renewing an
+owner for scheduling may clear the cancellation flag sent to its keeper, but
+never extends this deadline. A holder that ignores cancellation is reaped when
+its lease expires. Funding refusal retains its shorter one-slice deadline.
+
+The finish request carries a reason and masked error, with no outcome. The store
+derives the terminal verdict from the accepted plan and persisted job results.
+Preparation without an accepted plan finishes failed, or cancelled when the run
+has cancellation intent. Terminal outcomes absorb replay.
 
 ## Detached request trace
 

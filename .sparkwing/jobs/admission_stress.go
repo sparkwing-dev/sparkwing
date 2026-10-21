@@ -71,7 +71,6 @@ func (p AdmissionStress) Plan(_ context.Context, plan *sparkwing.Plan, in Admiss
 	}
 	plan.AdmissionClass(class)
 	if profile == stressLightSequential {
-		plan.Resources(sparkwing.Cores(0.2))
 	}
 
 	specs, err := admissionStressProfile(profile)
@@ -80,11 +79,7 @@ func (p AdmissionStress) Plan(_ context.Context, plan *sparkwing.Plan, in Admiss
 	}
 	nodes := make(map[string]*sparkwing.JobNode, len(specs))
 	for _, spec := range specs {
-		hints := []sparkwing.ResourceHint{sparkwing.Cores(spec.Cores)}
-		if spec.MemoryMiB > 0 {
-			hints = append(hints, sparkwing.MemoryGB(float64(spec.MemoryMiB)/1024))
-		}
-		node := sparkwing.Job(plan, spec.ID, stressWork(spec)).Resources(hints...)
+		node := sparkwing.Job(plan, spec.ID, stressWork(spec))
 		for _, dep := range spec.Needs {
 			node.Needs(nodes[dep])
 		}

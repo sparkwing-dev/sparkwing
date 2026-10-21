@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -80,7 +82,7 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 		t.Fatalf("order=%v", order)
 	}
 	for _, id := range []string{"a", "b", "c", "d"} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess {
 			t.Errorf("%s row=%+v error=%v", id, row, err)
 		}
@@ -120,7 +122,7 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
 	for id, want := range map[string]store.NodeState{"build": store.NodeFailed, "test": store.NodeCancelled, "deploy": store.NodeCancelled, "build-recover": store.NodeSuccess, "docs-recover": store.NodeSkipped, "after-lint": store.NodeSuccess, "after-flaky": store.NodeCancelled, "maybe": store.NodeFailed} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil || row.Outcome != want || row.Status != store.StatusDone {
 			t.Errorf("%s row=%+v error=%v, want %s", id, row, err, want)
 		}
@@ -150,11 +152,11 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 	if err != nil || completion.Outcome != "success" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "after"})
+	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "after"})
 	if err != nil || row.Outcome != store.NodeSuccess {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
-	optional, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "maybe"})
+	optional, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "maybe"})
 	if err != nil || optional.Status != store.StatusDone || optional.Outcome != store.NodeFailed {
 		t.Fatalf("optional row=%+v error=%v", optional, err)
 	}
@@ -167,7 +169,7 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -184,7 +186,7 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 			if err := json.Unmarshal(row.Spec, &job); err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(job.Needs, []string{"base"}) || !slices.Equal(job.NeedsIfPresent, []string{"extra"}) || !slices.Equal(row.Execution.Requires.Value, []string{"gpu", "linux", "big"}) || !slices.Equal(row.Execution.Prefers.Value, []string{"fast"}) || row.Execution.Resources.Value.Cores.Value != 4 || row.Execution.Resources.Value.MemoryBytes.Value != 1<<30 {
+			if !slices.Equal(job.Needs, []string{"base"}) || !slices.Equal(job.NeedsIfPresent, []string{"extra"}) || !slices.Equal(row.Execution.Requires.Value, []string{"gpu", "linux", "big"}) || !slices.Equal(row.Execution.Prefers.Value, []string{"fast"}) {
 				t.Fatalf("job=%+v execution=%+v", job, row.Execution)
 			}
 		}
@@ -203,18 +205,18 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		if input.NodeID != "slow" {
 			return errors.New("downstream body started during cancellation")
 		}
-		ref := controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: input.NodeID}
-		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
-		started, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
+		ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+		started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(input.Attempt)})
 		if err != nil {
 			return err
 		}
-		if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Accepted.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
+		if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Accepted.RunID), Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
 			return err
 		}
 		reportCtx, stopReport := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 		defer stopReport()
-		_, err = f.State.TransitionNode(reportCtx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(started.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}}})
+		_, err = f.State.TransitionNode(reportCtx, store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: store.NodeCancelled, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}})
 		return err
 	})
 	completion, err := f.Host.Run(ctx, f.Input)
@@ -257,7 +259,7 @@ func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 			if !errors.Is(err, cause) {
 				t.Fatalf("error=%v, want %v", err, cause)
 			}
-			row, err := f.Tenant.ReadNode(bounded, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "next"})
+			row, err := f.Tenant.ReadNode(bounded, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "next"})
 			if err != nil || row.StartedAt != nil || row.ClaimedBy != "" {
 				t.Fatalf("downstream row=%+v error=%v", row, err)
 			}
@@ -273,7 +275,7 @@ func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "node host") {
 		t.Fatalf("error=%v", err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: "a"})
+	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "a"})
 	if err != nil || row.StartedAt != nil {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
@@ -305,7 +307,7 @@ func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
 				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
 			for id, outcome := range map[string]store.NodeState{"big": store.NodeFailed, "after": store.NodeCancelled} {
-				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 				if err != nil || row.Outcome != outcome {
 					t.Fatalf("%s row=%+v error=%v", id, row, err)
 				}

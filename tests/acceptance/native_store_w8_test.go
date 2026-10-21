@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -79,7 +78,7 @@ func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, c
 		if unit.Unit == requested {
 			break
 		}
-		response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{requested}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+		response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{requested}})
 		if err != nil || response.Claim == nil {
 			t.Fatalf("claim %s: %v %+v", requested, err, response.Claim)
 		}
@@ -191,7 +190,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 						<-ctx.Done()
 						return nil, context.Cause(ctx)
 					}
-					if direct && !reflect.DeepEqual(input.GrantedRunner, expected) || input.GrantedRunner.Name != "runner" || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != binding.Principal.Capability.Binding.Generation {
+					if direct && !reflect.DeepEqual(input.GrantedRunner, expected) || input.GrantedRunner.Name != "runner" || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != runspec.ClaimGeneration(binding.Principal.Capability.Binding.Generation) {
 						t.Error("native owner received a changed runner or fence")
 					}
 					if _, err := binding.Tenant.ReadSnapshot(ctx, input.RunID); err != nil {
@@ -235,10 +234,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Controller: client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return root.Raw, nil }}, NewController: cloudStoreClientW8(t, server),
 			Loop: runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1}, Hosting: remote,
 			Repositories: repositories,
-			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-				resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-				return resources, resources, nil
-			},
+			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -251,10 +247,6 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
 			Bind:   bind,
-			RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-				resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-				return resources, resources, nil
-			},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -274,10 +266,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				Runner: runners.StoreRunnerConfig{
 					Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 					Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1},
-					Bind:   bind, RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-						resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-						return resources, resources, nil
-					},
+					Bind:   bind,
 				},
 			}, nil
 		}}
@@ -321,7 +310,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if mode == "remote_cancel" {
-		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != unit.Binding.Generation || run.State == store.RunSuccess || run.State == store.RunFailed || run.State == store.RunCancelled || !bound || !acquired || !closed {
+		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || run.State == store.RunSuccess || run.State == store.RunFailed || run.State == store.RunCancelled || !bound || !acquired || !closed {
 			t.Fatalf("cancelled acquisition finished or abandoned its claim: state=%s error=%v host error=%v", run.State, err, executionErr)
 		}
 		return
@@ -392,9 +381,7 @@ func FuzzNativeStoreAwardW8(f *testing.F) {
 		case 6:
 			unit.Accepted.Spec.Hash += runspec.Hash(value)
 		case 7:
-			unit.Execution.Resources.Set = true
-			unit.Execution.Resources.Value.Cores.Set = true
-			unit.Execution.Resources.Value.Cores.Value = 3
+			unit.Execution.Requires.Value = []string{"changed-label"}
 		case 8:
 			unit.Capability += value
 		case 9:

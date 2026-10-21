@@ -23,7 +23,7 @@ func closureID(job, kind string, index int) string {
 func planDocument(p *Plan) nodeproto.PlanDoc {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}, Resources: resourceDocument(p.resources)}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
 	if p.prioritySet {
 		v := p.priority
 		doc.Priority = &v
@@ -56,20 +56,6 @@ func planDocument(p *Plan) nodeproto.PlanDoc {
 	return doc
 }
 
-func resourceDocument(r *ResourceHints) *nodeproto.ResourceSpec {
-	if r == nil {
-		return nil
-	}
-	s := &nodeproto.ResourceSpec{}
-	if r.coresSet {
-		s.Cores = &r.Cores
-	}
-	if r.memorySet {
-		s.MemoryBytes = &r.MemoryBytes
-	}
-	return s
-}
-
 func concurrencyDocument(g *ConcurrencyGroup, cost *int) nodeproto.ConcurrencySpec {
 	l := g.limit
 	spec := nodeproto.ConcurrencySpec{Group: g.name, Capacity: &l.Capacity, Cost: cost, QueueTimeoutMS: milliseconds(l.QueueTimeout), CancelTimeoutMS: milliseconds(l.CancelTimeout)}
@@ -85,7 +71,7 @@ func concurrencyDocument(g *ConcurrencyGroup, cost *int) nodeproto.ConcurrencySp
 }
 
 func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {
-	s := nodeproto.JobSpec{ID: n.id, Needs: n.needs, NeedsIfPresent: n.needsOptional, NeedsGenerated: n.needsGenerated, Groups: jobGroups(p, n), Env: n.declaredEnv, Artifacts: n.outputGlobs, Requires: append(append([]string(nil), n.requires...), n.tools...), Prefers: n.prefers, Children: n.children, Inline: n.inline, Optional: n.optional, ContinueOnError: n.continueOnError, Resources: resourceDocument(n.resources)}
+	s := nodeproto.JobSpec{ID: n.id, Needs: n.needs, NeedsIfPresent: n.needsOptional, NeedsGenerated: n.needsGenerated, Groups: jobGroups(p, n), Env: n.declaredEnv, Artifacts: n.outputGlobs, Requires: append(append([]string(nil), n.requires...), n.tools...), Prefers: n.prefers, Children: n.children, Inline: n.inline, Optional: n.optional, ContinueOnError: n.continueOnError}
 	for _, e := range n.consumes {
 		s.Consumes = append(s.Consumes, nodeproto.ArtifactInput{Producer: e.producer, Into: e.into})
 	}

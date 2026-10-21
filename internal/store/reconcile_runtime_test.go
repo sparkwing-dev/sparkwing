@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -22,7 +23,7 @@ func reconcileFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, tenant.s, owner)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','run','claimed','trigger',1,1,'host','owner',1,?,?,?)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}}
+	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}}
 	return tenant, now, actor
 }
 
@@ -43,8 +44,8 @@ func TestReconcileWaitsForHolderUntilReaperCommits(t *testing.T) {
 
 func TestReconcileKeepsTerminalWithoutSourceOrNewEvent(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
+	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -89,7 +90,7 @@ func TestReconcileRechecksOwnerAndSourcePolicy(t *testing.T) {
 
 func TestReconcileRacingOwnersReclaimOneReapedJob(t *testing.T) {
 	tenant, now, actor := reconcileFixture(t)
-	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET plan_json=?,plan_hash='plan',spec_json=?,spec_hash='spec',sealed_at=1 WHERE id='run'`, []byte(`{"jobs":[{"id":"job"}]}`), []byte(`{}`))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.Add(-time.Nanosecond).UnixNano())
 	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
@@ -142,7 +143,7 @@ func TestReconcileRacingOwnersReclaimOneReapedJob(t *testing.T) {
 
 func TestReconcileDoesNotExecuteUnresolvedDependency(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=NULL,spec_json=?`, []byte(`{"id":"job","needs":["dependency"]}`))
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','dependency','pending',?,?)`, []byte(`{"id":"dependency"}`), []byte(`{}`))
@@ -157,7 +158,7 @@ func TestReconcileSelfClaimRenewalKeepsOwnerFence(t *testing.T) {
 	for _, problem := range []string{"live", "dispatched", "expired", "revoked"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, now, actor := reconcileFixture(t)
-			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=1`)
 			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone})

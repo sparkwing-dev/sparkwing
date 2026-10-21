@@ -266,7 +266,7 @@ func automationSubscribes(decl githubAppAutomationPipeline, event, action string
 	return false
 }
 
-func (s *Server) armGitHubAppSchedules(ctx context.Context, tenant *store.Tenant, installationID int64, repo store.GitHubRepo, branch string, entries []crons.Declared) ([]string, []string, error) {
+func (s *Server) armGitHubAppSchedules(ctx context.Context, tenant *store.Tenant, installationID int64, publication store.GitHubAppPublication, repo store.GitHubRepo, branch string, entries []crons.Declared) ([]string, []string, error) {
 	repoURL := "https://github.com/" + repo.Slug() + ".git"
 	rows := make([]store.CronSchedule, 0, len(entries))
 	requests := make([]runspec.Request, 0, len(entries))
@@ -294,5 +294,5 @@ func (s *Server) armGitHubAppSchedules(ctx context.Context, tenant *store.Tenant
 		rows = append(rows, row)
 		requests = append(requests, runspec.Request{Git: runspec.Git{Repository: repository}})
 	}
-	return tenant.ReplaceGitHubAppSchedules(ctx, installationID, repo.ID, repoURL, rows, requests)
+	return tenant.ReplaceGitHubAppSchedules(ctx, publication, repoURL, rows, requests)
 }

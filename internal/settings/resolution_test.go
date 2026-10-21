@@ -1,7 +1,6 @@
 package settings
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -67,7 +66,7 @@ func TestRequestOverridesSurvivePlan(t *testing.T) {
 	if !request.Priority.Set || request.Priority.Value != 0 || !request.Requires.Set || request.Requires.Value == nil || !request.DryRun.Set {
 		t.Fatalf("lost presence: %+v", request)
 	}
-	if request.Resources.Set || request.ClaimWait.Set {
+	if request.ClaimWait.Set {
 		t.Fatal("intake sealed checkout defaults")
 	}
 	declarations, err := ProjectCheckoutDeclarations([]byte("defaults:\n  requires: [linux]\n"), "sparkwing.yaml", "build")
@@ -115,19 +114,16 @@ func TestPlanResolutionDoesNotAliasCapturedRequest(t *testing.T) {
 
 func TestNativeCompoundSettingsRetainParentAndLeafOrigins(t *testing.T) {
 	parent := runspec.SettingOrigin{Layer: runspec.LayerFlag, File: "captured", Key: "resources", Line: 11}
-	leaf := runspec.SettingOrigin{Layer: runspec.LayerEnv, File: "environment", Key: "memory", Line: 22}
 	options := runspec.Options{
-		Resources: declaration(runspec.Resources{Cores: present(0.5), MemoryBytes: declaration(int64(1024), leaf)}, parent),
-		Pause:     declaration(runspec.PauseSelection{Before: present([]string{"job"})}, parent),
+		Pause: declaration(runspec.PauseSelection{Before: present([]string{"job"})}, parent),
 	}
 	resolved, err := ResolveRequest(Inputs{Sealed: Values{Options: options}, Context: Context{Local: true, NumCPU: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cores := resolved.Resources.Value.Cores.Origin
 	pause := resolved.Pause.Value.Before.Origin
-	if cores.Layer != parent.Layer || cores.File != parent.File || cores.Line != parent.Line || cores.Key != "resources.cores" || resolved.Resources.Value.MemoryBytes.Origin != leaf || pause.Layer != parent.Layer || pause.Line != parent.Line || pause.Key != "debug.pause.before" {
-		t.Fatalf("compound provenance lost: resources=%+v pause=%+v", resolved.Resources, resolved.Pause)
+	if pause.Layer != parent.Layer || pause.Line != parent.Line || pause.Key != "debug.pause.before" {
+		t.Fatalf("compound provenance lost: pause=%+v", resolved.Pause)
 	}
 }
 
@@ -173,7 +169,7 @@ func TestSealedHostIgnoresAmbientPreferences(t *testing.T) {
 }
 
 func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
-	in := Inputs{Context: Context{Local: true}, Sealed: Values{Options: runspec.Options{OwnerExecutionTimeout: present(12 * time.Hour), Priority: present(9), ClaimWait: present(2 * time.Hour), Resources: present(runspec.Resources{Cores: present(4.5)}), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(1), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Timeout: present(8 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{OwnerExecution: ptr(time.Hour), MaxPriority: ptr(1), MaxClaimWait: ptr(time.Minute), MaxCores: ptr(1.0), AllowedAdmissionClasses: []string{}, AllowedSources: []nodeproto.SourceSpec{}}}}
+	in := Inputs{Context: Context{Local: true}, Sealed: Values{Options: runspec.Options{OwnerExecutionTimeout: present(12 * time.Hour), Priority: present(9), ClaimWait: present(2 * time.Hour), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(1), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Timeout: present(8 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{OwnerExecution: ptr(time.Hour), MaxPriority: ptr(1), MaxClaimWait: ptr(time.Minute), MaxCores: ptr(1.0), AllowedAdmissionClasses: []string{}, AllowedSources: []nodeproto.SourceSpec{}}}}
 	if v, _, err := OwnerExecution(in); err != nil || v != 12*time.Hour {
 		t.Fatalf("owner %v: %v", v, err)
 	}
@@ -186,9 +182,6 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 	if v, _, err := ClaimWait(in); err != nil || v != 2*time.Hour {
 		t.Fatalf("queue %v: %v", v, err)
 	}
-	if v, _, err := ResourceLimits(in); err != nil || !v.Cores.Set || v.Cores.Value != 4.5 {
-		t.Fatalf("resources %+v: %v", v, err)
-	}
 	if v, _, err := AdmissionClass(in); err != nil || v != "batch" {
 		t.Fatalf("class %q: %v", v, err)
 	}
@@ -198,29 +191,24 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 }
 
 func TestIntakePreservesExplicitRequestSettings(t *testing.T) {
-	values := Values{Options: runspec.Options{ClaimWait: present(time.Hour), Resources: present(runspec.Resources{Cores: present(0.5)}), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{Tags: ptr(true)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Retry: present(0), Timeout: present(time.Minute), MemoTTL: present(time.Hour), ApprovalWait: present(time.Duration(0)), NoProgressTimeout: present(time.Duration(0)), RetryBackoff: present(time.Duration(0))}}}
+	values := Values{Options: runspec.Options{ClaimWait: present(time.Hour), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{Tags: ptr(true)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Retry: present(0), Timeout: present(time.Minute), MemoTTL: present(time.Hour), ApprovalWait: present(time.Duration(0)), NoProgressTimeout: present(time.Duration(0)), RetryBackoff: present(time.Duration(0))}}}
 	options, err := ResolveRequest(Inputs{Context: Context{Submitter: true, NumCPU: 4, Local: true}, Sealed: values})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !options.JobDefaults.Retry.Set || options.JobDefaults.Retry.Value != 0 || !options.ClaimWait.Set || !options.Resources.Set || options.Resources.Value.Cores.Value != 0.5 || !options.Checkout.Set || options.Checkout.Value.Policy.Depth != nil || !options.JobDefaults.ApprovalWait.Set || !options.AdmissionClass.Set {
+	if !options.JobDefaults.Retry.Set || options.JobDefaults.Retry.Value != 0 || !options.ClaimWait.Set || !options.Checkout.Set || options.Checkout.Value.Policy.Depth != nil || !options.JobDefaults.ApprovalWait.Set || !options.AdmissionClass.Set {
 		t.Fatalf("lost request settings: %+v", options)
 	}
 }
 
 func TestCeilingsRefuseWithoutClamping(t *testing.T) {
 	for _, local := range []bool{false, true} {
-		in := Inputs{Context: Context{Submitter: true, Local: local}, Code: Values{Options: runspec.Options{Resources: present(runspec.Resources{Cores: present(1.5)}), JobDefaults: runspec.JobExecutionSettings{Retry: present(11), MemoTTL: present(31 * 24 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{MaxCores: ptr(1.25)}}}
+		in := Inputs{Context: Context{Submitter: true, Local: local}, Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{Retry: present(11), MemoTTL: present(31 * 24 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{MaxCores: ptr(1.25)}}}
 		if _, _, err := Retry(in); err == nil {
 			t.Fatal("excess retry accepted")
 		}
 		if _, _, err := MemoTTL(in); err == nil {
 			t.Fatal("excess memo TTL accepted")
-		}
-		_, _, err := ResourceLimits(in)
-		var refusal *Error
-		if !errors.As(err, &refusal) || refusal.Value != "1.5" || refusal.Ceiling != "1.25" {
-			t.Fatalf("missing resource evidence: %v", err)
 		}
 	}
 }
@@ -233,14 +221,6 @@ func TestOperatorZeroWinsAndOriginsSurvive(t *testing.T) {
 	}
 	if v.MaxRunsPerPrincipalHour == nil || *v.MaxRunsPerPrincipalHour != 0 || v.Origins["operator.max_runs_per_principal_hour"].Source != Flag {
 		t.Fatalf("operator: %+v", v)
-	}
-	o := Origin{Source: Flag, File: "request", Key: "resources.cores", Line: 12}
-	projected, err := ProjectCeilings(OperatorValues{MaxCores: ptr(0.5), Origins: map[string]Origin{"operator.max_cores": o}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if projected.Resources.Value.Cores.Value != 0.5 || projected.Resources.Value.Cores.Origin.Line != 12 {
-		t.Fatalf("resource projection: %+v", projected)
 	}
 }
 

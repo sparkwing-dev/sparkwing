@@ -18,9 +18,8 @@ import (
 
 type creditClaimProfile struct{ cores float64 }
 
-func (p creditClaimProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: p.cores}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (p creditClaimProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{Labels: []string{"sparkwing-4cpu"}}, nil
 }
 
 func creditClaimFixture(t *testing.T, cores float64, rates store.CreditRateTable) (*engineFixture, *store.Tenant, http.Handler, string) {

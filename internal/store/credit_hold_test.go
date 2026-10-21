@@ -7,7 +7,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func meteredRunnerOnly(t *testing.T, s *Store) {
@@ -83,7 +82,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	switch runner {
 	case "metered":
 		meteredRunnerOnly(t, s)
-		if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8, MemoryBytes: 8 << 30}, Available: match.Resources{Cores: 8, MemoryBytes: 8 << 30}}); err != nil {
+		if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Kinds: []capability.UnitKind{kind}}); err != nil {
 			t.Fatal(err)
 		}
 	case "revoked":

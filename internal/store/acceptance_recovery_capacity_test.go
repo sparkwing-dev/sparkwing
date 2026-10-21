@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name string) (store.Actor, error) {
@@ -19,7 +19,7 @@ func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name strin
 	if err != nil {
 		return store.Actor{}, err
 	}
-	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runID}, Available: match.Resources{Cores: 8}})
+	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(runID)}})
 	if err != nil {
 		return store.Actor{}, err
 	}
@@ -49,7 +49,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 		return err
 	}
 	for _, group := range []struct{ key, node string }{{"node", "job"}, {"plan", ""}} {
-		request := store.AcquireSlotRequest{Key: group.key, HolderID: "original", RunID: f.ref.RunID, NodeID: group.node, Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
+		request := store.AcquireSlotRequest{Key: group.key, HolderID: "original", RunID: string(f.ref.RunID), NodeID: group.node, Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
 		if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
 			return fmt.Errorf("acquire %s: %+v, %v", group.key, got, err)
 		}
@@ -61,16 +61,23 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
 		return err
 	}
-	if _, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder); err != nil {
-		return err
+	beat, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder)
+	if err != nil {
+		return fmt.Errorf("renew retained node: %w", err)
 	}
-	if units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued || units[0].RunID != f.ref.RunID {
+	for _, key := range []string{"node", "plan"} {
+		state, err := f.tenant.GetConcurrencyState(ctx, key)
+		if err != nil || len(state.Holders) != 1 || !state.Holders[0].LeaseExpiresAt.Equal(beat.ExpiresAt) {
+			return fmt.Errorf("retained %s capacity must follow live job while owner expires: %+v, %v", key, state, err)
+		}
+	}
+	if units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued || runspec.RunID(units[0].RunID) != f.ref.RunID {
 		return fmt.Errorf("owner recovery: %+v, %v", units, err)
 	}
 	if err := f.reopen(ctx); err != nil {
 		return err
 	}
-	owner, err := f.claimOwner(ctx, f.ref.RunID, "successor")
+	owner, err := f.claimOwner(ctx, string(f.ref.RunID), "successor")
 	if err != nil {
 		return err
 	}
@@ -79,16 +86,16 @@ func checkRecoveryCapacity(t *testing.T) error {
 		if group.node == "" {
 			generation = owner.Owner.Generation
 		}
-		adopted, err := f.tenant.AdoptCapacity(ctx, group.key, "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: group.node, Generation: generation}, owner)
-		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || adopted.Holder.Binding.Generation != generation {
+		adopted, err := f.tenant.AdoptCapacity(ctx, group.key, "original", store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: group.node, Generation: int64(generation)}, owner)
+		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || runspec.ClaimGeneration(adopted.Holder.Binding.Generation) != generation {
 			return fmt.Errorf("adopt %s: %+v, %v", group.key, adopted, err)
 		}
 		if promoted, err := f.tenant.PromoteNextWaiters(ctx, group.key, time.Hour); err != nil || len(promoted) != 0 {
 			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, promoted, err)
 		}
 	}
-	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}); err != nil {
-		return err
+	if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}); err != nil {
+		return fmt.Errorf("report retained node: %w", err)
 	}
 	if err := checkCapacityWinner(ctx, f.tenant, "node", competitor); err != nil {
 		return err
@@ -96,8 +103,8 @@ func checkRecoveryCapacity(t *testing.T) error {
 	if state, err := f.tenant.GetConcurrencyState(ctx, "plan"); err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].HolderID != "original" {
 		return fmt.Errorf("job completion released plan capacity: %+v, %v", state, err)
 	}
-	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunTransition{RunID: f.ref.RunID, Actor: owner, To: store.RunSuccess, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
-		return err
+	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: owner, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
+		return fmt.Errorf("finish successor owner: %w", err)
 	}
 	return checkCapacityWinner(ctx, f.tenant, "plan", competitor)
 }
@@ -124,7 +131,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if err != nil {
 		return err
 	}
-	request := store.AcquireSlotRequest{Key: "deploy", HolderID: "original", RunID: f.ref.RunID, NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
+	request := store.AcquireSlotRequest{Key: "deploy", HolderID: "original", RunID: string(f.ref.RunID), NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
 	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
 		return fmt.Errorf("original capacity: %+v, %v", got, err)
 	}
@@ -147,11 +154,11 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 	if err := f.reopen(ctx); err != nil {
 		return err
 	}
-	adopted, err := f.tenant.AdoptCapacity(ctx, "deploy", "original", store.CapacityBinding{RunID: f.ref.RunID, NodeID: "job", Generation: f.holder.Generation}, f.owner)
+	adopted, err := f.tenant.AdoptCapacity(ctx, "deploy", "original", store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: "job", Generation: int64(f.holder.Generation)}, f.owner)
 	if err != nil || adopted.Kind != store.AcquireAgain {
 		return fmt.Errorf("expired adoption: %+v, %v", adopted, err)
 	}
-	request.HolderID, request.RunID = "original", f.ref.RunID
+	request.HolderID, request.RunID = "original", string(f.ref.RunID)
 	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
 		return fmt.Errorf("returning arrival: %+v, %v", got, err)
 	}
@@ -159,7 +166,7 @@ func checkRecoveryCapacityMaintenance(t *testing.T) error {
 		return fmt.Errorf("repeated capacity pass: %+v, %v", repeated, err)
 	}
 	state, err := f.tenant.GetConcurrencyState(ctx, "deploy")
-	if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].RunID != competitor || len(state.Waiters) != 1 || state.Waiters[0].RunID != f.ref.RunID {
+	if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].RunID != competitor || len(state.Waiters) != 1 || runspec.RunID(state.Waiters[0].RunID) != f.ref.RunID {
 		return fmt.Errorf("capacity after reopening: %+v, %v", state, err)
 	}
 	return nil

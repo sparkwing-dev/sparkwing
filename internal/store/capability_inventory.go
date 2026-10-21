@@ -64,7 +64,8 @@ func (s *Store) listCapabilities(ctx context.Context, team Team, a capability.Au
 	}
 	if !filter.IncludeRevoked {
 		query += ` AND ` + liveCredentialSQL("") + ``
-		args = append(args, tx.now().UnixNano(), tx.now().UnixNano())
+		now := tx.now(ctx)
+		args = append(args, now.UnixNano(), now.UnixNano())
 	}
 	rows, err := tx.QueryContext(ctx, query+` ORDER BY created_at DESC,prefix`, args...)
 	if err != nil {

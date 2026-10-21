@@ -18,12 +18,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type hereDependencies struct {
 	admitted    func(controllerwire.CreateRunResponse) error
-	capacity    func(context.Context) (match.Resources, match.Resources, error)
 	credentials func() (hereCredentials, error)
 	resolve     func(context.Context, client.EngineOptions) (hereRuntime, error)
 	version     string
@@ -43,13 +41,6 @@ type hereHostSession struct {
 
 func defaultHereDependencies(output string) hereDependencies {
 	return hereDependencies{
-		capacity: func(ctx context.Context) (match.Resources, match.Resources, error) {
-			home, err := wingd.HomeDir("")
-			if err != nil {
-				return match.Resources{}, match.Resources{}, err
-			}
-			return observeBurstCapacity(ctx, home)
-		},
 		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHereRuntime,
 		attach: func(ctx context.Context, options client.EngineOptions, run string, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
 			return attachHereRun(ctx, options, run, output, os.Stdout, host)
@@ -146,16 +137,7 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 	if err := ctx.Err(); err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
-	claim := controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: deps.version, AvailableCores: float64(goruntime.NumCPU()), OS: goruntime.GOOS, Arch: goruntime.GOARCH}
-	if deps.capacity != nil {
-		capacity, available, err := deps.capacity(ctx)
-		if err != nil {
-			return completion, incompleteHereHandoff(run, err)
-		}
-		claim.Capacity = &capacity
-		claim.AvailableCores = available.Cores
-		claim.AvailableMemoryBytes = available.MemoryBytes
-	}
+	claim := controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: deps.version, OS: goruntime.GOOS, Arch: goruntime.GOARCH}
 	response, err := runtime.controller.Claim(ctx, claim)
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)

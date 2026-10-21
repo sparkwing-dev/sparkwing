@@ -32,7 +32,7 @@ func TestPoolClaimsLaunchFreshPodsWithoutThePoolCredential(t *testing.T) {
 	transport := poolControllerTransport{handler}
 	l, err := NewLauncher(t.Context(), RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: base.Config,
-		Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30},
+		Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}},
 		Bearer: func(context.Context) (string, error) { return root, nil },
 		HTTP:   &http.Client{Transport: transport},
 	})
@@ -81,9 +81,8 @@ func (p poolControllerTransport) RoundTrip(r *http.Request) (*http.Response, err
 type poolRunnerPolicy struct{}
 
 func (poolRunnerPolicy) CheckRunner(context.Context, string) error { return nil }
-func (poolRunnerPolicy) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	resources := match.Resources{Cores: 4, MemoryBytes: 8 << 30}
-	return match.Profile{Capacity: resources}, resources, nil
+func (poolRunnerPolicy) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{Labels: []string{"sparkwing-4cpu"}}, nil
 }
 
 func poolControllerStore(t *testing.T) (*store.Store, string) {

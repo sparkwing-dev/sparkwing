@@ -2,18 +2,12 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"slices"
-	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
@@ -32,7 +26,7 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 	if c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush {
 		return nil
 	}
-	if c.Binding.Kind != capability.BindingTrigger || c.Binding.RunID != unit.RunID {
+	if c.Binding.Kind != capability.BindingTrigger || c.Binding.RunID != string(unit.RunID) {
 		return holderRefusal()
 	}
 	if c.Purpose == capability.PurposeHere {
@@ -43,18 +37,26 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 		if err := tx.QueryRowContext(ctx, `SELECT generation FROM triggers WHERE team=? AND id=?`, c.Team, unit.RunID).Scan(&generation); err != nil {
 			return err
 		}
-		if generation == 0 && (c.Binding.ClaimBy == nil || !c.Binding.ClaimBy.After(tx.now())) {
+		if generation == 0 && (c.Binding.ClaimBy == nil || !c.Binding.ClaimBy.After(tx.now(ctx))) {
 			return holderRefusal()
 		}
 		return nil
 	}
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}}
-	return checkOwnerTx(ctx, tx, Team(c.Team), actor, unit.RunID, tx.now())
+	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}}
+
+	return checkOwnerTx(ctx, tx, Team(c.Team), actor, string(unit.RunID))
 }
 
 func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	now := tx.now().UnixNano()
-	run, err := readRunTx(ctx, tx, team, unit.RunID)
+	now := tx.now(ctx).UnixNano()
+	var expired int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers WHERE team=? AND id=? AND expires_at<=?`, team, unit.RunID, now).Scan(&expired); err != nil {
+		return err
+	}
+	if expired > 0 {
+		return holderRefusal()
+	}
+	run, err := readRunTx(ctx, tx, team, string(unit.RunID))
 	if err != nil {
 		return err
 	}
@@ -132,9 +134,9 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	var result sql.Result
 	var err error
 	if claim.Kind == capability.UnitEval {
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now().UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
 	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now().UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
 	}
 	if err != nil {
 		return err
@@ -147,362 +149,4 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 		return holderRefusal()
 	}
 	return nil
-}
-
-type queuedClaim struct {
-	team    Team
-	unit    UnitRef
-	arrived int64
-	score   int
-}
-
-const (
-	launcherProbePerTeam   = 8
-	launcherClaimCursorKey = "launcher_claim_team"
-)
-
-type launcherSweep struct {
-	Claimant string                `json:"claimant"`
-	After    launcherSweepPosition `json:"after"`
-	Through  launcherSweepPosition `json:"through"`
-}
-
-type launcherSweepPosition struct {
-	Arrival    int64  `json:"arrival"`
-	RunID      string `json:"run_id"`
-	NodeID     string `json:"node_id"`
-	Generation int64  `json:"generation"`
-}
-
-func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
-	if capability.CloudLauncher(c) {
-		return queuedLauncherUnitTx(ctx, tx, c, demand, kinds)
-	}
-	var candidates []queuedClaim
-	for _, kind := range kinds {
-		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
-		rows, err := tx.QueryContext(ctx, query, args...)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		for rows.Next() {
-			v := queuedClaim{unit: UnitRef{Kind: kind}}
-			if err = rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.arrived); err != nil {
-				_ = rows.Close()
-				return UnitRef{}, err
-			}
-			candidates = append(candidates, v)
-		}
-		if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-			return UnitRef{}, err
-		}
-	}
-	slices.SortFunc(candidates, func(a, b queuedClaim) int {
-		return strings.Compare(string(a.team)+"\x00"+a.unit.RunID+"\x00"+string(a.unit.Kind)+"\x00"+a.unit.NodeID, string(b.team)+"\x00"+b.unit.RunID+"\x00"+string(b.unit.Kind)+"\x00"+b.unit.NodeID)
-	})
-	var eligible []queuedClaim
-	for _, candidate := range candidates {
-		standing, err := unitEligibilityTx(ctx, tx, candidate.team, candidate.unit, demand, eligibilityChecks{lock: true, fit: true, billing: true, claim: true})
-		if err != nil {
-			return UnitRef{}, err
-		}
-		if !standing.ok() {
-			continue
-		}
-		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, demand.CapabilityPrefix, standing.profile, standing.demand)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		if placement.hold {
-			continue
-		}
-		candidate.score = standing.score
-		eligible = append(eligible, candidate)
-	}
-	if len(eligible) == 0 {
-		return UnitRef{}, notFound("eligible work", "")
-	}
-	slices.SortStableFunc(eligible, func(a, b queuedClaim) int {
-		if a.score > b.score {
-			return -1
-		}
-		if a.score < b.score {
-			return 1
-		}
-		if a.arrived < b.arrived {
-			return -1
-		}
-		if a.arrived > b.arrived {
-			return 1
-		}
-		if a.unit.RunID < b.unit.RunID {
-			return -1
-		}
-		if a.unit.RunID > b.unit.RunID {
-			return 1
-		}
-		if a.unit.NodeID < b.unit.NodeID {
-			return -1
-		}
-		if a.unit.NodeID > b.unit.NodeID {
-			return 1
-		}
-		return 0
-	})
-	return eligible[0].unit, nil
-}
-
-// lockLauncherQueueTx precedes authority locks, following the settings lock tier.
-func lockLauncherQueueTx(ctx context.Context, tx *storeTx) error {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING`, launcherClaimCursorKey, []byte(`""`)); err != nil {
-		return err
-	}
-	var key string
-	return tx.QueryRowContext(ctx, `SELECT key FROM settings WHERE key=?`+tx.forUpdate(), launcherClaimCursorKey).Scan(&key)
-}
-
-func queuedLauncherUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, launcherClaimCursorKey).Scan(&raw); err != nil {
-		return UnitRef{}, err
-	}
-	var cursor Team
-	if err := json.Unmarshal(raw, &cursor); err != nil {
-		return UnitRef{}, err
-	}
-	// Free CPU and memory can make otherwise identical claimants match disjoint work.
-	matching := demand
-	matching.Target, matching.JobNamespace, matching.ExcludedTeamLabels, matching.Kinds = nil, "", nil, nil
-	matching.Labels = slices.Clone(matching.Labels)
-	slices.Sort(matching.Labels)
-	matching.Labels = slices.Compact(matching.Labels)
-	if len(matching.Labels) == 0 {
-		matching.Labels = nil
-	}
-	body, err := json.Marshal(matching)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	demandKey := fmt.Sprintf("launcher_sweep/%x", sha256.Sum256(body))
-	now := tx.now().UnixNano()
-	var ready []string
-	var readyArgs []any
-	for _, kind := range kinds {
-		query, args := tx.operator.queuedClaimQuery(c, kind, now)
-		ready = append(ready, `EXISTS (`+query+` AND r.team=teams.name LIMIT 1)`)
-		readyArgs = append(readyArgs, args...)
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM teams WHERE `+strings.Join(ready, ` OR `)+` ORDER BY name`, readyArgs...)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	var teams []Team
-	for rows.Next() {
-		var team Team
-		if err := rows.Scan(&team); err != nil {
-			_ = rows.Close()
-			return UnitRef{}, err
-		}
-		teams = append(teams, team)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return UnitRef{}, err
-	}
-	start := 0
-	for i, team := range teams {
-		if team <= cursor {
-			start = i + 1
-		}
-	}
-	for offset := range teams {
-		team := teams[(start+offset)%len(teams)]
-		if slices.Contains(demand.ExcludedTeamLabels, admission.TeamNodeValue(demand.JobNamespace, string(team))) {
-			continue
-		}
-		var candidates []queuedClaim
-		perKind := max(1, launcherProbePerTeam/len(kinds))
-		for _, kind := range kinds {
-			found, err := launcherSweepCandidatesTx(ctx, tx, c, team, kind, demandKey, perKind)
-			if err != nil {
-				return UnitRef{}, err
-			}
-			candidates = append(candidates, found...)
-		}
-		var best *queuedClaim
-		contenders := map[capability.UnitKind]bool{}
-		rejected := map[capability.UnitKind]queuedClaim{}
-		for i := range candidates {
-			candidate := &candidates[i]
-			standing, err := unitEligibilityTx(ctx, tx, team, candidate.unit, demand, eligibilityChecks{fit: true, billing: true, claim: true})
-			var unpriced *UnpricedCPUClassError
-			if errors.As(err, &unpriced) {
-				best = candidate
-				break
-			}
-			if err != nil {
-				return UnitRef{}, err
-			}
-			if !standing.ok() {
-				if !contenders[candidate.unit.Kind] {
-					rejected[candidate.unit.Kind] = *candidate
-				}
-				continue
-			}
-			contenders[candidate.unit.Kind] = true
-			candidate.score = standing.score
-			if best == nil || candidate.score > best.score || candidate.score == best.score && candidate.arrived < best.arrived {
-				best = candidate
-			}
-		}
-		// Only this matching demand consumes rejected rows; other claimants keep their own frontier.
-		for kind, last := range rejected {
-			key := demandKey + "/" + string(team) + "/" + string(kind)
-			var raw []byte
-			if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw); err != nil {
-				return UnitRef{}, err
-			}
-			var sweep launcherSweep
-			if err := json.Unmarshal(raw, &sweep); err != nil {
-				return UnitRef{}, err
-			}
-			sweep.After = launcherSweepPosition{Arrival: last.arrived, RunID: last.unit.RunID, NodeID: last.unit.NodeID, Generation: last.unit.SourceGeneration}
-			value, err := json.Marshal(sweep)
-			if err != nil {
-				return UnitRef{}, err
-			}
-			if err := setCreditSettingTx(ctx, tx, key, string(value)); err != nil {
-				return UnitRef{}, err
-			}
-		}
-		if best != nil {
-			value, err := json.Marshal(team)
-			if err != nil {
-				return UnitRef{}, err
-			}
-			if err := setCreditSettingTx(ctx, tx, launcherClaimCursorKey, string(value)); err != nil {
-				return UnitRef{}, err
-			}
-			return best.unit, nil
-		}
-	}
-	return UnitRef{}, notFound("eligible work", "")
-}
-
-func launcherSweepCandidatesTx(ctx context.Context, tx *storeTx, c capability.Capability, team Team, kind capability.UnitKind, demandKey string, limit int) ([]queuedClaim, error) {
-	key := demandKey + "/" + string(team) + "/" + string(kind)
-	var raw []byte
-	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	var sweep launcherSweep
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &sweep); err != nil {
-			return nil, err
-		}
-	}
-	query, args := tx.operator.queuedClaimQuery(c, kind, tx.now().UnixNano())
-	query += ` AND r.team=?`
-	args = append(args, team)
-	columns := []string{"t.available_at", "r.id"}
-	switch kind {
-	case capability.UnitNode:
-		columns[0] = "n.ready_at"
-		columns = append(columns, "n.node_id")
-	case capability.UnitEval:
-		columns[0] = "n.finished_at"
-		columns = append(columns, "e.source_node_id", "e.source_generation")
-	}
-	tuple := "(" + strings.Join(columns, ",") + ")"
-	placeholders := "(" + strings.TrimSuffix(strings.Repeat("?,", len(columns)), ",") + ")"
-	values := func(p launcherSweepPosition) []any {
-		v := []any{p.Arrival, p.RunID}
-		switch kind {
-		case capability.UnitNode:
-			v = append(v, p.NodeID)
-		case capability.UnitEval:
-			v = append(v, p.NodeID, p.Generation)
-		}
-		return v
-	}
-	read := func(query string, args []any) ([]queuedClaim, error) {
-		rows, err := tx.QueryContext(ctx, query, args...)
-		if err != nil {
-			return nil, err
-		}
-		var found []queuedClaim
-		for rows.Next() {
-			v := queuedClaim{unit: UnitRef{Kind: kind}}
-			if err := rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.arrived); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			found = append(found, v)
-		}
-		return found, errors.Join(rows.Err(), rows.Close())
-	}
-	for range 2 {
-		if sweep.Through.RunID == "" {
-			last, err := read(query+` ORDER BY `+strings.Join(columns, " DESC,")+` DESC LIMIT 1`, args)
-			if err != nil {
-				return nil, err
-			}
-			if len(last) == 0 {
-				_, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, key)
-				return nil, err
-			}
-			v := last[0]
-			sweep.Claimant = c.Prefix
-			sweep.Through = launcherSweepPosition{Arrival: v.arrived, RunID: v.unit.RunID, NodeID: v.unit.NodeID, Generation: v.unit.SourceGeneration}
-		}
-		bounded := query + ` AND ` + tuple + `<=` + placeholders
-		boundedArgs := append(slices.Clone(args), values(sweep.Through)...)
-		if sweep.After.RunID != "" {
-			bounded += ` AND ` + tuple + `>` + placeholders
-			boundedArgs = append(boundedArgs, values(sweep.After)...)
-		}
-		found, err := read(bounded+` ORDER BY `+strings.Join(columns, ",")+` LIMIT ?`, append(boundedArgs, limit))
-		if err != nil {
-			return nil, err
-		}
-		if len(found) > 0 {
-			value, err := json.Marshal(sweep)
-			if err != nil {
-				return nil, err
-			}
-			if err := setCreditSettingTx(ctx, tx, key, string(value)); err != nil {
-				return nil, err
-			}
-			return found, nil
-		}
-		sweep = launcherSweep{}
-	}
-	return nil, nil
-}
-
-func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int64) (string, []any) {
-	var query string
-	args := []any{}
-	switch kind {
-	case capability.UnitNode:
-		query = `SELECT r.team,r.id,n.node_id,0,n.ready_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
-		args = append(args, now, now)
-	case capability.UnitEval:
-		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,n.finished_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
-		args = append(args, now, now)
-	default:
-		query = `SELECT r.team,r.id,'',0,t.available_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
-		args = append(args, string(kind), now, now)
-	}
-	query += ` AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=?)`
-	args = append(args, now)
-	if !capability.CloudLauncher(c) {
-		query += ` AND r.team=?`
-		args = append(args, c.Team)
-	}
-	if c.Binding.RunID != "" {
-		query += ` AND r.id=?`
-		args = append(args, c.Binding.RunID)
-	}
-	return query, args
 }

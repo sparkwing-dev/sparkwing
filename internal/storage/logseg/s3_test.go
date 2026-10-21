@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
@@ -66,7 +68,7 @@ func TestS3CommittedReads(t *testing.T) {
 				reader.Objects = backend
 				for _, offset := range []int64{0, 1, 2} {
 					var out bytes.Buffer
-					result, err := reader.Read(t.Context(), store.Actor{Holder: "reader"}, blob.LogReadRequest{Subject: subject, Offset: offset}, &out)
+					result, err := reader.Read(t.Context(), store.Actor{NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "reader"}}, blob.LogReadRequest{Subject: subject, Offset: offset}, &out)
 					if fault != "" {
 						want = "a\n"
 					}

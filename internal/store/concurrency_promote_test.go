@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -45,8 +44,11 @@ func TestConcurrency_PromoteOntoExpiredHolderReclaimsRow(t *testing.T) {
 	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Nanosecond,
+		Capacity: 1, Policy: store.OnLimitQueue,
 	})
+	if _, err := s.DB().ExecContext(t.Context(), `UPDATE concurrency_holders SET lease_expires_at=0 WHERE holder_id='rA/n'`); err != nil {
+		t.Fatal(err)
+	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,

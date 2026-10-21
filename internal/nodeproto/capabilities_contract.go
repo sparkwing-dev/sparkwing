@@ -40,7 +40,6 @@ const (
 	CapabilityJobConcurrency        PlanCapability = "job_concurrency"
 	CapabilityPlanConcurrency       PlanCapability = "plan_concurrency"
 	CapabilityBoxConcurrency        PlanCapability = "box_concurrency"
-	CapabilityResources             PlanCapability = "resources"
 	CapabilityApproval              PlanCapability = "approval"
 	CapabilityApprovalCondition     PlanCapability = "approval_condition"
 	CapabilityClosures              PlanCapability = "closures"
@@ -92,7 +91,6 @@ func CapabilityTable() []PlacementCapability {
 		{CapabilityJobConcurrency, true, true, true, true, true, true},
 		{CapabilityPlanConcurrency, true, true, true, true, true, true},
 		{CapabilityBoxConcurrency, true, true, true, true, true, true},
-		{CapabilityResources, true, true, true, true, true, true},
 		{CapabilityApproval, true, true, true, true, true, true},
 		{CapabilityApprovalCondition, true, true, true, true, true, true},
 		{CapabilityClosures, true, true, true, true, true, true},

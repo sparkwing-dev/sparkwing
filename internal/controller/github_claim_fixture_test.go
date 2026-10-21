@@ -20,9 +20,8 @@ type githubClaimEnvironment struct{ location string }
 
 func (githubClaimEnvironment) CheckRunner(context.Context, string) error { return nil }
 
-func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 8, MemoryBytes: 8 << 30}
-	return match.Profile{Location: env.location, Capacity: capacity, OS: "linux", Arch: "amd64"}, capacity, nil
+func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{Location: env.location, OS: "linux", Arch: "amd64"}, nil
 }
 
 func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) *controller.Server {
@@ -77,7 +76,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 }
 
 func githubClaimBody(kind capability.UnitKind, run, job string) controllerwire.ClaimRequest {
-	return controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}, RunID: run, JobID: job, Labels: []string{controller.GitHubActionsLabel}, AvailableCores: 8, AvailableMemoryBytes: 8 << 30}
+	return controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}, RunID: run, JobID: job, Labels: []string{controller.GitHubActionsLabel}}
 }
 
 func githubFixtureKey(id int64) string { return fmt.Sprintf("gh:%d", id) }

@@ -207,13 +207,6 @@ type Setting[T any] struct {
 	Origin SettingOrigin `json:"origin"`
 }
 
-// safety: Resources preserves C4 floating cores losslessly; platform conversion happens at dispatch.
-// Cloud scratch is fixed by limits and is never an author setting.
-type Resources struct {
-	Cores       Setting[float64] `json:"cores"`
-	MemoryBytes Setting[int64]   `json:"memory_bytes"`
-}
-
 // PauseSelection keeps each pause control's presence and origin at intake.
 type PauseSelection struct {
 	Before    Setting[[]string] `json:"before"`
@@ -238,7 +231,6 @@ type JobExecutionSettings struct {
 	Retry             Setting[int]           `json:"retry"`
 	RetryBackoff      Setting[time.Duration] `json:"retry_backoff"`
 	MemoTTL           Setting[time.Duration] `json:"memo_ttl"`
-	Resources         Setting[Resources]     `json:"resources"`
 	Requires          Setting[[]string]      `json:"requires"`
 	Prefers           Setting[[]string]      `json:"prefers"`
 }
@@ -295,7 +287,6 @@ const (
 // safety: Options carries request winners and resolved values without zero-as-default rules.
 type Options struct {
 	Runner                Setting[RunnerSelection] `json:"runner"`
-	Resources             Setting[Resources]       `json:"resources"`
 	Priority              Setting[int]             `json:"priority"`
 	AdmissionClass        Setting[string]          `json:"admission_class"`
 	ClaimWait             Setting[time.Duration]   `json:"claim_wait"`
@@ -324,7 +315,6 @@ type Options struct {
 
 // safety: Ceilings snapshots operator bounds for C4 to enforce without silent clamping.
 type Ceilings struct {
-	Resources               Setting[Resources]              `json:"resources"`
 	Priority                Setting[int]                    `json:"priority"`
 	OwnerExecutionTimeout   Setting[time.Duration]          `json:"owner_execution_timeout"`
 	ClaimWait               Setting[time.Duration]          `json:"claim_wait"`

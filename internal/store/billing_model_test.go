@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func billingModelFixture(t *testing.T) (*Store, UnitDemand, *time.Time) {
@@ -32,7 +33,7 @@ func TestBillingModelNewCloudAdmissionsShareEightVCPU(t *testing.T) {
 		if id != "job" {
 			billingModelJob(t, s, id)
 		}
-		demand.Target.NodeID = id
+		demand.Target.NodeID = runspec.NodeID(id)
 		claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 		if id != "third" {
 			if err != nil {
@@ -92,12 +93,12 @@ func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
 		if id != "job" {
 			billingModelJob(t, s, id)
 		}
-		demand.Target.NodeID = id
+		demand.Target.NodeID = runspec.NodeID(id)
 		if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 			t.Fatalf("prepay did not lift standing: %v", err)
 		}
 	}
-	standing, err := (&Tenant{s: s, team: "a"}).BillingStanding(t.Context(), s.now())
+	standing, err := (&Tenant{s: s, team: "a"}).BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Established" {
 		t.Fatalf("prepaid standing=%+v: %v", standing, err)
 	}
@@ -124,7 +125,8 @@ func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			standing, err := tenant.BillingStanding(t.Context(), now)
+			s.SetTestClock(t, func() time.Time { return now })
+			standing, err := tenant.BillingStanding(t.Context())
 			if err != nil || (standing.Tier == "Held") != (!closed || status == "lost") {
 				t.Logf("outcome=%s closed=%t standing=%+v: %v", status, closed, standing, err)
 				return false
@@ -134,7 +136,8 @@ func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
 		wantBalance := int64(100 * MicroCreditsPerCent)
 		if status == "lost" {
 			wantBalance = 0
-			if released, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute:test:dispute", "operator", "reviewed", now); err != nil || released != 1 {
+			s.SetTestClock(t, func() time.Time { return now })
+			if released, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute:test:dispute", "operator", "reviewed"); err != nil || released != 1 {
 				t.Fatalf("operator release=%d: %v", released, err)
 			}
 		}
@@ -157,7 +160,6 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
 			t.Fatal(err)
 		}
-		demand.Available.Cores, demand.Capacity.Cores = 64, 64
 		allocated := 0
 		for i := range 9 {
 			cores := 1 << ((seed >> uint(i*3%27)) % 5)
@@ -165,7 +167,7 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 			billingModelJob(t, s, id)
 			execution := fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND run_id='run' AND node_id=?`, []byte(execution), id)
-			demand.Target.NodeID = id
+			demand.Target.NodeID = runspec.NodeID(id)
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if allocated+cores <= 8 {
 				if err != nil {
@@ -191,12 +193,14 @@ func TestBillingModelTrustedNeedsPaidHistoryAndCleanAge(t *testing.T) {
 	if _, err := tenant.TestOnlySettlePaidCredit(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: 5000 * MicroCreditsPerCent, Reference: "payment", CreatedBy: "billing"}); err != nil {
 		t.Fatal(err)
 	}
-	standing, err := tenant.BillingStanding(t.Context(), *now)
+	s.SetTestClock(t, func() time.Time { return *now })
+	standing, err := tenant.BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Established" {
 		t.Fatalf("young history: %+v: %v", standing, err)
 	}
 	*now = now.Add(30 * 24 * time.Hour)
-	standing, err = tenant.BillingStanding(t.Context(), *now)
+	s.SetTestClock(t, func() time.Time { return *now })
+	standing, err = tenant.BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Trusted" || standing.CloudVCPU != 128 || standing.MaxJobDuration != 6*time.Hour {
 		t.Fatalf("clean paid history: %+v: %v", standing, err)
 	}
@@ -212,7 +216,7 @@ func TestBillingModelIndependentClaimantsCannotOversubscribe(t *testing.T) {
 	for i, id := range []string{"job", "second", "third"} {
 		request := demand
 		target := *demand.Target
-		target.NodeID = id
+		target.NodeID = runspec.NodeID(id)
 		request.Target = &target
 		go func(client *Store) {
 			<-start
@@ -242,7 +246,7 @@ func TestBillingModelCustomerRunnerHasNoStandingCapacityOrDeadline(t *testing.T)
 		if id != "job" {
 			billingModelJob(t, s, id)
 		}
-		demand.Target.NodeID = id
+		demand.Target.NodeID = runspec.NodeID(id)
 		claim, _ := meteredUnitClaim(t, s, demand)
 		principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 		if err != nil || principal.Capability.Binding.Deadline == nil || !principal.Capability.Binding.Deadline.Equal(deadline) {
@@ -281,7 +285,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			s, demand, now := billingModelFixture(t)
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			switch {

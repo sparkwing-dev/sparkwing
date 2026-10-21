@@ -158,7 +158,7 @@ func TestFailedGitHubDeliveryCannotMutateReplacementConnection(t *testing.T) {
 						}
 						current = replace()
 						if effect == "suspend" {
-							err = op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true, now)
+							err = op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true)
 						} else {
 							_, err = op.UnbindGitHubAppInstallation(replay.Context(ctx), 7)
 						}

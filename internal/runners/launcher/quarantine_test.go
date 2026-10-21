@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -288,4 +289,41 @@ func TestReleaseConflictsConsumeOnlyProtectedTeamFaultBudget(t *testing.T) {
 			t.Fatalf("repaired team stayed blocked: %v %v", control.excluded, err)
 		}
 	})
+}
+
+// Faults observed during teardown consume budget without granting quarantine writes.
+func TestPreviouslyCountedFaultsDoNotAuthorizeExtraQuarantines(t *testing.T) {
+	l, kube, _, control := fixture()
+	var prior []error
+	for i := range maxQuarantinesPerSync + 4 {
+		binding := boundaryBinding("team")
+		binding.UnitID = fmt.Sprintf("unit-%d", i)
+		node := reservedNode(t, fmt.Sprintf("node-%d", i), binding, "garbage")
+		delete(node.Annotations, bindingAnnotation)
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		fault := &nodeFault{node: node.Name, cause: "reservation changed before teardown"}
+		prior = append(prior, errors.Join(fault, fault))
+	}
+	if err := l.syncReservations(t.Context(), errors.Join(prior...)); blocking(err) != nil {
+		t.Fatalf("contained faults stopped other teams: %v", err)
+	}
+	nodes, err := kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quarantines := 0
+	for _, node := range nodes.Items {
+		if quarantined(node) {
+			quarantines++
+		}
+	}
+	if quarantines != maxQuarantinesPerSync {
+		t.Fatalf("previously counted faults authorized %d quarantines, want %d", quarantines, maxQuarantinesPerSync)
+	}
+	control.award = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
+		t.Fatalf("claim did not block faulted team: excluded=%v err=%v", control.excluded, err)
+	}
 }

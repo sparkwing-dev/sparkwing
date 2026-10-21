@@ -60,17 +60,17 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET expires_at=?`, time.Now().Add(time.Hour).UnixNano()); err != nil {
 		return err
 	}
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: plan.RunID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return err
 	}
 	if err := reopen(); err != nil {
 		return err
 	}
-	profile, _, err := s.AsOperator().ReadClaimProfile(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	profile, err := s.AsOperator().ReadClaimProfile(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
 	if err != nil || profile.Name != "enrolled" || profile.Class != match.ClassAgent || len(profile.ReservedPools) != 1 || profile.Accept == nil {
 		return errors.Join(errors.New("reopening lost enrolled identity"), err)
 	}
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}, Labels: []string{"name=forged", "pool=forged", "class=cloud"}}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"name=forged", "pool=forged", "class=cloud"}}
 	var admitted []byte
 	if err := s.DB().QueryRowContext(ctx, `SELECT request_json FROM runs`).Scan(&admitted); err != nil {
 		return err

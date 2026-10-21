@@ -3,7 +3,7 @@ import type * as API from "../index.d.ts";
 import { failure, SDKError } from "./errors.ts";
 import { resolveArgs, validateArgSpecs } from "./args.ts";
 import { PlanningDiagnostics } from "./diagnostics.ts";
-import type { ClosureSpec, ConcurrencySpec, JobSpec, PlanDoc, ResourceSpec, StepSpec } from "./plan-wire.ts";
+import type { ClosureSpec, ConcurrencySpec, JobSpec, PlanDoc, StepSpec } from "./plan-wire.ts";
 
 function identifier(kind: string, value: string): void {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${kind} identifier must not be empty`);
@@ -18,16 +18,6 @@ function unique(values: readonly string[]): string[] {
 function names(kind: string, values: readonly string[]): string[] {
   for (const value of values) identifier(kind, value);
   return unique(values);
-}
-function resources(current: ResourceSpec | undefined, value: API.Resources): ResourceSpec | undefined {
-  if (value.cores === undefined && value.memoryBytes === undefined) return undefined;
-  const out = { ...current };
-  if (value.cores !== undefined) {
-    if (!Number.isFinite(value.cores) || value.cores < 0) throw new Error("cores must be finite and nonnegative");
-    out.cores = value.cores;
-  }
-  if (value.memoryBytes !== undefined) out.memory_bytes = integer("memoryBytes", value.memoryBytes);
-  return out;
 }
 function optionalField<T extends object, K extends keyof T>(target: T, key: K, value: T[K] | undefined): void {
   if (value === undefined) delete target[key];
@@ -485,11 +475,6 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     addConcurrency(this.spec, group, cost);
     return this;
   }
-  resources(value: API.Resources): this {
-    this.assertMutable();
-    optionalField(this.spec, "resources", resources(this.spec.resources, value));
-    return this;
-  }
   needsTools(...values: readonly string[]): this {
     this.assertMutable();
     for (const name of values) if (!knownTools.has(name)) throw new Error(`not a known tool: ${name}`);
@@ -603,9 +588,6 @@ class JobGroup implements API.JobGroup {
   concurrency(group: API.ConcurrencyGroup, cost?: number): this {
     return this.apply((job) => job.concurrency(group, cost));
   }
-  resources(value: API.Resources): this {
-    return this.apply((job) => job.resources(value));
-  }
   needsTools(...names: readonly string[]): this {
     return this.apply((job) => job.needsTools(...names));
   }
@@ -673,11 +655,6 @@ export class Plan implements API.Plan {
   concurrency(group: API.ConcurrencyGroup, cost?: number): this {
     this.assertMutable();
     addConcurrency(this.settings, group, cost);
-    return this;
-  }
-  resources(value: API.Resources): this {
-    this.assertMutable();
-    optionalField(this.settings, "resources", resources(this.settings.resources, value));
     return this;
   }
   priority(value: number): this {

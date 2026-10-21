@@ -21,7 +21,7 @@ func TestWaitingNodesReadSealedDemandAndPageReadyWork(t *testing.T) {
 		t.Fatalf("first page: %+v, %v", first, err)
 	}
 	for _, row := range first {
-		if row.Team != "a" || row.Repo.URL != "https://github.com/acme/repo" || !slices.Equal(row.Selector, []string{"gpu", "pool=prod"}) || !slices.Equal(row.AllowedPools, []string{"prod"}) || row.Request.Cores != 4 || row.Request.MemoryBytes != 1024 {
+		if row.Team != "a" || row.Repo.URL != "https://github.com/acme/repo" || !slices.Equal(row.Selector, []string{"gpu", "pool=prod"}) || !slices.Equal(row.AllowedPools, []string{"prod"}) {
 			t.Fatalf("sealed demand: %+v", row)
 		}
 	}

@@ -43,6 +43,10 @@ func (o *Operator) runWindowLeased(ctx context.Context, name, stamp, holder stri
 		}
 		err = errors.Join(err, o.ReleaseSingletonLease(context.WithoutCancel(ctx), lease))
 	}()
+	now, err := o.s.databaseNow(ctx)
+	if err != nil {
+		return false, err
+	}
 	var last []byte
 	err = o.s.queryRow(ctx, `SELECT value FROM settings WHERE key=?`, stamp).Scan(&last)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -53,7 +57,7 @@ func (o *Operator) runWindowLeased(ctx context.Context, name, stamp, holder stri
 		if parseErr != nil {
 			return false, parseErr
 		}
-		if o.s.now().Sub(time.Unix(0, at)) < window {
+		if now.Sub(time.Unix(0, at)) < window {
 			return false, nil
 		}
 	}
@@ -62,10 +66,10 @@ func (o *Operator) runWindowLeased(ctx context.Context, name, stamp, holder stri
 		return true, err
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, name, tx.now()); err != nil {
+		if err := assertSingletonLeaseTx(ctx, tx, lease, name); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, stamp, []byte(strconv.FormatInt(tx.now().UnixNano(), 10)))
+		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, stamp, []byte(strconv.FormatInt(tx.now(ctx).UnixNano(), 10)))
 		return err
 	})
 	return true, err

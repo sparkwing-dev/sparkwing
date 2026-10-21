@@ -19,15 +19,14 @@ test("flat declarations keep zero and false settings and leave authority to the 
     .timeout(0)
     .noProgressTimeout(0)
     .memo(() => "key", { ttlMs: 0 })
-    .resources({ cores: 0, memoryBytes: 0 })
     .env("CI", "1")
     .env("NODE_OPTIONS", "--stack-trace-limit=50", startup());
   build.cache(goModules(), npm(), dir("./web/node_modules/", "web/package-lock.json"));
   const capacity = new ConcurrencyGroup("builds", { scope: "box", capacity: 2, queueTimeoutMs: 0, cancelTimeoutMs: 0 });
-  plan.concurrency(capacity).resources({ cores: 0 });
+  plan.concurrency(capacity);
   build.concurrency(capacity, 2);
   const doc = plan.toDoc();
-  assert.deepEqual(Object.keys(doc).sort(), ["admission_class", "claim_wait_ms", "concurrency", "jobs", "priority", "resources", "source"]);
+  assert.deepEqual(Object.keys(doc).sort(), ["admission_class", "claim_wait_ms", "concurrency", "jobs", "priority", "source"]);
   assert.deepEqual(doc.source, { depth: 0, full_history: false, tags: false, submodules: false, lfs: false });
   assert.deepEqual(doc.concurrency, [{ group: "builds", scope: "box", capacity: 2, queue_timeout_ms: 0, cancel_timeout_ms: 0 }]);
   assert.deepEqual(doc.jobs[0], {
@@ -41,7 +40,6 @@ test("flat declarations keep zero and false settings and leave authority to the 
   assert.equal(job.timeout_ms, 0);
   assert.equal(job.no_progress_timeout_ms, 0);
   assert.deepEqual(job.memo, { ttl_ms: 0 });
-  assert.deepEqual(job.resources, { cores: 0, memory_bytes: 0 });
   assert.deepEqual(job.env, { CI: { value: "1" }, NODE_OPTIONS: { value: "--stack-trace-limit=50", startup: true } });
   assert.deepEqual(job.caches, [
     { name: "go-modules", resolver: "gomod", key_files: ["go.sum"] },
@@ -188,7 +186,6 @@ test("builder refuses malformed graphs and preserves host-owned ceilings", () =>
   assert.throws(() => p.job("j"), /duplicate job/);
   assert.throws(() => j.retry(-1), /nonnegative integer/);
   assert.throws(() => j.timeout(1.1), /nonnegative integer/);
-  assert.throws(() => j.resources({ cores: NaN }), /finite/);
   assert.throws(() => j.needsTools("typo"), /known tool/);
   const limits = new Plan();
   limits
@@ -199,19 +196,6 @@ test("builder refuses malformed graphs and preserves host-owned ceilings", () =>
   assert.equal(limits.toDoc().jobs[0]?.memo?.ttl_ms, 31 * 86400000);
 });
 
-test("resource dimensions merge and empty declarations clear them", () => {
-  const plan = new Plan().resources({ cores: 2 }).resources({ memoryBytes: 3 });
-  const job = plan
-    .job("j", () => undefined)
-    .resources({ cores: 4, memoryBytes: 8 })
-    .resources({ cores: 0 });
-  assert.deepEqual(plan.toDoc().resources, { cores: 2, memory_bytes: 3 });
-  assert.deepEqual(plan.toDoc().jobs[0]?.resources, { cores: 0, memory_bytes: 8 });
-  plan.resources({});
-  job.resources({});
-  assert.equal(plan.toDoc().resources, undefined);
-  assert.equal(plan.toDoc().jobs[0]?.resources, undefined);
-});
 
 test("refs retain edges, max age and absence behavior", async () => {
   const plan = new Plan();
@@ -335,7 +319,6 @@ test("group execution policy reaches every member without losing tool selectors"
     .artifacts("out/*")
     .consumes(source)
     .concurrency(new ConcurrencyGroup("cap"))
-    .resources({ memoryBytes: 1 })
     .prefers("os=linux")
     .inline()
     .continueOnError()

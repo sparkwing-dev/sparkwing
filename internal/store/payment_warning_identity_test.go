@@ -89,7 +89,7 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
-	if count, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "reviewed", s.now()); err != nil || count != 1 {
+	if count, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "reviewed"); err != nil || count != 1 {
 		t.Fatalf("release: %d, %v", count, err)
 	}
 	if err := s.db.Close(); err != nil {
@@ -132,7 +132,7 @@ func TestPaymentWarningHoldDoesNotReplaceUnrelatedDispute(t *testing.T) {
 		if id == warning.WarningID {
 			continue
 		}
-		if count, err := tenant.ReleaseCreditFreezes(t.Context(), id, "console", "reviewed", s.now()); err != nil || count != 1 {
+		if count, err := tenant.ReleaseCreditFreezes(t.Context(), id, "console", "reviewed"); err != nil || count != 1 {
 			t.Fatalf("warning release: %d, %v", count, err)
 		}
 	}

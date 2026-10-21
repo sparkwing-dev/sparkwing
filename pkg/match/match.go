@@ -1,7 +1,5 @@
 // Package match decides whether an agent may run a piece of work. Every claim
-// route asks [Evaluate] whether an agent could ever run a demand, and asks
-// [Fits] whether it has room for it now, so the routes cannot disagree about
-// who may take what.
+// route asks [Evaluate] whether the agent satisfies the work requirements.
 //
 // A selector is a list of terms. Terms are ANDed; the comma-separated
 // alternatives inside a term are ORed. Each alternative is a bare label
@@ -26,18 +24,15 @@ const (
 // Reason names why a verdict refuses.
 type Reason string
 
-// Reasons, in the order [Evaluate] and [Fits] check them.
+// Reasons identify the eligibility rule that refused a demand.
 const (
 	ReasonReservation      Reason = "reservation"
 	ReasonRepo             Reason = "repo"
 	ReasonTrustedPlacement Reason = "trusted_placement"
 	ReasonSelector         Reason = "selector"
-	ReasonShape            Reason = "shape"
-	ReasonAvailability     Reason = "availability"
 )
 
-// Resources is a CPU and memory amount. A zero capacity dimension is unknown
-// and admits any request in that dimension.
+// Resources is the physical allocation of a Cloud size. It is never used for matching.
 type Resources struct {
 	Cores       float64 `json:"cores" yaml:"cores"`
 	MemoryBytes int64   `json:"memory_bytes" yaml:"memory_bytes"`
@@ -46,6 +41,7 @@ type Resources struct {
 // RepoFilter decides which repositories an agent accepts. named reports
 // whether the fields name a repository at all.
 type RepoFilter interface {
+	Patterns() []string
 	AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool)
 }
 
@@ -81,8 +77,6 @@ type Profile struct {
 	// OS and Arch are observed. Empty falls back to an os= or arch= label, which
 	// is how a runner that reports no platform has always matched.
 	OS, Arch string
-	// Capacity is the most the agent could ever give one node.
-	Capacity Resources
 	// Accept narrows the repositories the agent takes; nil takes every one.
 	Accept RepoFilter
 }
@@ -101,7 +95,6 @@ type Demand struct {
 	// Trigger demands a repository the filter admits; a node admits a run that
 	// names none, since it then fetches no source.
 	Trigger bool
-	Request Resources
 }
 
 // Verdict is the outcome of a check. The zero Verdict admits.
@@ -135,20 +128,6 @@ func evaluateRequirements(p Profile, d Demand) Verdict {
 			return Verdict{Reason: ReasonTrustedPlacement, Term: term}
 		}
 		return Verdict{Reason: ReasonSelector, Term: term}
-	}
-	if !fits(p.Capacity, d.Request) {
-		return Verdict{Reason: ReasonShape}
-	}
-	return Verdict{}
-}
-
-// Fits reports whether request fits in what the agent has free now. A
-// dimension the agent reports no capacity for is unknown and admits any
-// request, while a known capacity makes a zero availability mean none free.
-func Fits(capacity, available, request Resources) Verdict {
-	if (capacity.Cores > 0 && request.Cores > available.Cores) ||
-		(capacity.MemoryBytes > 0 && request.MemoryBytes > available.MemoryBytes) {
-		return Verdict{Reason: ReasonAvailability}
 	}
 	return Verdict{}
 }
@@ -185,11 +164,6 @@ func admitsRepo(filter RepoFilter, repo Repository, trigger bool) bool {
 		return named && admitted
 	}
 	return !named || admitted
-}
-
-func fits(have, want Resources) bool {
-	return (have.Cores <= 0 || want.Cores <= have.Cores) &&
-		(have.MemoryBytes <= 0 || want.MemoryBytes <= have.MemoryBytes)
 }
 
 func termSatisfied(p Profile, term string) bool {

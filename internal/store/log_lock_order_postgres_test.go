@@ -20,8 +20,8 @@ func TestPostgresLogPreparationLocksAuthorityBeforeRunAgainstRenewal(t *testing.
 		t.Fatal(err)
 	}
 	prefix := claim.Award.CapabilityPrefix
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, CapabilityPrefix: prefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	attempt := runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Award.Generation}
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, CapabilityPrefix: prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	attempt := runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: int64(claim.Award.Generation)}
 	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &attempt}
 	tenant := teststore.ForTeam(t, st, "a")
 	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET attempt=1 WHERE team='a' AND run_id='run' AND node_id='job'`); err != nil {

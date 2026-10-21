@@ -320,8 +320,14 @@ remote work for a runner advertising those preferred labels when applicable.
 `NeedsTools(names...)` declares known tool requirements. `Inline()` selects the
 run host for execution. `sw.Runner(ctx)` reports the host-granted identity.
 
-`Resources(sw.Cores(value), sw.MemoryGB(value))` declares job or plan resources.
-Fractional cores are supported. `plan.Priority(value)` sets admission priority.
+Runner size is a required label, for example `job.Requires("sparkwing-4cpu")`.
+Cloud offers `sparkwing-2cpu`, `sparkwing-4cpu`, `sparkwing-8cpu`,
+`sparkwing-16cpu`, `sparkwing-32cpu` and `sparkwing-64cpu`; an installation must
+price a size before it can award it. Billing uses that label's exact credit class.
+Without a size requirement, Cloud uses `sparkwing-2cpu`.
+Self-hosted runners advertise their own labels. Each selector term must match;
+comma-separated alternatives within a term are ORed. CPU and memory resource
+declarations are removed. `plan.Priority(value)` sets admission priority.
 `plan.ClaimWait(duration)` declares a positive maximum wait for a runner claim.
 `plan.Checkout(sw.Checkout{...})` declares source options with pointer fields for
 `Depth`, `FullHistory`, `Tags`, `Submodules` and `LFS`. Explicit values remain

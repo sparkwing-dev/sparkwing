@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func readRunnerInventory(t *testing.T, s *Store, team Team) capability.RunnerSnapshot {
@@ -31,7 +30,6 @@ func readRunnerInventory(t *testing.T, s *Store, team Team) capability.RunnerSna
 func TestRunnerInventorySeparatesRenewalLivenessFromHeadroom(t *testing.T) {
 	s, demand, claim, now := renewalFixture(t, capability.UnitNode)
 	demand.Labels = []string{"gpu", "name=forged", "class=cloud"}
-	demand.Available = match.Resources{Cores: 3, MemoryBytes: 1024}
 	if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
 		t.Fatal(err)
 	}

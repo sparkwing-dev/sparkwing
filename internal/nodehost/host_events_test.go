@@ -36,7 +36,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				fixture = executionStoreFixture(t, deps)
 			})
 			input = storedExecutionInput(t, fixture, host)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}}
+			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}}
 			if mode == "result_refused" {
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
 					t.Fatal(err)
@@ -63,7 +63,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			persisted, err := fixture.Tenant.ReadNode(ctx, row.Ref)
-			if err != nil || persisted.Generation != input.Generation || persisted.Attempt != int64(len(processes)) {
+			if err != nil || persisted.Generation != input.Generation || persisted.Attempt != runspec.AttemptOrdinal(len(processes)) {
 				t.Fatalf("execution lost its generation or ordinal: %+v, %v", persisted, err)
 			}
 			for _, process := range processes {
@@ -122,7 +122,7 @@ func TestHostStepPersistence(t *testing.T) {
 			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				fixture = executionStoreFixture(t, deps)
 				deps.Log = func(ctx context.Context, in NodeInput, log nodeproto.FrameLog) error {
-					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: in.Accepted.RunID, NodeID: "job"})
+					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(in.Accepted.RunID), NodeID: "job"})
 					if err != nil || row.Generation != in.Generation || row.Attempt != in.Attempt || row.ClaimedBy != in.Authority.Holder || row.CapabilityPrefix != in.Authority.CapabilityPrefix {
 						t.Fatalf("diagnostic differs from committed attempt: %+v, %v", row, err)
 					}
@@ -164,7 +164,7 @@ func TestHostStepPersistence(t *testing.T) {
 				if err := rows.Scan(&attempt, &generation, &id, &state, &started, &finished); err != nil {
 					t.Fatal(err)
 				}
-				if generation != input.Generation || started <= 0 || state != "running" && (finished == nil || *finished < started) {
+				if runspec.ClaimGeneration(generation) != input.Generation || started <= 0 || state != "running" && (finished == nil || *finished < started) {
 					t.Fatal("step lost its generation or timestamps")
 				}
 				if states[attempt] == nil {
@@ -220,7 +220,7 @@ func TestHostStepPersistence(t *testing.T) {
 					t.Fatal("diagnostic failure leaked a process")
 				}
 			}
-			persisted, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: input.Accepted.RunID, NodeID: "job"})
+			persisted, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"})
 			outcome := store.NodeSuccess
 			if mode == "before_refused" || mode == "step_failed" || mode == "step_write_refused" || mode == "diagnostic_refused" {
 				outcome = store.NodeFailed
@@ -337,8 +337,8 @@ func fixtureEngine(t *testing.T, accepted AcceptedRun) engine.Identity {
 func storedExecutionInput(t *testing.T, fixture *storeHostFixture, host *ClaimedNodeHost) NodeInput {
 	t.Helper()
 	ctx := t.Context()
-	ref := controllerwire.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "job"}
-	if _, err := fixture.Tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: fixture.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"}
+	if _, err := fixture.Tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	awarded, err := fixture.Tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: fixture.Actor, Policy: store.SourceNone})

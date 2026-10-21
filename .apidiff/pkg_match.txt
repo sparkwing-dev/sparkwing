@@ -3,6 +3,14 @@
 const ClassAgent = "agent"
 const ClassCloud = "cloud"
 const ClassCoordinator = "coordinator"
+type CloudSize struct {
+	Label       string
+	CreditClass int64
+	Resources   Resources
+}
+func CloudSizeForProfile(selector []string, profile Profile) (CloudSize, error)
+func CloudSizeMemoryBytes(cores int64) int64
+func CloudSizes() []CloudSize
 var CloudTools = parseToolManifest(build.RunnerTools)
 const DefaultClaimWait = 24 * time.Hour
 type Demand struct {
@@ -15,11 +23,9 @@ type Demand struct {
 	Repo *Repository
 
 	Trigger bool
-	Request Resources
 }
 func DetectTools(lookPath func(string) (string, error)) []string
 func Evaluate(profile Profile, demand Demand) Verdict
-func Fits(capacity, available, request Resources) Verdict
 func IsKnownTool(name string) bool
 var KnownTools = []string{
 	"aws", "buildx", "crane", "docker", "git", "go", "golangci-lint",
@@ -35,18 +41,15 @@ type Profile struct {
 
 	OS, Arch string
 
-	Capacity Resources
-
 	Accept RepoFilter
 }
 type Reason string
-const ReasonAvailability Reason = "availability"
 const ReasonRepo Reason = "repo"
 const ReasonReservation Reason = "reservation"
 const ReasonSelector Reason = "selector"
-const ReasonShape Reason = "shape"
 const ReasonTrustedPlacement Reason = "trusted_placement"
 type RepoFilter interface {
+	Patterns() []string
 	AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool)
 }
 type Repository struct {

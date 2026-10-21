@@ -6,10 +6,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// CloudAwardResources reads Cloud's committed allocation or a self-hosted pool's sealed resource pins.
+// CloudAwardResources reads Cloud's committed allocation or a self-hosted pool's selected size.
 func (o *Operator) CloudAwardResources(ctx context.Context, ref capability.AuthorityRef) (*match.Resources, error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -34,12 +35,16 @@ func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.Auth
 		if err != nil {
 			return nil, err
 		}
-		resources, err := unitResourcesTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID})
+		selectors, err := unitSelectorsTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return nil, err
 		}
-		allocation := matchingResources(resources)
-		return &allocation, nil
+		profile, err := enrolledClaimProfileTx(ctx, tx, chain)
+		if err != nil {
+			return nil, err
+		}
+		size, err := match.CloudSizeForProfile(selectors, profile)
+		return &size.Resources, err
 	}
 	if c.Billing == nil || c.Billing.ExecutorClass != TierCloud {
 		return nil, nil

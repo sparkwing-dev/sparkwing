@@ -3,6 +3,7 @@ package teststore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -134,7 +136,14 @@ func Exec(ctx context.Context, st *store.Store, query string, args ...any) (_ sq
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, db.Close()) }()
-	return db.ExecContext(ctx, rebind(st, query), args...)
+	result, err := db.ExecContext(ctx, rebind(st, query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := projectClaimRunIdentities(ctx, db, st, query); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func rebind(st *store.Store, query string) string {
@@ -182,4 +191,55 @@ func SeedGitHubInstallation(t T, st *store.Store, team store.Team, in store.GitH
 	in.Team = team
 	in.CreatedAt, in.UpdatedAt = now.UTC(), now.UTC()
 	return in
+}
+
+func projectClaimRunIdentities(ctx context.Context, db *sql.DB, st *store.Store, query string) error {
+	upper := strings.ToUpper(strings.TrimSpace(query))
+	if !strings.HasPrefix(upper, "INSERT INTO RUNS") && !(strings.HasPrefix(upper, "UPDATE RUNS") && strings.Contains(upper, "REPO_")) {
+		return nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id,repo_key,repo_display,request_json FROM runs`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id, key, display string
+		request          []byte
+	}
+	var runs []row
+	for rows.Next() {
+		var v row
+		if err = rows.Scan(&v.id, &v.key, &v.display, &v.request); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		runs = append(runs, v)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, v := range runs {
+		if v.display == "" {
+			var request struct {
+				Request struct {
+					Git struct {
+						Repository struct {
+							Display string `json:"display"`
+						} `json:"repository"`
+					} `json:"git"`
+				} `json:"request"`
+			}
+			if err = json.Unmarshal(v.request, &request); err != nil {
+				return err
+			}
+			v.display = request.Request.Git.Repository.Display
+		}
+		identity, err := sourceurl.RoutingIdentity(v.key, v.display)
+		if err != nil {
+			identity = ""
+		}
+		if _, err = db.ExecContext(ctx, rebind(st, `UPDATE runs SET repo_identity=? WHERE id=?`), identity, v.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }

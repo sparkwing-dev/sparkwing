@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -31,7 +30,7 @@ func pushedService(t *testing.T) *pushedFixture {
 func TestDisarmRepoURLRemovesOnlyThatRepository(t *testing.T) {
 	svc := pushedService(t)
 	for i, repo := range []string{pushedRepoURL, "https://github.com/acme/other.git"} {
-		_, _, err := svc.Schedules.ArmCronSchedule(t.Context(), store.CronSchedule{ID: []string{"first", "second"}[i], RepoPath: repo, Pipeline: "ci", Cron: "0 * * * *", Where: store.CronWhereController, GitHubInstallationID: 7, GitHubRepositoryID: int64(701 + i)}, time.Now())
+		_, _, err := svc.Schedules.ArmCronSchedule(t.Context(), store.CronSchedule{ID: []string{"first", "second"}[i], RepoPath: repo, Pipeline: "ci", Cron: "0 * * * *", Where: store.CronWhereController, GitHubInstallationID: 7, GitHubRepositoryID: int64(701 + i)})
 		if err != nil {
 			t.Fatal(err)
 		}

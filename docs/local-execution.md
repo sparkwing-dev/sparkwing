@@ -403,7 +403,7 @@ admission:
 
 Admission charges against that host's capacity. On Linux, an available writable
 cgroup can enforce the machine budget. macOS scheduling controls are advisory.
-The contribution preference controls advertised runner headroom, rather than an
+Runner labels control job placement, rather than an
 OS resource sandbox. Operator ceilings refuse excessive author values instead
 of silently clamping them. See [machine settings](machine-config.md).
 
@@ -492,24 +492,11 @@ started by a push, pull request, release or schedule never reach it.
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.
 
-Registered machines advertise measured CPU and memory headroom. Their
-`contribution` setting caps that offer, and `keep_free` reserves capacity for
-other work. Enrollment enables `local_admission`, which shares the machine's
-admission controller with local runs. If that controller is absent, a released
-runner fetches the verified matching CLI and starts it before claiming work.
-Each claimed job holds its machine lease through source preparation, execution
-and cleanup. A full machine offers zero headroom, so later preferences can win.
-Busy local work does not prevent jobs from becoming ready for overflow.
-Jobs without resource settings use the same one-core admission charge locally
-and when matching a runner. The requesting machine reserves compute before claiming a job, because local
-work can arrive after a capacity observation. A waiting job stays available to
-other ranked claimants. If another machine advances it, the requester cancels
-its compute wait. Ctrl-C also cancels the wait.
-Concurrency slots count once even when a registered runner shares this machine
-with the requesting CLI.
-Machine admission keeps Cloud run identities separate from local records.
-Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
-committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.
+Registered machines advertise labels and a configured concurrent-job count.
+Required labels select eligible machines. CPU and memory observations are not
+claim requirements. Enrollment can enable `local_admission` to share the
+machine's local admission controller with local runs; claim authority and
+placement still belong to the controller.
 
 An unreachable controller before intake, including connection setup and source upload,
 produces a message and a local run.

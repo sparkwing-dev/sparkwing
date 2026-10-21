@@ -132,7 +132,7 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	if err != nil || old == nil {
 		t.Fatalf("claim: %+v, %v", old, err)
 	}
-	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true, now); err != nil {
+	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true); err != nil {
 		t.Fatal(err)
 	}
 	// Crash after the effect commits, before delivery completion.
@@ -148,7 +148,7 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	if err != nil || newer == nil || newer.ID != "unsuspend" {
 		t.Fatalf("newer: %+v, %v", newer, err)
 	}
-	if err := op.SetGitHubAppInstallationSuspended(newer.Context(ctx), 7, false, now.Add(time.Second)); err != nil {
+	if err := op.SetGitHubAppInstallationSuspended(newer.Context(ctx), 7, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := op.FinishGitHubDelivery(ctx, *newer, "", now.Add(time.Second)); err != nil {
@@ -165,10 +165,10 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	if err != nil || replay == nil || replay.ID != "suspend" {
 		t.Fatalf("replay: %+v, %v", replay, err)
 	}
-	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true, now.Add(3*time.Minute)); err == nil {
+	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true); err == nil {
 		t.Fatal("stale worker applied lifecycle mutation")
 	}
-	if err := op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true, now.Add(3*time.Minute)); err != nil {
+	if err := op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true); err != nil {
 		t.Fatal(err)
 	}
 	got, err := op.GitHubAppInstallationTeam(ctx, 7)
@@ -197,7 +197,7 @@ func TestGitHubDeliveryFailedLifecycleDoesNotKeepReceipt(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE cron_schedules RENAME TO unavailable_cron_schedules`); err != nil {
 		t.Fatal(err)
 	}
-	if err := op.SetGitHubAppInstallationSuspended(claim.Context(ctx), 7, true, now); err == nil {
+	if err := op.SetGitHubAppInstallationSuspended(claim.Context(ctx), 7, true); err == nil {
 		t.Fatal("suspension committed without schedule withdrawal")
 	}
 	got, err := op.GitHubAppInstallationTeam(ctx, 7)
@@ -207,7 +207,7 @@ func TestGitHubDeliveryFailedLifecycleDoesNotKeepReceipt(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE unavailable_cron_schedules RENAME TO cron_schedules`); err != nil {
 		t.Fatal(err)
 	}
-	if err := op.SetGitHubAppInstallationSuspended(claim.Context(ctx), 7, true, now); err != nil {
+	if err := op.SetGitHubAppInstallationSuspended(claim.Context(ctx), 7, true); err != nil {
 		t.Fatal(err)
 	}
 	got, err = op.GitHubAppInstallationTeam(ctx, 7)

@@ -43,7 +43,6 @@ Shared runner registration requires team administration. --personal registers ca
 | `--repos PATTERN` | repos Repeatable; comma-separated values are accepted. |
 | `--label LABEL` | label Repeatable; comma-separated values are accepted. |
 | `--max-concurrent N` | max concurrent Must be at least 1. |
-| `--contribution SPEC` | contribution |
 | `--config PATH` | config |
 | `--force` | Replace an existing object. |
 | `--no-service` | no service |

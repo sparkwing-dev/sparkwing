@@ -92,7 +92,7 @@ func TestRunnerListingCommandUsesSelectedProfile(t *testing.T) {
 		if req.Method != "GET" || req.URL.Path != "/api/v1/runners" || req.Header.Get("Authorization") != "Bearer private-credential" {
 			t.Fatalf("runner request: %s %s", req.Method, req.URL)
 		}
-		return 200, `{"runners":[{"name":"desktop","class":"self_hosted","location":"local","labels":["gpu"],"reserved_pools":["prod"],"repos":[],"last_seen":"","status":"idle","active_jobs":[],"max_concurrent":2,"metered":false,"capacity":{"cores":6.5,"memory_bytes":7516192768}}]}`
+		return 200, `{"runners":[{"name":"desktop","class":"self_hosted","location":"local","labels":["gpu"],"reserved_pools":["prod"],"repos":[],"last_seen":"","status":"idle","active_jobs":[],"max_concurrent":2,"metered":false}]}`
 	})
 	var result error
 	out := captureStdout(t, func() {

@@ -552,16 +552,21 @@ here (the personal machine sealed as `OriginMachine` from a verified proof),
 personal, github-actions, self-hosted (including local queues) or cloud. An
 empty ranking means first come, and an unset ranking means the default order.
 
-`unitEligibilityTx` is the single judgment of a claimant for a unit: kinds,
-authority and placement (including the ranking), matching, advertised
-capacity and billing for every metered claimant. Queue scans, named claims,
-ranking holds and notices all use it. `unitPlacementTx` applies only the
-ranking to a ranked unit. Inside `limits.RankingWindow` from readiness, a claim
-waits while a better-ranked eligible claimant is live, and it writes its ask to
-`unit_asks` under the unit's claim lock in the same transaction, which commits
-when the scan awards another unit or nothing. For `limits.RankingAward` after
-the window, a claim waits only for a better-ranked ask recorded inside the
-window. An award deletes the unit's asks.
+`claimSQL` selects and rechecks every claimant through one SQL predicate: readiness,
+grants, binding, repository scope, trust, selectors, reservation, exclusions,
+placement and funding. Teams take turns by their last committed award ordinal;
+arrival and stable unit identity break ties. Failed awards advance no ordinal.
+There is no launcher scan frontier, demand hash or probing savepoint. Repository
+routing identities are normalized by the source URL owner when intake writes the run.
+
+Inside `limits.RankingWindow`, lower tiers wait for a live, eligible higher tier
+and record an ask in `unit_asks`. During `limits.RankingAward` after the window,
+the recorded winner takes the unit. SQL applies those holds before `LIMIT 1`,
+so a held prefix cannot hide eligible work. Explicit placement and burst holds
+also compare only eligible live claimants. An award deletes its unit's asks.
+Preference scores do not reorder jobs ahead of fair share and arrival.
+`explainUnitEligibilityTx` supplies diagnostics for notices; it never selects
+or awards work.
 
 A personal machine takes only its owner's manual runs. `automatedLineageTx`
 follows a retry or child run back to its original request and refuses any whose

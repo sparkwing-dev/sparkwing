@@ -33,7 +33,7 @@ func armAppRowForTick(t *testing.T, tenant *store.Tenant, armedBy string) store.
 		Cron: "* * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
 		Where: store.CronWhereController, GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567",
 		GitHubInstallationID: 7, GitHubRepositoryID: 701, ArmedBy: armedBy, NextDueAt: &next,
-	}, time.Now())
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

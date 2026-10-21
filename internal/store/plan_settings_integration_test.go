@@ -49,12 +49,12 @@ func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcce
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tenant, PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: in.Request.RequestedArgs, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
+	return tenant, PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: in.Request.RequestedArgs, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
 }
 
 func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
-	cores, timeout := 1.5, int64(1234)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Resources: &nodeproto.ResourceSpec{Cores: &cores}, TimeoutMS: &timeout, Requires: []string{"linux"}}}}
+	timeout := int64(1234)
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout, Requires: []string{"linux"}}}}
 	tenant, request := sharedSettingsPlan(t, plan)
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
@@ -63,11 +63,11 @@ func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 	if !slices.Equal(accepted.Spec.Resolved.SecretArgs, []string{"message"}) {
 		t.Fatalf("intake classification lost: %+v", accepted.Spec.Resolved.SecretArgs)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.Execution.Resources.Value.Cores.Value != cores || node.Execution.Timeout.Value != 1234*time.Millisecond || !slices.Equal(node.Execution.Requires.Value, []string{"linux"}) || node.Attempt != 0 {
+	if node.Execution.Timeout.Value != 1234*time.Millisecond || !slices.Equal(node.Execution.Requires.Value, []string{"linux"}) || node.Attempt != 0 {
 		t.Fatalf("resolved execution: %+v, attempt %d", node.Execution, node.Attempt)
 	}
 	replayed, err := tenant.AcceptPlan(t.Context(), request)
@@ -77,11 +77,10 @@ func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 }
 
 func TestAcceptanceRerunsSharedSettingsBeforePersistence(t *testing.T) {
-	cores := 1.5
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Resources: &nodeproto.ResourceSpec{Cores: &cores}}}}
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
 	tenant, request := sharedSettingsPlan(t, plan)
-	zero := float64(0)
-	plan.Jobs[0].Resources.Cores = &zero
+	zero := int64(-1)
+	plan.Jobs[0].TimeoutMS = &zero
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +108,7 @@ func TestAcceptancePersistsConcurrencyWinnersFromResolutionContract(t *testing.T
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.RunID, NodeID: "job"})
+	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil || !reflect.DeepEqual(row.Execution.Concurrency, want) {
 		t.Fatalf("persisted concurrency winners: %+v, %v", row.Execution.Concurrency, err)
 	}

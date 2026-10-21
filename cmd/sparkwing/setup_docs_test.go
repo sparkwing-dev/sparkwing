@@ -14,7 +14,7 @@ func TestSharedControllerSetupDocsUseProvisionedAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"SPARKWING_HOME", "SPARKWING_CONFIG", "/api/v1/auth/whoami", "sparkwing operator teams create"} {
-			if !strings.Contains(string(raw), want) {
+			if !strings.Contains(raw, want) {
 				t.Errorf("%s omits %s", slug, want)
 			}
 		}

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -27,7 +29,7 @@ func TestStoreQueueOrder(t *testing.T) {
 func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	t.Helper()
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 		input.Request.Git.Repository.Key = "gh:42"
@@ -44,11 +46,11 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a-blocked", "job", "z-preferred"} {
-		if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: controllerwire.NodeRef{RunID: plan.RunID, NodeID: id}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	before, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: plan.RunID, NodeID: "a-blocked"})
+	before, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "a-blocked"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if _, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: foreign}); err != nil {
 		t.Fatal(err)
 	}
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}
 	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 3})
 	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil || claim.RunID != pending.RunID || claim.Kind != capability.UnitTrigger {

@@ -75,14 +75,14 @@ func FuzzLocalClaimProfileRequiresCapturedAccount(f *testing.F) {
 		case 5:
 			p.Authority.ID = "foreign:" + forged
 		}
-		profile, available, err := c.ResolveClaimProfile(t.Context(), p)
+		profile, err := c.ResolveClaimProfile(t.Context(), p)
 		if mutation%6 != 0 {
-			if err == nil || profile.Name != "" || available.Cores != 0 {
+			if err == nil || profile.Name != "" {
 				t.Fatal("foreign authority acquired local placement facts")
 			}
 			return
 		}
-		if err != nil || profile.Name != c.subject || profile.OS != runtime.GOOS || profile.Arch != runtime.GOARCH || profile.Capacity != available || available.Cores != float64(runtime.NumCPU()) {
+		if err != nil || profile.Name != c.subject || profile.OS != runtime.GOOS || profile.Arch != runtime.GOARCH {
 			t.Fatalf("verified account lost its machine facts: %+v: %v", profile, err)
 		}
 	})

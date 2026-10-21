@@ -171,7 +171,7 @@ func (s *Server) refillPass(ctx context.Context) {
 // new one; the refund's success reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
 	operator := s.operator
-	due, err := operator.DueCardRefunds(ctx, time.Now())
+	due, err := operator.DueCardRefunds(ctx)
 	if err != nil {
 		s.logger.Error("listing queued card refunds", "err", err)
 		return

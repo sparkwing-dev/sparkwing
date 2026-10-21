@@ -68,7 +68,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 1})
+	response, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	if err != nil || response.Claim == nil {
 		t.Fatalf("here claim: %+v %v", response, err)
 	}

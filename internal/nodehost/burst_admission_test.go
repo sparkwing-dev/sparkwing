@@ -21,7 +21,6 @@ func burstAdmissionFixture(t *testing.T) (*ownerFixture, OwnerHost, RunInput, *f
 	f, host, input := newOwnerFixture(t, true)
 	spec := f.snapshot.Run.Spec
 	spec.Request.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "cloud"}}}
-	spec.Resolved.Settings.Options.Resources.Value.Cores.Value = 4
 	f.snapshot.Run.Request = spec.Request
 	input.SealedRequest, _ = json.Marshal(spec.Request.Request)
 	accepted, err := ownerAccepted(f.snapshot.Run)
@@ -29,8 +28,7 @@ func burstAdmissionFixture(t *testing.T) (*ownerFixture, OwnerHost, RunInput, *f
 		t.Fatal(err)
 	}
 	input.Accepted = &accepted
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
-	f.snapshot.Nodes[0].Execution.Resources.Value.Cores.Value = 4
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
 	host.Local = func(store.NodeRow) bool { return true }
 	host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
@@ -82,7 +80,7 @@ func TestBurstSelfClaimHoldsMachineCapacityThroughExecution(t *testing.T) {
 	f, host, input, daemon := burstAdmissionFixture(t)
 	host.Executor = ownerNodeFunc(func(ctx context.Context, node NodeInput) error {
 		requests := daemon.requests()
-		if live, _, _ := daemon.counts(); live != 1 || len(requests) != 1 || requests[0].Resources.Cores != 4 || requests[0].SemaphoresOnly {
+		if live, _, _ := daemon.counts(); live != 1 || len(requests) != 1 || requests[0].Resources.Cores != 0 || requests[0].SemaphoresOnly {
 			t.Fatalf("self claim started without job capacity: %+v live=%d", requests, live)
 		}
 		f.record("execute")
@@ -199,7 +197,7 @@ func burstSharedClaimConcurrency(t *testing.T, scope, group string, capacity, co
 		return RunCompletion{}, host.Admit(ctx, *input.Accepted, row, func(ctx context.Context) error {
 			return (&LocalAdmission{Daemon: daemon}).ClaimedNode(ctx, *input.Accepted, row, func(context.Context) error {
 				requests := daemon.requests()
-				if len(requests) != 3 || len(requests[1].Semaphores) != 1 || len(requests[2].Semaphores) != 0 || requests[2].Resources.Cores != 4 {
+				if len(requests) != 3 || len(requests[1].Semaphores) != 1 || len(requests[2].Semaphores) != 0 || requests[2].Resources.Cores != 0 {
 					t.Fatalf("registered claim did not retain requester's concurrency: %+v", requests)
 				}
 				return nil
@@ -215,18 +213,15 @@ func burstSharedClaimConcurrency(t *testing.T, scope, group string, capacity, co
 }
 
 func FuzzBurstReleaseNeverReservesMachineResources(f *testing.F) {
-	f.Add(uint8(4), uint32(1024), true)
-	f.Add(uint8(0), uint32(0), false)
-	f.Fuzz(func(t *testing.T, cores uint8, memory uint32, grouped bool) {
+	f.Add(true)
+	f.Add(false)
+	f.Fuzz(func(t *testing.T, grouped bool) {
 		_, host, input, daemon := burstAdmissionFixture(t)
 		var spec runspec.Spec
 		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 			t.Fatal(err)
 		}
-		spec.Resolved.Settings.Options.Resources.Value.Cores.Value = float64(cores)
-		spec.Resolved.Settings.Options.Resources.Value.MemoryBytes.Value = int64(memory)
-		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: input.RunID, NodeID: "job"}}
-		row.Execution.Resources = spec.Resolved.Settings.Options.Resources
+		row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "job"}}
 		if grouped {
 			row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "fail"}}
 		}

@@ -26,9 +26,9 @@ func (f runnerAdmissionFunc) CheckRunner(ctx context.Context, version string) er
 	return f(ctx, version)
 }
 
-type engineEnrollmentFunc func(context.Context, capability.Principal) (match.Profile, match.Resources, error)
+type engineEnrollmentFunc func(context.Context, capability.Principal) (match.Profile, error)
 
-func (f engineEnrollmentFunc) ResolveClaimProfile(ctx context.Context, principal capability.Principal) (match.Profile, match.Resources, error) {
+func (f engineEnrollmentFunc) ResolveClaimProfile(ctx context.Context, principal capability.Principal) (match.Profile, error) {
 	return f(ctx, principal)
 }
 
@@ -42,11 +42,11 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 	authorized := capability.Authorized{Principal: root, Binding: root.Capability.Binding, Target: capability.Target{Team: "a"}}
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
 	engineAcceptedFixturePlan(t, server, "a", "run")
-	server.claimProfiles = engineEnrollmentFunc(func(_ context.Context, principal capability.Principal) (match.Profile, match.Resources, error) {
+	server.claimProfiles = engineEnrollmentFunc(func(_ context.Context, principal capability.Principal) (match.Profile, error) {
 		if principal.Authority.ID != "runner" {
 			t.Fatal("enrollment received a caller-selected identity")
 		}
-		return match.Profile{Name: "forged", Capacity: match.Resources{Cores: 8}}, match.Resources{Cores: 8}, nil
+		return match.Profile{Name: "forged"}, nil
 	})
 	allowed := false
 	server.RunnerPolicy = runnerAdmissionFunc(func(_ context.Context, version string) error {
@@ -58,7 +58,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 		}
 		return nil
 	})
-	body := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"name=forged", "class=cloud"}, AvailableCores: 8}
+	body := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"name=forged", "class=cloud"}}
 	if _, err := server.Claim(t.Context(), authorized, body); err == nil {
 		t.Fatal("revoked runner received an award")
 	}
@@ -66,12 +66,6 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 		t.Fatalf("runner policy blocked draining: %v", err)
 	}
 	allowed = true
-	body.AvailableCores = 2
-	noWork, err := server.Claim(t.Context(), authorized, body)
-	if err != nil || noWork.Claim != nil {
-		t.Fatalf("busy runner claimed: %+v, %v", noWork, err)
-	}
-	body.AvailableCores = 8
 	got, err := server.Claim(t.Context(), authorized, body)
 	if err != nil || got.Claim == nil || got.Claim.Capability == "" || got.Claim.Runner.Name != "runner" || got.Claim.Runner.Type != "runner" || got.Claim.RunID != "run" || got.Claim.JobID != "job" || got.Claim.Purpose != capability.PurposeWork || got.Claim.Delivery != capability.DeliveryDirect || got.Claim.Execution == nil {
 		t.Fatalf("registered claim: %+v, %v", got.Claim, err)
@@ -136,7 +130,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	holder, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	holder, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +208,7 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 				engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 				engineAcceptedFixturePlan(t, server, "a", "run")
 			}
-			claim, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			claim, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: root.Prefix, Target: target})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +221,7 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 			}
 			authorized := capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "forged", RunID: "foreign"}}
 			got, err := server.Exchange(t.Context(), authorized)
-			if err != nil || got.Claim.Unit != kind || got.Claim.RunID != "run" || got.Claim.JobID != target.NodeID || got.Claim.Purpose != principal.Capability.Purpose || got.Claim.Delivery != capability.DeliveryDirect || got.Claim.Capability == "" || got.Claim.Capability == string(claim.Bearer) || got.Claim.LeaseExpiresAt != claim.Award.LeaseExpiresAt || got.Claim.Runner.Name != "launcher" || got.Claim.Runner.Type != "cloud" {
+			if err != nil || got.Claim.Unit != kind || got.Claim.RunID != "run" || got.Claim.JobID != string(target.NodeID) || got.Claim.Purpose != principal.Capability.Purpose || got.Claim.Delivery != capability.DeliveryDirect || got.Claim.Capability == "" || got.Claim.Capability == string(claim.Bearer) || got.Claim.LeaseExpiresAt != claim.Award.LeaseExpiresAt || got.Claim.Runner.Name != "launcher" || got.Claim.Runner.Type != "cloud" {
 				t.Fatalf("exchange identity: unit=%s run=%s job=%s delivery=%s, %v", got.Claim.Unit, got.Claim.RunID, got.Claim.JobID, got.Claim.Delivery, err)
 			}
 			if replay, err := server.Exchange(t.Context(), authorized); err == nil || replay.Claim.Capability != "" {
@@ -242,7 +236,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		server, tenant := engineRuntimeStore(t)
 		owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 		engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-		holder, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+		holder, err := server.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}})
 		if err != nil {
 			t.Fatal(err)
 		}

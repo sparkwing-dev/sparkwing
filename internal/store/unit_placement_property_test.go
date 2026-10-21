@@ -13,12 +13,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(213, 611))
-	for _, problem := range []string{"live", "stale", "stale_activity", "revoked", "expired", "foreign", "repository", "grant", "capacity", "hard_selector", "deadline", "preferred_claimant", "granted_name", "unknown_capacity"} {
+	for _, problem := range []string{"live", "stale", "stale_activity", "revoked", "expired", "foreign", "repository", "grant", "hard_selector", "deadline", "preferred_claimant", "granted_name"} {
 		for i := range 6 {
 			t.Run(fmt.Sprintf("%s/%d", problem, i), func(t *testing.T) {
 				s, request := unitClaimFixture(t)
@@ -27,10 +26,10 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 				preferred := fmt.Sprintf("gpu-%x", random.Uint64())
 				if problem == "granted_name" {
 					preferred = "name=preferred"
-					request.Labels = []string{preferred}
+					request.Labels = []string{preferred, "sparkwing-4cpu"}
 				}
 				policy := ClaimPlacement{Preferences: []PlacementPreference{{Hold: 3 * time.Minute}, {}}, Liveness: time.Minute}
-				execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Value: 4, Set: true}}}, Set: true}}}
+				execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
 				if i%2 == 0 {
 					policy.Preferences[0].Prefers = []string{preferred}
 				} else {
@@ -41,7 +40,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					request.Labels = []string{"tool:git"}
 				}
 				if problem == "preferred_claimant" {
-					request.Labels = []string{preferred}
+					request.Labels = []string{preferred, "sparkwing-4cpu"}
 				}
 				body, err := json.Marshal(execution)
 				if err != nil {
@@ -63,13 +62,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					root.ExpiresAt = &expires
 				}
 				authorityPersist(t, s, root)
-				observation := UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{preferred, "name=forged", "pool=forged"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
-				if problem == "unknown_capacity" {
-					observation.Capacity, observation.Available = match.Resources{}, match.Resources{}
-				}
-				if problem == "capacity" {
-					observation.Available.Cores = 2
-				}
+				observation := UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{preferred, "sparkwing-4cpu", "name=forged", "pool=forged"}}
 				if err := s.AsOperator().RecordRunnerPoll(t.Context(), observation); err != nil {
 					t.Fatal(err)
 				}
@@ -173,7 +166,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 				authorityPersist(t, s, root)
 				live := random.IntN(2) == 0
 				if live {
-					observation := UnitDemand{CapabilityPrefix: name, Labels: []string{"name=runner", "class=cloud"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+					observation := UnitDemand{CapabilityPrefix: name, Labels: []string{"sparkwing-4cpu", "name=runner", "class=cloud"}}
 					if err := s.AsOperator().RecordRunnerPoll(t.Context(), observation); err != nil {
 						t.Fatal(err)
 					}
@@ -182,7 +175,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 					wantHeld = true
 				}
 			}
-			request.Labels = []string{"name=" + order[0], "class=cloud"}
+			request.Labels = []string{"sparkwing-4cpu", "name=" + order[0], "class=cloud"}
 			if i%2 == 0 {
 				request.Target, request.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 			}

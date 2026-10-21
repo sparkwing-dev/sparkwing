@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
@@ -19,7 +18,6 @@ func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
 			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 				t.Fatal(err)
 			}
-			demand.Capacity, demand.Available = match.Resources{Cores: 8}, match.Resources{Cores: 8}
 			if queued {
 				demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 			}
@@ -51,7 +49,7 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 		}
 		tenant := &Tenant{s: s, team: "a"}
 		actor := Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}
-		change := NodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Cause: CauseUnpriced, Actor: actor, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass}}}
+		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Cause: CauseUnpriced, Actor: actor, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass}}}
 		switch variant % 4 {
 		case 0:
 			change.Actor.Authority.ID = fmt.Sprintf("missing-%x", seed)
@@ -79,34 +77,14 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 	}
 }
 
-func TestUnpricedWorkFailsEvenWhenItDoesNotFitThePoller(t *testing.T) {
-	for _, queued := range []bool{false, true} {
-		s, demand, _ := meteredUnitFixture(t, true)
-		table := CreditRateTable{{Cores: 1, MicroPerSecond: 2}}
-		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
-			t.Fatal(err)
-		}
-		demand.Capacity, demand.Available = match.Resources{Cores: 2}, match.Resources{Cores: 2}
-		if queued {
-			demand.Target = nil
-			demand.Kinds = []capability.UnitKind{capability.UnitNode}
-		}
-		_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-		row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-		if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != NodeFailed {
-			t.Fatalf("queued=%t unpriced work stayed pending: %+v %v %v", queued, row, err, readErr)
-		}
-	}
-}
-
 func TestUnpricedFailureKeepsThePollersMatchingEvidence(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, false)
 	table := CreditRateTable{{Cores: 1, MicroPerSecond: 2}}
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}},"requires":{"set":true,"value":["tool:terraform"]}}`))
-	demand.Labels = []string{"tool:terraform"}
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu","tool:terraform"]}}`))
+	demand.Labels = []string{"sparkwing-4cpu", "tool:terraform"}
 	_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
 	if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != NodeFailed {

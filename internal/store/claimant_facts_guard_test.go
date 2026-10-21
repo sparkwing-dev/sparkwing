@@ -26,7 +26,7 @@ func TestClaimantFactsHaveOneOwner(t *testing.T) {
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			if claimantRuleOutsideOwner(name, node) {
-				t.Errorf("%s: claimant rules belong to claimant_facts.go and claim_ranking.go", fset.Position(node.Pos()))
+				t.Errorf("%s: claimant facts belong to claimant_facts.go; eligibility belongs to claim_query.go and claim_ranking.go", fset.Position(node.Pos()))
 			}
 			return true
 		})
@@ -40,7 +40,7 @@ func claimantRuleOutsideOwner(name string, node ast.Node) bool {
 		}
 	}
 	literal, ok := node.(*ast.BasicLit)
-	if !ok || literal.Kind != token.STRING || name == "claim_ranking.go" {
+	if !ok || literal.Kind != token.STRING || name == "claim_ranking.go" || name == "claim_query.go" {
 		return false
 	}
 	value, _ := strconv.Unquote(literal.Value)

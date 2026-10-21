@@ -626,6 +626,10 @@ components:
           type: boolean
         generation:
           type: integer
+        outcome:
+          type: string
+        reason:
+          type: string
         replayed:
           type: boolean
         state_seq:
@@ -756,14 +760,6 @@ components:
       properties:
         arch:
           type: string
-        available_cores:
-          type: number
-        available_memory_bytes:
-          type: integer
-        capacity:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.match.Resources'
-            - type: "null"
         excluded_team_labels:
           anyOf:
             - items:
@@ -796,8 +792,6 @@ components:
         - runner_version
         - kinds
         - labels
-        - available_cores
-        - available_memory_bytes
       type: object
       x-sparkwing-go-type: controllerwire.ClaimRequest
     internal.controllerwire.ClaimResponse:
@@ -1694,12 +1688,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.apierr.Error'
             - type: "null"
-        outcome:
-          type: string
         reason:
           type: string
-      required:
-        - outcome
       type: object
       x-sparkwing-go-type: controllerwire.FinishRequest
     internal.controllerwire.FireView:
@@ -2973,10 +2963,6 @@ components:
           type: boolean
         policy:
           type: string
-        reserved:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.match.Resources'
-            - type: "null"
         source:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.ReuseSource'
@@ -3008,10 +2994,6 @@ components:
     internal.controllerwire.RenewalRequest:
       additionalProperties: true
       properties:
-        available:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.match.Resources'
-            - type: "null"
         executing:
           type: boolean
         local_secrets:
@@ -4610,10 +4592,6 @@ components:
                 type: string
               type: array
             - type: "null"
-        resources:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.ResourceSpec'
-            - type: "null"
         result_step:
           type: string
         retry:
@@ -4668,19 +4646,6 @@ components:
         - job
       type: object
       x-sparkwing-go-type: nodeproto.PipelineReference
-    internal.nodeproto.ResourceSpec:
-      additionalProperties: true
-      properties:
-        cores:
-          anyOf:
-            - type: number
-            - type: "null"
-        memory_bytes:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.ResourceSpec
     internal.nodeproto.RetrySpec:
       additionalProperties: true
       properties:
@@ -4896,12 +4861,9 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.time.Duration.'
         priority:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         retry:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
       required:
-        - resources
         - priority
         - owner_execution_timeout
         - claim_wait
@@ -5178,8 +5140,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
         requires:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         retry:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
         retry_backoff:
@@ -5194,7 +5154,6 @@ components:
         - retry
         - retry_backoff
         - memo_ttl
-        - resources
         - requires
         - prefers
       type: object
@@ -5389,8 +5348,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.string.'
         requires:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         runner:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.RunnerSelection.'
         start_at:
@@ -5403,7 +5360,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
       required:
         - runner
-        - resources
         - priority
         - admission_class
         - claim_wait
@@ -5657,18 +5613,6 @@ components:
         - env
       type: object
       x-sparkwing-go-type: runspec.Resolved
-    internal.runspec.Resources:
-      additionalProperties: true
-      properties:
-        cores:
-          $ref: '#/components/schemas/internal.runspec.Setting.float64.'
-        memory_bytes:
-          $ref: '#/components/schemas/internal.runspec.Setting.int64.'
-      required:
-        - cores
-        - memory_bytes
-      type: object
-      x-sparkwing-go-type: runspec.Resources
     internal.runspec.RunnerSelection:
       additionalProperties: true
       properties:
@@ -5804,21 +5748,6 @@ components:
         - origin
       type: object
       x-sparkwing-go-type: runspec.Setting[bool]
-    internal.runspec.Setting.float64.:
-      additionalProperties: true
-      properties:
-        origin:
-          $ref: '#/components/schemas/internal.runspec.SettingOrigin'
-        set:
-          type: boolean
-        value:
-          type: number
-      required:
-        - set
-        - value
-        - origin
-      type: object
-      x-sparkwing-go-type: runspec.Setting[float64]
     internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.CheckoutPolicy.:
       additionalProperties: true
       properties:
@@ -5864,21 +5793,6 @@ components:
         - origin
       type: object
       x-sparkwing-go-type: runspec.Setting[github.com/sparkwing-dev/sparkwing/internal/runspec.PauseSelection]
-    internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.:
-      additionalProperties: true
-      properties:
-        origin:
-          $ref: '#/components/schemas/internal.runspec.SettingOrigin'
-        set:
-          type: boolean
-        value:
-          $ref: '#/components/schemas/internal.runspec.Resources'
-      required:
-        - set
-        - value
-        - origin
-      type: object
-      x-sparkwing-go-type: runspec.Setting[github.com/sparkwing-dev/sparkwing/internal/runspec.Resources]
     internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.RunnerSelection.:
       additionalProperties: true
       properties:
@@ -5909,21 +5823,6 @@ components:
         - origin
       type: object
       x-sparkwing-go-type: runspec.Setting[int]
-    internal.runspec.Setting.int64.:
-      additionalProperties: true
-      properties:
-        origin:
-          $ref: '#/components/schemas/internal.runspec.SettingOrigin'
-        set:
-          type: boolean
-        value:
-          type: integer
-      required:
-        - set
-        - value
-        - origin
-      type: object
-      x-sparkwing-go-type: runspec.Setting[int64]
     internal.runspec.Setting.map.string.github.com.sparkwing-dev.sparkwing.internal.runspec.Setting.string..:
       additionalProperties: true
       properties:
@@ -6093,18 +5992,24 @@ components:
           type: string
         Kind:
           type: string
+        NodeID:
+          type: string
         Owner:
           $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
         Result:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.RecordedResult'
             - type: "null"
+        RunID:
+          type: string
       required:
         - Result
         - ConsoleProof
         - Authority
         - Kind
         - CapabilityPrefix
+        - RunID
+        - NodeID
         - Holder
         - Generation
         - Owner

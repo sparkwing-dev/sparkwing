@@ -74,18 +74,15 @@ type PlanAccepted struct {
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
-	Capacity             *match.Resources      `json:"capacity,omitempty"`
-	OS                   string                `json:"os,omitempty"`
-	Arch                 string                `json:"arch,omitempty"`
-	RunnerVersion        string                `json:"runner_version"`
-	Kinds                []capability.UnitKind `json:"kinds"`
-	Labels               []string              `json:"labels"`
-	JobNamespace         string                `json:"job_namespace,omitempty"`
-	ExcludedTeamLabels   []string              `json:"excluded_team_labels,omitempty"`
-	AvailableCores       float64               `json:"available_cores"`
-	AvailableMemoryBytes int64                 `json:"available_memory_bytes"`
-	RunID                string                `json:"run_id,omitempty"`
-	JobID                string                `json:"job_id,omitempty"`
+	OS                 string                `json:"os,omitempty"`
+	Arch               string                `json:"arch,omitempty"`
+	RunnerVersion      string                `json:"runner_version"`
+	Kinds              []capability.UnitKind `json:"kinds"`
+	Labels             []string              `json:"labels"`
+	JobNamespace       string                `json:"job_namespace,omitempty"`
+	ExcludedTeamLabels []string              `json:"excluded_team_labels,omitempty"`
+	RunID              string                `json:"run_id,omitempty"`
+	JobID              string                `json:"job_id,omitempty"`
 }
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
@@ -152,7 +149,6 @@ type ExchangeResponse struct {
 // RenewalRequest reports activity, never a replacement holder or generation.
 type RenewalRequest struct {
 	LocalSecrets map[string]string `json:"local_secrets,omitempty"`
-	Available    *match.Resources  `json:"available,omitempty"`
 	Executing    bool              `json:"executing"`
 }
 
@@ -187,11 +183,13 @@ type JobTransitionRequest struct {
 }
 
 type Applied struct {
-	Replayed        bool  `json:"replayed"`
-	CancelRequested bool  `json:"cancel_requested"`
-	StateSeq        int64 `json:"state_seq"`
-	Generation      int64 `json:"generation"`
-	Attempt         int64 `json:"attempt"`
+	Outcome         string `json:"outcome,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	Replayed        bool   `json:"replayed"`
+	CancelRequested bool   `json:"cancel_requested"`
+	StateSeq        int64  `json:"state_seq"`
+	Generation      int64  `json:"generation"`
+	Attempt         int64  `json:"attempt"`
 }
 
 // ExpansionSubmission carries one expansion body or failure under its source generation.
@@ -232,10 +230,9 @@ type MaterializedResultSource struct {
 }
 
 type ReconcileRequest struct {
-	Reserved        *match.Resources `json:"reserved,omitempty"`
-	Policy          string           `json:"policy"`
-	Source          *ReuseSource     `json:"source,omitempty"`
-	MaterializeOnly bool             `json:"materialize_only,omitempty"`
+	Policy          string       `json:"policy"`
+	Source          *ReuseSource `json:"source,omitempty"`
+	MaterializeOnly bool         `json:"materialize_only,omitempty"`
 }
 
 type ReconcileResponse struct {
@@ -272,9 +269,8 @@ type AcceptedExpansion struct {
 }
 
 type FinishRequest struct {
-	Outcome string        `json:"outcome"`
-	Reason  string        `json:"reason,omitempty"`
-	Error   *apierr.Error `json:"error,omitempty"`
+	Reason string        `json:"reason,omitempty"`
+	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 type CancelRequest struct {

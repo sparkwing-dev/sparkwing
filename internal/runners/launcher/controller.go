@@ -3,13 +3,13 @@ package launcher
 import (
 	"context"
 	"errors"
-	"math"
 	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -29,8 +29,8 @@ type ControllerControl struct {
 
 // NewControllerControl captures only observations; the controller supplies each award's identity.
 func NewControllerControl(client LauncherController, demand controllerwire.ClaimRequest) (*ControllerControl, error) {
-	if client == nil || demand.RunnerVersion == "" || len(demand.Kinds) == 0 || demand.AvailableCores < 0 || math.IsNaN(demand.AvailableCores) || math.IsInf(demand.AvailableCores, 0) || demand.AvailableMemoryBytes < 0 {
-		return nil, errors.New("launcher controller requires a client, runner version, unit kinds and finite nonnegative capacity")
+	if client == nil || demand.RunnerVersion == "" || len(demand.Kinds) == 0 {
+		return nil, errors.New("launcher controller requires a client, runner version, unit kinds")
 	}
 	seen := make(map[capability.UnitKind]bool)
 	for _, kind := range demand.Kinds {
@@ -84,18 +84,7 @@ func (c *ControllerControl) Claim(ctx context.Context, namespace string, exclude
 }
 
 func (c *ControllerControl) resources(unit controllerwire.ClaimedUnit) *match.Resources {
-	if unit.CloudResources == nil || unit.Runner.Type != "runner" {
-		return unit.CloudResources
-	}
-	resources := *unit.CloudResources
-	// Self-hosted work without a pin uses the operator's configured pod budget.
-	if resources.Cores == 0 {
-		resources.Cores = c.demand.AvailableCores
-	}
-	if resources.MemoryBytes == 0 {
-		resources.MemoryBytes = c.demand.AvailableMemoryBytes
-	}
-	return &resources
+	return unit.CloudResources
 }
 
 func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
@@ -113,15 +102,15 @@ func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryP
 		return CloudJobBinding{}, err
 	}
 	fence := unit.Binding
-	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: deadlineValue(unit.ParentCapabilityExpiry)}
+	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation), Attempt: runspec.AttemptOrdinal(fence.Attempt), OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: deadlineValue(unit.ParentCapabilityExpiry)}
 	switch unit.Unit {
 	case capability.UnitPlan:
 		binding.Kind = CloudPlan
 	case capability.UnitNode:
 		binding.Kind = CloudWork
 	case capability.UnitEval:
-		binding.Kind, binding.SourceNodeID, binding.SourceGeneration = CloudEval, unit.JobID, unit.SourceGeneration
-		binding.Generation, binding.Holder = fence.Expansion.Generation, fence.Expansion.Holder
+		binding.Kind, binding.SourceNodeID, binding.SourceGeneration = CloudEval, runspec.NodeID(unit.JobID), runspec.ClaimGeneration(unit.SourceGeneration)
+		binding.Generation, binding.Holder = runspec.ClaimGeneration(fence.Expansion.Generation), fence.Expansion.Holder
 	default:
 		return CloudJobBinding{}, errors.New("controller returned a non-Cloud unit")
 	}

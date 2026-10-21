@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // ClaimController claims through the shared queue and must honor context cancellation.
@@ -41,16 +40,15 @@ type LoopConfig struct {
 
 // Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
-	Config          LoopConfig
-	Controller      ClaimController
-	Host            UnitHost
-	CheckVersion    func(context.Context, string) error
-	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
-	OnError         func(error)
-	mu              sync.Mutex
-	drain           chan struct{}
-	running         bool
-	draining        bool
+	Config       LoopConfig
+	Controller   ClaimController
+	Host         UnitHost
+	CheckVersion func(context.Context, string) error
+	OnError      func(error)
+	mu           sync.Mutex
+	drain        chan struct{}
+	running      bool
+	draining     bool
 }
 
 // Drain may be called before or during Run and is safe to repeat.
@@ -316,14 +314,6 @@ func (l *Loop) request(ctx context.Context) (controllerwire.ClaimRequest, error)
 		RunnerVersion: l.Config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Kinds:  slices.Clone(l.Config.Kinds),
 		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID,
-	}
-	if l.RequestCapacity != nil {
-		capacity, available, err := l.RequestCapacity(ctx)
-		if err != nil {
-			return req, err
-		}
-		req.Capacity = &capacity
-		req.AvailableCores, req.AvailableMemoryBytes = available.Cores, available.MemoryBytes
 	}
 	return req, nil
 }

@@ -124,20 +124,20 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
+	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}}
 	remove := false
 	transportErr := error(nil)
 	wire := launcherControllerW8{
 		claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-			if !slices.Equal(request.Kinds, demand.Kinds) || request.RunnerVersion != demand.RunnerVersion || request.AvailableCores != demand.AvailableCores || request.AvailableMemoryBytes != demand.AvailableMemoryBytes {
+			if !slices.Equal(request.Kinds, demand.Kinds) || request.RunnerVersion != demand.RunnerVersion {
 				t.Fatalf("launcher split or changed its claim: %+v", request)
 			}
 			return controllerwire.ClaimResponse{}, nil
 		},
 		sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 			want := []controllerwire.LauncherObservation{
-				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: award.Binding.UnitID, Holder: award.Binding.Holder, Generation: award.Binding.Generation}},
-				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: second.Binding.UnitID, Holder: second.Binding.Holder, Generation: second.Binding.Generation}},
+				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: award.Binding.UnitID, Holder: award.Binding.Holder, Generation: int64(award.Binding.Generation)}},
+				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: second.Binding.UnitID, Holder: second.Binding.Holder, Generation: int64(second.Binding.Generation)}},
 			}
 			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
 			observed := slices.Clone(request.Observed)

@@ -41,13 +41,13 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	if _, err := acme.GitHubAppAutomation(ctx, 8, 701); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("other installation read = %v", err)
 	}
-	if err := st.AsOperator().SetGitHubAppInstallationSuspended(ctx, 7, true, now); err != nil {
+	if err := st.AsOperator().SetGitHubAppInstallationSuspended(ctx, 7, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acme.GitHubAppAutomation(ctx, 7, 701); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("suspended consent = %v", err)
 	}
-	if err := st.AsOperator().SetGitHubAppInstallationSuspended(ctx, 7, false, now); err != nil {
+	if err := st.AsOperator().SetGitHubAppInstallationSuspended(ctx, 7, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acme.GitHubAppAutomation(ctx, 7, 701); err != nil {

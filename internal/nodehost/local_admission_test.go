@@ -30,7 +30,7 @@ func localAdmissionSeal(t *testing.T, options runspec.Options) AcceptedRun {
 }
 
 func localAdmissionRow(id string) store.NodeRow {
-	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: id}}
+	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: runspec.NodeID(id)}}
 }
 
 func localAdmissionOptions() runspec.Options {
@@ -55,8 +55,6 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 	_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
 		for _, id := range []string{"ok", "bad"} {
 			row := localAdmissionRow(id)
-			row.Execution.Resources.Value.Cores.Value = 2
-			row.Execution.Resources.Value.MemoryBytes.Value = 1 << 30
 			err := admission.Node(ctx, accepted, row, func(context.Context) error {
 				if live, _, _ := d.counts(); live != 2 {
 					t.Error("job ran without both run and job leases")
@@ -79,7 +77,7 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 	for _, req := range d.requests()[1:] {
-		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != testRunID || req.OwnerLeaseToken != "lease-"+testRunID || !req.SubLease || req.SemaphoresOnly || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{Cores: 2, MemoryBytes: 1 << 30}) {
+		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != testRunID || req.OwnerLeaseToken != "lease-"+testRunID || !req.SubLease || req.SemaphoresOnly || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{}) {
 			t.Fatalf("request=%+v", req)
 		}
 	}
@@ -108,11 +106,10 @@ func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
 	}
 }
 
-func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
+func TestAdmissionRunLeavesHostLeasesToEachNode(t *testing.T) {
 	d := newFakeDaemon()
 	admission := LocalAdmission{Daemon: d}
 	options := localAdmissionOptions()
-	options.Resources.Value.Cores.Value = 4
 	accepted := localAdmissionSeal(t, options)
 	_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
 		row := localAdmissionRow("g")
@@ -126,7 +123,7 @@ func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqs := d.requests()
-	if len(reqs) != 2 || !reqs[1].SemaphoresOnly || !strings.HasPrefix(string(reqs[1].RunID), testRunID+"/node-semaphore/") || len(reqs[1].Semaphores) != 1 || reqs[1].Semaphores[0].Name != scopedConcurrencyKey("db", "run", testRunID, "") || reqs[1].Resources != (wingwire.HostResources{}) {
+	if len(reqs) != 3 || reqs[1].SemaphoresOnly || !strings.HasPrefix(string(reqs[1].RunID), testRunID+"/node-host/") || len(reqs[1].Semaphores) != 1 || reqs[1].Semaphores[0].Name != scopedConcurrencyKey("db", "run", testRunID, "") || reqs[1].Resources != (wingwire.HostResources{}) {
 		t.Fatalf("requests=%+v", reqs)
 	}
 }
@@ -137,7 +134,6 @@ func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
 	accepted := localAdmissionSeal(t, localAdmissionOptions())
 	_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
 		row := localAdmissionRow("build")
-		row.Execution.Resources.Value.Cores.Value = 2
 		row.Execution.Concurrency = []runspec.Concurrency{
 			{Group: "b", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"},
 			{Group: "a", Scope: "box", Capacity: 2, Cost: 1, OnLimit: "queue"},
@@ -152,7 +148,7 @@ func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
 		t.Fatalf("leases=%+v", requests)
 	}
 	request := requests[1]
-	if len(request.Semaphores) != 2 || request.Resources.Cores != 2 || request.SemaphoresOnly {
+	if len(request.Semaphores) != 2 || request.Resources.Cores != 0 || request.SemaphoresOnly {
 		t.Fatalf("claims=%+v", request)
 	}
 	if request.Semaphores[0].Name != scopedConcurrencyKey("a", "box", testRunID, "machine") || request.Semaphores[1].Name != scopedConcurrencyKey("b", "run", testRunID, "machine") {
@@ -365,7 +361,7 @@ func FuzzLocalAdmissionParentBinding(f *testing.F) {
 			accepted := parent
 			accepted.RunID = runID
 			row := localAdmissionRow(job)
-			row.Ref.RunID = rowRunID
+			row.Ref.RunID = runspec.RunID(rowRunID)
 			row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}}
 			ran := false
 			err := admission.node(ctx, accepted, row, local, func(context.Context) error { ran = true; return nil })

@@ -3,13 +3,10 @@ package store
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -20,6 +17,7 @@ import (
 func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDemand) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
 	body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Burst: &policy, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,created_principal='owner',created_subject_kind='account'`, body)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?`, s.now().UnixNano())
@@ -82,7 +80,7 @@ func TestBurstSealedPreferencesOverrideControllerPlacement(t *testing.T) {
 	root := burstPersonalClaimant(t, s, owner.Authority, "preferred")
 	fallback := burstPersonalClaimant(t, s, owner.Authority, "fallback")
 	demand.CapabilityPrefix = fallback.Prefix
-	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: []PlacementPreference{{Prefers: []string{"name=runner"}}}, Liveness: time.Minute})
@@ -192,64 +190,6 @@ func burstHereOwnerFixture(t *testing.T) (*Store, UnitDemand, capability.Princip
 	return s, demand, principal
 }
 
-func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
-	s, demand, principal := burstHereOwnerFixture(t)
-	fallback := demand
-	owner := authorityMember(t, s, "owner", RoleOwner)
-	fallback.CapabilityPrefix = burstPersonalClaimant(t, s, owner.Authority, "fallback").Prefix
-	fallback.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
-	if _, err := s.AsOperator().ClaimUnit(t.Context(), fallback); err == nil {
-		t.Fatal("live here owner did not hold fallback")
-	}
-	node := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node, nil)
-		if err != nil {
-			return err
-		}
-		if !eligible {
-			t.Fatal("here owner cannot execute")
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	demand.CapabilityPrefix = principal.Capability.Prefix
-	demand.Available.Cores = 0
-	if err := s.AsOperator().RecordHereAvailability(t.Context(), principal.Authority, demand.Available); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		reserved := demand.Capacity
-		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node, &reserved)
-		if err != nil || !eligible {
-			t.Fatalf("held reservation was double-counted as occupied: eligible=%v error=%v", eligible, err)
-		}
-		eligible, err = ownerExecutionEligibleTx(t.Context(), tx, principal, node, nil)
-		if err != nil || eligible {
-			t.Fatalf("reservation leaked to other jobs: eligible=%v error=%v", eligible, err)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().ClaimUnit(t.Context(), fallback); err != nil {
-		t.Fatalf("saturated here owner blocked fallback: %v", err)
-	}
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		eligible, err := ownerExecutionEligibleTx(t.Context(), tx, principal, node, nil)
-		if err != nil {
-			return err
-		}
-		if eligible {
-			t.Fatal("saturated here owner can execute")
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestBurstMachinesPreferenceIncludesEveryOwnersRegisteredMachine(t *testing.T) {
 	s, demand := burstFixture(t, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines", Hold: time.Minute}, {Target: "cloud"}}})
 	owner := authorityMember(t, s, "owner", RoleOwner)
@@ -259,7 +199,7 @@ func TestBurstMachinesPreferenceIncludesEveryOwnersRegisteredMachine(t *testing.
 			t.Fatal(err)
 		}
 		if name == "desk-b" {
-			if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: issued.Capability.Prefix}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -304,54 +244,6 @@ func TestOverflowUsageIncludesCloudWorkAcrossMonthBoundary(t *testing.T) {
 	if err != nil || control.UsedSeconds != 120 {
 		t.Fatalf("usage across month: %+v %v", control, err)
 	}
-}
-
-func FuzzBurstReservationKeepsCapacityAndClaimFences(f *testing.F) {
-	for i := range uint8(9) {
-		f.Add(i, uint16(1))
-	}
-	f.Fuzz(func(t *testing.T, attack uint8, amount uint16) {
-		s, _, owner := burstHereOwnerFixture(t)
-		if err := s.AsOperator().RecordHereAvailability(t.Context(), owner.Authority, match.Resources{}); err != nil {
-			t.Fatal(err)
-		}
-		reserved := match.Resources{Cores: 4 + float64(amount%17)/4}
-		binding := owner.Capability.Binding
-		actor := Actor{Kind: ActorRunHost, Authority: owner.Authority, CapabilityPrefix: owner.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "run", Holder: binding.Holder, Generation: binding.Generation}}
-		switch attack % 9 {
-		case 1:
-			reserved.Cores = 9 + float64(amount)
-		case 2:
-			reserved.Cores = -1 - float64(amount)
-		case 3:
-			reserved.Cores = math.NaN()
-		case 4:
-			reserved.MemoryBytes = int64(amount) + 1
-		case 5:
-			reserved.Cores = math.Inf(1)
-		case 6:
-			actor.Owner.RunID = "foreign"
-		case 7:
-			actor.Owner.Generation++
-		case 8:
-			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["name=another-machine"]}}`))
-		}
-		tenant := &Tenant{s: s, team: "a"}
-		result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone, Reserved: &reserved})
-		if attack%9 == 0 {
-			if err != nil || result.Kind != Execute || result.Claim == nil {
-				t.Fatalf("reserved job did not receive fenced award: %+v %v", result, err)
-			}
-		} else {
-			if result.Kind == Execute || result.Claim != nil {
-				t.Fatal("reservation widened capacity, placement or claim authority")
-			}
-			row, readErr := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-			if readErr != nil || row.ClaimedBy != "" {
-				t.Fatalf("refused reservation consumed a claim: %+v %v", row, readErr)
-			}
-		}
-	})
 }
 
 func TestBurstMachinesPreferenceFollowsTheMachineStartedRunsOwner(t *testing.T) {

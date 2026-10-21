@@ -61,9 +61,8 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 
 type runnerStorePolicyW8 struct{}
 
-func (runnerStorePolicyW8) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (runnerStorePolicyW8) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 func (runnerStorePolicyW8) CheckRunner(_ context.Context, version string) error {
@@ -202,7 +201,7 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+	response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	if err != nil || response.Claim == nil {
 		t.Fatal(err)
 	}

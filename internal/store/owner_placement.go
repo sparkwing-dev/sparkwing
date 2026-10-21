@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -30,7 +30,7 @@ func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool {
 		return p != nil && p.Allowed && p.Owner == owner.Authority && p.Team == Team(c.Team) &&
 			owner.Authority == (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}) &&
 			c.Binding.Kind == capability.BindingTrigger && p.Generation > 0 && p.Generation == c.Binding.Generation &&
-			p.Node.RunID == c.Binding.RunID && p.Node == node.Ref && p.NodeGeneration == node.Generation &&
+			p.Node.RunID == runspec.RunID(c.Binding.RunID) && p.Node == node.Ref && runspec.ClaimGeneration(p.NodeGeneration) == node.Generation &&
 			p.SpecHash != "" && p.SpecHash == node.SpecHash
 	}
 }
@@ -41,8 +41,8 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		return UnitDemand{}, err
 	}
 	if tx.store.claimProfiles != nil && !here {
-		profile, available, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, owner)
-		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: available}, err
+		profile, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, owner)
+		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch}, err
 	}
 	chain, err := authorityChainTx(ctx, tx, owner.Authority, false)
 	if err != nil {
@@ -64,11 +64,8 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		if err := json.Unmarshal(body, &poll); err != nil {
 			return UnitDemand{}, err
 		}
-		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.now()) {
+		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.now(ctx)) {
 			continue
-		}
-		if !validMatchingResources(poll.Capacity) || !validMatchingResources(poll.Available) {
-			return UnitDemand{}, authorityError(apierr.IntegrityFailure, "invalid owner capacity observation")
 		}
 		poll.CapabilityPrefix = owner.Capability.Prefix
 		return poll.UnitDemand, nil
@@ -76,21 +73,8 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 	return UnitDemand{}, authorityError(apierr.Unavailable, "self-claim host observation is unavailable")
 }
 
-func reservedOwnerDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal, reserved *match.Resources) (UnitDemand, error) {
-	demand, err := ownerClaimDemandTx(ctx, tx, owner)
-	if err != nil || reserved == nil {
-		return demand, err
-	}
-	if !validMatchingResources(*reserved) || reserved.Cores > demand.Capacity.Cores || reserved.MemoryBytes > demand.Capacity.MemoryBytes || reserved.MemoryBytes > math.MaxInt64-demand.Available.MemoryBytes {
-		return UnitDemand{}, authorityError(apierr.BadRequest, "invalid owner machine reservation")
-	}
-	demand.Available.Cores += reserved.Cores
-	demand.Available.MemoryBytes += reserved.MemoryBytes
-	return demand, nil
-}
-
-func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref controllerwire.NodeRef, reserved *match.Resources) (bool, error) {
-	demand, ok, err := ownerExecutionDemandTx(ctx, tx, owner, reserved)
+func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref controllerwire.NodeRef) (bool, error) {
+	demand, ok, err := ownerExecutionDemandTx(ctx, tx, owner)
 	if !ok || err != nil {
 		return false, err
 	}
@@ -98,8 +82,8 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 }
 
 // safety: ok=false means the owner has no current host observation, which is not an error.
-func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal, reserved *match.Resources) (UnitDemand, bool, error) {
-	demand, err := reservedOwnerDemandTx(ctx, tx, owner, reserved)
+func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal) (UnitDemand, bool, error) {
+	demand, err := ownerClaimDemandTx(ctx, tx, owner)
 	if err != nil {
 		var denied *apierr.Error
 		if errors.As(err, &denied) && denied.Code == apierr.Unavailable {
@@ -123,7 +107,7 @@ func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Pr
 		}
 		return false, err
 	}
-	if !match.Evaluate(profile, required).OK() || !match.Fits(profile.Capacity, demand.Available, required.Request).OK() {
+	if !match.Evaluate(profile, required).OK() {
 		return false, nil
 	}
 	placement, err := unitPlacementTx(ctx, tx, Team(owner.Capability.Team), unit, demand.CapabilityPrefix, profile, required)

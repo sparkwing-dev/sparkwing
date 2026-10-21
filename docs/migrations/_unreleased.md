@@ -9,10 +9,37 @@ the team’s GitHub settings and choose Process again. Credit exhaustion creates
 a run that did not start. Use Run now after funding the team. Clients
 that post signed deliveries must treat 202 as acceptance for later processing.
 
-The store baseline moves to version 17 for the inbox, lifecycle effect receipts,
+The store baseline moves to version 18 for the inbox, targeted effect results,
 team queue attribution and idle free-slot tracking. Recreate stores from an
 earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
+
+## Runner sizes are labels
+
+Replace CPU and memory requests in pipeline declarations with runner labels.
+Cloud size labels are `sparkwing-2cpu`, `sparkwing-4cpu`, `sparkwing-8cpu`,
+`sparkwing-16cpu`, `sparkwing-32cpu` and `sparkwing-64cpu`. Without a size label,
+Cloud uses `sparkwing-2cpu`. Billing follows the selected size's credit class.
+Self-hosted runners advertise the labels their jobs need. Every selector term
+must match, and alternatives within a term still use OR.
+
+Go `Resources` and TypeScript `resources` declarations are
+removed. Update SDK dependencies and author code together. Remove CPU and memory
+availability fields from claim requests. Runner capacity no longer participates
+in claim matching.
+
+All claimants now share eligibility and fair-share ordering. An eligible team's
+last successful award determines its next turn, followed by job arrival and
+identity. Registration and temporary occupancy do not decide whether a push
+needs credits. A placement policy permitting unmetered execution can wait for
+its runner. Cloud-only work still needs funds at intake.
+
+The store baseline is 18. Earlier stores are refused and must be recreated under
+the pre-launch baseline policy. Delivery receipts now include each targeted
+admission, publication, withdrawal and lifecycle result. Reprocessing preserves
+committed effects. Historical deliveries without complete receipts cannot be
+reconstructed safely. Reconcile their outcomes before replaying them after a
+cutover. Failed deliveries still require an admin's Process again action.
 
 ## Cloud billing is prepaid
 
@@ -1091,8 +1118,8 @@ status consumers. API binding faults still use `api_ready` and `api_error`.
 
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
 The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
-Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
-`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies a
+`RevokeNode` command with the node reference and current run owner's authority.
 Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
 returns an error without changing state or events. An identical committed
 transition replays.
@@ -3096,3 +3123,20 @@ Within Sparkwing, `NodeRef` and the credential DTOs `CreateTokenRequest`,
 `RotatedToken` live in `internal/controllerwire`.
 `RunSnapshot` remains a private host read model in `internal/store`.
 Routes, JSON field names and runtime behavior are unchanged.
+
+## Bounded cancellation and derived completion
+
+Cancel requests give active work at most five minutes to drain. A holder that
+keeps heartbeating cannot extend that deadline. Cloud funding refusal still has
+its shorter deadline of at most one prepaid slice.
+
+`POST /api/v1/runs/{run}/finish` drops `outcome`. Send only `reason` and an optional
+masked `error`. The controller derives the verdict from accepted plan and job
+results. A run without an accepted plan finishes failed, or cancelled when
+cancellation was requested.
+
+The internal node API replaces `NodeTransition` with named commands. Store
+mutation methods no longer accept caller wall-clock arguments. The store captures
+database time when each transaction begins. Schema baseline 16 adds stored,
+generated cancellation deadlines. Older schema baselines require the declared
+restore workflow.

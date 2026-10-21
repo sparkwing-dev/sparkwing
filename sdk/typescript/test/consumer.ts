@@ -51,7 +51,6 @@ job
   .retry(0, { backoffMs: 0 })
   .timeout(0)
   .noProgressTimeout(0)
-  .resources({ cores: 0.5, memoryBytes: 1024 })
   .concurrency(group)
   .requires("os=linux")
   .prefers("fast")
@@ -94,7 +93,6 @@ plan
   .priority(0)
   .claimWait(0)
   .admissionClass("standard")
-  .resources({ cores: 0 })
   .concurrency(group)
   .checkout({ fullHistory: false, depth: 0, tags: false });
 const definition: PipelineDef = {

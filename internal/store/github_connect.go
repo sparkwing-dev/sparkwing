@@ -81,9 +81,12 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			if err == nil && previous != t.team {
-				previousTeam = Team(previous)
-				prior := &Tenant{s: t.s, team: Team(previous)}
+				previousTeam = previous
+				prior := &Tenant{s: t.s, team: previous}
 				if err := prior.unbindGitHubAppInstallationTx(ctx, tx, row.InstallationID); err != nil {
+					return err
+				}
+				if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, previous, row.InstallationID); err != nil {
 					return err
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=?`, previous, row.InstallationID); err != nil {
@@ -93,7 +96,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		row.ConnectedBy = p.Capability.Subject.ID
 		var err error
-		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now())
+		out, err = t.bindGitHubInstallationTx(ctx, tx, row, tx.now(ctx))
 		if err != nil {
 			return err
 		}
@@ -103,7 +106,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			for _, team := range []Team{previousTeam, t.team} {
-				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
+				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(ctx), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
 					return err
 				}
 			}

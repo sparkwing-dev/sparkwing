@@ -584,7 +584,7 @@ func Scenarios() []Scenario {
 			ID: "surface-config-final-schema", Group: "surface",
 			Sections: []string{"§7.4", "§9.4", "A20", "A37", "A38", "A43"}, Requires: []Area{C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"catalog", "repo", "identities"},
-			Steps:      []string{"Load final sparkwing.yaml and config.yaml fixtures for defaults, pipelines, guards, requires/prefers, events, runner/repo/keep_free and connection profiles.", "Try project profiles with embedded tokens, on.webhook, removed keys, duplicate profile names and malformed explicit settings."},
+			Steps:      []string{"Load final sparkwing.yaml and config.yaml fixtures for defaults, pipelines, guards, requires/prefers, events, runner/repo/labels and connection profiles.", "Try project profiles with embedded tokens, on.webhook, removed keys, duplicate profile names and malformed explicit settings."},
 			Assertions: []string{"Final schemas load and resolve the fixture's values; project-level profile credentials and unknown/removed config keys are refused with source and key.", "Removed engine env names do not activate hidden behavior; no legacy-key migration rewrites the user's files and connection tokens stay outside project YAML."},
 		},
 		{

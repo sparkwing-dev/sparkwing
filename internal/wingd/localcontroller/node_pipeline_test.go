@@ -224,7 +224,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := b.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}})
+	award, err := b.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if err := private.AdoptClaim(ctx, claim); err != nil {
 			return err
 		}
-		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}
+		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: claim.Node.Ref.RunID, NodeID: claim.Node.Ref.NodeID, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}}
 		beat, err := state.RenewNodeClaim(ctx, claim.Node.Ref, actor)
 		if err != nil {
 			return fmt.Errorf("renew unstarted local job: %w", err)
@@ -313,7 +313,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 			return grant, err
 		}
 		process := snapshot.Authorities[0].Principal.Capability
-		if process.Parent == nil || process.Parent.ID == principal.Capability.Prefix || process.Parent.ID != input.Authority.CapabilityPrefix || process.Binding.Kind != capability.BindingNode || process.Binding.RunID != input.Accepted.RunID || process.Binding.NodeID != input.NodeID || process.Binding.Generation != input.Generation || process.Binding.Attempt != input.Attempt || process.Binding.Holder != input.Authority.Holder {
+		if process.Parent == nil || process.Parent.ID == principal.Capability.Prefix || process.Parent.ID != input.Authority.CapabilityPrefix || process.Binding.Kind != capability.BindingNode || process.Binding.RunID != input.Accepted.RunID || process.Binding.NodeID != input.NodeID || runspec.ClaimGeneration(process.Binding.Generation) != input.Generation || runspec.AttemptOrdinal(process.Binding.Attempt) != input.Attempt || process.Binding.Holder != input.Authority.Holder {
 			return grant, errors.New("process substituted owner or foreign node authority")
 		}
 		bound, err := services.Config.Processes.Authorities.Resolve(ctx, capability.Authorized{Principal: snapshot.Authorities[0].Principal, Binding: process.Binding})
@@ -364,7 +364,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if row.OutputRecord == nil {
 			t.Fatalf("job output was not committed: %+v", row)
 		}
-		if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[row.Ref.NodeID] {
+		if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[string(row.Ref.NodeID)] {
 			t.Fatalf("job used another award: %+v", row)
 		}
 	}

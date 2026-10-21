@@ -14,7 +14,7 @@ func TestFreeSlotsReleaseAfterThirtyEmptyDays(t *testing.T) {
 	op := s.AsOperator()
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('aaa',1,1),('bbb',1,1)`)
 	for _, team := range []Team{"aaa", "bbb"} {
-		if err := s.GrantFreeSlot(ctx, team, *now); err != nil {
+		if err := s.GrantFreeSlot(ctx, team); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestFreeSlotIdleClockRestartsAfterTransientStoredBytes(t *testing.T) {
 	s, _, now := maintenanceStore(t)
 	ctx := context.Background()
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('aaa',1,1)`)
-	if err := s.GrantFreeSlot(ctx, "aaa", *now); err != nil {
+	if err := s.GrantFreeSlot(ctx, "aaa"); err != nil {
 		t.Fatal(err)
 	}
 	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "free-slots", 90*24*time.Hour)

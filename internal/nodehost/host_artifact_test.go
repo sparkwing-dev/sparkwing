@@ -212,7 +212,7 @@ func TestExecutorArtifactStaging(t *testing.T) {
 			var processes []*scriptedSDK
 			input, state, host := executionHostFixture(t, "artifact_retry", &trace, &processes, func(deps *ExecutorDependencies) {
 				deps.BindStorage = func(_ context.Context, in NodeInput) (StorageBinding, error) {
-					request.Authority.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: in.Generation, Attempt: in.Attempt}}
+					request.Authority.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: int64(in.Generation), Attempt: int64(in.Attempt)}}
 					request.Authority.Repo = "example.com/acme/repo"
 					return StorageBinding{Bytes: backend, Records: backend, Authority: request.Authority}, nil
 				}

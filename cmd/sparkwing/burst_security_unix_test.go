@@ -202,7 +202,7 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownerClaim, err := newClient(created.HereBearer).Claim(t.Context(), controllerwire.ClaimRequest{RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion(), AvailableCores: 8})
+	ownerClaim, err := newClient(created.HereBearer).Claim(t.Context(), controllerwire.ClaimRequest{RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion()})
 	if err != nil || ownerClaim.Claim == nil {
 		t.Fatalf("owner: %+v %v", ownerClaim, err)
 	}
@@ -238,7 +238,7 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := newClient(machine.Capability).Claim(t.Context(), controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}, RunnerVersion: installedVersion(), AvailableCores: 8, Labels: []string{"class=cloud", "class=coordinator", "name=here", forgedLabel}})
+	claimed, err := newClient(machine.Capability).Claim(t.Context(), controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}, RunnerVersion: installedVersion(), Labels: []string{"class=cloud", "class=coordinator", "name=here", forgedLabel}})
 	if allowed {
 		if err != nil || claimed.Claim == nil {
 			t.Fatalf("preferred personal machine refused: %+v %v", claimed, err)

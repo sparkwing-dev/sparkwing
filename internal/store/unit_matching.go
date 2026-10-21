@@ -5,10 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -69,7 +67,7 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 		}
 	}
 	if tx.store.claimProfiles != nil {
-		run.profile, _, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, p)
+		run.profile, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, p)
 		if err != nil {
 			run.err = err
 			return run
@@ -112,12 +110,15 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 }
 
 func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef, lock bool) (match.Profile, match.Demand, error) {
-	run := readMatchingRunTx(ctx, tx, request.CapabilityPrefix, unit.RunID, lock)
+	run := readMatchingRunTx(ctx, tx, request.CapabilityPrefix, string(unit.RunID), lock)
 	profile := run.profile
 	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
-	if tx.store.claimProfiles == nil || run.here {
-		profile.Capacity = request.Capacity
+	if profile.Class == match.ClassCloud {
+		for _, size := range match.CloudSizes() {
+			profile.Labels = append(profile.Labels, size.Label)
+		}
 	}
+
 	if run.err != nil {
 		return profile, match.Demand{}, run.err
 	}
@@ -138,7 +139,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		}
 		options = sealed.Resolved.Settings.Options
 	}
-	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Prefers: slices.Clone(options.Prefers.Value), Request: matchingResources(options.Resources.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}}
+	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Prefers: slices.Clone(options.Prefers.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}}
 	if demand.Repo.URL == "" {
 		demand.Repo.URL = requestSeal.Request.Git.Repository.Display
 	}
@@ -154,10 +155,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		if err = json.Unmarshal(body, &execution); err != nil {
 			return profile, demand, err
 		}
-		demand.Selector, demand.Prefers, demand.Request = slices.Clone(execution.Requires.Value), slices.Clone(execution.Prefers.Value), matchingResources(execution.Resources.Value)
-		if demand.Request == (match.Resources{}) {
-			demand.Request.Cores = admission.DefaultChargeCores
-		}
+		demand.Selector, demand.Prefers = slices.Clone(execution.Requires.Value), slices.Clone(execution.Prefers.Value)
 	}
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:
@@ -177,17 +175,10 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		}
 		demand.Selector = append(demand.Selector, selected.Value)
 	}
-	if !validMatchingResources(profile.Capacity) || !validMatchingResources(request.Available) || !validMatchingResources(demand.Request) {
-		return profile, demand, authorityError(apierr.BadRequest, "invalid claim resources")
-	}
 	if rankedUnit(requestSeal.Request, demand) {
 		_, err = claimRankTx(ctx, tx, Team(team), chain, requestSeal.Request)
 	}
 	return profile, demand, err
-}
-
-func matchingResources(v runspec.Resources) match.Resources {
-	return match.Resources{Cores: v.Cores.Value, MemoryBytes: v.MemoryBytes.Value}
 }
 
 func authenticatedClaimProfile(c capability.Capability, profile match.Profile, here bool) match.Profile {
@@ -201,10 +192,6 @@ func authenticatedClaimProfile(c capability.Capability, profile match.Profile, h
 		profile.Class = match.ClassAgent
 	}
 	return profile
-}
-
-func validMatchingResources(v match.Resources) bool {
-	return v.Cores >= 0 && !math.IsNaN(v.Cores) && !math.IsInf(v.Cores, 0) && v.MemoryBytes >= 0
 }
 
 func checkRepositoryClaimScope(chain []authorityNode, repository capability.RepositoryIdentity) error {
@@ -234,15 +221,16 @@ func launcherClaimant(c capability.Capability) bool {
 	return capability.Launcher(c)
 }
 
-func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef, reserved *match.Resources) (UnitClaim, error) {
-	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now()); err != nil {
+func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef) (UnitClaim, error) {
+
+	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return UnitClaim{}, err
 	}
 	p, err := tx.ResolveAuthority(ctx, actor.Authority)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	demand, err := reservedOwnerDemandTx(ctx, tx, p, reserved)
+	demand, err := ownerClaimDemandTx(ctx, tx, p)
 	if err != nil {
 		return UnitClaim{}, err
 	}

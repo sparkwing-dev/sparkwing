@@ -176,7 +176,7 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 						t.Fatalf("restart observed %d Jobs", len(request.Observed))
 					}
 					observation := request.Observed[0]
-					wantAward := capability.LeaseRef{Kind: unit.Unit, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
+					wantAward := capability.LeaseRef{Kind: unit.Unit, ID: b.UnitID, Holder: b.Holder, Generation: int64(b.Generation)}
 					if observation.Award != wantAward {
 						t.Fatal("restart lost persisted unit or node identity")
 					}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -69,9 +71,9 @@ func FuzzClaimedNodeMachineLeasesKeepSeparateJobs(f *testing.F) {
 		daemon := newFakeDaemon()
 		admission := LocalAdmission{Daemon: daemon, BoxID: testBox}
 		row := localAdmissionRow(first)
-		row.Ref.RunID = accepted.RunID
+		row.Ref.RunID = runspec.RunID(accepted.RunID)
 		err := admission.ClaimedNode(t.Context(), accepted, row, func(ctx context.Context) error {
-			row.Ref.NodeID = second
+			row.Ref.NodeID = runspec.NodeID(second)
 			return admission.ClaimedNode(ctx, accepted, row, func(context.Context) error {
 				requests := daemon.requests()
 				if live, _, _ := daemon.counts(); live != 2 || len(requests) != 2 || requests[0].RunID == requests[1].RunID || requests[0].SubLease || requests[1].SubLease {
