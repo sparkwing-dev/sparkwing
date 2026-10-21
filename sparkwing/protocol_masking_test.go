@@ -1,27 +1,16 @@
 package sparkwing
 
 import (
-	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 )
 
 func TestPlanningDiagnosticsMaskingConformance(t *testing.T) {
-	raw, err := os.ReadFile("../internal/secrets/testdata/masking.json")
+	vectors, err := masktest.Load("../internal/secrets/testdata/masking.json")
 	if err != nil {
-		t.Fatal(err)
-	}
-	var vectors []struct {
-		Name        string
-		Values      []string
-		MergeValues []string
-		Lists       []string
-		Input, Want string
-	}
-	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range vectors {

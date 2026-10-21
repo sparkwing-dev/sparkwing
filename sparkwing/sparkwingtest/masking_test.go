@@ -2,35 +2,23 @@ package sparkwingtest
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 )
 
 func TestTestHostMaskingConformance(t *testing.T) {
-	raw, err := os.ReadFile("../../internal/secrets/testdata/masking.json")
+	vectors, err := masktest.Load("../../internal/secrets/testdata/masking.json")
 	if err != nil {
-		t.Fatal(err)
-	}
-	var vectors []struct {
-		Name        string
-		Values      []string
-		Input, Want string
-	}
-	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range vectors {
 		t.Run(v.Name, func(t *testing.T) {
 			host := newHost(Options{}).(*host)
 			defer host.Close()
-			for _, value := range v.Values {
-				if err := host.Mask(t.Context(), value); err != nil {
-					t.Fatal(err)
-				}
-			}
+			host.masker.Merge(v.Masker())
 			attrs, _ := json.Marshal(map[string]any{"nested": []string{v.Input}})
 			host.emit(t.Context(), nodeproto.FrameLog{Step: v.Input, Message: v.Input, Attrs: attrs}, "job")
 			record := host.records[0]

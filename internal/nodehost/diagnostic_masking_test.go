@@ -4,35 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 )
 
 func TestHostDiagnosticsMaskingConformance(t *testing.T) {
-	raw, err := os.ReadFile("../secrets/testdata/masking.json")
+	vectors, err := masktest.Load("../secrets/testdata/masking.json")
 	if err != nil {
-		t.Fatal(err)
-	}
-	var vectors []struct {
-		Name                string
-		Values              []string
-		Input, Want         string
-		JSONInput, JSONWant string
-	}
-	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range vectors {
 		t.Run(v.Name, func(t *testing.T) {
-			masker := secrets.NewMasker()
-			for _, value := range v.Values {
-				masker.Register(value)
-			}
+			masker := v.Masker()
 			var result *apierr.Error
 			attrs := map[string]any{"nested": []any{v.Input}}
 			wantJSON := ""
@@ -47,16 +35,24 @@ func TestHostDiagnosticsMaskingConformance(t *testing.T) {
 			if !errors.As(maskHostError(source, masker), &result) {
 				t.Fatal("lost canonical error")
 			}
+			if result.Message != v.Want || result.Hint != v.Want {
+				t.Fatalf("masked error = %q, hint = %q, want %q", result.Message, result.Hint, v.Want)
+			}
 			if wantJSON != "" {
+				wantDetails := wantJSON
+				var object map[string]any
+				if json.Unmarshal([]byte(wantJSON), &object) != nil {
+					wantDetails = "null"
+				}
 				got, err := json.Marshal(result.Details)
-				if err != nil || string(got) != wantJSON {
-					t.Fatalf("masked details = %s (%v), want %s", got, err, wantJSON)
+				if err != nil || string(got) != wantDetails {
+					t.Fatalf("masked details = %s (%v), want %s", got, err, wantDetails)
 				}
 			} else if result.Details["nested"].([]any)[0] != v.Want {
 				t.Fatal("error details bypassed shared masker")
 			}
 			host := nodeExecutor{deps: ExecutorDependencies{Masker: masker, Log: func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
-				var attrs map[string]any
+				var attrs any
 				if err := json.Unmarshal(frame.Attrs, &attrs); err != nil {
 					t.Fatal(err)
 				}
@@ -67,7 +63,7 @@ func TestHostDiagnosticsMaskingConformance(t *testing.T) {
 					if string(frame.Attrs) != wantJSON {
 						t.Fatalf("masked diagnostic = %s, want %s", frame.Attrs, wantJSON)
 					}
-				} else if attrs["nested"].([]any)[0] != v.Want {
+				} else if attrs.(map[string]any)["nested"].([]any)[0] != v.Want {
 					t.Fatal("diagnostic attributes bypassed shared masker")
 				}
 				return nil

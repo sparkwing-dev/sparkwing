@@ -1,37 +1,20 @@
-package secrets
+package secrets_test
 
 import (
-	"encoding/json"
-	"os"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 )
 
 func TestMaskingConformanceVectors(t *testing.T) {
-	raw, err := os.ReadFile("testdata/masking.json")
+	vectors, err := masktest.Load("testdata/masking.json")
 	if err != nil {
-		t.Fatal(err)
-	}
-	var vectors []struct {
-		Name                       string
-		Values, Lists, MergeValues []string
-		Input, Want                string
-		JSONInput, JSONWant        string
-	}
-	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range vectors {
 		t.Run(v.Name, func(t *testing.T) {
-			m := newTestMasker(v.MergeValues...)
-			merged := NewMasker()
-			merged.Merge(m)
-			m = merged
-			for _, value := range v.Values {
-				m.Register(value)
-			}
-			for _, value := range v.Lists {
-				m.RegisterList(value)
-			}
+			m := v.Masker()
 			if got := m.Mask(v.Input); got != v.Want {
 				t.Fatalf("Mask = %q, want %q", got, v.Want)
 			}
@@ -51,7 +34,7 @@ func TestMaskingConformanceVectors(t *testing.T) {
 }
 
 func TestRegisterMasksEachSecretListElement(t *testing.T) {
-	m := NewMasker()
+	m := secrets.NewMasker()
 	m.RegisterList("first-private, second-private")
 	for _, value := range []string{"first-private", "second-private"} {
 		if m.Mask(value) != "***" || !m.ContainsSecret("job-"+value) {
