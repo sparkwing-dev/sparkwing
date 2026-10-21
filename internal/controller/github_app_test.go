@@ -78,7 +78,8 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 		return srv
 	}
 	var primary *controller.Server
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	now := time.Now()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		primary = assemble(st)
 		policies := primary.StorePolicies()
 		policies.ClaimProfiles = githubClaimEnvironment{location: "cloud"}

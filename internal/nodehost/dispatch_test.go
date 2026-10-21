@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -147,6 +148,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 }
 
 func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
+	now := time.Now()
 	for _, compute := range []bool{false, true} {
 		for _, scope := range []string{"run", "box"} {
 			for _, mode := range []string{"fresh", "ready", "claimed"} {
@@ -156,7 +158,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 						plan.Jobs[i].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new(scope)}}
 						plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(8.0), MemoryBytes: new(int64(8 << 30))}
 					}
-					f := newStoreHostFixture(t, plan)
+					f := newStoreHostFixture(t, plan, teststore.WithClock(func() time.Time { return now }))
 					claims := map[string]NodeInput{}
 					if mode != "fresh" {
 						releaseRemote(t, f, "build")

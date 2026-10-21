@@ -34,15 +34,15 @@ type sessionFlow struct {
 	config deployment.Config
 }
 
-func newSessionFlow(t *testing.T) sessionFlow {
+func newSessionFlow(t *testing.T, opts ...store.Option) sessionFlow {
 	t.Helper()
-	return newDeploymentSessionFlow(t, deploymenttest.Team(t))
+	return newDeploymentSessionFlow(t, deploymenttest.Team(t), opts...)
 }
 
-func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config) sessionFlow {
+func newDeploymentSessionFlow(t *testing.T, cfg deployment.Config, opts ...store.Option) sessionFlow {
 	t.Helper()
 	f := sessionFlow{logs: &bytes.Buffer{}, path: filepath.Join(t.TempDir(), "sessions.db"), config: cfg}
-	s, _, server := credentialMutationServer(t, f.path, f.newServer)
+	s, _, server := credentialMutationServer(t, f.path, f.newServer, opts...)
 	for _, statement := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('team','member','editor',1)`,
@@ -134,7 +134,8 @@ func TestSessionFlowHTTPRenewsWithNamedProof(t *testing.T) {
 
 func TestSessionFlowHTTPLogoutUsesVerifiedSession(t *testing.T) {
 	for _, header := range []bool{false, true} {
-		f := newSessionFlow(t)
+		now := time.Now().UTC()
+		f := newSessionFlow(t, teststore.WithClock(func() time.Time { return now }))
 		other, _, _, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 		if err != nil {
 			t.Fatal(err)
