@@ -34,7 +34,7 @@ func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
 	s := e.Server.WithOperatorAccounts([]string{"operator"})
 	h := s.Handler()
 	for i := range 105 {
-		engineSQL(t, e.Store, `INSERT INTO audit_events(id,ts,team,kind,actor) VALUES (?,?,?,'page',?)`, fmt.Sprintf("page-%03d", i), i/3, tenant.Team(), fmt.Sprint(i))
+		engineSQL(t, e.Store, `INSERT INTO audit_events(id,ts,team,kind,actor,subject_id,run_id,attrs) VALUES (?,?,?,'page',?,?,?,'{"operation":"delete"}')`, fmt.Sprintf("page-%03d", i), i/3, tenant.Team(), fmt.Sprint(i), fmt.Sprintf("subject-%d", i), fmt.Sprintf("run-%d", i))
 	}
 	var cursor string
 	for page, want := range []int{50, 50, 5} {
@@ -48,6 +48,9 @@ func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
 		}
 		if view.Events[0].Actor != fmt.Sprint(104-page*50) || view.Events[0].Kind != "page" {
 			t.Fatalf("unexpected first event: %+v", view.Events[0])
+		}
+		if ev := view.Events[0]; ev.SubjectID != fmt.Sprintf("subject-%d", 104-page*50) || ev.RunID != fmt.Sprintf("run-%d", 104-page*50) || ev.Attrs["operation"] != "delete" {
+			t.Fatalf("mutation target or operation lost: %+v", ev)
 		}
 		cursor = view.NextCursor
 		if (cursor == "") != (page == 2) {

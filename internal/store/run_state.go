@@ -270,8 +270,18 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 			return Applied{}, err
 		}
 		if row.State == RunSuccess {
-			if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": row.ID}}); err != nil {
+			result, err := tx.ExecContext(ctx, `INSERT INTO team_first_success(team,run_id) VALUES (?,?) ON CONFLICT(team) DO NOTHING`, team, row.ID)
+			if err != nil {
 				return Applied{}, err
+			}
+			first, err := result.RowsAffected()
+			if err != nil {
+				return Applied{}, err
+			}
+			if first == 1 {
+				if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team}, auditFirstSuccess{RunID: row.ID}); err != nil {
+					return Applied{}, err
+				}
 			}
 			if row.Request.Request.Mode != runspec.IntakePublish {
 				_, err = tx.ExecContext(ctx, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,?,?,?) ON CONFLICT(team,pipeline) DO UPDATE SET run_id=excluded.run_id,finished_at=excluded.finished_at WHERE pipeline_success_pins.finished_at<excluded.finished_at`, team, row.Pipeline, row.ID, now.UnixNano())

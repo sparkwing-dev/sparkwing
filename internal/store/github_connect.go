@@ -103,7 +103,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				return err
 			}
 			for _, team := range []Team{previousTeam, t.team} {
-				if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: team, Kind: "github.installation_reclaimed", SubjectID: transfer, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"installation_id": row.InstallationID, "previous_team": previousTeam, "new_team": t.team, "github_user_id": row.GitHubUserID}}); err != nil {
+				if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: team, Actor: p.Capability.Subject.ID}, auditInstallation{ReceiptID: transfer, InstallationID: row.InstallationID, PreviousTeam: previousTeam, NewTeam: t.team}); err != nil {
 					return err
 				}
 			}

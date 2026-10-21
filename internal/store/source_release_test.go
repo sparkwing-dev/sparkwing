@@ -127,6 +127,7 @@ func TestSourceReleaseSupportsOwnerUnitsAndGrantedCloudPlacement(t *testing.T) {
 
 func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 	tenant, auth, policy := sourceReleaseFixture(t)
+	authorityMember(t, tenant.s, "owner", RoleReader)
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err != nil {
 		t.Fatal(err)
@@ -138,13 +139,11 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 	if executor.Cloud || !executor.Shared || executor.Team != "a" || !reflect.DeepEqual(executor.AuthorizedRepositories, []string{"gh:1"}) || policy.request.Authorization.Principal.Authority != auth.Principal.Authority {
 		t.Fatalf("derived request: %+v", policy.request)
 	}
-	var stored capability.SourceReleaseAudit
-	var released int64
-	err = tenant.s.db.QueryRow(`SELECT json_extract(attrs, '$.release.ID'),json_extract(attrs, '$.release.Team'),json_extract(attrs, '$.release.CredentialID'),json_extract(attrs, '$.release.Host'),json_extract(attrs, '$.release.RepositoryKey'),json_extract(attrs, '$.release.RunID'),json_extract(attrs, '$.release.NodeID'),json_extract(attrs, '$.release.Generation'),json_extract(attrs, '$.release.MachineID'),json_extract(attrs, '$.release.OwnerAccountID'),json_extract(attrs, '$.release.CapabilityPrefix'),ts FROM audit_events WHERE kind='git_credential.released'`).Scan(&stored.ID, &stored.Team, &stored.CredentialID, &stored.Host, &stored.RepositoryKey, &stored.RunID, &stored.NodeID, &stored.Generation, &stored.MachineID, &stored.OwnerAccountID, &stored.CapabilityPrefix, &released)
-	stored.ReleasedAt = time.Unix(0, released).UTC()
-	if err != nil || !reflect.DeepEqual(stored, audit) {
+	stored, err := tenant.SourceReleaseAudits(t.Context(), 10)
+	if err != nil || len(stored) != 1 {
 		t.Fatalf("audit did not commit: %+v %v", stored, err)
 	}
+	assertSourceReleaseAuditProjection(t, stored[0], audit)
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {

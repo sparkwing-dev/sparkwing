@@ -9,7 +9,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 18, which drops `card_charges`,
+schema baseline moves to version 19, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -3097,7 +3097,13 @@ constraints on both dialects. Recreate stores from another baseline before
 starting this build. There is no in-place migration.
 
 Audit entries retain account IDs and invitation IDs rather than personal details.
+Each audit kind accepts a closed payload of identifiers, enums, digests and
+generated receipt IDs. Caller keys and names use digests when retained. Free-form
+reasons and messages are excluded. The database stamps each row's recording time
+for retention. Caller occurrence times remain separate and cannot shorten it.
 Deleted accounts render as "deleted account". Operator storage settings expose
 `audit_retention_days` (default 400 days, zero restores the default). The controller
 prunes older audit rows on its existing maintenance loop. The guards enforce
 append-only against application SQL. Database credentials can disable them.
+The team's first successful run remains a durable fact after its audit row
+expires, so retention cannot label a later success as the first.

@@ -646,10 +646,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 		string(slug), accountID, string(RoleOwner), now.UTC().UnixNano()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
 	}
-	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: slug, Account: accountID, Kind: BusinessEventTeamCreated,
-		SubjectID: string(slug), Actor: actor,
-	}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: slug, Actor: actor}, auditTeamCreation{AccountID: accountID}); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET teams_created = teams_created + 1 WHERE id = ?`, accountID)

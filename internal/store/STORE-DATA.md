@@ -23,9 +23,12 @@ STRICT, WITHOUT ROWID so replacement cannot bypass their guarded primary key.
 Every run deletion appends a `run.deleted` tombstone with a fresh identity,
 including when a later run reuses the ID.
 
-Actors and account subjects use account IDs. Invitation subjects use invitation
-IDs. The shared audit writer refuses email addresses and omits free-form reasons,
-messages, provider failure text and card/person details from nested attributes.
+Human actors and account subjects use account IDs. Non-account claimants are
+identified by capability and holder digests, with no caller-selected actor name.
+System actors use fixed enums. Invitation subjects use invitation
+IDs. One audit writer accepts a closed, typed payload for each kind. Payloads
+contain identifiers, enums, digests and generated receipt IDs. Retained caller
+names and grant keys use digests. Free-form reasons and messages are excluded.
 Readers render a missing account as "deleted account" without rewriting history.
 The account and operational records own personal details and deletion of them.
 
@@ -34,8 +37,14 @@ The operator storage settings API exposes `audit_retention_days`, stored as
 restores that default. Positive values set the horizon. The existing leased
 controller maintenance pass prunes expired audit rows in bounded batches,
 including facts for deleted teams. It uses the same database-clock cutoff as the
-SQL guards, so pruning cannot bypass the horizon. All UPDATEs remain refused,
-including changes to expired rows.
+SQL guards. The database stamps `recorded_at` at insertion, and that timestamp
+controls retention. A caller cannot set it. The separate `ts` occurrence time
+remains available for display, so a backdated occurrence cannot shorten retention.
+All UPDATEs remain refused, including changes to expired rows.
+
+`team_first_success` records the team's first successful run in the
+same transaction as its completion and audit fact. It has no run foreign key,
+so run deletion and audit expiry cannot make a later success the first.
 
 Editors may delete only runs they submitted. Owners may delete any run in their team.
 

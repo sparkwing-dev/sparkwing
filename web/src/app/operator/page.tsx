@@ -400,10 +400,25 @@ function TeamSearch() {
 function TeamView({ slug }: { slug: string }) {
   const [team, setTeam] = useState<OperatorTeam | null>(null);
   const [error, setError] = useState("");
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState("");
   const load = useCallback(() => {
     getOperatorTeam(slug).then(setTeam, (err) => setError(errorText(err)));
   }, [slug]);
   useEffect(load, [load]);
+  const loadOlder = async () => {
+    if (!team?.next_cursor || loadingOlder) return;
+    setLoadingOlder(true);
+    setOlderError("");
+    try {
+      const page = await getOperatorTeam(slug, team.next_cursor);
+      setTeam({ ...page, events: [...team.events, ...page.events] });
+    } catch (err) {
+      setOlderError(errorText(err));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
   if (error) return <Notice>{error}</Notice>;
   if (!team) return <Notice>Loading…</Notice>;
   const b = team.billing;
@@ -451,11 +466,21 @@ function TeamView({ slug }: { slug: string }) {
                 </span>{" "}
                 <span className="font-mono">{ev.kind}</span>
                 {ev.actor ? ` by ${ev.actor}` : ""}
-                {ev.attrs?.reason ? `: ${String(ev.attrs.reason)}` : ""}
+                {ev.attrs?.operation ? `: ${String(ev.attrs.operation)}` : ""}
+                {ev.subject_id ? ` · subject ${ev.subject_id}` : ""}
+                {ev.run_id ? ` · run ${ev.run_id}` : ""}
               </li>
             ))}
           </ul>
         )}
+        {olderError ? <p role="alert" className="p-4 text-sm">{olderError}</p> : null}
+        {team.next_cursor ? (
+          <div className="p-4">
+            <button className={quietButtonClass} disabled={loadingOlder} onClick={loadOlder}>
+              {loadingOlder ? "Loading older events…" : "Load older events"}
+            </button>
+          </div>
+        ) : null}
       </Panel>
     </>
   );

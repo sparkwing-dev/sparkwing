@@ -189,6 +189,11 @@ var (
 
 // hack: Postgres stores a default with a cast, parentheses and a quoted negative integer, so those are stripped.
 func normalizeDefault(expr string) string {
+	// Recording-time behavior is exercised against each database clock separately.
+	lower := strings.ToLower(expr)
+	if strings.Contains(lower, "unixepoch('subsec')") || strings.Contains(lower, "extract(epoch from statement_timestamp())") {
+		return "database_timestamp"
+	}
 	expr = postgresCast.ReplaceAllString(expr, "")
 	for strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
 		expr = expr[1 : len(expr)-1]

@@ -1,20 +1,15 @@
 package store
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
-// Business event kinds recorded by this package. A kind is a free-form
-// string, so a caller may record one not listed here.
+// Business event kinds returned by the audit reader.
 const (
 	BusinessEventAccountAdmitted   = "account.admitted"
 	BusinessEventTeamCreated       = "team.created"
@@ -29,8 +24,6 @@ const (
 	BusinessEventFirstRunSucceeded = "run.first_succeeded"
 )
 
-const maxBusinessEventAttrsBytes = 4096
-
 // BusinessEvent is one durable fact about an account or a team: an
 // admission, a purchase, a grant, a hold. It is written in the transaction
 // that makes the fact true, so the table never records a change that rolled
@@ -39,8 +32,8 @@ const maxBusinessEventAttrsBytes = 4096
 // SubjectID names the event within its team and kind, and a second event
 // with the same team, kind and subject is dropped for idempotent facts. Release
 // and mutation kinds, including run.deletion_authorized, retain every occurrence.
-// A replayed webhook is idempotent. An empty SubjectID is a once-per-team fact,
-// the way [BusinessEventFirstRunSucceeded] is recorded.
+// A replayed webhook is idempotent. The first successful run is a durable team
+// fact independent of audit retention.
 type BusinessEvent struct {
 	ID        string
 	At        time.Time
@@ -51,79 +44,6 @@ type BusinessEvent struct {
 	RunID     string
 	Actor     string
 	Attrs     map[string]any
-}
-
-// RecordBusinessEvent writes ev inside tx, the transaction making the
-// change it describes. A zero At is now, and Attrs is stored as JSON of at
-// most 4 KiB. An event whose team, kind and subject are already recorded
-// writes nothing, except team.mutated, secret.released, git_credential.released
-// and run.deletion_authorized, which append every occurrence.
-func (op *Operator) RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
-	if strings.TrimSpace(ev.Kind) == "" {
-		return fmt.Errorf("%w: a business event names its kind", ErrInvalidInput)
-	}
-	if ev.At.IsZero() {
-		ev.At = tx.now()
-	}
-	attrs := []byte("{}")
-	if len(ev.Attrs) > 0 {
-		var err error
-		if attrs, err = json.Marshal(ev.Attrs); err != nil {
-			return fmt.Errorf("business event attrs: %w", err)
-		}
-		var fields map[string]any
-		decoder := json.NewDecoder(bytes.NewReader(attrs))
-		decoder.UseNumber()
-		if err := decoder.Decode(&fields); err != nil {
-			return err
-		}
-		stripAuditPersonalFields(fields)
-		attrs, err = json.Marshal(fields)
-		if err != nil {
-			return err
-		}
-		if len(attrs) > maxBusinessEventAttrsBytes {
-			return fmt.Errorf("%w: business event attrs are %d bytes, over %d",
-				ErrInvalidInput, len(attrs), maxBusinessEventAttrsBytes)
-		}
-	}
-	// Email addresses have no durable home in an append-only record.
-	identityFields, err := json.Marshal([]string{string(ev.Team), ev.Kind, ev.Account, ev.SubjectID, ev.Actor, ev.RunID})
-	if err != nil {
-		return err
-	}
-	if bytes.ContainsRune(identityFields, '@') || bytes.ContainsRune(attrs, '@') {
-		return fmt.Errorf("%w: audit events contain identifiers, never email addresses", ErrInvalidInput)
-	}
-	var id string
-	switch ev.Kind {
-	case "team.mutated", "secret.released", "git_credential.released", "run.deletion_authorized":
-		var err error
-		id, err = newCreditID("event")
-		if err != nil {
-			return err
-		}
-	default:
-		identity, err := json.Marshal([]string{string(ev.Team), ev.Kind, ev.SubjectID})
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256(identity)
-		id = "fact:" + hex.EncodeToString(sum[:])
-	}
-	var team any = string(ev.Team)
-	if ev.Team == "" {
-		team = nil
-	}
-	_, err = tx.Exec(`
-		INSERT INTO audit_events (id, ts, team, account, kind, subject_id, actor, attrs, run_id, actor_is_account, subject_is_account)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-        CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END,
-        CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END)
-		ON CONFLICT DO NOTHING`,
-		id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID,
-		truncate(ev.Actor, 200), string(attrs), ev.RunID, ev.Actor, ev.SubjectID)
-	return err
 }
 
 // BusinessEvents returns at most limit events, newest first, with IDs breaking
@@ -178,23 +98,4 @@ func (t *Tenant) BusinessEvents(ctx context.Context, kind string, limit int, bef
 		out = append(out, ev)
 	}
 	return out, rows.Err()
-}
-
-// Free-form explanations and card/person details stay in mutable operational records.
-func stripAuditPersonalFields(value any) {
-	switch v := value.(type) {
-	case map[string]any:
-		for key, child := range v {
-			switch strings.ToLower(key) {
-			case "reason", "message", "failure", "email", "last4", "brand", "github_user_id":
-				delete(v, key)
-			default:
-				stripAuditPersonalFields(child)
-			}
-		}
-	case []any:
-		for _, child := range v {
-			stripAuditPersonalFields(child)
-		}
-	}
 }

@@ -56,10 +56,12 @@ func (s *Server) handleOperatorTeams(w http.ResponseWriter, r *http.Request, aut
 }
 
 type operatorEventJSON struct {
-	At    int64          `json:"at"`
-	Kind  string         `json:"kind"`
-	Actor string         `json:"actor,omitempty"`
-	Attrs map[string]any `json:"attrs,omitempty"`
+	At        int64          `json:"at"`
+	Kind      string         `json:"kind"`
+	Actor     string         `json:"actor,omitempty"`
+	SubjectID string         `json:"subject_id,omitempty"`
+	RunID     string         `json:"run_id,omitempty"`
+	Attrs     map[string]any `json:"attrs,omitempty"`
 }
 
 type operatorTeamJSON struct {
@@ -126,7 +128,7 @@ func operatorTeamView(ctx context.Context, t *store.Tenant, cursor string) (oper
 		out.NextCursor = events[len(events)-1].ID
 	}
 	for _, ev := range events {
-		out.Events = append(out.Events, operatorEventJSON{At: ev.At.Unix(), Kind: ev.Kind, Actor: ev.Actor, Attrs: ev.Attrs})
+		out.Events = append(out.Events, operatorEventJSON{At: ev.At.Unix(), Kind: ev.Kind, Actor: ev.Actor, SubjectID: ev.SubjectID, RunID: ev.RunID, Attrs: ev.Attrs})
 	}
 	return out, nil
 }

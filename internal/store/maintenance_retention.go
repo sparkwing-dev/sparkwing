@@ -77,7 +77,7 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 		return RetentionResult{}, err
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM audit_events WHERE id IN
-(SELECT id FROM audit_events WHERE ts < `+auditRetentionCutoffSQL(tx.dialect)+` ORDER BY ts,id LIMIT ?)`, request.Limit)
+(SELECT id FROM audit_events WHERE recorded_at < `+auditRetentionCutoffSQL(tx.dialect)+` ORDER BY recorded_at,id LIMIT ?)`, request.Limit)
 	if err != nil {
 		return RetentionResult{}, err
 	}

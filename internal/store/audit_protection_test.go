@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,7 +15,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return s.AsOperator().RecordBusinessEvent(tx, BusinessEvent{Team: "a", Kind: "secret.released", SubjectID: "release", RunID: "already-deleted-run", Attrs: map[string]any{"name": "KEY"}})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a"}, auditSecretRelease{RunID: "already-deleted-run", Name: digestAudit("KEY")})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -29,16 +30,16 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,run_id,actor) SELECT id,ts,team,kind,subject_id,run_id,'forged' FROM audit_events`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{Team: "a", Kind: "probe.once", SubjectID: "fact", Actor: "original"})
+		return tx.operator.recordAudit(tx, auditContext{Team: "a", Actor: "system"}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,actor) VALUES ('replacement',1,'a','probe.once','fact','forged')`)
+	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,actor) VALUES ('replacement',1,'a','checkout.opened','fact','forged')`)
 	var actor string
-	if err := s.db.QueryRow(`SELECT actor FROM audit_events WHERE kind='probe.once' AND id<>'replacement'`).Scan(&actor); err != nil || actor != "original" {
+	if err := s.db.QueryRow(`SELECT actor FROM audit_events WHERE kind='checkout.opened' AND id<>'replacement'`).Scan(&actor); err != nil || actor != "system" {
 		t.Fatalf("replacement altered audit: %q %v", actor, err)
 	}
-	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='probe.once'", 2)
+	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='checkout.opened'", 2)
 	tenant := &Tenant{s: s, team: "a"}
 	rows, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")
 	if err != nil || len(rows) != 1 || rows[0].RunID != "already-deleted-run" || rows[0].Actor != "" {
@@ -115,25 +116,51 @@ func TestMemberRemovalRequiresCommittedAudit(t *testing.T) {
 
 func TestAuditOwnerRejectsEmails(t *testing.T) {
 	s := authorityStore(t)
-	for _, ev := range []BusinessEvent{
-		{Kind: "privacy", Actor: "person@example.test"},
-		{Kind: "privacy", Account: "person@example.test"},
-		{Kind: "privacy", SubjectID: "person@example.test"},
-		{Kind: "privacy", Attrs: map[string]any{"nested": []any{map[string]any{"value": "person@example.test"}}}},
-	} {
-		if err := s.inTx(t.Context(), func(tx *storeTx) error { return tx.operator.RecordBusinessEvent(tx, ev) }); err == nil {
-			t.Fatalf("email entered audit: %+v", ev)
+	writers := []func(*storeTx) error{
+		func(tx *storeTx) error {
+			return tx.operator.recordAudit(tx, auditContext{Actor: "person@example.test"}, auditAdmission{AccountID: "account", Via: "signup"})
+		},
+		func(tx *storeTx) error {
+			return tx.operator.recordAudit(tx, auditContext{}, auditAdmission{AccountID: "person@example.test", Via: "signup"})
+		},
+		func(tx *storeTx) error {
+			return tx.operator.recordAudit(tx, auditContext{Team: "person@example.test"}, auditTeamCreation{AccountID: "account"})
+		},
+		func(tx *storeTx) error {
+			return tx.operator.recordAudit(tx, auditContext{}, auditRunDeletion{RunID: "person@example.test"})
+		},
+		func(tx *storeTx) error {
+			return tx.operator.recordAudit(tx, auditContext{}, auditMutation{SubjectID: "person@example.test", Operation: "membership.removed"})
+		},
+		func(tx *storeTx) error {
+			return tx.operator.recordAudit(tx, auditContext{}, auditAdmission{AccountID: "account", Via: "person@example.test"})
+		},
+	}
+	for _, write := range writers {
+		if err := s.inTx(t.Context(), write); err == nil {
+			t.Fatal("personal data entered audit")
 		}
 	}
 	rewriteSchemaCount(t, s.db, "audit_events", 0)
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{Team: "a", Kind: "privacy", Attrs: map[string]any{"reason": "person@example.test", "message": "Person Name", "last4": "1234", "amount_micro": 1}})
-	}); err != nil {
+}
+
+func TestOperatorGrantPersonalKeyNeverEntersAudit(t *testing.T) {
+	s, c, a := consoleFixture(t)
+	personal := "Jane Doe; phone 208-555-0100"
+	result, err := c.ConsoleGrantCredit(t.Context(), a, CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100, Reference: "console:" + personal, Reason: personal})
+	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "privacy", 10, "")
-	if err != nil || len(events) != 1 || len(events[0].Attrs) != 1 || events[0].Attrs["amount_micro"] != float64(1) {
-		t.Fatalf("personal audit attrs: %+v %v", events, err)
+	var body string
+	if err := s.db.QueryRow(`SELECT attrs FROM audit_events WHERE team='b' AND kind='credit.granted'`).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "Jane") || strings.Contains(body, "208-555") || strings.Contains(body, "example.test") {
+		t.Fatalf("personal grant key entered audit: %s", body)
+	}
+	events, err := (&Tenant{s: s, team: "b"}).BusinessEvents(t.Context(), BusinessEventCreditGranted, 10, "")
+	if err != nil || len(events) != 1 || events[0].SubjectID != result.Grant.ID || events[0].Attrs["reference_digest"] != digestAudit("console:"+personal).String() {
+		t.Fatalf("grant audit: %+v %v", events, err)
 	}
 }
 

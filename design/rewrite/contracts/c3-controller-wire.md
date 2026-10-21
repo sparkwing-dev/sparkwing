@@ -1280,3 +1280,6 @@ The operator session's team view includes at most 50 audit events, newest first
 with IDs breaking timestamp ties. `next_cursor` names the last returned event
 when older events remain. `GET /api/v1/operator/teams/{team}?cursor=<next_cursor>`
 continues strictly before it. The cursor must belong to that team's audit.
+Each event retains `subject_id`, `run_id` and `attrs.operation` when present.
+The console renders those targets and appends older pages through its continuation
+control.

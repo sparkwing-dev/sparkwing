@@ -214,13 +214,7 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	if err != nil {
 		return err
 	}
-	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventRefillSettings, SubjectID: change, Actor: actor, At: tx.now(),
-		Attrs: map[string]any{
-			"enabled": s.Enabled, "threshold_cents": s.ThresholdCents, "amount_cents": s.AmountCents,
-			"week_limit_cents": s.WeekLimitCents, "month_limit_cents": s.MonthLimitCents,
-		},
-	})
+	return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: tx.now()}, auditRefillSettings{ReceiptID: change, Enabled: s.Enabled, ThresholdCents: s.ThresholdCents, AmountCents: s.AmountCents, WeekLimitCents: s.WeekLimitCents, MonthLimitCents: s.MonthLimitCents})
 }
 
 // DueRefills opens a refill for every opted-in team whose balance fell below its threshold, within its limits, and
@@ -341,10 +335,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 		now.Add(refillKeyLife).UnixNano(), CheckoutKindRefill, r.Customer, r.PaymentMethod, r.ReceiptEmail); err != nil {
 		return nil, err
 	}
-	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventRefillOpened, SubjectID: r.ID, Actor: "system", At: now,
-		Attrs: map[string]any{"amount_cents": r.AmountCents, "balance_micro": st.BalanceMicro, "threshold_cents": refill.ThresholdCents},
-	}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: "system", At: now}, auditRefill{RefillID: r.ID, AmountCents: r.AmountCents, BalanceMicro: st.BalanceMicro, ThresholdCents: refill.ThresholdCents}); err != nil {
 		return nil, err
 	}
 	return &r, nil

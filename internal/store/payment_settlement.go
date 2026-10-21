@@ -224,7 +224,13 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		}
 	}
 	checkout.result.GrantID, checkout.result.Granted = id, true
-	return recordGrantEventTx(tx, grant, map[string]any{"session_id": event.CheckoutID, "three_d_secure": event.ThreeDS, "liability_shift": event.LiabilityShift, "refill": checkout.kind == CheckoutKindRefill})
+	threeDS := auditThreeDS(event.ThreeDS)
+	switch threeDS {
+	case "", "authenticated", "attempt_acknowledged", "failed", "processing_error", "exempted", "not_supported", "unknown":
+	default:
+		threeDS = "unknown"
+	}
+	return recordGrantEventTx(tx, grant, auditGrant{SessionID: digestAudit(event.CheckoutID), ThreeDS: threeDS, LiabilityShift: event.LiabilityShift, Refill: checkout.kind == CheckoutKindRefill})
 }
 
 func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
@@ -246,7 +252,7 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: now, Team: team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID, "failure": failure}})
+	return tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: "payment_provider"}, auditCheckout{CheckoutID: checkout.result.CheckoutID, Outcome: auditCheckoutOutcome(kind), PaymentMode: auditPaymentMode(event.Mode), EventID: digestAudit(event.EventID)})
 }
 
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
@@ -266,10 +272,7 @@ func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.Payment
 	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
 		return err
 	}
-	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventCardRefused, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", At: now,
-		Attrs: map[string]any{"reason": refusal.reason, "payment_id": event.PaymentID, "warning_id": refusal.warning},
-	}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: "payment_provider", At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: BusinessEventCardRefused}); err != nil {
 		return err
 	}
 	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)

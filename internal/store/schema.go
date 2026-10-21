@@ -27,6 +27,8 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 			switch word {
 			case "PRAGMA", "AUTOINCREMENT", "SERIAL", "BYTEA":
 				return errors.New("schema contains non-neutral syntax")
+			case "DATABASE_TIMESTAMP":
+				token = auditRecordingTimeSQL(dialect)
 			case "BIGINT":
 				// INTEGER PRIMARY KEY aliases rowid and silently invents a NULL key.
 				if dialect == DialectSQLite {
@@ -258,6 +260,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "team_counters", Owner: SchemaTenant},
 	{Name: "team_deletions", Owner: SchemaOperator},
 	{Name: "team_download_day", Owner: SchemaTenant},
+	{Name: "team_first_success", Owner: SchemaTenant},
 	{Name: "team_storage", Owner: SchemaTenant},
 	{Name: "teams", Owner: SchemaOperator},
 	{Name: "triggers", Owner: SchemaTenant},

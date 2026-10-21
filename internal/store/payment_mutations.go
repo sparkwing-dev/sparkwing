@@ -62,7 +62,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference, cr
 		if err := l.insertGrant(ctx, grant); err != nil {
 			return CreditReversal{}, err
 		}
-		if err := recordGrantEventTx(tx, grant, nil); err != nil {
+		if err := recordGrantEventTx(tx, grant, auditGrant{}); err != nil {
 			return CreditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true
@@ -107,14 +107,7 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
 		return false, err
 	}
-	attrs := map[string]any{"payment_id": paymentID}
-	// safety: provider dispute reasons are untrusted free text and never enter audit events.
-	if actor != "" {
-		attrs["reason"] = reason
-	}
-	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID, Actor: actor, Attrs: attrs,
-	}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: actor}, auditHold{HoldID: digestAudit(disputeID), PaymentID: digestAudit(paymentID)}); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -155,17 +148,8 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	if err != nil {
 		return 0, err
 	}
-	var releaseAttrs map[string]any
-	if actor != "" {
-		releaseAttrs = map[string]any{"reason": reason}
-		if noFault {
-			releaseAttrs["no_fault"] = true
-		}
-	}
 	for _, id := range released {
-		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-			At: now, Team: team, Kind: BusinessEventTeamUnfrozen, SubjectID: id, Actor: actor, Attrs: releaseAttrs,
-		}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{At: now, Team: team, Actor: actor}, auditHold{HoldID: digestAudit(id), Released: true, NoFault: noFault}); err != nil {
 			return 0, err
 		}
 	}
@@ -184,10 +168,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 		return err
 	}
 	if refusal.reason != "" {
-		return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-			Team: team, Kind: BusinessEventCardRefused, SubjectID: c.PaymentMethod, Actor: actor, At: now,
-			Attrs: map[string]any{"reason": refusal.reason, "brand": c.Brand, "last4": c.Last4},
-		})
+		return tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardRefused})
 	}
 	addedAt := now.UnixNano()
 	if !c.AddedAt.IsZero() {
@@ -211,10 +192,7 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor strin
 	    WHERE team = ? AND refill_blocked = 1 AND payment_method <> ?`, string(team), c.PaymentMethod); err != nil {
 		return err
 	}
-	if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		Team: team, Kind: BusinessEventCardAdded, SubjectID: c.PaymentMethod, Actor: actor, At: now,
-		Attrs: map[string]any{"brand": c.Brand, "last4": c.Last4},
-	}); err != nil {
+	if err := tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardAdded}); err != nil {
 		return err
 	}
 	return nil

@@ -70,7 +70,7 @@ var ErrDisputeConflict = errors.New("credits: the dispute is already held for an
 const OperatorHoldPrefix = "operator-"
 
 // HoldByOperator holds t on actor's word and returns the hold's id. The hold
-// and its business event, naming actor and reason, commit together.
+// and its audit fact, naming actor and hold ID, commit together.
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error) {
 	id, err := newCreditID("hold")
 	if err != nil {
@@ -123,8 +123,8 @@ func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, rea
 }
 
 // ReleaseOperatorHolds releases every hold an operator placed on t, and never
-// a payment dispute's. Each release and its business event, naming actor and
-// reason, commit together.
+// a payment dispute's. Each release and its audit fact, naming actor and hold
+// ID, commit together.
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error) {
 	return t.releaseFreezes(ctx, "", true, actor, reason, now)
 }

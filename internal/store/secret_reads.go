@@ -55,7 +55,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		}
 		if claim {
 			b := p.Capability.Binding
-			if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "secret.released", SubjectID: out.Name, RunID: b.RunID, Actor: p.Capability.Subject.ID, Attrs: map[string]any{"name": out.Name, "pipeline": out.Pipeline, "node_id": b.NodeID, "generation": b.Generation, "capability_prefix": p.Capability.Prefix, "holder": b.Holder}}); err != nil {
+			if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: p.Capability.Subject.ID}, auditSecretRelease{RunID: b.RunID, Name: digestAudit(out.Name), Pipeline: digestAudit(out.Pipeline), NodeID: digestAudit(b.NodeID), Generation: b.Generation, CapabilityPrefix: digestAudit(p.Capability.Prefix), Holder: digestAudit(b.Holder)}); err != nil {
 				return err
 			}
 		}

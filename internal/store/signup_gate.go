@@ -291,10 +291,7 @@ func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string,
 }
 
 func recordAdmissionEventTx(tx *storeTx, accountID, via, actor string, now time.Time) error {
-	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Account: accountID, Kind: BusinessEventAccountAdmitted, SubjectID: accountID, Actor: actor,
-		Attrs: map[string]any{"via": via},
-	})
+	return tx.operator.recordAudit(tx, auditContext{At: now, Actor: actor}, auditAdmission{AccountID: accountID, Via: auditAdmissionVia(via)})
 }
 
 // safety: g must be the row this transaction locked. The windows start no earlier than the operator last

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
@@ -79,7 +80,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		}
 	}
 	if paid := got[store.BusinessEventCheckoutPaid]; len(paid) == 1 &&
-		(paid[0].Actor != "payment_provider" || paid[0].Attrs["reference"] != "payment:test:fixture-row:pi_1") {
+		(paid[0].Actor != "payment_provider" || paid[0].Attrs["reference_digest"] != fmt.Sprintf("%x", sha256.Sum256([]byte("payment:test:fixture-row:pi_1")))) {
 		t.Errorf("paid event = %+v, want the verified provider and committed payment", paid[0])
 	}
 	if ev := got[store.BusinessEventTeamFrozen]; len(ev) == 1 && ev[0].Attrs["reason"] != nil {

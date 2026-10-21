@@ -92,7 +92,7 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
 			return err
 		}
-		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequested, Team: t.team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": tier, "message": message, "standing": standing.Tier, "history_tier": standing.History.Tier}}); err != nil {
+		if err := tx.operator.recordAudit(tx, auditContext{Team: t.team, Actor: actor, At: now}, auditStandingRequest{RequestID: id, State: StandingRequestOpen, Tier: auditStanding(tier), Standing: auditStanding(standing.Tier), HistoryTier: auditStanding(standing.History.Tier)}); err != nil {
 			return err
 		}
 		out, err = scanStandingRequest(tx.QueryRowContext(ctx, `SELECT `+standingRequestColumns+` WHERE r.team=? AND r.id=?`, t.team, id))
@@ -141,7 +141,7 @@ func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, st
 		return r, err
 	}
 	r.State, r.DecidedBy, r.DecidedAt, r.DecisionReason = state, actor, now, reason
-	return r, tx.operator.RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventStandingRequestDecided, Team: team, SubjectID: id, Actor: actor, At: now, Attrs: map[string]any{"tier": r.Tier, "state": state, "reason": reason}})
+	return r, tx.operator.recordAudit(tx, auditContext{Team: team, Actor: actor, At: now}, auditStandingRequest{RequestID: id, State: auditRequestState(state), Tier: auditStanding(r.Tier)})
 }
 
 // ConsoleDeclineStandingRequest declines the named open standing request under current operator authority.

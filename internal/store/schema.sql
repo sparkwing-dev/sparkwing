@@ -30,6 +30,11 @@ CREATE TABLE teams (
     CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_payment_method <> ''))
 );
 
+CREATE TABLE team_first_success (
+    team TEXT NOT NULL PRIMARY KEY REFERENCES teams(name),
+    run_id TEXT NOT NULL CHECK(run_id <> '')
+);
+
 CREATE TABLE runs (
     team TEXT NOT NULL REFERENCES teams(name),
     id TEXT NOT NULL PRIMARY KEY,
@@ -1001,6 +1006,7 @@ CREATE TABLE team_build_trust (
 -- safety: account audit events precede team creation, so this operator table permits no team.
 CREATE TABLE audit_events (
     id TEXT NOT NULL PRIMARY KEY,
+    recorded_at BIGINT NOT NULL DEFAULT (DATABASE_TIMESTAMP),
     ts BIGINT NOT NULL,
     team TEXT,
     run_id TEXT NOT NULL DEFAULT '',
@@ -1621,7 +1627,7 @@ CREATE INDEX idx_cron_schedules_github_identity ON cron_schedules(team, github_i
 CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);
 
 
-CREATE INDEX idx_audit_events_retention ON audit_events(ts,id);
+CREATE INDEX idx_audit_events_retention ON audit_events(recorded_at,id);
 
 CREATE INDEX idx_audit_events_team_ts ON audit_events(team, ts, id);
 

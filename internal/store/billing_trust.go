@@ -110,6 +110,6 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	if err != nil {
 		return before, after, err
 	}
-	err = tx.operator.RecordBusinessEvent(tx, BusinessEvent{Kind: BusinessEventBillingTrustChanged, Team: t.team, SubjectID: subject, Actor: c.Actor, At: now, Attrs: map[string]any{"reason": c.Reason, "trust_before": before.Trust, "trust_after": after.Trust, "standing_before": before.Tier, "standing_after": after.Tier}})
+	err = tx.operator.recordAudit(tx, auditContext{Team: t.team, Actor: c.Actor, At: now}, auditTrust{ReceiptID: subject, Before: auditTrustValue(before.Trust), After: auditTrustValue(after.Trust), StandingBefore: auditStanding(before.Tier), StandingAfter: auditStanding(after.Tier)})
 	return before, after, err
 }

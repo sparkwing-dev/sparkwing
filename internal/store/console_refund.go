@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -54,10 +55,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			return CreditReversal{}, err
 		}
 		digest := sha256.Sum256(body)
-		var receipt struct {
-			Digest [32]byte       `json:"digest"`
-			Result CreditReversal `json:"result"`
-		}
+		var receipt auditRefund
 		err = tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind='operator.refund_recorded' AND subject_id=?`, t.team, subject).Scan(&body)
 		if err == nil {
 			if err := json.Unmarshal(body, &receipt); err != nil {
@@ -66,8 +64,17 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			if receipt.Digest != digest {
 				return CreditReversal{}, authorityError(apierr.Conflict, "idempotency key names another refund")
 			}
-			receipt.Result.Created = false
-			return receipt.Result, nil
+			result := CreditReversal{Team: t.team, PaidMicro: receipt.PaidMicro, ReversedMicro: receipt.ReversedMicro, BalanceMicro: receipt.BalanceMicro}
+			if receipt.GrantID != "" {
+				var g CreditGrant
+				var at int64
+				if err := tx.QueryRowContext(ctx, `SELECT id,kind,amount_micro,reference,reverses,created_by,created_at FROM credit_grants WHERE team=? AND id=?`, t.team, receipt.GrantID).Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &at); err != nil {
+					return CreditReversal{}, err
+				}
+				g.Team, g.CreatedAt = t.team, time.Unix(0, at)
+				result.Grant = &g
+			}
+			return result, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return CreditReversal{}, err
@@ -104,7 +111,11 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if err := tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: t.team, Kind: "operator.refund_recorded", SubjectID: subject, Actor: actor, Attrs: map[string]any{"digest": digest, "result": result, "reason": req.Reason, "payment_id": req.PaymentID, "refund_id": req.RefundID}}); err != nil {
+		grantID := ""
+		if result.Grant != nil {
+			grantID = result.Grant.ID
+		}
+		if err := tx.operator.recordAudit(tx, auditContext{At: tx.now(), Team: t.team, Actor: actor}, auditRefund{ReceiptID: subject, Digest: digest, GrantID: grantID, PaidMicro: result.PaidMicro, ReversedMicro: result.ReversedMicro, BalanceMicro: result.BalanceMicro, PaymentID: digestAudit(req.PaymentID), RefundID: digestAudit(req.RefundID)}); err != nil {
 			return CreditReversal{}, err
 		}
 		return result, nil

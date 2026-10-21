@@ -188,5 +188,5 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 }
 
 func insertSourceReleaseAuditTx(ctx context.Context, tx *storeTx, audit capability.SourceReleaseAudit) error {
-	return tx.operator.RecordBusinessEvent(tx, BusinessEvent{At: audit.ReleasedAt, Team: Team(audit.Team), Kind: "git_credential.released", SubjectID: audit.CredentialID, RunID: audit.RunID, Actor: audit.OwnerAccountID, Attrs: map[string]any{"release": audit}})
+	return tx.operator.recordAudit(tx, auditContext{At: audit.ReleasedAt, Team: Team(audit.Team), Actor: audit.OwnerAccountID}, auditSourceRelease{RunID: audit.RunID, CredentialID: digestAudit(audit.CredentialID), Repository: digestAudit(audit.RepositoryKey), NodeID: digestAudit(audit.NodeID), Generation: audit.Generation, MachineID: digestAudit(audit.MachineID), CapabilityPrefix: digestAudit(audit.CapabilityPrefix)})
 }

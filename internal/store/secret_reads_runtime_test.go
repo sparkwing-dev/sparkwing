@@ -90,7 +90,7 @@ func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T
 		}
 		count++
 		body := event.Attrs
-		if body["name"] != "KEY" || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
+		if body["name_digest"] != digestAudit("KEY").String() || event.Actor != "" || body["generation"] != float64(a.Binding.Generation) || event.RunID != a.Binding.RunID {
 			t.Fatalf("audit: %+v", event)
 		}
 	}

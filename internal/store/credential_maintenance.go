@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -109,29 +110,33 @@ func (t *Tenant) credentialGitTx(ctx context.Context, tx *storeTx) (_ []GitCrede
 	return out, rows.Err()
 }
 
-// SourceReleaseAudits reads this tenant's committed source releases newest first.
+// SourceReleaseAudits reads committed releases with digests for caller-supplied identifiers.
 func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capability.SourceReleaseAudit, err error) {
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
-	rows, err := t.s.query(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind='git_credential.released' ORDER BY ts DESC,id DESC LIMIT ?`, t.team, limit)
+	rows, err := t.s.query(ctx, `SELECT id,ts,team,run_id,
+ CASE WHEN actor_is_account=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE accounts.id=audit_events.actor) THEN 'deleted account' ELSE actor END,
+ attrs FROM audit_events WHERE team=? AND kind='git_credential.released' ORDER BY ts DESC,id DESC LIMIT ?`, t.team, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
 	out := []capability.SourceReleaseAudit{}
 	for rows.Next() {
+		var row capability.SourceReleaseAudit
+		var at int64
 		var body string
-		if err := rows.Scan(&body); err != nil {
+		if err := rows.Scan(&row.ID, &at, &row.Team, &row.RunID, &row.OwnerAccountID, &body); err != nil {
 			return nil, err
 		}
-		var attrs struct {
-			Release capability.SourceReleaseAudit `json:"release"`
-		}
+		var attrs auditSourceRelease
 		if err := json.Unmarshal([]byte(body), &attrs); err != nil {
 			return nil, err
 		}
-		row := attrs.Release
+		row.ReleasedAt = time.Unix(0, at).UTC()
+		row.CredentialID, row.RepositoryKey, row.NodeID = attrs.CredentialID.String(), attrs.Repository.String(), attrs.NodeID.String()
+		row.MachineID, row.CapabilityPrefix, row.Generation = attrs.MachineID.String(), attrs.CapabilityPrefix.String(), attrs.Generation
 		out = append(out, row)
 	}
 	return out, rows.Err()
