@@ -130,7 +130,7 @@ func TestNativePlanAndFinishReplayKeepDistinctProofs(t *testing.T) {
 	h := New(e.Store, nil).Handler()
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body), 200)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body)+" ", 409)
-	finish := `{"outcome":"success"}`
+	finish := `{}`
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/finish", finish, 200)
 	for _, item := range []struct{ path, body string }{{"/api/v1/runs/run/plan", string(body)}, {"/api/v1/runs/run/finish", finish}} {
 		replay := engineClaimHTTP(t, h, raw, "POST", item.path, item.body, 200)

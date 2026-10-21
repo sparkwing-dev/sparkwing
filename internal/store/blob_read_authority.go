@@ -283,9 +283,6 @@ func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node s
 // ReadableBlobs answers existence only within the transaction's authorized read set.
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error) {
 	result := blob.Presence{}
-	if !request.Budget.Deadline.IsZero() && !t.s.now().Before(request.Budget.Deadline) {
-		return result, blob.ErrBudget
-	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return result, err
@@ -317,8 +314,8 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		if !request.Budget.Deadline.IsZero() && !tx.time.Before(request.Budget.Deadline) {
-			return blob.Presence{}, blob.ErrBudget
+		if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+			return blob.Presence{}, err
 		}
 		if seen[digest] {
 			continue
@@ -341,8 +338,8 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 			result.Present = append(result.Present, digest)
 		}
 	}
-	if !request.Budget.Deadline.IsZero() && !tx.time.Before(request.Budget.Deadline) {
-		return blob.Presence{}, blob.ErrBudget
+	if err := tx.checkBlobBudget(ctx, request.Budget); err != nil {
+		return blob.Presence{}, err
 	}
 	return result, nil
 }
@@ -368,4 +365,19 @@ func blobCandidateSelectedTx(ctx context.Context, tx *storeTx, team string, c bl
 		}
 	}
 	return false, nil
+}
+
+// Budgets measure elapsed work, independently of the authorization snapshot.
+func (tx *storeTx) checkBlobBudget(ctx context.Context, budget blob.Budget) error {
+	if budget.Deadline.IsZero() {
+		return nil
+	}
+	now, err := tx.readClock(ctx)
+	if err != nil {
+		return err
+	}
+	if !now.Before(budget.Deadline) {
+		return blob.ErrBudget
+	}
+	return nil
 }

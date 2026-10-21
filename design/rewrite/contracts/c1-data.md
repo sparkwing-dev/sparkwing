@@ -4201,6 +4201,10 @@ read fresh database time after lock waits or policy work, through the same
 error-returning clock owner. Lifecycle, identity, billing and schedule mutations
 use store time instead of a caller clock. Schedule due times and provider event
 timestamps remain domain facts.
+Capacity locks refresh the decision time after waiting, before counting holders
+or promoting waiters.
+Blob lookup budgets read elapsed database time through one budget check. They
+do not reuse the authorization snapshot. Cache lookup exhaustion remains a miss.
 Browser flow expiry and recent sign-in checks use the same snapshot as the
 session authority read.
 

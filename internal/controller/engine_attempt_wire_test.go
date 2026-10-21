@@ -110,4 +110,25 @@ func captureEngineTransition(ctx context.Context, body controllerwire.JobTransit
 	return capture.change, err
 }
 
+func TestEngineReleaseCommandsPreserveDestination(t *testing.T) {
+	for _, destination := range []string{"ready", "pending"} {
+		command, err := captureEngineTransition(t.Context(), controllerwire.JobTransitionRequest{To: destination, Cause: "release"})
+		if err != nil {
+			t.Fatalf("release to %s: %v", destination, err)
+		}
+		switch command.(type) {
+		case store.ReadyNode:
+			if destination != "ready" {
+				t.Fatal("release to pending became ready")
+			}
+		case store.ReleaseNode:
+			if destination != "pending" {
+				t.Fatal("release to ready became pending")
+			}
+		default:
+			t.Fatalf("unexpected command %T", command)
+		}
+	}
+}
+
 func (f *transitionCapture) Team() store.Team { return "a" }

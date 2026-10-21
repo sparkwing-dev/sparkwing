@@ -194,7 +194,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 					want = map[string]any{"step_id": "test", "state": "passed", "source_attempt": float64(attempt)}
 					response = controllerwire.StepRecorded{Recorded: true}
 				case "/api/v1/runs/run/finish":
-					want = map[string]any{"outcome": "success"}
+					want = map[string]any{}
 					response = controllerwire.Applied{Replayed: true, StateSeq: 12, Generation: int64(generation) + 1, Attempt: attempt}
 				case "/api/v1/claims/awarded-unit/heartbeat":
 					want = map[string]any{"executing": executing}

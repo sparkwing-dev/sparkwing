@@ -684,10 +684,20 @@ func txLockEntry(ctx context.Context, tx *storeTx, forUpdate string, team Team, 
 		ctx,
 		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+forUpdate, string(team), key,
 	).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
-	return err
+	return tx.capacityLocked(ctx)
+}
+
+// Lock waits can outlive holders whose capacity a later transaction reused.
+func (tx *storeTx) capacityLocked(ctx context.Context) error {
+	now, err := tx.now(ctx)
+	if err != nil {
+		return err
+	}
+	tx.time = now
+	return nil
 }
 
 func txEntryCapacity(ctx context.Context, tx *storeTx, team Team, key string) (int, error) {

@@ -236,7 +236,7 @@ func TestLocalHostPrivateTransportDrainsCancelledOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, server.store, `UPDATE runs SET cancel_requested_at=1,cancel_reason='user_cancelled' WHERE team='a' AND id='run'`)
+	engineSQL(t, server.store, `UPDATE runs SET cancel_requested_at=?,cancel_reason='user_cancelled' WHERE team='a' AND id='run'`, time.Now().UnixNano())
 	snapshot, err := host.ReadSnapshot(t.Context(), "run")
 	if err != nil || snapshot.Run.CancelRequestedAt == nil {
 		t.Fatalf("cancel snapshot: %v", err)

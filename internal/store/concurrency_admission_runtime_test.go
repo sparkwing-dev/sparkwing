@@ -102,3 +102,37 @@ func TestConcurrencyExpiredWaiterBecomesANewArrival(t *testing.T) {
 		t.Fatalf("expired waiter bypassed earlier arrival: released=%v, %+v, %v", released, promoted, err)
 	}
 }
+
+func TestConcurrencyUsesTimeAfterCapacityLocks(t *testing.T) {
+	for _, maintenance := range []bool{false, true} {
+		t.Run(map[bool]string{false: "admission", true: "maintenance"}[maintenance], func(t *testing.T) {
+			tenant, now, _ := capacityFixture(t)
+			s := tenant.s
+			lease := maintenanceReaper(t, s)
+			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','expired','run','job',1,?,3)`, now.Add(time.Minute).UnixNano())
+			if maintenance {
+				rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','key','next','run','job',1,?,3,'queue')`, now.Add(time.Hour).UnixNano())
+			}
+			begin, locked := *now, now.Add(2*time.Minute)
+			first := true
+			s.SetTestClock(t, func() time.Time {
+				if first {
+					first = false
+					return begin
+				}
+				return locked
+			})
+			if maintenance {
+				result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease, ConcurrencyMaintenanceOptions{})
+				if err != nil || len(result.StaleHolders) != 1 || result.Promoted != 1 {
+					t.Fatalf("maintenance after lock: %+v, %v", result, err)
+				}
+			} else {
+				result, err := tenant.AcquireConcurrencySlot(t.Context(), AcquireSlotRequest{Key: "key", HolderID: "next", RunID: "run", NodeID: "job", Capacity: 1, Lease: time.Minute})
+				if err != nil || result.Kind != AcquireGranted || !result.LeaseExpiresAt.Equal(locked.Add(time.Minute)) {
+					t.Fatalf("admission after lock: %+v, %v", result, err)
+				}
+			}
+		})
+	}
+}

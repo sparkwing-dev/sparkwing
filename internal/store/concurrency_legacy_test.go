@@ -33,15 +33,7 @@ func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var hasEntry int
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+t.s.forUpdate(), string(t.team), key,
-	).Scan(&hasEntry)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, txCommitChecked(ctx, tx, tx.time.UnixNano(), concurrencyKey{t.team, key})
-	}
-	if err != nil {
+	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
 		return nil, err
 	}
 
@@ -164,13 +156,7 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 	// safety: entries-row lock before any row writes (same order as
 	// acquire) so release+promote serializes with admissions without
 	// inverting lock order against a concurrent acquire.
-	var hasEntry int
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+t.s.forUpdate(), string(t.team), key,
-	).Scan(&hasEntry)
-	entryDeclared := err == nil
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
 		return false, nil, nil, err
 	}
 
@@ -179,9 +165,6 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 		return false, nil, nil, err
 	}
 
-	if !entryDeclared {
-		return released, followers, nil, txCommitChecked(ctx, tx, tx.time.UnixNano(), concurrencyKey{t.team, key})
-	}
 	now := tx.time
 	nowNS := now.UnixNano()
 	expiresNS := now.Add(promoteLease).UnixNano()

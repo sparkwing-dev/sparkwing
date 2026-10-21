@@ -242,8 +242,9 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 	if input.Attempt == math.MaxInt64 {
 		return input, &executorTransitionError{err: errors.New("attempt ordinal exhausted")}
 	}
-	expected := input.Attempt + 1
-	applied, err := h.transition(ctx, input, store.StartNode{SourceAttempt: &input.Attempt, Attempt: &store.NodeAttempt{
+	sourceAttempt := input.Attempt
+	expected := sourceAttempt + 1
+	applied, err := h.transition(ctx, input, store.StartNode{SourceAttempt: &sourceAttempt, Attempt: &store.NodeAttempt{
 		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(expected), Generation: int64(input.Generation)},
 		Holder:   input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, ExecutorName: input.GrantedRunner.Name, ExecutorKind: input.GrantedRunner.Type,
 	}})
@@ -273,7 +274,8 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 		wait := executorBackoff(input.Execution.RetryBackoff.Value, retry+1)
 		retryAt := time.Now().Add(wait)
 		result = recordNodeFailure(input.NodeID, result, h.deps.Mask)
-		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &input.Attempt, Result: &result, RetryAt: &retryAt})
+		sourceAttempt := input.Attempt
+		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &sourceAttempt, Result: &result, RetryAt: &retryAt})
 		if err != nil {
 			return result, err
 		}

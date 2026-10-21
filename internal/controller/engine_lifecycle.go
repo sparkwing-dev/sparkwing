@@ -188,10 +188,18 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 		}
 		return store.PublishNodeAttempt{Ref: ref, Actor: actor, Publication: body.Publication}, nil
 	case store.CauseRelease:
-		if body.To != string(store.NodePending) || resultForStore != nil || body.RetryAt != nil || body.Publication != nil {
+		if resultForStore != nil || body.RetryAt != nil || body.Publication != nil {
 			return nil, invalidEngineBody("release carries conflicting fields")
 		}
-		return store.ReleaseNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt)}, nil
+		switch store.NodeState(body.To) {
+		case store.NodeReady:
+			if body.SourceAttempt == nil {
+				return store.ReadyNode{Ref: ref, Actor: actor}, nil
+			}
+		case store.NodePending:
+			return store.ReleaseNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt)}, nil
+		}
+		return nil, invalidEngineBody("release requires ready without an attempt, or pending")
 	default:
 		return nil, invalidEngineBody("unsupported node command")
 	}

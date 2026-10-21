@@ -92,5 +92,8 @@ ORDER BY team,key`+tx.forUpdate(), tx.time.UnixNano())
 		}
 		keys = append(keys, key)
 	}
-	return keys, errors.Join(rows.Err(), rows.Close())
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return keys, tx.capacityLocked(ctx)
 }
