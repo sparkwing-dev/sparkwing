@@ -121,3 +121,64 @@ No web changes. No new production Go or SQL; one added shell line connects the e
 Xwing env context --session 1084 -o json: could not run (session-index lock path is read-only).
 No candidate installed. No real product HOME used. No staging or commit commands run.
 Temporary directory /tmp/sw-astra-WS15 removed after all checks completed.
+
+WS15 session 4 verification (after b3140c552)
+Environment: GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache TMPDIR=/tmp/sw-astra-WS15
+Integration: git merge-base --is-ancestor bw-3095-rewrite HEAD succeeded.
+The worktree started clean, with no pending merge.
+
+Regression before the fix:
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/store -run '^TestRestoreFailedResweepKeepsAcknowledgementHeld$' -count=1
+--- FAIL: TestRestoreFailedResweepKeepsAcknowledgementHeld (0.05s)
+    restore_test.go:106: failed resweep kept earlier success = {Epoch:restored Pending:true Reconciled:true AcknowledgedAt:0}, <nil>
+FAIL github.com/sparkwing-dev/sparkwing/internal/store 0.169s
+exit: 1
+
+After the fix:
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./internal/crons ./cmd/sparkwing-controller -run '^(TestEpoch|TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestSchemaDocumentationNamesBaseline|TestOpenExistingSchemaErrors|TestOpenRefusesAStoreFromAnotherBaseline|TestOlderSchema|TestTenantSQLScope|TestPaymentPull|TestRunCronTickLeased|TestTick)' -count=1
+ok internal/credentials 0.123s
+ok internal/capability 0.068s
+ok internal/store 2.509s
+ok internal/controller 0.967s
+ok internal/crons 2.473s
+ok cmd/sparkwing-controller 0.450s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test -tags rewrite_integration ./internal/store ./internal/controller ./cmd/sparkwing-controller -run '^(TestRestore|TestRestored|TestPeerAuthenticationCreates|TestSchemaError|TestSchemaDocumentationNamesBaseline|TestOpenExistingSchemaErrors|TestOpenRefusesAStoreFromAnotherBaseline|TestOlderSchema|TestTenantSQLScope|TestPaymentPull|TestRunCronTickLeased)' -count=1
+ok internal/store 2.034s
+ok internal/controller 0.739s
+ok cmd/sparkwing-controller 0.322s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing run ./internal/guardcheck /home/bombuntu/.xwing/envs/1084/sparkwing
+Additional environment: GOLANGCI_LINT_CACHE=/home/bombuntu/.xwing/envs/1084/sparkwing/.cache/golangci-lint
+guardcheck: every guard matches its allow-list
+exit: 0
+
+Investigation of the lead's reported authority failures, before production edits:
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/controller ./internal/store -run '^(TestPeerIntakeBudgetsFollowPlacement|TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty)$' -count=1
+ok internal/controller 0.365s
+ok internal/store 3.085s
+exit: 0
+
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing test ./internal/controller ./internal/store -run '^(TestPeerIntakeBudgetsFollowPlacement|TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty)$' -count=20
+ok internal/controller 3.018s
+--- FAIL: TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty (2.81s)
+    --- FAIL: TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty/6 (0.11s)
+        named_job_scope_test.go:67: authority expired while ancestry was locked
+--- FAIL: TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty (2.39s)
+    --- FAIL: TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty/7 (0.11s)
+        named_job_scope_test.go:67: authority has ended
+FAIL internal/store 61.482s
+exit: 1
+The cause remains undiagnosed. No claims, admission, or fixture changes made.
+
+Independent correctness review: no actionable findings. The committed reset
+precedes provider I/O, and supported restore commands hold controller exclusion.
+Doc mirrors and git diff --check passed.
+$ go -C /home/bombuntu/.xwing/envs/1084/sparkwing vet ./internal/store
+exit: 0
+NOT RUN: full suites, PostgreSQL and socket-dependent tests; harness lead owns these.
+No web changes. Xwing candidate context cannot create its read-only session-index lock.
+No candidate installed. No product binary used against real HOME. No git mutation commands run.
+Temporary directory /tmp/sw-astra-WS15 removed after all checks completed.

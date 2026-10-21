@@ -236,8 +236,10 @@ backup. It also holds schedules. Every preparation, including a retry,
 rotates the epoch again. Issue replacement credentials only after the last
 preparation. Reconciliation pulls provider payments through the same idempotent
 settlement path as webhooks. Cloud reconciliation needs the payment mode's
-provider and webhook credentials. A Checkout reservation created after the
-backup is absent from the restored database. Its provider metadata carries
+provider and webhook credentials. Every sweep clears the previous success
+before contacting the provider. A failed or interrupted resweep keeps
+acknowledgment blocked until a new sweep succeeds. A Checkout reservation
+created after the backup is absent from the restored database. Its provider metadata carries
 routing identity only, so reconciliation fails rather than inventing the
 missing reservation. Stop and repair the reservation with an operator before
 retrying. There is no supported reservation-repair API.

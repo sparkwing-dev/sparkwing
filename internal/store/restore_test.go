@@ -86,3 +86,37 @@ func TestRestoreHoldsSchedulesUntilReconciliationAndAcknowledgement(t *testing.T
 		t.Fatalf("same epoch reentered restore = %+v, %v", state, err)
 	}
 }
+
+func TestRestoreFailedResweepKeepsAcknowledgementHeld(t *testing.T) {
+	s := authorityStore(t)
+	op := s.AsOperator()
+	ctx := t.Context()
+	if err := op.PrepareRestore(ctx, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.ReconcileRestore(ctx, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("provider payment has no restored team correlation")
+	if err := op.ReconcileRestore(ctx, func(context.Context) error {
+		if err := op.AcknowledgeRestore(ctx); err == nil {
+			t.Fatal("earlier sweep allowed acknowledgement during a resweep")
+		}
+		return failure
+	}); !errors.Is(err, failure) {
+		t.Fatalf("failed resweep = %v", err)
+	}
+	state, err := op.RestoreStatus(ctx)
+	if err != nil || !state.Pending || state.Reconciled {
+		t.Fatalf("failed resweep kept earlier success = %+v, %v", state, err)
+	}
+	if err := op.AcknowledgeRestore(ctx); err == nil {
+		t.Fatal("earlier sweep allowed acknowledgement after a failed resweep")
+	}
+	if err := op.ReconcileRestore(ctx, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.AcknowledgeRestore(ctx); err != nil {
+		t.Fatalf("successful retry did not release acknowledgement: %v", err)
+	}
+}

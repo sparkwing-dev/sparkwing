@@ -24,7 +24,8 @@ For a restore at a matching schema, stop the controller and follow
 2. Run `sparkwing-controller restore prepare`. Every invocation rotates the
    epoch and invalidates all earlier bearer tokens and dashboard sessions.
 3. Run `sparkwing-controller restore reconcile`. Provider facts settle through
-   the normal idempotent payment path before acknowledgment is allowed.
+   the normal idempotent payment path before acknowledgment is allowed. A failed
+   or interrupted resweep invalidates the earlier success and requires a retry.
 4. Inspect restored state, then run `sparkwing-controller restore acknowledge`.
    This discards schedule instants through the acknowledgment time.
 5. Supply a fresh `bootstrap-admin-token` seed before startup. Reissue runner

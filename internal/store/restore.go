@@ -98,12 +98,20 @@ func writeRestoreStateTx(ctx context.Context, tx *storeTx, state RestoreState) e
 
 // ReconcileRestore records a successful provider pull without holding a transaction across network calls.
 func (o *Operator) ReconcileRestore(ctx context.Context, pull func(context.Context) error) error {
-	state, err := o.RestoreStatus(ctx)
+	state, err := inTxResult(ctx, o.s, func(tx *storeTx) (RestoreState, error) {
+		state, err := restoreStateTx(ctx, tx)
+		if err != nil {
+			return state, err
+		}
+		if !state.Pending || pull == nil {
+			return state, errors.New("restore reconciliation requires a prepared restore and a provider sweep")
+		}
+		// A failed or interrupted resweep must invalidate an earlier success.
+		state.Reconciled = false
+		return state, writeRestoreStateTx(ctx, tx, state)
+	})
 	if err != nil {
 		return err
-	}
-	if !state.Pending || pull == nil {
-		return errors.New("restore reconciliation requires a prepared restore and a provider sweep")
 	}
 	if err := pull(ctx); err != nil {
 		return err

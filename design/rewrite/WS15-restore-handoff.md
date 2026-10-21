@@ -14,6 +14,23 @@ Session 3 resolves both integration conflicts in the working files: retain schem
 
 Focused normal and `rewrite_integration` restore, epoch, payment-pull, cron, directional-schema and SQL guard tests pass, as does full guardcheck. Shell syntax, embedded-doc drift and diff whitespace checks pass. No new tests were needed because the existing drift test catches the stale examples. The lead's latest test output reports passing store suites and guardcheck, with `TestExpansionFansOutAndHoldsItsWaiter` failing in the admission lane. Full suites, PostgreSQL, socket checks and independent review remain with the lead. Candidate inspection still cannot create Xwing's session-index lock inside the sandbox.
 
+Session 4 fixes stale reconciliation success. A successful sweep followed by
+a failed resweep previously left `Reconciled=true`, allowing acknowledgment.
+`ReconcileRestore` now commits the reset before calling the provider. A failed
+or interrupted call keeps acknowledgment blocked until another sweep succeeds.
+The new regression failed on the previous code and covers acknowledgment
+during the call, after failure, and after a successful retry. This adds 8
+production Go lines to the existing restore owner, for cumulative WS15 growth
+of 732 Go lines and 1 SQL line. No parallel redesign files changed.
+
+Focused normal and tagged checks pass. Independent correctness review found
+no actionable issue. The lead's two reported authority failures both passed
+in isolation. A 20-run repeat reproduced the named-job failure twice, at
+`named_job_scope_test.go:67`, with `authority expired while ancestry was locked`
+and `authority has ended`. The peer-placement test passed all 20 runs. This
+does not establish the cause of either failure. They are outside the restore
+diff. Test commands and output are in `WS15-test-output.txt`.
+
 ## Decisions needing the lead
 
 B63 is covered. B61 cannot be fully closed without authoritative recovery of reservations created after the backup and usage lost after it. Provider metadata only routes payments; it cannot recreate trusted team correlations. Uncorrelated pulls fail before settlement and keep the restore held. Recommend an external authoritative correlation/usage journal rather than weakening settlement authority. The limitation is explicit in the operator and migration docs.
