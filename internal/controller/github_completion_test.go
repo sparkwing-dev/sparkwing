@@ -122,10 +122,11 @@ type githubCompletionFixture struct {
 
 func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	t.Helper()
+	f := &githubCompletionFixture{t: t, now: time.Now(), api: &completionGitHub{repository: 42, name: "acme/app", checksGranted: true}}
 	clock := &testClock{}
-	server, tenant, finish := preparedProfileRun(t, clock.option())
-	f := &githubCompletionFixture{t: t, server: server, tenant: tenant, finish: finish, now: time.Now(), api: &completionGitHub{repository: 42, name: "acme/app", checksGranted: true}}
 	clock.pin(func() time.Time { return f.now })
+	server, tenant, finish := preparedProfileRun(t, clock.option())
+	f.server, f.tenant, f.finish = server, tenant, finish
 	app := runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", Event: "push", VerifiedAt: f.now}
 	f.changeRequest(func(input *runspec.Request) {
 		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: app.SHA, Ref: app.Ref, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}}

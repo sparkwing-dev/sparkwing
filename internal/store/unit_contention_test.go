@@ -22,11 +22,11 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 				target = storetest.NewPostgres(t)
 			}
 			s := target.Open(t)
+			now := time.Unix(1700000000, 0).UTC()
+			s.SetTestClock(t, func() time.Time { return now })
 			demand := s.TestOnlyUnitDemand(t)
 			replica := target.Open(t)
-			if dialect == "sqlite" {
-				replica.TestOnlyClock(time.Unix(1700000000, 0).UTC())
-			}
+			replica.SetTestClock(t, func() time.Time { return now })
 			random := rand.New(rand.NewPCG(91, 773))
 			for round := range 8 {
 				t.Run(fmt.Sprint(round), func(t *testing.T) {
