@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc/githuboidctest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testing.T) {
@@ -198,6 +199,13 @@ func TestGitHubAppRunsAnywhereUnlessTheRepositoryPinsCloud(t *testing.T) {
 	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := team.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "app-runner-fixture", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	for pipeline, runner := range map[string]string{"any-build": "", "cloud-build": "cloud"} {
 		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"runner": runner}); code != http.StatusOK {
 			t.Fatalf("subscribe %s runner=%q: %d", pipeline, runner, code)

@@ -676,6 +676,13 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.connect(bob, 502, 8, nil)
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := team.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "app-team-fixture", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
@@ -694,10 +701,6 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 	got := f.triggers(olga.team)
 	if len(got) != 1 || got[0].Pipeline != "build" || got[0].GitSHA != headSHA || got[0].Repo != "acme/widgets" {
 		t.Fatalf("olga's triggers = %+v", got)
-	}
-	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
 	}
 	run, err := team.GetRun(t.Context(), got[0].ID)
 	if err != nil || run.Status != "pending" {
