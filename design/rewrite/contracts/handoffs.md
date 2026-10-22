@@ -1001,3 +1001,28 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-21 Korey decision 45: one admission owner in the store
 
 - All logical concurrency capacity is held by one durable admission module in the controller's store (the local store in local mode) (design: simplicity/CONTROLLER-ONLY-ADMISSION.md). Owners and hosts never acquire; they ask to start work under an award and receive admit, wait, skip or fail. Each level's group set is granted atomically with one arrival sequence; reservation identity belongs to the work, not the coordinator, so handoff never moves it. Decisions 37, 38 and 42 stand.
+
+## 2026-10-21 Korey decision 46: a restore may lose usage, never a payment
+
+- After a point-in-time restore, usage and credit holds recorded after the restore point are not recovered; that credit stays with the customer (no usage journal). Customers are never overcharged by a restore.
+- Guarantee: no Stripe payment is ever lost. Restore reconciliation pulls every provider payment, refund and dispute since the backup through the idempotent settlement path. Any provider object that cannot be matched to a team's records blocks the operator's restore acknowledgment until it is resolved by hand, and stays listed until then.
+
+## 2026-10-21 Korey decision 47: restore payment recovery is a manual runbook
+
+- Amends decision 46. Automated restore reconciliation is removed: no pull-based settlement path, card-order recovery, purge closure evidence or periodic Stripe sweep (Stripe retries webhooks for 3 days and the durable inbox catches them). After a restore an operator compares Stripe with the ledger and applies any missing payment, refund or dispute with the existing operator tools, following a runbook kept outside the repository. A small read-only "provider objects since <time> and whether the ledger has them" report may stay if it is small.
+- Kept automatic: the credential epoch (revoked credentials stay revoked) and the post-restore schedule hold.
+- Principle: a rare, low-severity failure that is easy to recover by hand gets a runbook, not a system. Code volume must match the problem's frequency and severity.
+
+## 2026-10-21 Korey decision 48: masking is a host feature
+
+- Ratifies decision 43's consequence: pipeline code run without a Sparkwing host (a pipeline binary or SDK invoked directly) gets no secret masking, as it gets no concurrency or other host-provided guarantees. Every supported run path (sparkwing run, runners, Cloud, sparkwingtest) goes through the host. Documented as a host feature, matching GitHub Actions, where masking happens in the runner's log stream.
+
+## 2026-10-21 Korey decision 49: only the length rule refuses a secret
+
+- Amends decision 43. Secrets containing `***` are not refused. The contrived case where masking one secret forms another secret that contains the marker is accepted (rare, low severity); the masking property test excludes marker-containing secrets with a comment explaining why.
+- Ratifies the narrowed length rule: refuse only values a customer stores or supplies that are shorter than 4 characters (stored secrets, supplied secret args and list items, non-empty secret defaults of the selected pipeline). Derived values (proxy credential parts, encodings) shorter than the minimum are skipped for masking, not refused; defaults of unselected pipelines and empty defaults are not validated.
+
+## 2026-10-21 Korey decision 50: overbuilt-code cuts and SDK rules moved to the host
+
+- Cut (rare, cheap, manually recoverable; simplicity/OVERBUILT-SWEEP.md): the unused objectguard measurement coalescer; the cross-controller bucket-measurement lease (decision 29 allows one controller); the self-repairing diagnostic incarnation counter (use a fresh identity); the temporary storage-ceiling thaw policy; physical-space accounting during cache deletion; transactional hook installation with concurrent-edit detection; snapshot-exact `daemon events` continuation cursors. The binary-cache eviction queue becomes a plain bounded scan that deletes oldest entries. `hooks status --prove` (synthetic commit proof) is replaced by a status check comparing installed hooks with the expected content; DELIVERY.md's gates policy is updated to match.
+- Moved to the host (simplicity/SDK-TO-HOST-SWEEP.md): argument defaults, required/unknown checks, validation and normalization (SDKs keep typed shells; one host validator after describe is authoritative); plan validation (TypeScript's independent DAG checker deleted); secret declaration validation; label normalization (claims lane); the annotation range check. Memo input computation moves to the executing host after the admission redesign lands (existing memo caches are invalidated).

@@ -1,4 +1,4 @@
-package envredact
+package envredact_test
 
 import (
 	"testing"

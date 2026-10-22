@@ -8,6 +8,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -32,7 +33,12 @@ func TestGoSDKInstallCacheIgnoresDisabledWorkspace(t *testing.T) {
 	var diagnostics bytes.Buffer
 	install := func() string {
 		t.Helper()
-		_, cached, err := installGoSDK(t.Context(), dir, engine.SDKInstallRequest{ExecutableDirectory: t.TempDir()}, pin, os.Environ(), &diagnostics, secrets.NewMasker())
+		masker := secrets.NewMasker()
+		environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, cached, err := installGoSDK(t.Context(), dir, engine.SDKInstallRequest{ExecutableDirectory: t.TempDir()}, pin, environment, &diagnostics, masker)
 		if err != nil {
 			t.Fatalf("install: %v: %s", err, &diagnostics)
 		}

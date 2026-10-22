@@ -25,58 +25,58 @@ type SDKEnvironment struct {
 	Store     EvaluationStore
 	Masks     *MaskRegistry
 	Snapshots CapturedEnvironmentLoader
-	Build     func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	Build     func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error)
 	Split     func([]procenv.Assignment) (procenv.JobEnv, error)
 }
 
-func (e SDKEnvironment) planning(ctx context.Context, input PlanningProcessInput) ([]string, error) {
+func (e SDKEnvironment) planning(ctx context.Context, input PlanningProcessInput) (procenv.Env, error) {
 	if input.Run.RunID == "" || input.Run.Pipeline == "" {
-		return nil, errors.New("SDK planning environment requires sealed run identity")
+		return procenv.Env{}, errors.New("SDK planning environment requires sealed run identity")
 	}
 	return e.build(ctx, procenv.Plan, input.Environment, sdkRuntime(input.Run, input.Runner))
 }
 
-func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity) ([]string, error) {
+func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity) (procenv.Env, error) {
 	env, _, err := e.jobEnvironments(ctx, kind, accepted, nodeID, generation, specHash, runner, false)
 	return env, err
 }
 
-func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity, cleanup bool) ([]string, []string, error) {
+func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity, cleanup bool) (procenv.Env, procenv.Env, error) {
 	if err := context.Cause(ctx); err != nil {
-		return nil, nil, err
+		return procenv.Env{}, procenv.Env{}, err
 	}
 	if e.Store == nil || accepted.RunID == "" || nodeID == "" || generation < 0 || specHash == "" {
-		return nil, nil, errors.New("SDK job environment requires persisted job identity")
+		return procenv.Env{}, procenv.Env{}, errors.New("SDK job environment requires persisted job identity")
 	}
 	var spec runspec.Spec
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
-		return nil, nil, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
+		return procenv.Env{}, procenv.Env{}, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
 	}
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(accepted.RunID), NodeID: runspec.NodeID(nodeID)}
 	row, err := e.Store.ReadNode(ctx, ref)
 	if err != nil {
-		return nil, nil, err
+		return procenv.Env{}, procenv.Env{}, err
 	}
 	if row.Ref != ref || row.Generation != runspec.ClaimGeneration(generation) || row.SpecHash != specHash {
-		return nil, nil, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
+		return procenv.Env{}, procenv.Env{}, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
 	}
 	var job nodeproto.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil || job.ID != nodeID {
-		return nil, nil, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
+		return procenv.Env{}, procenv.Env{}, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
 	}
 	runtime := sdkRuntime(executorRunContext(spec), runner)
 	// safety: retry seals retain the source run ID; runtime identity belongs to the destination row.
 	runtime.RunID = accepted.RunID
 	runtime.JobID = nodeID
 	if err := context.Cause(ctx); err != nil {
-		return nil, nil, err
+		return procenv.Env{}, procenv.Env{}, err
 	}
-	return projectJobEnvironment(kind, job.Env, runtime, cleanup, e.Split, func(kind procenv.Kind, runtime procenv.Runtime) ([]string, error) {
+	return projectJobEnvironment(kind, job.Env, runtime, cleanup, e.Split, func(kind procenv.Kind, runtime procenv.Runtime) (procenv.Env, error) {
 		return e.build(ctx, kind, spec.Request.Request.Env, runtime)
 	})
 }
 
-func projectJobEnvironment(kind procenv.Kind, env map[string]nodeproto.EnvValue, runtime procenv.Runtime, cleanup bool, split func([]procenv.Assignment) (procenv.JobEnv, error), build func(procenv.Kind, procenv.Runtime) ([]string, error)) ([]string, []string, error) {
+func projectJobEnvironment(kind procenv.Kind, env map[string]nodeproto.EnvValue, runtime procenv.Runtime, cleanup bool, split func([]procenv.Assignment) (procenv.JobEnv, error), build func(procenv.Kind, procenv.Runtime) (procenv.Env, error)) (procenv.Env, procenv.Env, error) {
 	assignments := make([]procenv.Assignment, 0, len(env))
 	for name, value := range env {
 		assignments = append(assignments, procenv.Assignment{Name: name, Value: value.Value, Startup: value.Startup})
@@ -87,45 +87,45 @@ func projectJobEnvironment(kind procenv.Kind, env map[string]nodeproto.EnvValue,
 	}
 	jobEnv, err := split(assignments)
 	if err != nil {
-		return nil, nil, err
+		return procenv.Env{}, procenv.Env{}, err
 	}
 	runtime.Startup = jobEnv.Startup
 	if kind == procenv.StepTool || kind == procenv.Cleanup {
 		runtime.Startup = append(runtime.Startup, jobEnv.Body...)
 		attempt, err := build(procenv.Attempt, runtime)
 		if err != nil {
-			return nil, nil, err
+			return procenv.Env{}, procenv.Env{}, err
 		}
 		env, err := build(kind, procenv.Runtime{AttemptEnv: attempt})
-		return env, nil, err
+		return env, procenv.Env{}, err
 	}
 	startup, err := build(kind, runtime)
 	if err != nil || !cleanup {
-		return startup, nil, err
+		return startup, procenv.Env{}, err
 	}
 	complete := startup
 	if len(jobEnv.Body) != 0 {
 		runtime.Startup = append(slices.Clone(runtime.Startup), jobEnv.Body...)
 		complete, err = build(procenv.Attempt, runtime)
 		if err != nil {
-			return nil, nil, err
+			return procenv.Env{}, procenv.Env{}, err
 		}
 	}
 	complete, err = build(procenv.Cleanup, procenv.Runtime{AttemptEnv: complete})
 	if err != nil {
-		return nil, nil, err
+		return procenv.Env{}, procenv.Env{}, err
 	}
 	return startup, complete, nil
 }
 
-func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runspec.EnvSnapshot, runtime procenv.Runtime) ([]string, error) {
+func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runspec.EnvSnapshot, runtime procenv.Runtime) (procenv.Env, error) {
 	build := e.Build
 	if build == nil {
 		build = procenv.Build
 	}
 	base, err := capturedBase(ctx, e.Base, e.Snapshots, seal)
 	if err != nil {
-		return nil, err
+		return procenv.Env{}, err
 	}
 	runtime.GateIndex = ""
 	if base.Local {
@@ -141,13 +141,12 @@ func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runsp
 	}
 	env, err := build(kind, base, runtime)
 	if err != nil {
-		return nil, err
+		return procenv.Env{}, err
 	}
 	if err := context.Cause(ctx); err != nil {
-		return nil, err
+		return procenv.Env{}, err
 	}
-	// safety: an empty built environment must remain explicit to os/exec.
-	return append([]string{}, env...), nil
+	return env, nil
 }
 
 func sdkRuntime(run nodeproto.RunContext, runner nodeproto.RunnerIdentity) procenv.Runtime {

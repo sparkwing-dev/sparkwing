@@ -1,18 +1,13 @@
 package capability
 
-import (
-	"testing"
-	"time"
+import "testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-)
-
-func TestBillingMinimumsUseLimits(t *testing.T) {
+func TestBillingMinimumsMatchContract(t *testing.T) {
 	want := map[BillingUnit]int64{
 		BillingPlan: 0,
 		BillingEval: 0,
-		BillingJob:  int64(limits.WorkBillingMinimum / time.Second),
-		BillingHost: int64(limits.HostBillingMinimum / time.Second),
+		BillingJob:  60,
+		BillingHost: 60,
 	}
 	for _, rule := range billingRules {
 		minimum, ok := want[rule.Unit]

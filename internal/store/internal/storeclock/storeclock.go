@@ -7,3 +7,6 @@ import "time"
 // Option is set by the store package at init and returns a store.Option that
 // installs clock; teststore converts the result back to store.Option.
 var Option func(clock func() time.Time) any
+
+// Now returns the clock of a store passed by teststore.
+var Now func(store any) time.Time

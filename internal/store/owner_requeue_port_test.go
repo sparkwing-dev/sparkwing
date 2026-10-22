@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
@@ -66,7 +65,7 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 					t.Fatalf("refused recovery changed live work: %v", err)
 				}
 				if !cloud {
-					charged += max(int64(limits.HostBillingMinimum/time.Second), int64(claim.Award.LeaseExpiresAt.Sub(*now)/time.Second)) * 2
+					charged += max(60, int64(claim.Award.LeaseExpiresAt.Sub(*now)/time.Second)) * 2
 				}
 				*now = claim.Award.LeaseExpiresAt
 				for replay := range 2 {
@@ -106,7 +105,7 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 		}
 	}
 	if !cloud {
-		charged += int64(limits.HostBillingMinimum/time.Second) * 2
+		charged += 120
 	}
 	unitBillingTotal(t, s, charged, true)
 	before, err := tenant.ReadSnapshot(t.Context(), claim.RunID)

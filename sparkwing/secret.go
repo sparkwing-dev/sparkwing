@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"errors"
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
 // ErrSecretMissing classifies a "no entry for this name" outcome from
@@ -16,16 +16,11 @@ import (
 // Every secrets backend returns this same value, so
 // `errors.Is(err, sparkwing.ErrSecretMissing)` matches a miss from any of
 // them.
-var ErrSecretMissing = errors.New("secret missing")
+var ErrSecretMissing = secretname.ErrMissing
 
-// SecretResolver resolves a stored value to (plain, masked) at the
-// moment of the call. The orchestrator installs a resolver on the
-// run ctx; jobs read values through the package-level Secret / Variable
-// helpers.
-//
-// Resolution is on-demand: no plan-time declaration, no dispatch-time
-// pre-injection. Implementations are expected to cache successful
-// results per-run and register masked values with the run's log masker.
+// secretResolver resolves names declared by SecretsProvider during describe.
+// sdkOperations.Context installs a service-backed resolver; Secret and Variable
+// resolve values lazily when jobs request them.
 //
 // The masked return drives strict matching at the SDK call site:
 // Secret errors on masked=false entries, Variable errors on masked=true
@@ -34,18 +29,17 @@ type secretResolver interface {
 	resolve(ctx context.Context, name string) (value string, masked bool, err error)
 }
 
-// SecretResolverFunc adapts a function to SecretResolver.
+// secretResolverFunc adapts a function to secretResolver.
 type secretResolverFunc func(ctx context.Context, name string) (value string, masked bool, err error)
 
-// Resolve satisfies SecretResolver.
+// resolve satisfies secretResolver.
 func (f secretResolverFunc) resolve(ctx context.Context, name string) (string, bool, error) {
 	return f(ctx, name)
 }
 
 const keySecretResolver ctxKey = 100
 
-// WithSecretResolver returns a derived ctx carrying the given resolver.
-// The orchestrator installs one per run; jobs reach it via Secret.
+// withSecretResolver returns a derived ctx carrying the given resolver.
 func withSecretResolver(ctx context.Context, r secretResolver) context.Context {
 	return context.WithValue(ctx, keySecretResolver, r)
 }

@@ -26,7 +26,7 @@ func checkBlobManifestRecords(t testing.TB, ctx context.Context, root string, ob
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedPresence(ctx, teststore.SQL(t, s))
+	request, err := teststore.SeedPresence(ctx, s)
 	if err != nil {
 		return err
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name string) (store.Actor, error) {
@@ -58,7 +59,7 @@ func checkRecoveryCapacity(t *testing.T) error {
 			return fmt.Errorf("queue %s: %+v, %v", group.key, got, err)
 		}
 	}
-	if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
+	if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, teststore.Now(f.s).UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
 		return err
 	}
 	beat, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder)

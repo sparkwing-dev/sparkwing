@@ -49,12 +49,12 @@ func TestCapturedHostEnvironment(t *testing.T) {
 			cfg := ProtocolSessionConfig{Revoke: func() error { revocations++; return nil }, Environments: SDKEnvironment{
 				Snapshots: snapshots, Store: st,
 				Base: procenv.Base{Local: true, Captured: []string{"SPARKWING_CUSTOM=changed"}, Ambient: []string{"EMPTY=daemon"}},
-				Build: func(_ procenv.Kind, base procenv.Base, runtime procenv.Runtime) ([]string, error) {
+				Build: func(_ procenv.Kind, base procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 					builds++
 					if !reflect.DeepEqual(base.Captured, want) || runtime.RunID != input.Accepted.RunID {
 						t.Fatalf("captured=%v runtime=%+v", base.Captured, runtime)
 					}
-					return nil, refused
+					return procenv.Env{}, refused
 				},
 			}}
 			var process ExecutorProcess

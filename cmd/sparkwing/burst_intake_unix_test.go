@@ -161,7 +161,7 @@ func FuzzBurstHostSourceEnvironmentExcludesRequesterValues(f *testing.F) {
 				t.Fatal(err)
 			}
 			path, cache, modules := false, false, false
-			for _, item := range environment {
+			for item := range environment.Values() {
 				name, _, _ := strings.Cut(item, "=")
 				if name == "TOKEN" || name == "BURST_USER_VALUE" {
 					t.Fatal("requester value escaped the remote environment policy")

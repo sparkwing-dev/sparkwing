@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -274,22 +275,24 @@ func TestStoreAdmissionSQLiteQueueTimeoutAndLimitPolicies(t *testing.T) {
 		reason string
 	}{{"queue", store.NodeFailed, store.FailureQueueTimeout}, {"skip", store.NodeSkipped, ""}, {"fail", store.NodeFailed, ""}} {
 		t.Run(test.policy, func(t *testing.T) {
-			fixture := newStoreHostFixture(t, capacityPlan(test.policy, 10, "a", "b"))
-			admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
-			if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { return nil }); err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			err := admission.Node(ctx, fixture.Accepted, capacityRow(t, fixture, "b"), func(context.Context) error { t.Error("ran beyond full group"); return nil })
-			var failure *AdmissionFailure
-			if !errors.As(err, &failure) || failure.Outcome != test.want || failure.Reason != test.reason {
-				t.Fatalf("refusal=%v", err)
-			}
-			state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
-			if err != nil || len(state.Waiters) != 0 || len(state.Holders) != 1 {
-				t.Fatalf("refused state=%+v err=%v", state, err)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				fixture := newStoreHostFixture(t, capacityPlan(test.policy, 10, "a", "b"), teststore.WithClock(time.Now))
+				admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+				if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				err := admission.Node(ctx, fixture.Accepted, capacityRow(t, fixture, "b"), func(context.Context) error { t.Error("ran beyond full group"); return nil })
+				var failure *AdmissionFailure
+				if !errors.As(err, &failure) || failure.Outcome != test.want || failure.Reason != test.reason {
+					t.Fatalf("refusal=%v", err)
+				}
+				state, err := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+				if err != nil || len(state.Waiters) != 0 || len(state.Holders) != 1 {
+					t.Fatalf("refused state=%+v err=%v", state, err)
+				}
+			})
 		})
 	}
 }

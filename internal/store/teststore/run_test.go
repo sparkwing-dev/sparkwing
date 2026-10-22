@@ -1,6 +1,7 @@
 package teststore_test
 
 import (
+	"crypto/sha256"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -14,7 +15,8 @@ import (
 )
 
 func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	now := time.Unix(1700000000, 123).UTC()
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,8 +25,11 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if _, err := teststore.SeedUpload(t.Context(), teststore.SQL(t, s)); err != nil {
+	if _, err := teststore.SeedUpload(t.Context(), s); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte("upload-boundary"))); err != nil {
+		t.Fatalf("publication authority differs from fixture clock: %v", err)
 	}
 	started := time.Unix(1700000000, 123).UTC()
 	seed := store.Node{RunID: "upload", NodeID: "report", Status: "pending", Deps: []string{"previous"}, StartedAt: &started, AttemptsConsumed: 2}
@@ -59,7 +64,7 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	}
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)}
 	running, err := tenant.ReadNode(t.Context(), ref)
-	if err != nil || running.Status != store.StatusRunning || running.StartedAt == nil || running.Attempt != 1 || running.ClaimedBy == "" || running.CapabilityPrefix == "" || running.LeaseExpiresAt == nil || running.Generation != 1 {
+	if err != nil || running.Status != store.StatusRunning || running.StartedAt == nil || !running.StartedAt.Equal(now) || running.LeaseExpiresAt == nil || !running.LeaseExpiresAt.Equal(now.Add(time.Hour)) || running.Attempt != 1 || running.ClaimedBy == "" || running.CapabilityPrefix == "" || running.Generation != 1 {
 		t.Fatalf("running fixture: %+v %v", running, err)
 	}
 	if err := teststore.SeedNodeFinish(s, t.Context(), store.DefaultTeam, ref, store.NodeResult{Outcome: store.NodeSuccess}); err != nil {

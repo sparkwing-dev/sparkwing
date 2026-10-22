@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
@@ -163,7 +163,7 @@ func Preflight(ctx context.Context, h Host) error {
 
 // DefaultExec runs a native service command and returns its combined output.
 func DefaultExec(ctx context.Context, name string, args ...string) (string, error) {
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	out, err := procenv.HostCommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
 

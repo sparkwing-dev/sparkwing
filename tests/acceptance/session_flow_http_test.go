@@ -126,7 +126,7 @@ func TestSessionFlowHTTPRenewsWithNamedProof(t *testing.T) {
 			t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 		}
 		count, expires := f.state(t)
-		if count != 1 || expires/time.Second.Nanoseconds() != result.Expires || result.Expires < time.Now().Add(6*24*time.Hour).Unix() {
+		if count != 1 || expires/time.Second.Nanoseconds() != result.Expires || result.Expires < teststore.Now(f.store).Add(6*24*time.Hour).Unix() {
 			t.Fatalf("stored=%d/%d result=%+v", count, expires, result)
 		}
 	}
@@ -295,15 +295,15 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			query, value := "", int64(0)
 			switch state {
 			case "expired":
-				query, value = "UPDATE sessions SET expires_at=? WHERE hash=?", time.Now().Add(-time.Hour).UnixNano()
+				query, value = "UPDATE sessions SET expires_at=? WHERE hash=?", teststore.Now(f.store).Add(-time.Hour).UnixNano()
 			case "revoked":
-				query, value = "UPDATE sessions SET revoked_at=? WHERE hash=?", time.Now().UnixNano()
+				query, value = "UPDATE sessions SET revoked_at=? WHERE hash=?", teststore.Now(f.store).UnixNano()
 			case "removed member":
 				query = "DELETE FROM memberships"
 			case "maximum lifetime":
-				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(-31*24*time.Hour).UnixNano()
+				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", teststore.Now(f.store).Add(-31*24*time.Hour).UnixNano()
 			case "future creation":
-				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", time.Now().Add(time.Hour).UnixNano()
+				query, value = "UPDATE sessions SET created_at=? WHERE hash=?", teststore.Now(f.store).Add(time.Hour).UnixNano()
 			case "license":
 			case "missing key":
 				f.restartWithCipher(t, nil)

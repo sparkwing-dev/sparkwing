@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -18,7 +19,7 @@ func TestNativeGitEnvironmentExcludesInheritedControlsProperty(t *testing.T) {
 		}
 		got, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: captured}, procenv.Runtime{})
 		want := []string{"GIT_NO_REPLACE_OBJECTS=1", "GIT_SSL_CAINFO=/ca.pem", "GIT_SSL_CAPATH=/certs", "HOME=/private/home", "PATH=/bin"}
-		if err != nil || !reflect.DeepEqual(got, want) {
+		if err != nil || !reflect.DeepEqual(slices.Collect(got.Values()), want) {
 			t.Logf("Git environment = %v, error = %v", got, err)
 			return false
 		}

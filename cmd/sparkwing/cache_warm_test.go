@@ -120,8 +120,8 @@ func TestCacheWarmCanceledBeforePreparation(t *testing.T) {
 	}
 }
 
-func cacheWarmTestEnvironment(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) {
-	return []string{"PATH=/tools"}, nil
+func cacheWarmTestEnvironment(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) {
+	return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: []string{"PATH=/tools"}}, procenv.Runtime{})
 }
 
 func TestCacheWarmUsesInstallEnvironmentBeforeClearing(t *testing.T) {
@@ -129,11 +129,11 @@ func TestCacheWarmUsesInstallEnvironmentBeforeClearing(t *testing.T) {
 	deps := cacheWarmDependencies{
 		environment: []string{"PATH=/tools", "SECRET=private"},
 		locate:      func() (string, error) { return "/checkout/.sparkwing", nil },
-		buildEnv: func(kind procenv.Kind, base procenv.Base, rt procenv.Runtime) ([]string, error) {
+		buildEnv: func(kind procenv.Kind, base procenv.Base, rt procenv.Runtime) (procenv.Env, error) {
 			if kind != procenv.Install || !base.Local || !reflect.DeepEqual(base.Captured, []string{"PATH=/tools", "SECRET=private"}) || !reflect.DeepEqual(rt, procenv.Runtime{}) {
 				t.Fatalf("wrong process policy: %v %+v %+v", kind, base, rt)
 			}
-			return nil, failure
+			return procenv.Env{}, failure
 		},
 	}
 	var out bytes.Buffer

@@ -19,12 +19,13 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 )
 
-func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+func commandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
+	return processCommandContext(ctx, environment, name, args...)
 }
 
 func configureProcessGroup(_ context.Context, cmd *exec.Cmd, _ <-chan struct{}) {
@@ -44,10 +45,7 @@ func configureProcessGroup(_ context.Context, cmd *exec.Cmd, _ <-chan struct{}) 
 		return
 	}
 	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
-	if cmd.Env == nil {
-		cmd.Env = os.Environ()
-	}
-	cmd.Env = append(cmd.Env, variable+"="+program)
+	procenv.ConfigureWindowsBash(cmd, program)
 }
 
 func commandResourceUsage(*exec.Cmd) (time.Duration, int64, bool) { return 0, 0, false }

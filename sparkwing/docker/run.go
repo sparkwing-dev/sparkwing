@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sort"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"
 )
@@ -144,7 +144,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		}
 	}
 
-	startCmd := exec.CommandContext(ctx, "docker", "start", "-a", name)
+	startCmd := procenv.HostCommandContext(ctx, "docker", "start", "-a", name)
 	startCmd.Stdout = opts.Stdout
 	startCmd.Stderr = opts.Stderr
 	if err := startCmd.Run(); err != nil {

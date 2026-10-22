@@ -26,17 +26,17 @@ func TestRunnerInstallEnvironmentUsesSharedPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, entry := range ambient[:5] {
-				if !slices.Contains(env, entry) {
+				if !slices.Contains(slices.Collect(env.Values()), entry) {
 					t.Fatalf("missing remote base %q", entry)
 				}
 			}
 			for _, entry := range ambient[5:8] {
-				if slices.Contains(env, entry) {
+				if slices.Contains(slices.Collect(env.Values()), entry) {
 					t.Fatalf("inherited unlisted control or credential %q", entry)
 				}
 			}
 			for _, entry := range ambient[8:] {
-				if slices.Contains(env, entry) != listed {
+				if slices.Contains(slices.Collect(env.Values()), entry) != listed {
 					t.Fatalf("allow-list verdict changed for %q", entry)
 				}
 			}
@@ -79,7 +79,7 @@ func FuzzRunnerProxyCredentialsRemainMasked(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Contains(env, "npm_config_registry="+value) {
+			if !slices.Contains(slices.Collect(env.Values()), "npm_config_registry="+value) {
 				t.Fatal("proxy setting was changed")
 			}
 			if strings.Contains(masker.Mask(password), part) {

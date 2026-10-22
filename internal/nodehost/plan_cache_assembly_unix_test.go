@@ -41,7 +41,9 @@ func TestNativePlanningAssemblesDefaultCacheFromAcquisition(t *testing.T) {
 		}
 		return process, err
 	}
-	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "gh:123", LocalCheckout: root, SHA: sha, PipelineDir: "."}, source.Options{Base: config.Source.Base, BuildEnvironment: func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) { return environment, nil }})
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "gh:123", LocalCheckout: root, SHA: sha, PipelineDir: "."}, source.Options{Base: config.Source.Base, BuildEnvironment: func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) {
+		return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: environment}, procenv.Runtime{})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

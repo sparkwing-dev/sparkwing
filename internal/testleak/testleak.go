@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"go.uber.org/goleak"
 )
 
@@ -76,7 +76,7 @@ func enterSandbox() string {
 }
 
 func resolveGoEnv() map[string]string {
-	out, err := exec.Command("go", "env", "-json", "GOENV", "GOPATH", "GOCACHE", "GOMODCACHE").Output()
+	out, err := procenv.HostCommand("go", "env", "-json", "GOENV", "GOPATH", "GOCACHE", "GOMODCACHE").Output()
 	if err != nil {
 		return nil
 	}

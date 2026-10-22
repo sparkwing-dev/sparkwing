@@ -1,0 +1,49 @@
+# Guard scope
+
+Run `go run ./internal/guardcheck .` for the repository guards. The spawn
+guard has no allow-list. It checks typed references because aliases, dot
+imports and function values must not hide process constructors.
+
+The spawn guard independently inventories production Go source in the root
+module, using Go's directory exclusions. It loads Linux, macOS and Windows
+on amd64 and arm64, the host's qatrust and cgo profiles, and FreeBSD packages
+that contain remaining Unix fallback files. Any source absent from the typed
+loads fails the guard. A new platform or build tag needs a checked profile,
+or its files keep the guard red. Test files, testdata, vendor, hidden and
+underscore directories, and nested modules are outside this inventory.
+
+Process constructors, exec.Cmd value construction and direct Cmd.Env access
+belong to procenv. Command and CommandContext take an opaque procenv.Env from
+Build. Its values can be read through an iterator, but its backing slice cannot
+be changed or replaced by callers. Go-tool additions use Env.GoTool, which
+checks names, filters credentials and registers masks before launch.
+
+In repos, pipelineentry, nodehost and engine (including subpackages), the guard
+refuses host and control process constructors and command environment mutation.
+Those packages must use the constructors that take procenv.Env. Host tooling
+elsewhere can capture an explicit environment with ControlCommand or preserve
+host inheritance with HostCommand. Source and build transports still carry
+ordinary slices. The protected launch boundary requires Build to apply policy
+before those values become an environment.
+
+# Accepted residuals
+
+These guards stop mistakes in our own code. They do not sandbox code that
+tries to evade them.
+
+- Reflection and json.Unmarshal can mutate an exec.Cmd returned by procenv,
+  including its environment. These are accepted because rewriting a process
+  environment through reflection or decoding is outside the supported launch
+  pattern. Hiding exec.Cmd behind a new execution API would add a second
+  lifecycle interface to cover that evasion.
+- Raw syscall instructions and Windows DLL procedure calls can create a
+  process without a named constructor. These are accepted because classifying
+  their numeric and dynamic targets would require a native-code sandbox.
+  The guard still refuses the named process APIs in os, os/exec, syscall and
+  x/sys.
+- Controller handlers remain in the authorization package's import graph.
+  TestAuthorizedHandlersDoNotAuthorize restores the authorization-only source
+  guard until a package boundary replaces it. Aliases and indirect helper calls
+  remain outside that test's proof because it matches source names. The RBAC
+  confinement test independently checks the complete rendered chart against
+  an authorizing API server.

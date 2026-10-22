@@ -73,10 +73,11 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, env []string, start 
 }
 
 func captureSnapshot(ctx context.Context, env []string, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string, selection *burstSourceSelection) (*worktreeSnapshot, error) {
-	env, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
+	prepared, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
 		return nil, err
 	}
+	env = slices.Collect(prepared.Values())
 	repoRoot, err := gitOutput(ctx, start, env, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
@@ -467,8 +468,7 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string
 		"GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
 		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
 	}
-	cmd := snapshotGitCommand(ctx, env, "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
-	cmd.Env = append(append([]string{}, env...), identity...)
+	cmd := snapshotGitCommand(ctx, append(append([]string{}, env...), identity...), "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
 	cmd.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -824,7 +824,6 @@ func snapshotGitCommand(ctx context.Context, env []string, args ...string) *exec
 		args = append([]string{"-c", "core.longpaths=true"}, args...)
 	}
 	// #nosec G702 -- fixed Git argv; Git callbacks receive the filtered environment.
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = append([]string{}, env...)
+	cmd := procenv.ControlCommandContext(ctx, append([]string{}, env...), "git", args...)
 	return cmd
 }

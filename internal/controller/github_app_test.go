@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,7 +82,9 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 		return srv
 	}
 	var primary *controller.Server
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	clock := new(atomic.Int64)
+	clock.Store(time.Now().UTC().UnixNano())
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		primary = assemble(st)
 		policies := primary.StorePolicies()
 		policies.ClaimProfiles = githubClaimEnvironment{location: "cloud"}
@@ -91,7 +94,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
+	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(teststore.Now(st), 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,8 +108,8 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 	t.Cleanup(ts.Close)
 	srv, url := primary, ts.URL
 	return &appFixture{
-		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv},
-		app:             app, replica: replica, logs: logs, inboxNow: time.Now().Add(time.Hour),
+		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv, clock: clock},
+		app:             app, replica: replica, logs: logs, inboxNow: teststore.Now(st).Add(time.Hour),
 	}
 }
 

@@ -57,7 +57,8 @@ func (s *Store) configurePolicies(policies Policies) {
 }
 
 func init() {
+	storeclock.Now = func(s any) time.Time { return s.(*Store).now() }
 	storeclock.Option = func(clock func() time.Time) any {
-		return Option{apply: func(s *Store) { s.clock = clock }}
+		return Option{apply: func(s *Store) { s.clock, s.pinnedClock = clock, s.now }}
 	}
 }

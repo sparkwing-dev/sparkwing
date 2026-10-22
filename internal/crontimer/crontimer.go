@@ -17,11 +17,11 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
@@ -160,7 +160,7 @@ func Status(ctx context.Context, h Host) (State, error) {
 // DefaultExec runs a command and returns its output, stdout and stderr
 // combined, for a Host that talks to the real machine.
 func DefaultExec(ctx context.Context, name string, args ...string) (string, error) {
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	out, err := procenv.HostCommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
 

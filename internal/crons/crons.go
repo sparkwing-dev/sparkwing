@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -576,12 +576,12 @@ func readCheckout(ctx context.Context, root string) checkoutState {
 	var state checkoutState
 	ctx, cancel := context.WithTimeout(ctx, checkoutReadTimeout)
 	defer cancel()
-	head, err := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD").Output()
+	head, err := procenv.HostCommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return state
 	}
 	state.head = strings.TrimSpace(string(head))
-	status, err := exec.CommandContext(ctx, "git", "-C", root, "status", "--porcelain").Output()
+	status, err := procenv.HostCommandContext(ctx, "git", "-C", root, "status", "--porcelain").Output()
 	if err != nil {
 		return state
 	}

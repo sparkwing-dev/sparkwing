@@ -13,13 +13,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+func commandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
 	if policy, ok := execdiag.FromContext(ctx); ok && policy.Expired != nil {
 		wrapped := []string{"-c", `ulimit -c 0 && exec "$@"`, "sparkwing-exec", name}
 		wrapped = append(wrapped, args...)
-		return exec.CommandContext(ctx, "/bin/sh", wrapped...)
+		return processCommandContext(ctx, environment, "/bin/sh", wrapped...)
 	}
-	return exec.CommandContext(ctx, name, args...)
+	return processCommandContext(ctx, environment, name, args...)
 }
 
 func configureProcessGroup(ctx context.Context, cmd *exec.Cmd, streamsDone <-chan struct{}) {

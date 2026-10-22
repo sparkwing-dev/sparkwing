@@ -1,4 +1,4 @@
-package procenv
+package procenv_test
 
 import (
 	"testing"

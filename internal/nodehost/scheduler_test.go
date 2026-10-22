@@ -28,7 +28,7 @@ const testRunID = "run-sched"
 
 func openStore(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{teststore.WithClock(time.Now), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 		return store.Policies{Intake: hostIntakePolicy{}, ClaimProfiles: hostEnrollment{}, SessionKeys: cipher}, err
 	})}, opts...)...)

@@ -57,9 +57,10 @@ func (p SDKPlanner) fingerprintPlanning(ctx context.Context, input PlanningProce
 	if err != nil {
 		return err
 	}
-	slices.Sort(environment)
+	environmentValues := slices.Collect(environment.Values())
+	slices.Sort(environmentValues)
 	planning.Inputs.Version = 1
-	planning.Inputs.EnvironmentDigest, err = runspec.CanonicalHash(environment)
+	planning.Inputs.EnvironmentDigest, err = runspec.CanonicalHash(environmentValues)
 	if err != nil {
 		return err
 	}

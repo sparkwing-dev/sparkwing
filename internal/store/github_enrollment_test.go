@@ -147,7 +147,7 @@ func TestGitHubActionsRequiresCurrentEnrollmentProperty(t *testing.T) {
 		case 7:
 			spec.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:42"}
 		case 8:
-			spec.ExpiresAt = new(tenant.s.now().Add(2 * time.Hour))
+			spec.ExpiresAt = new(tenant.s.now().Add(-time.Hour))
 		}
 		issued, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), spec)
 		if err == nil || issued.Raw != "" {
