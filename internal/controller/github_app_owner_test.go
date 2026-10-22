@@ -171,16 +171,16 @@ func TestGitHubRepositoryDisplayComesFromTheAppInstallation(t *testing.T) {
 		}
 	}
 	var created controllerwire.CreateRunResponse
-	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:701", ""), &created); code != http.StatusCreated || created.Request.Request.Git.Repository.Display != "acme/widgets" {
-		t.Fatalf("unlabelled GitHub identity = %d display=%q, want acme/widgets", code, created.Request.Request.Git.Repository.Display)
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:701", ""), &created); code != http.StatusCreated || created.Inputs.Git.Repository.Display != "acme/widgets" {
+		t.Fatalf("unlabelled GitHub identity = %d display=%q, want acme/widgets", code, created.Inputs.Git.Repository.Display)
 	}
 	var uncovered controllerwire.CreateRunResponse
-	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:999", ""), &uncovered); code != http.StatusCreated || uncovered.Request.Request.Git.Repository.Display != "gh:999" {
-		t.Fatalf("uncovered GitHub identity = %d display=%q, want the key", code, uncovered.Request.Request.Git.Repository.Display)
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("gh:999", ""), &uncovered); code != http.StatusCreated || uncovered.Inputs.Git.Repository.Display != "gh:999" {
+		t.Fatalf("uncovered GitHub identity = %d display=%q, want the key", code, uncovered.Inputs.Git.Repository.Display)
 	}
 	var keyed controllerwire.CreateRunResponse
-	if code := f.call("POST", "/api/v1/runs", olga.auth, request("git:git.example.test/acme/widgets", ""), &keyed); code != http.StatusCreated || keyed.Request.Request.Git.Repository.Display != "git.example.test/acme/widgets" {
-		t.Fatalf("keyed git identity = %d display=%q, want the key's path", code, keyed.Request.Request.Git.Repository.Display)
+	if code := f.call("POST", "/api/v1/runs", olga.auth, request("git:git.example.test/acme/widgets", ""), &keyed); code != http.StatusCreated || keyed.Inputs.Git.Repository.Display != "git.example.test/acme/widgets" {
+		t.Fatalf("keyed git identity = %d display=%q, want the key's path", code, keyed.Inputs.Git.Repository.Display)
 	}
 	var victim struct {
 		Capability string `json:"capability"`

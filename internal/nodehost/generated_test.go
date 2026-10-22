@@ -55,7 +55,7 @@ func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInpu
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := f.State.AcceptExpansion(t.Context(), store.ExpansionSubmission{Source: row.Ref, SourceGeneration: source.Generation, Actor: actor, Body: body})
+	accepted, err := f.State.AcceptExpansion(t.Context(), store.ExpansionSubmission{Source: row.Ref, SourceGeneration: source.Generation, Actor: actor, Body: body, Registration: runspec.SecretRegistration{Version: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +74,9 @@ func TestAResumedRunKeepsAFailedGeneratedNode(t *testing.T) {
 	if err := f.report(t.Context(), claimedFixtureNode(t, f, child.ID), store.NodeFailed); err != nil {
 		t.Fatal(err)
 	}
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		t.Error("accepted expansion evaluated again")
-		return nil, nil, nil
+		return nil, runspec.SecretRegistration{}, nil, nil
 	}
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -104,7 +104,7 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls := 0
-			f.Host.Expand = func(_ context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			f.Host.Expand = func(_ context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				calls++
 				if input.NodeID != source.NodeID || runspec.ClaimGeneration(input.Generation) != source.Generation || row.Ref.NodeID != runspec.NodeID(source.NodeID) {
 					t.Error("expansion lost source fence")
@@ -114,7 +114,7 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 					jobs = append(jobs, nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 				}
 				body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
-				return body, nil, err
+				return body, runspec.SecretRegistration{Version: 1}, nil, err
 			}
 			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -146,9 +146,9 @@ func TestAResumeKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
 	if !replayed.Replayed || replayed.BodyHash != accepted.BodyHash {
 		t.Fatal("accepted complete/empty groups did not replay immutably")
 	}
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		t.Error("accepted generators ran again")
-		return nil, nil, nil
+		return nil, runspec.SecretRegistration{}, nil, nil
 	}
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -164,8 +164,8 @@ func TestExpansionFailureWithoutAWaiterFailsTheRun(t *testing.T) {
 	doc.Jobs = doc.Jobs[:1]
 	f := newStoreHostFixture(t, doc)
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
-		return nil, &store.ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator failed"}, nil
+	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+		return nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator failed"}, nil
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

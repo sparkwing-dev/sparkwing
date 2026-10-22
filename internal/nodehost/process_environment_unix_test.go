@@ -200,6 +200,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			}
 			spec.PlanHash = planHash
 			input.Accepted.Spec, _ = json.Marshal(spec)
+			st.accepted = &input.Accepted
 			jobHash, _ := executorHash(job)
 			st.row.Spec, _ = json.Marshal(job)
 			st.row.SpecHash, input.SpecHash = string(jobHash), string(jobHash)

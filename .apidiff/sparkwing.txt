@@ -422,13 +422,14 @@ type Workable interface {
 func WriteFile(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
-func (s combinedSecrets) ContainsSecret(id string) bool
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
+func (noHostSecrets) ContainsSecret(string) bool
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
 func (l protocolLogger) Emit(r LogRecord)
 func (l protocolLogger) Log(level, message string)
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
+func (sdkOperations) Arguments(plan any) []nodeproto.ArgumentDescription
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context
 func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error)
 func (sdkOperations) Document(plan any) nodeproto.PlanDoc
@@ -436,4 +437,3 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error)
 func (sdkOperations) Prepare(built any, request nodeproto.Request) error
 func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.RunResult, err error)
-func (s secretSet) ContainsSecret(id string) bool

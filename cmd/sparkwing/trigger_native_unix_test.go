@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -64,7 +67,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	if got := request.Request.Reason; got != flags.reason {
 		t.Fatalf("reason=%q, want %q", got, flags.reason)
 	}
-	_, server, bearer := burstIntakeController(t, "http://controller.test")
+	state, server, bearer := burstIntakeController(t, "http://controller.test")
 	handler := server.Handler()
 	controller, err := client.NewEngineClient(client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
 		recorder := httptest.NewRecorder()
@@ -78,22 +81,31 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.HereBearer == "" || created.Request.Request.Reason != flags.reason {
+	if created.HereBearer == "" || nativeTriggerSeal(t, state, created.RunID).Request.Reason != flags.reason {
 		t.Fatal("intake lost reason or first here bearer")
 	}
 	replay, err := controller.CreateRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !replay.Replayed || replay.RunID != created.RunID || replay.HereBearer != "" || replay.Request.Hash != created.Request.Hash || replay.Request.Request.Reason != flags.reason {
+	if !replay.Replayed || replay.RunID != created.RunID || replay.HereBearer != "" || nativeTriggerSeal(t, state, replay.RunID).Hash != nativeTriggerSeal(t, state, created.RunID).Hash || nativeTriggerSeal(t, state, replay.RunID).Request.Reason != flags.reason {
 		t.Fatal("replay changed sealed reason or here authority")
 	}
-	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: created.Request, SourceRunID: created.RunID})
-	if err != nil || carried.Request.Request.Reason != flags.reason || carried.Request.Hash != created.Request.Hash {
+	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: nativeTriggerSeal(t, state, created.RunID), SourceRunID: created.RunID})
+	if err != nil || carried.Request.Request.Reason != flags.reason || carried.Request.Hash != nativeTriggerSeal(t, state, created.RunID).Hash {
 		t.Fatalf("retry lost reason or request seal: %v", err)
 	}
 	request.Request.Reason = "different reason"
 	if _, err := controller.CreateRun(t.Context(), request); err == nil {
 		t.Fatal("changed sealed reason replayed under the same intake key")
 	}
+}
+
+func nativeTriggerSeal(t *testing.T, st *store.Store, id string) runspec.SealedRequest {
+	t.Helper()
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).ReadRun(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row.Request
 }

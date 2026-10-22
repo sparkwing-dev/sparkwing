@@ -55,6 +55,7 @@ func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput
 		processes = append(processes, p)
 		return p, nil
 	}
+	st.accepted = &in.Accepted
 	return in, st, deps, &processes
 }
 

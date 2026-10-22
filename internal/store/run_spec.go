@@ -37,11 +37,12 @@ type IntakeRequest struct {
 	OriginMachine string `json:"-"`
 }
 
-// AdmissionResult includes the atomically allocated team number and the first sealed request.
+// AdmissionResult includes execution inputs and a member projection built under the admission transaction.
 type AdmissionResult struct {
 	RunID                string
 	Number               int64
 	Request              runspec.SealedRequest
+	Inputs               runspec.Display
 	OwnerUnit            *OwnerLeaseRef
 	HereCapabilityPrefix string
 	// HereBearer reaches only the requesting host; C2 owns its encoding and it never enters persisted run JSON.
@@ -73,6 +74,7 @@ type ExpansionSubmission struct {
 	SourceGeneration runspec.ClaimGeneration
 	Actor            Actor
 	Body             json.RawMessage
+	Registration     runspec.SecretRegistration
 	Failure          *ExpansionFailure
 }
 
@@ -194,8 +196,11 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err != nil {
 			return err
 		}
-		result.State, result.BodyHash = accepted.state, accepted.hash
-		if source.Expansion == result.State && source.ExpansionDigest == result.BodyHash {
+		result.State, result.BodyHash = accepted.state, accepted.bodyHash
+		if request.Failure != nil {
+			result.BodyHash = accepted.hash
+		}
+		if source.Expansion == result.State && source.ExpansionDigest == accepted.hash {
 			result.Nodes, err = acceptedExpansionNodes(snapshot, accepted.plan)
 			if err != nil {
 				return err
@@ -218,7 +223,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
-		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, result.BodyHash, accepted.body, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
+		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, accepted.body, accepted.registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
 		if err != nil {
 			return err
 		}

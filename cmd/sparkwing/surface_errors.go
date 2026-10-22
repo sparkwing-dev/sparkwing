@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -98,22 +96,6 @@ func (e *maskedCLIError) As(target any) bool {
 	if !errors.As(e.err, &original) {
 		return false
 	}
-	masked := *original
-	if e.masker.Mask(string(original.Code)) != string(original.Code) {
-		masked.Code = apierr.Internal
-	}
-	masked.Message, masked.Hint = e.masker.Mask(original.Message), e.masker.Mask(original.Hint)
-	if original.Details != nil {
-		masked.Details = map[string]any{"masked_attrs": "error details unavailable"}
-		if body, err := json.Marshal(original.Details); err == nil {
-			decoder := json.NewDecoder(bytes.NewReader(e.masker.MaskJSON(body)))
-			decoder.UseNumber()
-			var details map[string]any
-			if err := decoder.Decode(&details); err == nil {
-				masked.Details = details
-			}
-		}
-	}
-	*result = &masked
+	*result = e.masker.Error(original)
 	return true
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -94,7 +93,7 @@ func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, 
 		if err == nil {
 			result, err = retryReceipt(id, response)
 		}
-		if err == nil && response.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
+		if err == nil && response.Here {
 			if connection.here == nil {
 				err = incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.Unavailable, Message: "here hosting is unavailable in this build"})
 			} else {
@@ -116,11 +115,11 @@ func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, 
 
 func retryReceipt(source string, response controllerwire.CreateRunResponse) (retryResult, error) {
 	result := retryResult{SourceRunID: source}
-	if response.RunID == "" || response.Number <= 0 || response.Request.RunID == "" {
+	if response.RunID == "" || response.Number <= 0 || response.Inputs.Pipeline == "" {
 		return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid retry receipt"}
 	}
 	result.RunID, result.Number, result.Replayed = response.RunID, response.Number, response.Replayed
-	if response.HereBearer != "" && response.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
+	if response.HereBearer != "" && !response.Here {
 		return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned unexpected here authority"}
 	}
 	return result, nil

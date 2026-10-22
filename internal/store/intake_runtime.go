@@ -195,7 +195,10 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = tx.QueryRowContext(ctx, `SELECT next_run_number FROM teams WHERE name=?`, team).Scan(&number); err != nil {
 		return AdmissionResult{}, err
 	}
-	result := AdmissionResult{RunID: id, Number: number, Request: snapshot.request}
+	result := AdmissionResult{RunID: id, Number: number, Request: snapshot.request, Inputs: runspec.DisplayRequest(snapshot.request)}
+	if snapshot.spec != nil {
+		result.Inputs = runspec.DisplaySpec(*snapshot.spec)
+	}
 	if request.IdempotencyKey == "" {
 		scope = ""
 		digest = ""
@@ -352,6 +355,9 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 	c := p.Capability
 	if c.Team != string(team) || c.Audience != capability.Controller || request.Request.Team != "" && request.Request.Team != string(team) || request.CapabilityPrefix != "" && request.CapabilityPrefix != c.Prefix {
 		return p, authorityError(apierr.Forbidden, "intake authority does not match the team")
+	}
+	if request.Request.LocalForeground && (request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginLocal || request.Request.Dispatch != runspec.DispatchHost || c.Subject.Kind != capability.SubjectLocal) {
+		return p, authorityError(apierr.Forbidden, "foreground reservation requires local host intake")
 	}
 	grant := capability.RunsWrite
 	if request.Request.Lineage.RetryOf != "" {
@@ -556,7 +562,7 @@ func admissionResultTx(ctx context.Context, tx *storeTx, team Team, id string) (
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, OwnerUnit: run.Owner, Replayed: true}
+	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, Inputs: run.Display(), OwnerUnit: run.Owner, Replayed: true}
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		result.OwnerUnit = nil
 	}

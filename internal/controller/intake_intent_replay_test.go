@@ -69,14 +69,14 @@ func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
 		return response
 	}
 	first := admitted(engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(nil), http.StatusCreated).Body)
-	if first.Request.Request.Git.SHA != selected {
-		t.Fatalf("child sealed %q, want %q", first.Request.Request.Git.SHA, selected)
+	if first.Inputs.Git.SHA != selected {
+		t.Fatalf("child sealed %q, want %q", first.Inputs.Git.SHA, selected)
 	}
 	sourcetest.Write(t, filepath.Join(repo, "advance.txt"), "advance\n")
 	sourcetest.Git(t, repo, "add", ".")
 	sourcetest.Git(t, repo, "commit", "-qm", "advance")
 	replayed := admitted(engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(nil), http.StatusOK).Body)
-	if !replayed.Replayed || replayed.RunID != first.RunID || replayed.Request.Request.Git.SHA != selected {
+	if !replayed.Replayed || replayed.RunID != first.RunID || replayed.Inputs.Git.SHA != selected {
 		t.Fatalf("advanced branch replay = %+v, want run %s at %s", replayed, first.RunID, selected)
 	}
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(map[string]string{"changed": "yes"}), http.StatusConflict)
@@ -85,7 +85,7 @@ func TestFreshChildReplayIgnoresBranchMovementAndSourceOutage(t *testing.T) {
 	}
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(map[string]string{"changed": "after outage"}), http.StatusConflict)
 	replayed = admitted(engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", intake(nil), http.StatusOK).Body)
-	if replayed.RunID != first.RunID || replayed.Request.Request.Git.SHA != selected {
+	if replayed.RunID != first.RunID || replayed.Inputs.Git.SHA != selected {
 		t.Fatalf("source outage replay = %+v, want run %s", replayed, first.RunID)
 	}
 }

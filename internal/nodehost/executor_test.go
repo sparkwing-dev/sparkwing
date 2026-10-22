@@ -28,6 +28,7 @@ import (
 )
 
 type executorStore struct {
+	accepted   *AcceptedRun
 	row        store.NodeRow
 	changes    []capturedNodeCommand
 	fail       store.TransitionCause
@@ -38,7 +39,18 @@ type executorStore struct {
 func (*executorStore) RecordStep(context.Context, store.StepReport) error { return nil }
 
 func (s *executorStore) ReadSnapshot(_ context.Context, runID string) (store.RunSnapshot, error) {
-	return store.RunSnapshot{Run: store.RunRow{ID: runID}, Nodes: []store.NodeRow{s.row}, Expansions: s.expansions}, nil
+	row := store.RunRow{ID: runID}
+	if s.accepted != nil {
+		var spec runspec.Spec
+		if err := json.Unmarshal(s.accepted.Spec, &spec); err != nil {
+			return store.RunSnapshot{}, err
+		}
+		row.Spec = &spec
+		row.Request = spec.Request
+		row.PlanHash = s.accepted.PlanHash
+		row.Plan, _ = json.Marshal(s.accepted.Plan)
+	}
+	return store.RunSnapshot{Run: row, Nodes: []store.NodeRow{s.row}, Expansions: s.expansions}, nil
 }
 
 func (s *executorStore) ReadNode(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
@@ -143,12 +155,12 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	resolved := engine.Resolved{Identity: identity, Executable: "/verified/engine"}
 	execution := runspec.JobExecutionSettings{}
-	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
+	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, SecretRegistration: runspec.SecretRegistration{Version: 1}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
 	raw, _ := json.Marshal(spec)
 	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 4, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	jobJSON, _ := json.Marshal(job)
-	s := &executorStore{row: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
+	s := &executorStore{accepted: &input.Accepted, row: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
 	deps := ExecutorDependencies{Store: s, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 		p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
@@ -167,7 +179,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 		}
 		c, cancel := context.WithCancel(ctx)
 		return c, cancel, nil
-	}, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") }}
+	}, Masker: testMasker("private")}
 	return input, s, deps, &processes
 }
 
@@ -180,6 +192,7 @@ func TestNodeExecutorRetriesRetainGenerationAndAdvanceOrdinal(t *testing.T) {
 	_ = json.Unmarshal(input.Accepted.Spec, &spec)
 	spec.Resolved.Settings.Jobs[input.NodeID] = input.Execution
 	input.Accepted.Spec, _ = json.Marshal(spec)
+	s.accepted = &input.Accepted
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, progress ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, progress)
@@ -357,6 +370,7 @@ func TestNodeExecutorLostLeaseNeverReports(t *testing.T) {
 
 func executorRetryBudget(t *testing.T, input *NodeInput, s *executorStore, budget int) {
 	t.Helper()
+	s.accepted = &input.Accepted
 	input.Execution.Retry.Set = true
 	input.Execution.Retry.Value = budget
 	s.row.Execution = input.Execution
@@ -370,6 +384,7 @@ func executorRetryBudget(t *testing.T, input *NodeInput, s *executorStore, budge
 
 func executorChangeJob(t *testing.T, input *NodeInput, s *executorStore, job nodeproto.JobSpec) {
 	t.Helper()
+	s.accepted = &input.Accepted
 	input.Accepted.Plan.Jobs = []nodeproto.JobSpec{job}
 	hash, err := executorHash(input.Accepted.Plan)
 	if err != nil {
@@ -677,6 +692,7 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 			bodyHash, _ := executorHash(accepted)
 			s.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
 			input.Replay = []GeneratorReplay{{SourceJob: "source", SourceGeneration: 2, GeneratorID: "generator", Output: json.RawMessage(`{"seed":1}`)}}
+			s.accepted = &input.Accepted
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 				process, err := start(ctx, in, p)
@@ -1029,7 +1045,7 @@ func TestNodeExecutorReportsOnlyBoundedMaskedFailureText(t *testing.T) {
 	input, st, deps, _ := executorFixture(t)
 	secret := "private-start-credential"
 	sentinel := errors.New(secret + strings.Repeat("界", int(limits.ErrorBytes)) + "failure-tail")
-	deps.Mask = func(text string) string { return strings.ReplaceAll(text, secret, "***") }
+	deps.Masker = testMasker(secret)
 	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) { return nil, sentinel }
 	host, err := NewNodeExecutor(deps)
 	if err != nil {

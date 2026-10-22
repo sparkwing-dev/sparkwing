@@ -156,7 +156,20 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=? WHERE id='run'`, now.UnixNano())
 			}
 			if mode == "already_accepted" {
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET expansion='accepted',expansion_body=?,expansion_digest='accepted' WHERE node_id='job'`, []byte(`{"jobs":[]}`))
+				body := json.RawMessage(`{"jobs":[]}`)
+				registration := runspec.SecretRegistration{Version: 1}
+				digest, err := runspec.CanonicalHash(struct {
+					Body         json.RawMessage
+					Registration runspec.SecretRegistration
+				}{body, registration})
+				if err != nil {
+					t.Fatal(err)
+				}
+				registrationJSON, err := json.Marshal(registration)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET expansion='accepted',expansion_body=?,expansion_registration=?,expansion_digest=? WHERE node_id='job'`, body, registrationJSON, digest)
 			}
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,started_at,disruptions,claimed_at) VALUES ('a','run','job',2,?,8,'evaluator','eval-cap',?,4,?,?,1)`, status, now.UnixNano(), started, disruptions)
 			lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)

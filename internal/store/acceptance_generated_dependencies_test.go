@@ -60,7 +60,7 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	request := store.ExpansionSubmission{Source: source.Ref, SourceGeneration: source.Generation, Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
+	request := store.ExpansionSubmission{Registration: runspec.SecretRegistration{Version: 1}, Source: source.Ref, SourceGeneration: source.Generation, Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
 	accepted, err := tenant.AcceptExpansion(ctx, request)
 	if err != nil || len(accepted.Nodes) != 2 {
 		return fmt.Errorf("accept expansion: %+v, %v", accepted, err)

@@ -109,7 +109,9 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 		if err != nil {
 			return source.Credential{}, err
 		}
-		requestMasker(ctx).Register(token.Token)
+		if err := requestMasker(ctx).Register(token.Token); err != nil {
+			return source.Credential{}, err
+		}
 		return source.Credential{Kind: "github_app", Host: host, Secret: token.Token}, nil
 	}
 	return s.intakeStoredCredential(ctx, a.team, spec.RepoKey, host, "")
@@ -155,7 +157,9 @@ func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, re
 	if err != nil || plain == "" {
 		return source.Credential{}, &apierr.Error{Code: apierr.Unavailable, Message: "source credential could not be opened"}
 	}
-	requestMasker(ctx).Register(plain)
+	if err := requestMasker(ctx).Register(plain); err != nil {
+		return source.Credential{}, err
+	}
 	return source.Credential{Kind: credential.Kind, Host: host, Username: credential.Username, Secret: plain, KnownHosts: credential.KnownHosts}, nil
 }
 

@@ -213,11 +213,11 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: plan})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: ownerClaim.Claim.Request, Declarations: declarations, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: created.Request.Request.RequestedArgs, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: ownerClaim.Claim.Request.Request.Env, Args: ownerClaim.Claim.Request.Request.RequestedArgs, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

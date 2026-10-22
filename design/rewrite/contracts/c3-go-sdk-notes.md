@@ -120,9 +120,23 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 `sparkwingtest.New` snapshots option values, including Git and pull-request metadata. Reusing and changing an options value for another fixture cannot change an existing fixture's plans. Injected service callbacks remain test-owned dependencies.
 
-Fake-host records mask attribute keys and nested values, including numeric, boolean and null values whose text contains a registered secret. Longer masks precede their prefixes. `Host.Records` preserves attribute numbers as `json.Number` so masking and snapshots never round large integers.
+CLI discovery, production planning and the test host share one declaration gate.
+Incomplete discovery withholds author diagnostics through subsequent planning.
+Directly constructed test plans register argument declarations before execution.
+Test-host step/eval outputs containing a secret are withheld like production.
+Stored secrets, supplied secret args and selected nonempty defaults follow the
+four-character refusal. Secrets containing `***` are accepted. Empty supplied
+arguments and defaults carry no value. Unselected defaults do not refuse
+a run. Their valid raw values and list items register while short items are
+skipped. Invalid derived proxy parts are skipped.
+Runs without version 1 host registrations cannot resume and must be started again.
 
-SDK planning errors redact longer secret inputs before their prefixes, including defaults, so input field order cannot expose a suffix.
+Fake-host records use the host masking module. It masks serialized JSON attributes, validates the result including duplicate keys, and withholds the whole attribute payload on failure. Text streams are masked before line splitting. Pipeline code run without a host is unmasked.
+
+Host planning diagnostics use the shared matcher for overlapping secret values
+and defaults. Private declarations drive execution lookup and argument parsing.
+Help and cached descriptions use the separate presentation type, which withholds
+all unclassified text after incomplete discovery.
 
 ## Public symbol inventory
 

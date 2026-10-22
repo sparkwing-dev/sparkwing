@@ -17,6 +17,7 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -162,25 +163,39 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		}
 		w := authorityHTTP(h, b, "POST", "/api/v1/secrets?"+query.Encode(), string(body))
 		row, err := target.GetSecretRow("KEY", pipeline)
-		if w.Code != 204 || w.Body.Len() != 0 || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared != shared {
-			return false
-		}
-		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", pipeline, shared, masked, row.Value)
-		if err != nil || plain != value || row.Value == value {
-			return false
-		}
-		if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
-			return false
-		}
-		w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
-		if _, err := target.GetSecretRow("KEY", pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
-			return false
+		if masked && utf8.RuneCountInString(value) < 4 {
+			assertEngineError(t, w, http.StatusBadRequest, apierr.InvalidArgs)
+			if !strings.Contains(w.Body.String(), "use a plain config variable") || row != nil || !errors.Is(err, store.ErrNotFound) {
+				return false
+			}
+		} else {
+			if w.Code != 204 || w.Body.Len() != 0 || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared != shared {
+				return false
+			}
+			plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", pipeline, shared, masked, row.Value)
+			if err != nil || plain != value || row.Value == value {
+				return false
+			}
+			if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
+				return false
+			}
+			w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
+			if _, err := target.GetSecretRow("KEY", pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
+				return false
+			}
 		}
 		other, err := foreign.GetSecretRow("KEY", pipeline)
 		if err != nil || other.Value != "foreign-value" {
 			return false
 		}
 		return foreign.RemoveSecret(t.Context(), credentialSeedAuthority(t, s, "foreign"), "KEY", pipeline) == nil
+	}
+	for _, value := range []string{"", "abc", "ééé", "has***marker", "abcd", "éééé"} {
+		for _, masked := range []bool{false, true} {
+			if !property(value, "foreign-selector", masked, true) {
+				t.Fatalf("value %q masked=%t violated tenant isolation", value, masked)
+			}
+		}
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

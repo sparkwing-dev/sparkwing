@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -67,10 +66,7 @@ func parseRunSelection(r *http.Request) (controllerwire.RunQuery, error) {
 
 func runSelectionMatches(view store.RunView, q controllerwire.RunQuery) bool {
 	run := view.Snapshot.Run
-	display := runspec.DisplayRequest(run.Request)
-	if run.Spec != nil {
-		display = runspec.DisplaySpec(*run.Spec)
-	}
+	display := run.Display()
 	if run.Number <= q.AfterNumber || q.ParentRunID != "" && run.Lineage.ParentRunID != q.ParentRunID || q.ParentRunID == "" && q.RootOnly && run.Lineage.ParentRunID != "" ||
 		!selectionValues([]string{q.Pipeline}, false, run.Pipeline) || !selectionValues([]string{q.Status}, false, string(run.State)) ||
 		!selectionValues(q.Branches, false, display.Git.Ref) || !selectionValues([]string{q.SHA}, true, display.Git.SHA) ||

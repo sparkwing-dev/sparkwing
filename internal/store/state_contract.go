@@ -12,6 +12,7 @@ import (
 
 // RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts.
 type RunRow struct {
+	expansions        []AcceptedExpansionRow
 	ID                string
 	Number            int64
 	Team              Team
@@ -44,6 +45,7 @@ type AcceptedExpansionRow struct {
 	SourceGeneration int64
 	Body             json.RawMessage
 	BodyHash         string
+	Registration     runspec.SecretRegistration
 }
 
 // RunSnapshot contains one consistent read, including accepted expansions in insertion order.

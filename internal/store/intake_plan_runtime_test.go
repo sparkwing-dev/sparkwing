@@ -485,8 +485,13 @@ func TestPlanControllerHandoffRequiresLiveOwnerLease(t *testing.T) {
 
 func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
+		in.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{}}
 		in.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42, BaseRepo: "gh:1", HeadRepo: "gh:1", BaseRef: "main", HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567"}}
 	})
+	if runspec.DisplayRequest(plan.Seal.Request).RequestedArgs["message"] != "hello" {
+		t.Fatal("intake fixture must initially classify message as public")
+	}
+	plan.Seal.Resolved.SecretArgs = []string{"message"}
 	retrier := authorityRoot("retrier", "a")
 	retrier.Grants = []capability.Grant{capability.RunsControl}
 	authorityPersist(t, tenant.s, retrier)
@@ -498,6 +503,9 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	retry, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if retry.Inputs.RequestedArgs["message"] != runspec.RedactedArgValue || retry.Inputs.Args["message"] != runspec.RedactedArgValue {
+		t.Fatal("retry receipt ignored accepted secret classification")
 	}
 	run, err := tenant.ReadRun(t.Context(), retry.RunID)
 	if err != nil {
@@ -511,7 +519,7 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 		t.Fatalf("retry job=%+v %v", node, err)
 	}
 	replay, err := tenant.AdmitRun(t.Context(), request)
-	if err != nil || !replay.Replayed || replay.RunID != retry.RunID {
+	if err != nil || !replay.Replayed || replay.RunID != retry.RunID || replay.Inputs.RequestedArgs["message"] != runspec.RedactedArgValue || replay.Inputs.Args["message"] != runspec.RedactedArgValue {
 		t.Fatalf("retry replay=%+v %v", replay, err)
 	}
 }
@@ -568,6 +576,59 @@ func TestLocalForegroundClaimCannotLoseToBackgroundQueue(t *testing.T) {
 	claim, err := op.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: admitted.HereCapabilityPrefix, Target: target})
 	if err != nil || claim.RunID != admitted.RunID || claim.Award.Generation != 1 {
 		t.Fatalf("foreground handoff lost its first award: %+v %v", claim, err)
+	}
+}
+
+func TestLocalForegroundReservationUsesTheRequestingOSAccount(t *testing.T) {
+	for _, foreground := range []bool{false, true} {
+		t.Run(map[bool]string{false: "detached", true: "foreground"}[foreground], func(t *testing.T) {
+			tenant, request, _ := intakeFixture(t)
+			requester := authorityRoot("local-requester", "a")
+			requester.Subject.Kind = capability.SubjectLocal
+			requester.Grants = []capability.Grant{capability.RunsWrite, capability.TriggersClaim}
+			authorityPersist(t, tenant.s, requester)
+			request.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: requester.Prefix}
+			request.Request.Origin, request.Request.LocalForeground = runspec.OriginLocal, foreground
+			admitted, err := tenant.AdmitRun(t.Context(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			background := authorityRoot("local-queue", "a")
+			background.Subject, background.Grants = requester.Subject, requester.Grants
+			authorityPersist(t, tenant.s, background)
+			demand := UnitDemand{CapabilityPrefix: background.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}
+			claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
+			if !foreground {
+				if err != nil || claim.RunID != admitted.RunID {
+					t.Fatalf("detached queue: %+v %v", claim, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("background took reserved local work: %+v %v", claim, err)
+			}
+			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}
+			other := authorityRoot("another-account", "a")
+			other.Subject.Kind, other.Grants = capability.SubjectLocal, requester.Grants
+			authorityPersist(t, tenant.s, other)
+			demand.CapabilityPrefix = other.Prefix
+			if _, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
+				t.Fatal("another OS account took the foreground reservation")
+			}
+			demand.CapabilityPrefix = requester.Prefix
+			claim, err = tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil || claim.Award.Generation != 1 {
+				t.Fatalf("foreground claim: %+v %v", claim, err)
+			}
+			if err := tenant.s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+				t.Fatal(err)
+			}
+			demand.CapabilityPrefix, demand.Target = background.Prefix, nil
+			claim, err = tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil || claim.Award.Generation != 2 {
+				t.Fatalf("background reclaim after handoff: %+v %v", claim, err)
+			}
+		})
 	}
 }
 
@@ -962,4 +1023,58 @@ func TestPlanSealRechecksOwnerAfterJobInsertion(t *testing.T) {
 func seedTriggerClaim(t *testing.T, s *Store, runID, holder, prefix string, generation int64, expiry time.Time) {
 	t.Helper()
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE id=?`, holder, prefix, generation, s.now().UnixNano(), expiry.UnixNano(), runID)
+}
+
+func TestLocalForegroundReservationDoesNotFollowRetrySeals(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	root := authorityRoot("local-submitter", "a")
+	root.Subject.Kind = capability.SubjectLocal
+	root.Grants = []capability.Grant{capability.RunsWrite, capability.RunsControl, capability.TriggersClaim}
+	authorityPersist(t, tenant.s, root)
+	request.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
+	request.Request.Origin, request.Request.LocalForeground = runspec.OriginLocal, true
+	original, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: request.Authority, RetryMode: "all", Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: original.RunID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Request.RunID != original.RunID || !retry.Request.Request.LocalForeground {
+		t.Fatal("retry changed its immutable source seal")
+	}
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}})
+	if err != nil || claim.RunID != retry.RunID {
+		t.Fatalf("retry inherited foreground reservation: run=%s err=%v", claim.RunID, err)
+	}
+}
+
+func TestLocalForegroundIntakeRequiresLocalHostExecution(t *testing.T) {
+	for _, invalid := range []string{"subject", "origin", "dispatch", "mode"} {
+		t.Run(invalid, func(t *testing.T) {
+			tenant, request, _ := intakeFixture(t)
+			root := authorityRoot("local-submitter", "a")
+			root.Subject.Kind = capability.SubjectLocal
+			root.Grants = []capability.Grant{capability.RunsWrite}
+			if invalid == "subject" {
+				root.Subject.Kind = capability.SubjectMachine
+			}
+			authorityPersist(t, tenant.s, root)
+			request.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
+			request.Request.Origin, request.Request.LocalForeground = runspec.OriginLocal, true
+			switch invalid {
+			case "origin":
+				request.Request.Origin = runspec.OriginTrigger
+			case "dispatch":
+				request.Request.Dispatch = runspec.DispatchController
+			case "mode":
+				request.Request.Mode = runspec.IntakePublish
+			}
+			if _, err := tenant.AdmitRun(t.Context(), request); err == nil {
+				t.Fatal("invalid foreground reservation admitted")
+			}
+			rewriteSchemaCount(t, tenant.s.db, "runs", 0)
+		})
+	}
 }

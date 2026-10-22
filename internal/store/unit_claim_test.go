@@ -563,3 +563,40 @@ func fundUnitClaim(t *testing.T, s *Store) {
 		t.Fatal(err)
 	}
 }
+
+func TestNamedClaimReadinessDoesNotRevealForeignWork(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "pending", true: "cancelled"}[cancelled], func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			foreign := authorityRoot("foreign-runner", "b")
+			authorityPersist(t, s, foreign)
+			demand.CapabilityPrefix = foreign.Prefix
+			if cancelled {
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1`)
+			}
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			var refused *apierr.Error
+			if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+				t.Fatalf("foreign refusal: %v", err)
+			}
+		})
+	}
+}
+
+func TestClaimReadinessDiagnosticCannotRefreshEvaluationOwner(t *testing.T) {
+	s, _ := unitClaimFixture(t)
+	now := s.now()
+	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=7,status='done',outcome='success',finished_at=1,expansion='expected'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+	err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return checkClaimableUnitTx(t.Context(), tx, "a", UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 7})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generation int64
+	if err := s.db.QueryRow(`SELECT owner_generation FROM eval_units`).Scan(&generation); err != nil || generation != 3 {
+		t.Fatalf("readiness diagnostic mutated owner generation: %d %v", generation, err)
+	}
+}

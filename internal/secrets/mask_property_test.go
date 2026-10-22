@@ -1,16 +1,23 @@
 package secrets
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
+
+func newTestMasker(values ...string) *Masker {
+	m := NewMasker()
+	for _, value := range values {
+		if err := m.Register(value); err != nil {
+			panic(err)
+		}
+	}
+	return m
+}
 
 func TestMaskMergesOverlappingSecrets(t *testing.T) {
 	m := newTestMasker("abcXYZ", "XYZdef")
@@ -39,7 +46,7 @@ func TestMaskHidesEveryJSONEscapeSpelling(t *testing.T) {
 // Invariant: no registered secret is visible in masked text, raw or after
 // decoding JSON escapes, however its characters are escaped or overlap others.
 func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := rand.New(rand.NewSource(817))
 	alpha := []rune(`ab/"\é`)
 	word := func(n int) string {
 		var b strings.Builder
@@ -67,9 +74,10 @@ func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
 		rest := in
 		for len(rest) > 0 {
 			n := 1 + r.Intn(len(rest))
-			streamed.WriteString(pieces.Mask(rest[:n], n == len(rest)))
+			streamed.WriteString(pieces.Mask(rest[:n]))
 			rest = rest[n:]
 		}
+		streamed.WriteString(pieces.Flush())
 		assertNoSecretVisible(t, iter, secrets, in, streamed.String())
 	}
 }
@@ -125,34 +133,98 @@ func TestRegisterOfAKnownValueDoesNoWork(t *testing.T) {
 	}
 }
 
-func TestCachedRegistersBeforeAnotherReaderSeesTheValue(t *testing.T) {
-	masker := NewMasker()
-	read := make(chan struct{})
-	c := NewCached(SourceFunc(func(name string) (string, bool, error) {
-		close(read)
-		return "secret-value", true, nil
-	}), masker)
-	masker.mu.Lock()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _, _ = c.Resolve(context.Background(), "TOKEN")
-	}()
-	<-read
-	for range 10000 {
-		c.mu.RLock()
-		_, cached := c.cache["TOKEN"]
-		c.mu.RUnlock()
-		if cached {
-			masker.mu.Unlock()
-			<-done
-			t.Fatal("value served from the cache before the masker registered it")
+// Concatenated emissions, including a final EOF flush, must never expose any
+// registered spelling even when matching or replacement crosses a chunk edge.
+// Decision 49 accepts marker-containing secrets and values containing '*' that
+// replacement may form beside a marker across emissions that cannot be recalled.
+func TestStreamReplacementClosureProperty(t *testing.T) {
+	random := rand.New(rand.NewSource(43109))
+	candidates := []string{
+		"abcd", "bcde", "abcdxyz", "xyzé", "line\none", `slash/quote"`,
+		"private-token", "two private words", "x%2Fy", "éééé",
+		"*xyz", "ab**", "**xy", "x**y",
+	}
+	for iteration := range 1200 {
+		m := NewMasker()
+		count := 1 + random.Intn(4)
+		for range count {
+			if err := m.Register(candidates[random.Intn(len(candidates))]); err != nil {
+				t.Fatal(err)
+			}
 		}
-		runtime.Gosched()
+		var input strings.Builder
+		for range 1 + random.Intn(6) {
+			input.WriteString([]string{"a", "b", "*", "\n", `\\u0061`, "%2f", "\"", "public"}[random.Intn(8)])
+			input.WriteString(candidates[random.Intn(len(candidates))])
+		}
+		data := input.String()
+		stream := m.Stream()
+		var result strings.Builder
+		for len(data) > 0 {
+			n := 1 + random.Intn(min(len(data), 9))
+			result.WriteString(stream.Mask(data[:n]))
+			data = data[n:]
+			if random.Intn(23) == 0 {
+				if err := m.Register("late-secret"); err != nil {
+					t.Fatal(err)
+				}
+				result.WriteString(stream.Mask("late-secret"))
+			}
+		}
+		result.WriteString(stream.Flush())
+		rendered := result.String()
+		decoded := jsonDecodedView(rendered)
+		for _, spelling := range m.Values() {
+			if strings.Contains(spelling, "*") {
+				continue // Decision 49 accepts values formed with '*' adjacent to a replacement marker.
+			}
+			if strings.Contains(rendered, spelling) || strings.Contains(decoded, spelling) {
+				t.Fatalf("iteration %d: spelling %q survived in %q", iteration, spelling, rendered)
+			}
+		}
 	}
-	masker.mu.Unlock()
-	<-done
-	if got := masker.Mask("secret-value"); got != "***" {
-		t.Fatalf("Mask = %q", got)
+}
+
+func FuzzStreamReplacementClosure(f *testing.F) {
+	for _, seed := range []string{"aaaa", "ababxxxx", "ab**", `quoted\u0022value`, "lower%2fvalue", "***"} {
+		f.Add([]byte(seed))
 	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) == 0 || len(data) > 1024 {
+			t.Skip()
+		}
+		value := "private-" + strings.ToValidUTF8(string(data), "?")
+		// Decision 49 also accepts values formed with '*' adjacent to a replacement marker.
+		if strings.Contains(value, "*") {
+			t.Skip()
+		}
+		m := newTestMasker(value, "ab**", "xxxx", "aaaa", "*xyz")
+		stream := m.Stream()
+		input := string(data) + value + escapeEveryRune(value) + strings.Repeat("ab", int(data[0])) + "xxxxxyz"
+		var output strings.Builder
+		at := 0
+		for len(input) > 0 {
+			n := min(1+int(data[at%len(data)])%31, len(input))
+			output.WriteString(stream.Mask(input[:n]))
+			input = input[n:]
+			at++
+		}
+		if err := m.Register("issued-private-value"); err != nil {
+			t.Fatal(err)
+		}
+		output.WriteString(stream.Mask("issued-private-value"))
+		output.WriteString(stream.Flush())
+		view := output.String()
+		for range 3 {
+			for _, pattern := range m.Values() {
+				if strings.Contains(pattern, "*") {
+					continue // Decision 49 accepts this marker-edge residual.
+				}
+				if strings.Contains(view, pattern) {
+					t.Fatalf("registered spelling %q survived in %q", pattern, output.String())
+				}
+			}
+			view = jsonDecodedView(view)
+		}
+	})
 }

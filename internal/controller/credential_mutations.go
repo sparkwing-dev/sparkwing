@@ -50,6 +50,8 @@ func decodeCredentialRequest[T any](r *http.Request) (*T, error) {
 
 func credentialWriteError(err error) error {
 	switch {
+	case errors.Is(err, secrets.ErrInvalidValue):
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: secrets.ErrInvalidValue.Error()}
 	case errors.Is(err, errBoundCipherRequired):
 		return &apierr.Error{Code: apierr.Unavailable, Message: "bound credential encryption is unavailable"}
 	case errors.Is(err, secrets.ErrKeyRefused):

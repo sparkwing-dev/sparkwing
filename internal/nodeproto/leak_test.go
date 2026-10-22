@@ -1,4 +1,4 @@
-package nodeproto
+package nodeproto_test
 
 import (
 	"testing"

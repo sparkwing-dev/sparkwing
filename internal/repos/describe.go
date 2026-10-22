@@ -3,7 +3,6 @@ package repos
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -30,6 +30,8 @@ type Session struct {
 	frames   *nodeproto.Reader
 	next     int
 	broken   error
+	masker   *secrets.Masker
+	gate     *runspec.DeclarationGate
 }
 
 // Call sends req with the next request id and decodes the reply's result into
@@ -50,15 +52,22 @@ func (s *Session) Call(req nodeproto.Request, result any) error {
 }
 
 // Describe sends describe after the session's protocol handshake.
-func (s *Session) Describe() (nodeproto.DescribeDoc, error) {
+func (s *Session) Describe() (*runspec.DeclarationGate, error) {
 	var doc nodeproto.DescribeDoc
 	err := s.Call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc)
-	return doc, err
+	if err != nil {
+		return nil, err
+	}
+	s.gate, err = runspec.NewDeclarationGate(doc, s.masker)
+	if err != nil {
+		return nil, err
+	}
+	return s.gate, nil
 }
 
 // Describe starts the pipeline entry in dir and returns its describe reply.
-func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (nodeproto.DescribeDoc, error) {
-	var doc nodeproto.DescribeDoc
+func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (*runspec.DeclarationGate, error) {
+	var doc *runspec.DeclarationGate
 	err := Converse(ctx, entry, dir, func(s *Session) (err error) {
 		doc, err = s.Describe()
 		return err
@@ -74,9 +83,14 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 		fmt.Errorf("%s: no reply within %s: %w", entry[len(entry)-1], SessionTimeout, context.DeadlineExceeded))
 	defer cancel()
 	masker := secrets.NewMasker()
+	var s *Session
 	defer func() {
 		if result != nil {
-			result = maskedSessionError{error: result, masker: masker}
+			var gate *runspec.DeclarationGate
+			if s != nil {
+				gate = s.gate
+			}
+			result = errors.Join(context.Cause(ctx), gate.Error(result))
 		}
 	}()
 	environment, err := procenv.Build(procenv.Plan, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{Runner: procenv.RunnerInfo{Name: "describe", Type: "local"}})
@@ -112,7 +126,7 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 		close(killed)
 	})
 
-	s := &Session{requests: nodeproto.NewWriter(reqW), frames: nodeproto.NewReader(frameR)}
+	s = &Session{requests: nodeproto.NewWriter(reqW), frames: nodeproto.NewReader(frameR), masker: masker}
 	var hello nodeproto.HelloResult
 	talkErr := s.Call(nodeproto.Request{
 		Op: nodeproto.OpHello, Protocol: nodeproto.Version,
@@ -143,34 +157,6 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 		return sessionFailure(s.broken, waitErr, masker.Mask(stderr.String()))
 	}
 	return talkErr
-}
-
-type maskedSessionError struct {
-	error
-	masker *secrets.Masker
-}
-
-func (e maskedSessionError) Error() string { return e.masker.Mask(e.error.Error()) }
-func (e maskedSessionError) Unwrap() error { return e.error }
-
-func (e maskedSessionError) As(target any) bool {
-	result, ok := target.(**apierr.Error)
-	if !ok {
-		return false
-	}
-	var original *apierr.Error
-	if !errors.As(e.error, &original) {
-		return false
-	}
-	body, err := json.Marshal(original)
-	if err == nil {
-		if masked, err := apierr.DecodeInner(e.masker.MaskJSON(body)); err == nil {
-			*result = masked
-			return true
-		}
-	}
-	*result = &apierr.Error{Code: apierr.Internal, Message: "pipeline process failed"}
-	return true
 }
 
 func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.Request) (nodeproto.Reply, error) {

@@ -10,14 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -43,7 +42,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				}
 			}
 			host.Store = fixture.Tenant
-			host.Mask = func(text string) string { return strings.ReplaceAll(text, "private", "***") }
+			host.Masker = testMasker("private")
 			err := host.Execute(ctx, input)
 			failed := mode == "before_refused" || mode == "output_refused" || mode == "result_refused"
 			if (err != nil) != failed {
@@ -141,7 +140,7 @@ func TestHostStepPersistence(t *testing.T) {
 				}
 			})
 			input = storedExecutionInput(t, fixture, host)
-			host.Store, host.Mask = fixture.Tenant, func(text string) string { return text }
+			host.Store, host.Masker = fixture.Tenant, secrets.NewMasker()
 			if mode == "step_write_refused" {
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_step BEFORE UPDATE OF status ON node_steps WHEN NEW.status='passed' BEGIN SELECT RAISE(ABORT,'step transaction refused'); END`); err != nil {
 					t.Fatal(err)
@@ -275,7 +274,7 @@ func TestClaimedHostForeignAwards(t *testing.T) {
 				observed = true
 				return fixture.Tenant.RenewNodeClaim(ctx, ref, actor)
 			}}
-			host.Store, host.Mask = observer, func(text string) string { return text }
+			host.Store, host.Masker = observer, secrets.NewMasker()
 			acquired := false
 			host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 				acquired = true

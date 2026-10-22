@@ -290,6 +290,7 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 				}
 				spec.Resolved.Settings.Jobs[input.NodeID] = input.Execution
 				input.Accepted.Spec, _ = json.Marshal(spec)
+				state.accepted = &input.Accepted
 				admission.BoxID = testBox
 			}
 			start := deps.Start

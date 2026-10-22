@@ -29,7 +29,6 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 	if holder == nil || argsType == nil {
 		return
 	}
-	p.diagnostics.collectJob(jobValue)
 	schema, err := parseInputsSchema(argsType)
 	if err != nil {
 		panic(fmt.Sprintf("sparkwing: Job(%q): invalid WithArgs[%s]: %v", id, argsType, err))

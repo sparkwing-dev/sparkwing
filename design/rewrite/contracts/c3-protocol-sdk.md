@@ -625,15 +625,13 @@ them atomically with the owner.
 Executor errors are masked before they return to the caller as well as before
 their terminal request is sent. Error matching still reaches the original cause,
 so lease-loss handling and refused-transaction detection retain their meaning.
-Structured error rendering receives the same masked message and hint with its
-original code. Untrusted SDK details are withheld from that rendered error.
+Structured error rendering receives masked message, hint and details. Codes
+containing secret material are replaced with a safe fallback.
 
-`OwnerHost.Mask` is required before renewal. Owner and claimed-node hosts use
-the executor's error wrapper for every returned error, including persistence
-reads and cleanup. Error matching retains the original cause. Rendered canonical
-errors retain their code and masked hint but omit untrusted details. The mask
-must share the source and SDK secret registry because these errors may contain
-credentials before ordinary job logging starts.
+Owner and claimed-node hosts use the executor's error wrapper for every returned
+error, including persistence reads and cleanup. Error matching retains the
+original cause. The wrapper shares the source and SDK secret registry because
+these errors may contain credentials before ordinary job logging starts.
 
 An acquisition adapter that returns success after cancellation cannot continue
 to acceptance or scheduling. Requested cancellation before acceptance finishes
@@ -885,7 +883,8 @@ a host decoder. Empty expansion is an explicit jobs array. Evaluation, drift,
 validation and cleanup failures discard the entire proposed body and return one
 masked `ExpansionFailure`. Owner cancellation or lease loss returns an error and
 leaves settlement to live authority. `OwnerHost` submits the body or failure once
-through `AcceptExpansion`. The evaluator writes no topology or lifecycle state.
+through `AcceptExpansion`, including the private registration projection returned
+with a successful body. The evaluator writes no topology or lifecycle state.
 
 `EvaluationDependencies.Start` supplies the environment and delegated route
 binding. `ProtocolSessionConfig.StartEvaluation` provides the native process
@@ -1194,3 +1193,68 @@ Remote machine admission uses the controller-scoped holder codec in C4. It
 creates no local run record and gives the local controller no authority to read
 or cancel a Cloud run. Existing award renewal, masking and source authorization
 remain in force while a claimed job waits for machine admission.
+
+## Host masking ownership (decision 43)
+
+`internal/secrets` owns the only matcher and encoded-spelling derivation. SDKs
+contain no masker and perform no automatic Mask RPCs. Explicit `Mask` remains
+synchronous. Without a host, pipeline execution is unmasked.
+
+The accepted run seals `Resolved.SecretRegistration`, including valid discovered
+secret defaults, list argument kinds, raw/effective values and normalized list
+items. Go argument parsing and projection use `argvalue.List`. TypeScript uses
+the same comma split, Unicode White_Space trim and empty-item omission contract.
+Known registrations precede author execution. Lazily issued values are registered
+before release. Refuse fewer than four characters in customer-stored
+secrets, supplied secret args and selected nonempty defaults, including individual
+list items. Refusals direct authors to a plain config variable. Empty supplied
+arguments and defaults carry no value. Unselected defaults do not refuse a run.
+Their valid values and list items register while short items are skipped. Unsafe
+derived proxy parts are skipped. Issued values do not invalidate exact replay of
+accepted topology. Fresh identifiers, including generated job IDs and expansions,
+are validated against every registered mask, including issued values.
+
+Stdout/stderr bytes enter the stream masker before line splitting. Decode protocol
+frames before sanitizing payloads and constructing trusted envelopes. Attribute
+JSON is masked as text, then checked for valid syntax, unique keys at every
+nesting level and object shape. Failure replaces the whole attribute payload
+with `{"masked_attrs":"***"}`. Trusted envelope keys never pass through matching.
+
+Describe output remains gated until all declarations are known. Generator eval
+replies carry `arguments` and `declarations_known`. The host gates generator output
+before invoking the callback, registers its declared values on success and only
+then releases output. Failed discovery withholds output and author error details.
+Accepted expansions retain their private registration projection for reconstruction.
+CLI discovery, production and the test host consume one declaration gate.
+CLI lookup, flag parsing and routing use private declarations. Only help, cache
+and display consume the separate presentation type. Incomplete discovery
+withholds all unclassified presentation text, including names, shorts and job IDs.
+Help returns the safe incomplete-discovery diagnostic instead of an empty page.
+Directly constructed test plans use the same argument projection before callbacks run. The test host
+withholds secret-bearing step/eval outputs. Controller control text and public
+run presentation load accepted expansion registrations inside their owners.
+
+A compiled multi-pattern matcher retains only viable suffixes across writes,
+including escaped spellings and replacement-marker edges. Pending raw bytes are
+bounded by the longest spelling. Completed redaction ranges emit immediately.
+Closure runs at most four passes, then replaces the remaining ambiguous payload
+as a whole. Registration adds sparse automata without rebuilding earlier ones.
+Decision 49 accepts stream/batch differences when replacement markers form a
+secret containing `***` or a value containing `*` beside a replacement marker.
+Percent matching follows terminal output links rather than every failure state.
+Safe partial lines flush after 25 ms of idle output. Incomplete pattern prefixes stay private until
+more input or EOF. Size and idle flushes end on UTF-8 boundaries. Every delivery
+failure reaches the session failure owner, including asynchronous flushes. Runs
+sealed without version 1 host masking registrations are refused before launch
+with a request to start a new run. No migration is provided.
+
+SDK command helpers forward each child stdout/stderr stream through `FrameLog`
+`stream`, base64 `stream_data`, and `stream_end` fields. They never split those
+bytes into lines. Base64 preserves incomplete UTF-8 bytes across frames. The host
+decodes each stream, masks it and then emits ordinary `exec_line` records with
+the command's step attribution. Standalone SDK execution remains unmasked.
+
+Partial describe failure does not block a healthy selected pipeline. Its host
+keeps output gated through planning because a failed sibling leaves declarations
+unknown. Selecting the failed pipeline preserves the error code and withholds
+its author-provided error details.

@@ -104,7 +104,7 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state, host, input := newOwnerFixture(t, true)
-		state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
+		state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
 		host.Lease.Interval = time.Second
 		var beats atomic.Int64
 		observed := make(chan struct{}, 1)
@@ -149,7 +149,7 @@ func TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
 	now := time.Now()
 	state.snapshot.Run.CancelRequestedAt = &now
-	state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
+	state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: store.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
 	host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
 		row := snapshot.Nodes[0]
 		return store.ScheduleSnapshot{CancelRequested: true, Nodes: []store.ScheduleNode{{ID: string(row.Ref.NodeID), Status: string(row.Status), Claimed: row.ClaimedBy != "", Outcome: string(row.Outcome)}}}, nil
@@ -243,6 +243,7 @@ func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance)
 	if f.acceptErr != nil {
 		return store.AcceptedPlan{}, f.acceptErr
 	}
+	input.Seal.Resolved.SecretRegistration.Version = 1
 	spec := runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: input.Seal.Resolved}
 	f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), input.Seal.Plan
 	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: strings.Repeat("a", 64)}, nil
@@ -337,8 +338,8 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
-		Mask:  func(value string) string { return value },
-		Store: f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		Masker: secrets.NewMasker(),
+		Store:  f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Delegator: ownerDelegatorFixture{actor: in.Owner},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
@@ -371,7 +372,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	}}
 	h.Wait, h.WaitNode = follower.Wait, follower.WaitNode
 	if resumed {
-		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: runspec.Resolved{Engine: selected.Identity}}
+		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: runspec.Resolved{Engine: selected.Identity, SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 		f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), json.RawMessage(`{"jobs":[]}`)
 		accepted, err := ownerAccepted(f.snapshot.Run)
 		if err != nil {
@@ -448,7 +449,7 @@ func TestOwnerHostRejectedReattachNeverAcquires(t *testing.T) {
 
 func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, SpecHash: "job-hash"}}
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome == "success" {
 			return store.ScheduleDecision{Outcome: "success"}
@@ -484,7 +485,7 @@ func TestOwnerHostRetainsIntakeSecretClassifications(t *testing.T) {
 	input.SealedRequest, _ = json.Marshal(f.snapshot.Run.Request.Request)
 	masker := secrets.NewMasker()
 	host.Masks = NewMaskRegistry(masker)
-	host.Mask = masker.Mask
+	host.Masker = masker
 	prepare := host.Prepare
 	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 		if masker.Mask("private-value") != "***" {
@@ -512,7 +513,7 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f, h, in := newOwnerFixture(t, true)
-				f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
+				f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, SpecHash: "job-hash"}}
 				h.Lease = lease.Keeper{Interval: time.Second, Lease: time.Hour}
 				h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 					if s.Nodes[0].Ready {

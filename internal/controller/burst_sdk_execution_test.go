@@ -250,7 +250,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 				return nil
 			}, nil
 		},
-		Store: state, Mask: masker.Mask, Masks: masks,
+		Store: state, Masker: masker, Masks: masks,
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masks},
 		Log: func(_ context.Context, _ nodehost.NodeInput, frame nodeproto.FrameLog) error {
 			logs.WriteString(frame.Message)
@@ -287,7 +287,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if native != nil && native.source != nil {
 		host := &nodehost.ClaimedNodeHost{
 			Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: 20 * time.Second},
-			Source: *native.source, Executor: executor, Mask: masker.Mask, Masks: masks,
+			Source: *native.source, Executor: executor, Masker: masker, Masks: masks,
 			Acquire: func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
 				entry, err := native.acquire(ctx, spec, options)
 				if err == nil {

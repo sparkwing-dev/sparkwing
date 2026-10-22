@@ -39,14 +39,6 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	return resolveLocalServicesWith(ctx, home, openLocalController)
 }
 
-func resolveStandaloneServicesAt(ctx context.Context, home string, claimed <-chan struct{}) (dashboardServices, error) {
-	return resolveLocalServicesWith(ctx, home, func(ctx context.Context, home string) (wingd.LocalController, error) {
-		return (localcontroller.Config{Bind: func(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
-			return bindStandaloneController(ctx, b, claimed)
-		}}).Open(ctx, home)
-	})
-}
-
 func resolveLocalServicesWith(ctx context.Context, home string, open func(context.Context, string) (wingd.LocalController, error)) (dashboardServices, error) {
 	if err := ctx.Err(); err != nil {
 		return dashboardServices{}, err
@@ -108,24 +100,6 @@ func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
 
 func openLocalController(ctx context.Context, home string) (wingd.LocalController, error) {
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
-}
-
-// safety: a standalone run cannot detach, so its trigger belongs to the foreground CLI; the queue waits for that
-// claim, or its first poll would take the trigger and refuse the CLI's here handoff. Child runs need it afterwards.
-func bindStandaloneController(ctx context.Context, b localcontroller.Binding, claimed <-chan struct{}) (localcontroller.Services, error) {
-	services, err := bindLocalController(ctx, b)
-	bearer := services.Runner.Bearer
-	if bearer != nil {
-		services.Runner.Bearer = func(ctx context.Context) (string, error) {
-			select {
-			case <-claimed:
-			case <-ctx.Done():
-				return "", context.Cause(ctx)
-			}
-			return bearer(ctx)
-		}
-	}
-	return services, err
 }
 
 func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ localcontroller.Services, err error) {

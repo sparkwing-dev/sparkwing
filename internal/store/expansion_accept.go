@@ -17,13 +17,18 @@ type expansionAcceptance struct {
 	selection     secretSelection
 	state         ExpansionState
 	hash          string
+	bodyHash      string
 	body, failure []byte
+	registration  []byte
 	plan          nodeproto.PlanDoc
 }
 
 func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot) (expansionAcceptance, error) {
 	var result expansionAcceptance
 	if request.Failure != nil {
+		if len(request.Registration.Defaults) > 0 || len(request.Registration.ListArgs) > 0 || len(request.Registration.Values) > 0 {
+			return result, authorityError(apierr.BadRequest, "failed expansion cannot register secrets")
+		}
 		result.state = ExpansionFailed
 		var err error
 		result.failure, err = json.Marshal(request.Failure)
@@ -32,6 +37,9 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		}
 		result.hash, err = stateHash(request.Failure)
 		return result, err
+	}
+	if request.Registration.Version != 1 {
+		return result, authorityError(apierr.PlanInvalid, "expansion requires an explicit version 1 secret registration")
 	}
 	priorJobs := map[string]bool{}
 	for _, existing := range snapshot.Expansions {
@@ -52,6 +60,22 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	}
 	result.selection = selection
 	secrets, err := planSecretsTx(ctx, tx, team, *snapshot.Run.Spec, selection)
+	if err != nil {
+		return result, err
+	}
+	registration, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: request.Registration})
+	if err != nil {
+		return result, authorityError(apierr.PlanInvalid, err.Error())
+	}
+	if len(request.Registration.Values) > 0 && !slices.Equal(request.Registration.Values, registration.Values) {
+		return result, authorityError(apierr.SpecDrift, "expansion secret registration differs from declarations")
+	}
+	for _, value := range registration.Values {
+		if err := secrets.Register(value); err != nil {
+			return result, authorityError(apierr.PlanInvalid, err.Error())
+		}
+	}
+	result.registration, err = json.Marshal(registration)
 	if err != nil {
 		return result, err
 	}
@@ -83,7 +107,15 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err != nil {
 		return result, err
 	}
-	hash, err := tx.store.planServices().CanonicalHash(json.RawMessage(result.body))
+	bodyHash, err := tx.store.planServices().CanonicalHash(json.RawMessage(result.body))
+	if err != nil {
+		return result, err
+	}
+	result.bodyHash = string(bodyHash)
+	hash, err := tx.store.planServices().CanonicalHash(struct {
+		Body         json.RawMessage
+		Registration runspec.SecretRegistration
+	}{result.body, registration})
 	result.hash, result.state = string(hash), ExpansionAccepted
 	return result, err
 }
@@ -141,7 +173,11 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 			snapshot.Nodes[i].Expansion, snapshot.Nodes[i].ExpansionDigest = ExpansionAccepted, accepted.hash
 		}
 	}
-	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.hash})
+	var registration runspec.SecretRegistration
+	if err := json.Unmarshal(accepted.registration, &registration); err != nil {
+		return nil, err
+	}
+	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.bodyHash, Registration: registration})
 	if _, err := snapshot.Scheduling(); err != nil {
 		return nil, err
 	}

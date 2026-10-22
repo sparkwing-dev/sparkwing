@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
@@ -28,7 +30,7 @@ func TestGoConcurrencyCapacityMustBeExplicit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secretSet(nil)})
+		_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
 		if capacity == 0 {
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {

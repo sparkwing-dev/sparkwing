@@ -41,8 +41,6 @@ type localRunRuntime struct {
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer) error
-	// safety: ownerClaimed releases a standalone queue held for the CLI's own trigger claim.
-	ownerClaimed func()
 }
 
 type localRunDependencies struct {
@@ -146,9 +144,6 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}
 	response, err := runtime.controller.CreateRun(ctx, request)
 	masker.Register(response.HereBearer)
-	for _, value := range response.Request.Request.RequestedArgs {
-		masker.Register(value)
-	}
 	if err != nil {
 		return err
 	}
@@ -160,7 +155,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 			return fmt.Errorf("run %s is admitted but its handle could not be published: %w", response.RunID, err)
 		}
 	}
-	format := response.Request.Request.Options.Output.Value
+	format := request.Request.Options.Output.Value
 	if flags.detached {
 		return errors.Join(emitLocalRunReceipt(out, response, format), ctx.Err())
 	}
@@ -168,7 +163,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		return fmt.Errorf("run %s is admitted but its start record could not be written: %w", response.RunID, err)
 	}
 	host := func(ctx context.Context) (nodehost.RunCompletion, error) {
-		return hostLocalRun(ctx, runtime, response.RunID, response.Request.Hash, deps.version)
+		return hostLocalRun(ctx, runtime, response.RunID, "", deps.version)
 	}
 	completion, err := observeHereRun(ctx, response.RunID, hereObservation{host: host, follow: func(ctx context.Context) error {
 		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out)
@@ -252,17 +247,14 @@ func validateLocalIntake(response controllerwire.CreateRunResponse, pipeline str
 	if err := validateLocalReceipt(response); err != nil {
 		return err
 	}
-	request := response.Request.Request
-	if response.Number <= 0 || request.Pipeline != pipeline || request.Origin != runspec.OriginLocal || request.Mode != runspec.IntakeExecute || request.Dispatch != runspec.DispatchHost {
-		return localRunProtocolError("controller returned a different local pipeline or intake purpose")
+	if response.Inputs.Pipeline != pipeline {
+		return localRunProtocolError("controller returned a different local pipeline")
 	}
 	return nil
 }
 
 func validateLocalReceipt(response controllerwire.CreateRunResponse) error {
-	sealed := response.Request
-	hash, err := runspec.CanonicalHash(sealed)
-	if err != nil || response.RunID == "" || sealed.RunID != response.RunID || sealed.Version != 1 || sealed.Request.Version != 1 || sealed.Hash == "" || hash != sealed.Hash || response.HereBearer != "" {
+	if response.RunID == "" || response.Number <= 0 || response.Here || response.HereBearer != "" {
 		return localRunProtocolError("controller returned an invalid local intake receipt")
 	}
 	return nil
@@ -273,9 +265,6 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 		return completion, err
 	}
 	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: version})
-	if runtime.ownerClaimed != nil {
-		runtime.ownerClaimed()
-	}
 	if err != nil {
 		return completion, err
 	}
@@ -319,6 +308,10 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 }
 
 func localRunInput(run string, requestHash runspec.Hash, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
+	request := award.Request.Request
+	if request.Origin != runspec.OriginLocal || request.Mode != runspec.IntakeExecute || request.Dispatch != runspec.DispatchHost {
+		return nodehost.RunInput{}, localRunProtocolError("controller returned a different local intake purpose")
+	}
 	if requestHash != "" && award.Request.Hash != requestHash {
 		return nodehost.RunInput{}, localRunProtocolError("controller returned a different local request seal")
 	}
@@ -337,7 +330,7 @@ func emitLocalRunReceipt(out io.Writer, response controllerwire.CreateRunRespons
 		RunID     string `json:"run_id"`
 		RequestID string `json:"request_id,omitempty"`
 		Replayed  bool   `json:"replayed"`
-	}{response.RunID, response.Request.Request.RequestID, response.Replayed}
+	}{response.RunID, response.RequestID, response.Replayed}
 	switch format {
 	case "json":
 		return json.NewEncoder(out).Encode(receipt)

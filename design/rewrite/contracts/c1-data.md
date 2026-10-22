@@ -834,6 +834,12 @@ lookups select matching requirement sets, and a transaction-local merge checks
 each route's head with the shared predicate. Each route selects one head per
 unit kind through its source index, then compares those heads in the same order.
 Rejected heads advance only that transaction's route. Named rechecks seek the complete team and unit key.
+Local foreground intake seals `Request.LocalForeground`. The shared predicate
+reserves the original intake's generation-zero trigger for a named claim by the
+submitting OS account. Queued polls retain their original unnamed intent when
+an indexed head recheck names a candidate. Detached intake, retry destinations
+and subsequent lease recovery use normal queue eligibility. No process-local
+queue gate participates in this reservation.
 There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
 ordinal. Queue arbitration serializes asks and awards. Claims take the controller
@@ -851,6 +857,11 @@ Requirement references prevent retention from removing a set still used by work.
 Run retention removes unreferenced sets and their terms. Work without ranking,
 burst placement or preferences omits those relations from its SQL plan. Ranked
 work without preferences keeps ranking and omits preference relations.
+Named work without placement relations hydrates only its current claimant.
+Scoped polls hydrate machines from their source team and keep service observers.
+The predicate joins work to claimant scope by team before evaluating pairs.
+Cancelled, finished or expired named work reports its state refusal before
+funding diagnostics.
 Private owner placement projections use that same SQL predicate before readiness.
 They write no asks, awards, reservations or fair-share ordinals. Readiness is
 rechecked when the owner asks to execute.
@@ -2313,7 +2324,7 @@ local publication transport and physical bytes remain integration obligations.
 
 | Export | Purpose |
 |---|---|
-| `AcceptedExpansionRow` | Keeps accepted expansion bytes, source fence and body hash in a consistent snapshot. |
+| `AcceptedExpansionRow` | Keeps accepted expansion bytes, private secret registration, source fence, body hash and combined acceptance digest in a consistent snapshot. |
 | `RunSnapshot.Scheduling` | Projects declarations and persisted state into the scheduling graph. |
 | `ScheduleNode`, `ScheduleExpansion`, `ScheduleSnapshot` | Carry the accepted graph, including empty generator groups. |
 | `DecisionKind`, `NodeDecision`, `ScheduleDecision`, `Decide` | Define one pure graph decision consumed by both owners. |
@@ -4344,3 +4355,20 @@ labels. Every contained teardown, release or quarantine fault enters that
 ledger once per node. More than three distinct faults block that team's next
 claim. Quarantine permission is tracked separately and permits at most three
 distinct nodes per team per pass; counting a fault grants no write permission.
+
+## Sealed masking projection (decision 43)
+
+The accepted run seals `Resolved.SecretRegistration`. It retains secret defaults
+from every discovered pipeline, selected list argument kinds, and the complete
+raw/default/effective/item registration set. `BuildSecretRegistration` is the
+single derivation owner. Seal validation recomputes the projection and refuses
+drift. Accepted expansions extend this projection privately for generated args.
+Controllers and execution hosts use it rather than infer list semantics from
+joined values. Display receipts continue to use the accepted spec's latest secret
+classification.
+
+Stored secrets, supplied secret arguments and nonempty defaults of the selected
+pipeline require at least four characters, including each nonempty normalized
+list item. Empty and unselected defaults do not refuse a run. Short derived
+values are skipped. Secrets containing `***` are accepted. Plain config variables
+remain available for shorter values.

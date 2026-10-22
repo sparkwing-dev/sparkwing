@@ -349,6 +349,7 @@ type Concurrency struct {
 // Raw requested argument values are restricted execution inputs, not a display document.
 // SecretArgs is unset before describe. Display must then redact every requested value.
 type Request struct {
+	LocalForeground   bool                  `json:"local_foreground,omitempty"`
 	Burst             *BurstPlacement       `json:"burst,omitempty"`
 	Version           int                   `json:"version"`
 	Team              string                `json:"team"`
@@ -423,6 +424,7 @@ type Resolved struct {
 	Engine              engine.Identity     `json:"engine"`
 	Args                map[string]string   `json:"args"`
 	SecretArgs          []string            `json:"secret_args"`
+	SecretRegistration  SecretRegistration  `json:"secret_registration"`
 	SecretNames         []string            `json:"secret_names"`
 	Entrypoint          string              `json:"entrypoint"`
 	DefaultBranch       Optional[string]    `json:"default_branch"`
@@ -430,6 +432,23 @@ type Resolved struct {
 	Guards              Guards              `json:"guards"`
 	Settings            ExecutionSettings   `json:"settings"`
 	Env                 EnvSnapshot         `json:"env"`
+}
+
+// SecretValue preserves a discovered default and its argument grammar.
+type SecretValue struct {
+	Raw  string `json:"raw"`
+	List bool   `json:"list,omitempty"`
+}
+
+// SecretRegistration is the only source of accepted-run mask registrations.
+// Defaults holds discovered literal inputs, including defaults from every
+// pipeline and values classified by a generator. ListArgs identifies selected
+// arguments parsed as []string; Values is the sealed, normalized projection.
+type SecretRegistration struct {
+	Version  int           `json:"version"`
+	Defaults []SecretValue `json:"defaults,omitempty"`
+	ListArgs []string      `json:"list_args,omitempty"`
+	Values   []string      `json:"values,omitempty"`
 }
 
 // safety: Spec binds both seals and the accepted plan hash as the one host input.

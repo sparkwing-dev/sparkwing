@@ -15,7 +15,7 @@ func TestOwnerExpansionHTTPDerivesSourceAuthority(t *testing.T) {
 		name, body string
 		state      store.ExpansionState
 	}{
-		{"success", `{"source_generation":3,"body":{"jobs":[]}}`, store.ExpansionAccepted},
+		{"success", `{"source_generation":3,"body":{"jobs":[]},"registration":{"version":1}}`, store.ExpansionAccepted},
 		{"failure", `{"source_generation":3,"failure":{"code":"sdk_error","message":"generator failed"}}`, store.ExpansionFailed},
 	} {
 		t.Run(report.name, func(t *testing.T) {

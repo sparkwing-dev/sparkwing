@@ -49,9 +49,12 @@ type CreateRunRequest struct {
 
 // CreateRunResponse returns the accepted run and any first-intake here bearer.
 type CreateRunResponse struct {
-	RunID   string                `json:"run_id"`
-	Number  int64                 `json:"number"`
-	Request runspec.SealedRequest `json:"request"`
+	RunID      string          `json:"run_id"`
+	Number     int64           `json:"number"`
+	Inputs     runspec.Display `json:"inputs"`
+	RequestID  string          `json:"request_id,omitempty"`
+	WriteScope string          `json:"write_scope"`
+	Here       bool            `json:"here"`
 	// HereBearer is issued once and retained privately for resume.
 	HereBearer string `json:"here_bearer,omitempty"`
 	Replayed   bool   `json:"replayed"`
@@ -194,9 +197,10 @@ type Applied struct {
 
 // ExpansionSubmission carries one expansion body or failure under its source generation.
 type ExpansionSubmission struct {
-	SourceGeneration int64           `json:"source_generation"`
-	Body             json.RawMessage `json:"body,omitempty"`
-	Failure          *apierr.Error   `json:"failure,omitempty"`
+	SourceGeneration int64                      `json:"source_generation"`
+	Body             json.RawMessage            `json:"body,omitempty"`
+	Registration     runspec.SecretRegistration `json:"registration,omitempty"`
+	Failure          *apierr.Error              `json:"failure,omitempty"`
 }
 
 type ExpandedJob struct {
@@ -262,10 +266,11 @@ type ExecutionJob struct {
 
 // AcceptedExpansion retains exact accepted declarations for reconstruction, including empty groups.
 type AcceptedExpansion struct {
-	SourceJob        string          `json:"source_job"`
-	SourceGeneration int64           `json:"source_generation"`
-	Body             json.RawMessage `json:"body"`
-	BodyHash         string          `json:"body_hash"`
+	SourceJob        string                     `json:"source_job"`
+	SourceGeneration int64                      `json:"source_generation"`
+	Body             json.RawMessage            `json:"body"`
+	BodyHash         string                     `json:"body_hash"`
+	Registration     runspec.SecretRegistration `json:"registration,omitempty"`
 }
 
 type FinishRequest struct {

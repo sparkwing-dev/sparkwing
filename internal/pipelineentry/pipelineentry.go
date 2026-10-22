@@ -162,7 +162,7 @@ type installOutput struct {
 }
 
 func (w *installOutput) Write(body []byte) (int, error) {
-	text := w.stream.Mask(string(body), false)
+	text := w.stream.Mask(string(body))
 	n, err := io.WriteString(w.out, text)
 	if err == nil && n != len(text) {
 		err = io.ErrShortWrite
@@ -174,7 +174,7 @@ func (w *installOutput) Write(body []byte) (int, error) {
 }
 
 func (w *installOutput) flush() error {
-	_, err := io.WriteString(w.out, w.stream.Mask("", true))
+	_, err := io.WriteString(w.out, w.stream.Flush())
 	return err
 }
 

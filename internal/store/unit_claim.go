@@ -323,7 +323,7 @@ func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitD
 	if err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
 		return err
 	}
-	diagnostic, err := explainUnitEligibilityTx(ctx, tx, team, unit, demand)
+	diagnostic, err := explainUnitPlacementTx(ctx, tx, team, unit, demand)
 	if err != nil {
 		return err
 	}
@@ -332,6 +332,13 @@ func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitD
 	}
 	if err := checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return err
+	}
+	diagnostic, err = explainUnitFundingTx(ctx, tx, team, unit, diagnostic)
+	if err != nil {
+		return err
+	}
+	if !diagnostic.ok() {
+		return diagnostic.refused
 	}
 	return errRankingHold
 }

@@ -52,6 +52,7 @@ func prepareNativeStoreW8(t *testing.T, s *store.Store, kind capability.UnitKind
 	}
 	spec := *run.Spec
 	spec.PlanHash = "plan"
+	spec.Resolved.SecretRegistration = runspec.SecretRegistration{Version: 1}
 	body, err := json.Marshal(spec)
 	if err != nil {
 		t.Fatal(err)

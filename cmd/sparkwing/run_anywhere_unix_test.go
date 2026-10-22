@@ -42,11 +42,11 @@ func runAnywherePlan(t *testing.T, f cloudDispatch, created controllerwire.Creat
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: doc, Context: settings.Context{}})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: cloudDispatchRequest(t, f, created.RunID), Declarations: declarations, Plan: doc, Context: settings.Context{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolution := runspec.Resolved{Entrypoint: "Deploy", Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}, Engine: engineID, Env: created.Request.Request.Env}
+	resolution := runspec.Resolved{Entrypoint: "Deploy", Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}, Engine: engineID, Env: cloudDispatchRequest(t, f, created.RunID).Request.Env}
 	if _, err := f.open(bearer, false).AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: resolution}); err != nil {
 		t.Fatalf("plan acceptance: %v", err)
 	}
@@ -74,8 +74,8 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Request.Request.Dispatch != runspec.DispatchController {
-		t.Fatalf("unselected Cloud trigger sealed dispatch=%s", created.Request.Request.Dispatch)
+	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchController {
+		t.Fatalf("unselected Cloud trigger sealed dispatch=%s", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch)
 	}
 	if _, err := f.state.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "run-anywhere-test", time.Hour); err != nil {
 		t.Fatal(err)
@@ -176,4 +176,13 @@ func runAnywhereAdmin(t *testing.T, f cloudDispatch) string {
 		t.Fatal(err)
 	}
 	return issued.Raw
+}
+
+func cloudDispatchRequest(t *testing.T, f cloudDispatch, id string) runspec.SealedRequest {
+	t.Helper()
+	row, err := teststore.ForTeam(t, f.state, store.DefaultTeam).ReadRun(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row.Request
 }

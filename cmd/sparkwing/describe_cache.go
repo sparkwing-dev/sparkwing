@@ -15,11 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func describeCachePath(key string) string {
 	return filepath.Join(bincache.SparkwingHome(),
-		"cache", "describe-v2", key+".json")
+		"cache", "describe-v4", key+".json")
 }
 
 func byRepoDescribePath(sparkwingDir string) string {
@@ -29,10 +30,10 @@ func byRepoDescribePath(sparkwingDir string) string {
 	}
 	sum := sha256.Sum256([]byte(abs))
 	return filepath.Join(bincache.SparkwingHome(),
-		"cache", "describe-v2", "by-repo", hex.EncodeToString(sum[:16])+".json")
+		"cache", "describe-v4", "by-repo", hex.EncodeToString(sum[:16])+".json")
 }
 
-func readDescribeCache(ctx context.Context, sparkwingDir string) ([]nodeproto.PipelineDescription, error) {
+func readDescribeCache(ctx context.Context, sparkwingDir string) ([]runspec.PipelinePresentation, error) {
 	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
 	if err != nil {
 		return nil, err
@@ -45,7 +46,10 @@ func readDescribeCache(ctx context.Context, sparkwingDir string) ([]nodeproto.Pi
 			return nil, err
 		}
 		doc, err := describeEntry(ctx, sparkwingDir, entry)
-		return doc.Pipelines, err
+		if err != nil {
+			return nil, err
+		}
+		return doc.Presentation().Pipelines, nil
 	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
@@ -88,28 +92,28 @@ func builtEntry(ctx context.Context, sparkwingDir, key string) (pipelineentry.Co
 }
 
 // safety: the versioned cache directory separates protocol document shapes.
-func readDescribeFile(path string) []nodeproto.PipelineDescription {
+func readDescribeFile(path string) []runspec.PipelinePresentation {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	var doc nodeproto.DescribeDoc
+	var doc runspec.DescribePresentation
 	if err := (nodeproto.Reply{ID: "cache", OK: true, Result: raw}).Decode(&doc); err != nil || doc.Pipelines == nil {
 		return nil
 	}
 	return doc.Pipelines
 }
 
-func refreshDescribe(ctx context.Context, sparkwingDir string, entry pipelineentry.Command, key string) ([]nodeproto.PipelineDescription, error) {
+func refreshDescribe(ctx context.Context, sparkwingDir string, entry pipelineentry.Command, key string) ([]runspec.PipelinePresentation, error) {
 	doc, err := describeEntry(ctx, sparkwingDir, entry)
 	if err != nil {
 		return nil, err
 	}
 	// safety: a home that takes no writes still answers from the entry.
-	if err := storeDescribe(sparkwingDir, key, doc); err != nil {
+	if err := storeDescribe(sparkwingDir, key, doc.Presentation()); err != nil {
 		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
 	}
-	return doc.Pipelines, nil
+	return doc.Presentation().Pipelines, nil
 }
 
 func writeDescribeCache(ctx context.Context, sparkwingDir, key string, entry pipelineentry.Command) error {
@@ -117,10 +121,10 @@ func writeDescribeCache(ctx context.Context, sparkwingDir, key string, entry pip
 	if err != nil {
 		return err
 	}
-	return storeDescribe(sparkwingDir, key, doc)
+	return storeDescribe(sparkwingDir, key, doc.Presentation())
 }
 
-func storeDescribe(sparkwingDir, key string, doc nodeproto.DescribeDoc) error {
+func storeDescribe(sparkwingDir, key string, doc runspec.DescribePresentation) error {
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return err
@@ -145,11 +149,15 @@ func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName stri
 	if err != nil {
 		return nil, err
 	}
-	schema, err := boundPipelineSchema(schemas, identity)
-	return schema.Args, err
+	for _, schema := range schemas {
+		if schema.Name == identity.Entrypoint {
+			return schema.Args, nil
+		}
+	}
+	return nil, fmt.Errorf("pipeline %q: presentation unavailable", identity.Name)
 }
 
-func describeEntry(ctx context.Context, sparkwingDir string, entry pipelineentry.Command) (nodeproto.DescribeDoc, error) {
+func describeEntry(ctx context.Context, sparkwingDir string, entry pipelineentry.Command) (*runspec.DeclarationGate, error) {
 	doc, err := repos.Describe(ctx, entry, filepath.Dir(sparkwingDir))
 	if err != nil {
 		return doc, fmt.Errorf("describe %s: %w", entry[len(entry)-1], err)

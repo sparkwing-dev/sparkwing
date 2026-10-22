@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -58,7 +61,11 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkRequestID(t, first.Request.Request, "trace-42")
+	checkRequestID(t, first, "trace-42")
+	claimed, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunID: first.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion()})
+	if err != nil || claimed.Claim == nil {
+		t.Fatalf("owner claim: %v", err)
+	}
 	second, err := controller.CreateRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +73,7 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 	if first.RunID == second.RunID || second.Replayed {
 		t.Fatal("tracing ID deduplicated separate submissions")
 	}
-	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: first.Request, SourceRunID: first.RunID})
+	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: claimed.Claim.Request, SourceRunID: first.RunID})
 	if err != nil {
 		t.Fatal(err)
 	}

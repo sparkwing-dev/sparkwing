@@ -181,7 +181,7 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return !run.Request.Request.Git.App.Set && !created.Request.Request.Git.App.Set
+		return !run.Request.Request.Git.App.Set && !created.Inputs.Git.App.Set
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

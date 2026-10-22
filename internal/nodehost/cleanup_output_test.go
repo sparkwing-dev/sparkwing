@@ -30,9 +30,8 @@ func FuzzNativeCleanupMasksAcrossWriteBoundaries(f *testing.F) {
 			messages = append(messages, record.Message)
 			return nil
 		}}
-		sink := &nativeCleanupSink{ctx: t.Context(), logs: logs}
-		writer := &LineWriter{sink: sink, level: LevelInfo, stream: masks.Stream()}
-		text := strings.Repeat("p", maxTextLine-len(content)/2) + content + "\r\n" + content
+		writer := logs.writer(t.Context(), LevelInfo)
+		text := strings.Repeat("p", (1<<20)-len(content)/2) + content + "\r\n" + content
 		width := 256 + int(chunk)
 		for len(text) > 0 {
 			part := text[:min(width, len(text))]
@@ -41,9 +40,11 @@ func FuzzNativeCleanupMasksAcrossWriteBoundaries(f *testing.F) {
 			}
 			text = text[len(part):]
 		}
-		writer.Flush()
+		if err := writer.close(); err != nil {
+			t.Fatal(err)
+		}
 		output := strings.Join(messages, "\n")
-		if sink.err != nil || strings.Contains(output, content) || masks.ContainsSecret(output) || !strings.Contains(output, "***") {
+		if strings.Contains(output, content) || masks.ContainsSecret(output) || !strings.Contains(output, "***") {
 			t.Fatal("native cleanup output exposed a registered secret or lost masking")
 		}
 	})

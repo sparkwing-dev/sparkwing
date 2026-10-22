@@ -15,7 +15,7 @@ func expansionFixture(t *testing.T) (*Tenant, *time.Time, ExpansionSubmission) {
 	t.Helper()
 	tenant, now, _ := stateFixture(t)
 	plan := []byte(`{"jobs":[{"id":"job","closures":{"generate":["group"]}}]}`)
-	spec, err := json.Marshal(runspec.Spec{Version: 1, Request: runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "p", Dispatch: runspec.DispatchHost}, Provenance: assertedProvenance(t, "p", "", "")}})
+	spec, err := json.Marshal(runspec.Spec{Version: 1, Request: runspec.SealedRequest{Version: 1, RunID: "run", Request: runspec.Request{Pipeline: "p", Dispatch: runspec.DispatchHost}, Provenance: assertedProvenance(t, "p", "", "")}})
 	if err != nil {
 		t.Fatal(err)
 	}

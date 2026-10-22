@@ -83,7 +83,7 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := prepared.described[0].Help; got != test.want {
+			if got := prepared.declarations.Declarations().Pipelines[0].Help; got != test.want {
 				t.Fatalf("compiled description=%q, want %q", got, test.want)
 			}
 			if test.flag == "" {
@@ -91,7 +91,7 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: prepared.described}); err != nil {
+				if err := storeDescribe(dir, key, presentationFixture(prepared.declarations.Declarations().Pipelines...)); err != nil {
 					t.Fatal(err)
 				}
 			} else {

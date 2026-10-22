@@ -41,6 +41,15 @@ func openStore(t *testing.T, opts ...store.Option) *store.Store {
 
 func deps(ids ...string) []string { return ids }
 
+func TestStoreHostFixtureUsesStoreClock(t *testing.T) {
+	now := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	database := openStore(t, teststore.WithClock(func() time.Time { return now }))
+	f := newStoreHostFixtureOn(t, database, fanOutDoc(), runspec.Options{})
+	if _, err := database.AsOperator().ResolveAuthority(t.Context(), f.Actor.Authority); err != nil {
+		t.Fatalf("owner authority differs from its store clock: %v", err)
+	}
+}
+
 func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "d", Needs: deps("b", "c"), Steps: []nodeproto.StepSpec{{ID: "body"}}},

@@ -36,6 +36,14 @@ func (e eligibility) ok() bool { return e.failed == "" }
 
 // explainUnitEligibilityTx supplies refusal details for placement notices; awards use claimSQL.
 func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant UnitDemand) (eligibility, error) {
+	e, err := explainUnitPlacementTx(ctx, tx, team, unit, claimant)
+	if err != nil || !e.ok() {
+		return e, err
+	}
+	return explainUnitFundingTx(ctx, tx, team, unit, e)
+}
+
+func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant UnitDemand) (eligibility, error) {
 	var e eligibility
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant.CapabilityPrefix}, false)
 	if unavailableRunner(err) || refusal(err) {
@@ -73,7 +81,17 @@ func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit 
 	case err != nil:
 		return e, err
 	}
+	verdict := match.Evaluate(e.profile, e.demand)
+	if !verdict.OK() {
+		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
+		return e, nil
+	}
+	return e, nil
+}
+
+func explainUnitFundingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, e eligibility) (eligibility, error) {
 	if e.metered {
+		var err error
 		if e.price, err = unitBillingPriceTx(ctx, tx, e.demand.Selector, e.profile); err != nil {
 			var unpriced *UnpricedCPUClassError
 			if errors.As(err, &unpriced) {
@@ -83,14 +101,7 @@ func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit 
 			}
 			return e, err
 		}
-	}
-	verdict := match.Evaluate(e.profile, e.demand)
-	if !verdict.OK() {
-		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
-		return e, nil
-	}
-	if e.metered {
-		if err := checkUnitBillingTx(ctx, tx, team, unit, e.price, capability.CloudLauncher(c)); err != nil {
+		if err := checkUnitBillingTx(ctx, tx, team, unit, e.price, capability.CloudLauncher(e.chain[0].principal.Capability)); err != nil {
 			var refused *apierr.Error
 			if errors.Is(err, ErrInsufficientCredits) || errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) {
 				e.failed, e.refused = stepBilling, err

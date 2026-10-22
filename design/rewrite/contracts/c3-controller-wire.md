@@ -143,6 +143,10 @@ Here intake/retry never transparently retries. Idempotent replay retains the run
 but cannot return its raw HereBearer. A lost first response is a failed handoff,
 with a fresh trigger request as the recovery and the abandoned reservation expiring
 at its original claim_by. Resume uses the retained private bearer, bound to the controller URL and run.
+Local foreground `CreateRunRequest.Request.local_foreground` reserves the original
+run's first trigger claim for a named local claim from its submitting OS account.
+Only local host execution may request it. Detached submissions omit it. History
+publication clears it without changing the local source request.
 Local transport also binds the absolute API socket path. Local clients use a raw
 socket transport under the same C2 route retry policy as HTTP clients, without
 an additional transport retry loop.
@@ -150,7 +154,7 @@ an additional transport retry loop.
 The prepared-request initial-trigger component calls `Controller.CreateRun` once,
 preserving a supplied idempotency key or generating one before submission. Its
 receipt exposes run ID, team number, replay, observed terminal outcome and a
-masked error. The component validates the returned first seal and initial run
+masked error. The component validates the display receipt and initial run
 identity before handing the complete private response to here hosting. A fresh
 here receipt requires its bearer; a replay cannot contain one. Received here
 authority reaches the retaining handoff even if cancellation arrived during
@@ -334,14 +338,14 @@ one envelope and use `apierr.DecodeInner`.
 | Export | Contract |
 | --- | --- |
 | `Compatibility`, `CompatibilityFor`, `APIMajor` | API identity and per-engine compatibility window, served by `/api/v1/capabilities?engine_version=` from verified release metadata. |
-| `CreateRunRequest`, `CreateRunResponse` | Shared intake, allocated team number, first seal, replay and one-time here bearer. |
+| `CreateRunRequest`, `CreateRunResponse` | Shared intake, allocated team number, display inputs, write scope, replay and one-time here bearer. |
 | `PlanSubmission`, `PlanAccepted` | Second-seal proposal and committed plan/spec hashes. Restricted `CheckoutDeclarations` retain pipeline/default layers and origins; the store resolves them against its own request overrides and ceilings. |
 | `ClaimRequest`, `ClaimResponse`, `ClaimedUnit` | Queue or named selection and a server-derived unit award. Granted identity, pools and billing never come from the request. Runner software version is checked by `engine.EvaluateRunner` before new awards; draining renewals stay available. |
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
 | `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
 | `LauncherObservation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
-| `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body or structured failure and the persisted topology/settings. |
+| `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body with private `registration`, or a structured failure, and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |
 | `RunDetail`, `JobDetail`, `AttemptDetail` | Shared safe status response. Inputs come from `runspec.DisplayRequest` or `DisplaySpec`. |
@@ -381,9 +385,12 @@ an unknown/absent mode or absent idempotency key before intake. The mode joins
 the exact-body digest, so the same key with a different mode conflicts. Neither
 selection changes the original request, plan, source authority, actor or captured
 environment. The controller records the retrier as separate lineage.
-`CreateRunResponse.RunID` identifies the newly allocated retry. Its `Request`
-retains the original seal's run identity and hash, including across retry chains.
-Consumers must not rewrite or equate those identities.
+`CreateRunResponse.RunID` identifies the newly allocated retry. `Inputs` is a
+`runspec.Display` projection. Member receipts carry no sealed request, source
+location, environment digest or secret-bearing hash. `WriteScope` is derived
+from stored provenance for local publication. `Here` tells the CLI whether it
+must host the run. The original seal remains in execution claims, including
+across retry chains. Consumers must not rewrite that seal.
 
 The CLI submits both local and profile retries through `Controller.Retry`.
 It resolves and deduplicates all flag/stdin selectors before submitting any run.
@@ -633,6 +640,9 @@ cannot select its owner or encryption result. `SecretWritten` returns the
 encrypted/bound metadata and replay marker. The client refuses an unconfirmed
 restriction, visibility change or unbound result. W1/W2 must persist `only_on`
 and enforce it at plan acceptance and release, including here refusal.
+Masked values shorter than four characters are refused
+with HTTP 400 and guidance to use a plain config variable. Explicit plain
+configuration writes permit those values.
 
 `DeleteSecret` uses `DELETE /api/v1/secrets/{name}?pipeline=` and returns
 `SecretDeletion` with the exact row selector and a deleted/absent bit. Deletion
@@ -1276,3 +1286,16 @@ continues strictly before it. The cursor must belong to that team's audit.
 Each event retains `subject_id`, `run_id` and `attrs.operation` when present.
 The console renders those targets and appends older pages through its continuation
 control.
+
+## Private expansion mask registrations
+
+The expansion HTTP decoder accepts `registration` and forwards it unchanged to
+acceptance. Expansion submissions and accepted owner snapshots carry it beside
+the generated plan body. It is a `runspec.SecretRegistration`, never a member
+projection. Every successful submission explicitly supplies version 1, including
+an empty registration. Absence and unsupported versions are refused before
+normalization. The store validates normalized values, binds body and registration
+to one acceptance digest, and returns the original private projection on replay.
+`BodyHash` still hashes only the generated plan body for SDK replay. Missing or
+changed registration refuses acceptance or reconstruction. Public plan JSON and
+member receipts never carry these values.

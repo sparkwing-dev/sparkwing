@@ -10,6 +10,9 @@ export interface LogRecord {
   event?: string;
   msg?: string;
   attrs?: Record<string, unknown>;
+  stream?: string;
+  stream_data?: string;
+  stream_end?: boolean;
 }
 export class LogWriter implements Logger {
   readonly #sink: LineSink;
@@ -33,8 +36,16 @@ export class LogWriter implements Logger {
     this.#log("error", msg, attrs);
   }
   event(event: string, attrs?: Record<string, unknown>): void {
+    if (event === "exec_chunk") {
+      this.#emit({
+        ts: this.#now().toISOString(), level: "info", event: "exec_line", stream: String(attrs?.stream ?? ""),
+        ...(attrs?.data === undefined ? {} : { stream_data: String(attrs.data) }),
+        ...(attrs?.end === true ? { stream_end: true } : {}),
+      });
+      return;
+    }
     const msg =
-      event === "exec_line" ? String(attrs?.line ?? "") : event === "exec_start" ? `$ ${String(attrs?.command ?? "")}` : undefined;
+      event === "exec_start" ? `$ ${String(attrs?.command ?? "")}` : undefined;
     this.#emit({ ts: this.#now().toISOString(), level: "info", event, ...(attrs ? { attrs } : {}), ...(msg === undefined ? {} : { msg }) });
   }
   #log(level: Level, msg: string, attrs?: Record<string, unknown>): void {

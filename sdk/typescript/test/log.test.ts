@@ -29,3 +29,15 @@ test("logs never write an encoded frame above the protocol limit", () => {
   assert.ok(frames.length > 0);
   assert.ok(frames.every((frame) => Buffer.byteLength(frame) <= MAX_FRAME_BYTES));
 });
+
+test("command chunks remain base64 transport until the host masks and splits them", () => {
+  const records: any[] = [];
+  const log = new LogWriter({ write: (line) => records.push(JSON.parse(line)) }, "compile");
+  const data = Buffer.from("before\nafter").toString("base64");
+  log.event("exec_chunk", { stream: "command-stdout", data });
+  log.event("exec_chunk", { stream: "command-stdout", end: true });
+  assert.deepEqual(records.map(({event,step,stream,stream_data,stream_end,msg}) => ({event,step,stream,stream_data,stream_end,msg})), [
+    { event: "exec_line", step: "compile", stream: "command-stdout", stream_data: data, stream_end: undefined, msg: undefined },
+    { event: "exec_line", step: "compile", stream: "command-stdout", stream_data: undefined, stream_end: true, msg: undefined },
+  ]);
+});

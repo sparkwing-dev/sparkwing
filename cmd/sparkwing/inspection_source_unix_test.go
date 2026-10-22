@@ -94,7 +94,7 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 		},
 	}
 	err := withLocalPipelineEntry(t.Context(), home, dir, "demo", runFlags{}, os.Environ(), options, func(ctx context.Context, entry pipelineInspection, execution string) error {
-		schema, err := entry.describe(ctx)
+		schema, err := entry.presentation(ctx)
 		if err != nil {
 			return err
 		}

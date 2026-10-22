@@ -66,6 +66,9 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 				if request.Args["token"] != supplied || request.Args["empty"] != "" || request.Args["label"] != "explicit" || request.Run.RunID != "run" {
 					t.Fatalf("planning inputs changed: %+v", request)
 				}
+				if _, ok := request.Args["empty"]; ok {
+					t.Fatal("empty default became a supplied argument")
+				}
 				return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nil
 			}
 			return nil, nil
@@ -78,7 +81,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || prepared.Args["empty"] != "" || len(prepared.Args) != 3 {
+	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || !reflect.DeepEqual(prepared.Args, map[string]string{"label": "explicit", "token": supplied}) {
 		t.Fatalf("description = %+v", prepared)
 	}
 	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {
@@ -94,6 +97,24 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 		if p.closed != 1 || p.cleaned != 1 {
 			t.Fatal("planning process was not joined and cleaned")
 		}
+	}
+}
+
+func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
+	planner, input, fixture, _ := sdkPlanningFixture(t)
+	planner.ValidatePlan = nodeproto.ValidatePlan
+	planner.Masks = NewMaskRegistry(planner.Masker)
+	if err := planner.Masks.registerIssued("issued-token"); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := planner.Prepare(t.Context(), input, fixture.input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = prepared.Functions.Validate(json.RawMessage(`{"jobs":[{"id":"new-issued-token","steps":[{"id":"run"}]}]}`), nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: planner.Masks.replayMasks})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+		t.Fatalf("fresh plan validation = %v", err)
 	}
 }
 

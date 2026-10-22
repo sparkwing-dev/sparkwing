@@ -89,7 +89,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 		}
 		replay := serve(true)
 		var repeated controllerwire.CreateRunResponse
-		if replay.Code != http.StatusOK || json.Unmarshal(replay.Body.Bytes(), &repeated) != nil || repeated.Request.Hash != admitted.Request.Hash || repeated.Request.Ceilings.OwnerExecutionTimeout.Value != time.Hour {
+		if replay.Code != http.StatusOK || json.Unmarshal(replay.Body.Bytes(), &repeated) != nil || repeated.RunID != admitted.RunID || storedIntake(t, st, repeated.RunID).Ceilings.OwnerExecutionTimeout.Value != time.Hour {
 			t.Logf("sealed settings changed on replay HTTP %d: %s", replay.Code, replay.Body)
 			return false
 		}
@@ -162,15 +162,15 @@ func TestPeerIntakeBudgetsFollowPlacement(t *testing.T) {
 			if recorder.Code != http.StatusCreated || json.Unmarshal(recorder.Body.Bytes(), &admitted) != nil {
 				t.Fatalf("admit HTTP %d: %s", recorder.Code, recorder.Body)
 			}
-			if got := admitted.Request.Request.Options.OwnerExecutionTimeout.Value; got != tc.want {
+			if got := storedIntake(t, st, admitted.RunID).Request.Options.OwnerExecutionTimeout.Value; got != tc.want {
 				t.Fatalf("owner deadline=%v, want %v", got, tc.want)
 			}
 			timeout := int64(time.Hour / time.Millisecond)
-			placement := store.RequestPlacement(admitted.Request.Request)
+			placement := store.RequestPlacement(storedIntake(t, st, admitted.RunID).Request)
 			if (placement == nodeproto.PlacementLocal) != tc.local {
 				t.Fatalf("intake placement=%s local=%v", placement, tc.local)
 			}
-			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout}}}, Context: settings.Context{Local: placement == nodeproto.PlacementLocal}})
+			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: storedIntake(t, st, admitted.RunID), Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout}}}, Context: settings.Context{Local: placement == nodeproto.PlacementLocal}})
 			if err != nil || resolved.Jobs["job"].Timeout.Value != time.Hour {
 				t.Fatalf("admitted budget fails plan acceptance: %v", err)
 			}

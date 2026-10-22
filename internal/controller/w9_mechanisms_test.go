@@ -304,13 +304,24 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	submission, err := json.Marshal(controllerwire.ExpansionSubmission{SourceGeneration: 7, Body: body})
+	registration, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := runspec.CanonicalHash(struct {
+		Body         json.RawMessage
+		Registration runspec.SecretRegistration
+	}{body, registration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submission, err := json.Marshal(controllerwire.ExpansionSubmission{SourceGeneration: 7, Body: body, Registration: registration})
 	if err != nil {
 		t.Fatal(err)
 	}
 	controller.EngineClaimHTTP(t, handler, claim.Capability, "POST", "/api/v1/runs/run/jobs/source/expansion", string(submission), 200)
 	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "source"})
-	if err != nil || row.Expansion != store.ExpansionAccepted {
+	if err != nil || row.Expansion != store.ExpansionAccepted || row.ExpansionDigest != string(digest) {
 		t.Fatalf("generator did not settle: %+v %v", row, err)
 	}
 }

@@ -115,7 +115,7 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 		input.Attempt, st.row.Attempt = runspec.AttemptOrdinal(int64(ordinal)), runspec.AttemptOrdinal(int64(ordinal))
 		masker := secrets.NewMasker()
 		masker.Register(secret)
-		deps.Mask = masker.Mask
+		deps.Masker = masker
 		var diagnostics []nodeproto.FrameLog
 		deps.Log = func(_ context.Context, _ NodeInput, log nodeproto.FrameLog) error {
 			diagnostics = append(diagnostics, log)

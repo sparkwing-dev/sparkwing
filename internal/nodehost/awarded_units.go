@@ -21,7 +21,7 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	if err := h.unitReady(input); err != nil {
 		return accepted, err
 	}
-	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
+	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Masker) }()
 	owner := input.Owner.Owner
 	if owner.Kind != store.OwnerTrigger || owner.RunID != runspec.RunID(input.RunID) || owner.Holder == "" || owner.Generation <= 0 {
 		return accepted, errors.New("plan unit requires its planning lease")
@@ -62,7 +62,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if input.Accepted == nil || sourceID == "" || generation < 0 || fence.Kind != capability.UnitEval || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 || h.Expand == nil {
 		return errors.New("eval unit requires accepted source, expansion lease and evaluator")
 	}
-	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Mask) }()
+	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Masker) }()
 	if err := h.Masks.initializeSeal(*input.Accepted); err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if err != nil || !reflect.DeepEqual(accepted, *input.Accepted) || string(snapshot.Run.Request.Hash) != input.RequestHash {
 		return errors.Join(err, errors.New("eval award differs from persisted acceptance"))
 	}
-	if err := h.Masks.initialize(snapshot.Run.Request, &snapshot.Run.Spec.Resolved, &accepted.Plan, snapshot.Nodes); err != nil {
+	if err := h.Masks.initializeSnapshot(snapshot, accepted); err != nil {
 		return err
 	}
 	var row store.NodeRow
@@ -100,28 +100,28 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 		return errors.Join(err, cause)
 	}
 	if err != nil || entry == nil {
-		return h.commitExpansion(ctx, row, input.Owner, nil, &store.ExpansionFailure{Code: apierr.PlanFailed, MaskedError: "evaluation source acquisition failed"})
+		return h.commitExpansion(ctx, row, input.Owner, nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: apierr.PlanFailed, MaskedError: "evaluation source acquisition failed"})
 	}
-	body, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+	body, registration, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 	if err != nil {
 		return err
 	}
-	return h.commitExpansion(ctx, row, input.Owner, body, failure)
+	return h.commitExpansion(ctx, row, input.Owner, body, registration, failure)
 }
 
 func (h *OwnerHost) unitReady(input RunInput) error {
-	if h.Store == nil || h.Mask == nil || h.Renew == nil || h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval || input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost {
+	if h.Store == nil || h.Masker == nil || h.Renew == nil || h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval || input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost {
 		return errors.New("awarded unit requires state, renewal, masking and sealed input")
 	}
 	return nil
 }
 
-func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, actor store.Actor, body json.RawMessage, failure *store.ExpansionFailure) error {
+func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, actor store.Actor, body json.RawMessage, registration runspec.SecretRegistration, failure *store.ExpansionFailure) error {
 	if (len(body) == 0) == (failure == nil) {
 		return errors.New("generator must return declarations or a structured failure")
 	}
 	commit := func() error {
-		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: actor, Body: body, Failure: failure})
+		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: actor, Body: body, Registration: registration, Failure: failure})
 		return err
 	}
 	if h.Masks != nil && failure == nil {

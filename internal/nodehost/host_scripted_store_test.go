@@ -152,6 +152,7 @@ func newOwnerSealStore(row store.RunRow) *ownerSealFixture {
 			return store.AcceptedPlan{}, errors.New("host replaced intake")
 		}
 		s.row.Plan, s.row.PlanHash = input.Seal.Plan, ownerPlanHash
+		input.Seal.Resolved.SecretRegistration.Version = 1
 		s.row.Spec = &runspec.Spec{Declarations: input.Seal.Declarations, Request: input.Seal.Request, Hash: "spec", PlanHash: ownerPlanHash, Resolved: input.Seal.Resolved}
 		return store.AcceptedPlan{Spec: *s.row.Spec, Plan: s.row.Plan, PlanHash: s.row.PlanHash}, nil
 	}

@@ -203,3 +203,44 @@ func TestCloudNamedRecheckSeeksTheTenantUnitKey(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClaimPredicateJoinsOnlyTheTeamsClaimants(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	facts := []claimFacts{{Prefix: demand.CapabilityPrefix, Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"sparkwing-4cpu"}}}
+	teams := make([]claimTeamFacts, 200)
+	for i := range teams {
+		teams[i] = claimTeamFacts{Team: fmt.Sprintf("team-%03d", i), Balance: 1e12, Available: 128}
+	}
+	for i := range 999 {
+		facts = append(facts, claimFacts{Prefix: fmt.Sprintf("observer-%04d", i), Team: teams[i%len(teams)].Team, Trust: "any", Kinds: []string{"node"}})
+	}
+	q := claimSQL{dialect: DialectSQLite}
+	query, err := q.query(facts, teams, DefaultCreditRateTable(DefaultCreditRateMicro), []capability.UnitKind{capability.UnitNode}, demand, s.now().UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+query, q.args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	found := false
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+		if (strings.Contains(detail, "SEARCH c USING AUTOMATIC") || strings.Contains(detail, "SEARCH w USING AUTOMATIC")) && strings.Contains(detail, "(team=?)") {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("claimant scope lacks a team index seek: %v", plan)
+	}
+}

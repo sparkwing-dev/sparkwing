@@ -47,7 +47,6 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 		t.Run(outcome, func(t *testing.T) {
 			lost := outcome != "success"
 			input, s, host, _ := claimedNodeFixture(t)
-			host.Mask = func(s string) string { return s }
 			root, sha := hostSourceCheckout(t)
 			s.run.Spec.Request.Request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}
 			s.run.Spec.Request.Request.Git.SHA = sha
@@ -136,7 +135,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 					return revoke()
 				}}, nil
 			}
-			deps.Mask = host.Mask
+			deps.Masker = host.Masker
 			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
 			}

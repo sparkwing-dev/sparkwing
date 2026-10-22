@@ -97,17 +97,13 @@ test("run streams complete and trailing lines while capture preserves exact byte
     assert.equal(result.stdout, "first\r\nsecond");
     assert.equal(result.stderr, "warning\n");
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(
-      events
-        .filter((value) => value.event === "exec_line")
-        .map((value) => [value.attrs.stream, value.attrs.line])
-        .sort(),
-      [
-        ["stderr", "warning"],
-        ["stdout", "first"],
-        ["stdout", "second"],
-      ],
-    );
+    const forwarded = events.filter((value) => value.event === "exec_chunk");
+    for (const [source, expected] of [["stdout", result.stdout], ["stderr", result.stderr]] as const) {
+      const frames = forwarded.filter((value) => value.attrs.source === source);
+      assert.equal(frames.filter((value) => value.attrs.end === true).length, 1);
+      assert.equal(new Set(frames.map((value) => value.attrs.stream)).size, 1);
+      assert.equal(Buffer.concat(frames.filter((value) => typeof value.attrs.data === "string").map((value) => Buffer.from(String(value.attrs.data), "base64"))).toString(), expected);
+    }
     assert.equal(events[0]?.event, "exec_start");
     assert.equal(events.at(-1)?.event, "exec_end");
     events.length = 0;

@@ -43,8 +43,42 @@ credential stays outside the Job. See [Runner Job placement](#runner-job-placeme
 An authorized pipeline can use and disclose its secrets. Masking covers values
 registered with the host and their supported encodings. Arbitrary transformations,
 network exfiltration and files outside the host's output path are outside that
-protection. Registered secrets are refused in job, step, group and approval IDs
-because stored identifiers cannot be masked safely.
+protection. Plan acceptance refuses known registered secrets in job, step, group
+and approval IDs because stored identifiers cannot be masked safely. A lazily
+issued secret is registered before release without invalidating exact replay of
+accepted topology. Every fresh identifier, including generated job IDs, is checked
+against issued values as well as declared secrets. One Go host module masks every presentation payload. Stdout and stderr
+are masked as byte streams before line splitting. Protocol frames are decoded
+first, then their payloads are sanitized before trusted envelopes are built.
+The accepted run seals one registration projection containing raw arguments,
+secret defaults, effective values and every normalized list item. Stored secrets
+and OIDC tokens are registered before the host releases them. Explicit `Mask`
+registers author-generated values before subsequent output.
+
+Stored secrets, supplied secret arguments and nonempty secret defaults of the
+selected pipeline must contain at least four characters, including each nonempty
+list item. Use a plain config variable for shorter values. Empty supplied
+arguments and defaults carry no value. Defaults of unselected pipelines do not
+refuse a run. Their valid values and list items still register, while short
+items are skipped. Secrets containing `***` are accepted. Replacement markers can
+form a registered value containing `***`, or a value containing `*` beside a marker,
+across published stream emissions. This rare marker-edge case is accepted.
+The old twelve-byte line/list fragment policy
+is removed. Remote environment values still use their separate twelve-byte
+registration threshold. Plain submitted config is preserved when it is too short
+to register a mask. Derived proxy credential parts shorter than four characters
+are skipped. Planning output waits until declarations are known.
+Failed discovery withholds output. A healthy selected pipeline can still plan
+when a sibling fails discovery, with planning output withheld. Private
+declarations drive lookup, flag parsing and routing. Help, display and the
+describe cache use a separate presentation type. Incomplete discovery withholds
+all unclassified presentation text, including names and job IDs. Help reports the
+incomplete-discovery diagnostic. Structured
+attributes are masked as JSON text and checked for valid JSON, duplicate keys
+and object shape. A failed check
+replaces the whole attribute payload. Pipeline code run without a Sparkwing host
+is unmasked. See the [masking contract](../internal/secrets/MASKING.md) for
+encodings and overlap rules.
 
 ## Authentication and authorization
 
@@ -148,6 +182,10 @@ prefix. Source and secret releases record their authorized subject. Raw bearers,
 request bodies, captured environment values and secret-bearing hashes do not
 belong in logs or receipts. Public run details are redacted display projections.
 Restricted claims and sealed execution inputs must never be rendered as details.
+Run creation and retry return display inputs, not the execution seal. Schedule
+declarations, overrides, effective arguments and fire history hide every argument
+value because schedules have no describe-time secret classification. Execution
+claims retain the original values.
 
 ## Login and request budgets
 

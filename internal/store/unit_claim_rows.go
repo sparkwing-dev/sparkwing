@@ -85,22 +85,16 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	var expiry sql.NullInt64
 	if unit.Kind == capability.UnitEval {
 		var ownerName string
-		var ownerGeneration int64
-		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,owner_lease_name,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&status, &holder, &prefix, &expiry, &ownerName, &ownerGeneration)
+		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,owner_lease_name FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&status, &holder, &prefix, &expiry, &ownerName)
 		if err != nil {
 			return err
 		}
-		var actualGeneration, until int64
-		if err = tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name=?`, ownerName).Scan(&actualGeneration, &until); err != nil {
+		var until int64
+		if err = tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name=?`, ownerName).Scan(&until); err != nil {
 			return err
 		}
 		if ownerName != "controller.owner" || until <= now || status != "pending" || holder != "" || prefix != "" {
 			return holderRefusal()
-		}
-		if actualGeneration != ownerGeneration {
-			if _, err = tx.ExecContext(ctx, `UPDATE eval_units SET owner_generation=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, actualGeneration, team, unit.RunID, unit.NodeID, unit.SourceGeneration); err != nil {
-				return err
-			}
 		}
 		var generation int64
 		var outcome, expansion string
@@ -134,7 +128,7 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	var result sql.Result
 	var err error
 	if claim.Kind == capability.UnitEval {
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET owner_generation=(SELECT generation FROM leases WHERE name=eval_units.owner_lease_name),status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
 	} else {
 		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
 	}
