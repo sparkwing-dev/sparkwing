@@ -80,3 +80,35 @@ func TestPostgresConfigurationErrorsOmitCredentials(t *testing.T) {
 		t.Fatalf("configuration error must omit credentials: %v", err)
 	}
 }
+
+func TestOpenExistingSchemaErrorsAreDirectional(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int
+		want    string
+	}{
+		{"older", store.ExpectedSchemaVersion() - 1, "older than this binary"},
+		{"newer", store.ExpectedSchemaVersion() + 1, "newer than this binary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.db")
+			st, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version = ?`, tc.version); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = store.OpenExisting(t.Context(), store.DialectSQLite, path)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("OpenExisting error = %v, want %q", err, tc.want)
+			}
+			if tc.name == "newer" && (strings.Contains(err.Error(), "delete") || strings.Contains(err.Error(), "recreate")) {
+				t.Fatalf("rollback suggests discarding data: %v", err)
+			}
+		})
+	}
+}

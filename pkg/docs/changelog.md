@@ -24,6 +24,9 @@ unlock.
 - **cli (Breaking):** Remove synthetic `pipeline hooks status --prove` and daemon event continuation cursors. Hook status compares installed content and format with the expected hooks. Failed hook installation may leave completed file replacements in place; rerun installation after fixing the reported error. `daemon events` retains bounded newest output and corrupt-record warnings.
 - **storage (Breaking):** Object-store breaker reset clears request budgets and keeps the bucket ceiling enforced. Free objects or raise the ceiling to resume writes. Daemon diagnostic identities are fresh on each start. Binary-cache pruning uses bounded oldest-first scans and reports logical bytes removed. `pkg/cachecontrol` replaces `ReclaimBytes` with `RemoveBytes` and removes `ObservedCapacityGainedBytes`.
 
+- **controller:** Helm persists credential epochs on a dedicated retained volume. Startup, admin and restore share `--credential-epoch-dir`; epoch files use the trusted credential-file checks.
+
+- **controller (Breaking):** Schema baseline 20 includes persisted credential epochs and declared restore preparation and schedule acknowledgment. An external credential epoch invalidates all earlier bearer tokens and dashboard sessions after restore; operators supply a fresh bootstrap seed and reissue credentials. Schedule acknowledgment discards catch-up through its timestamp. Schema mismatch errors distinguish upgrade from rollback and preserve newer stores. See [migration](docs/migrations/_unreleased.md#declared-restore-and-credential-epochs).
 - **auth:** GitHub Actions runner credentials use the store clock for their one-hour lifetime, so controller clock skew cannot make an otherwise valid exchange fail.
 
 - **go api:** Add `secretname.ErrMissing` as the shared missing-secret error. `sparkwing.ErrSecretMissing` keeps the same error identity.

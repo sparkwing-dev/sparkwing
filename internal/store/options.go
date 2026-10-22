@@ -62,3 +62,8 @@ func init() {
 		return Option{apply: func(s *Store) { s.clock, s.pinnedClock = clock, s.now }}
 	}
 }
+
+// WithCredentialEpoch binds persisted credentials to the external restore epoch.
+func WithCredentialEpoch(epoch string) Option {
+	return Option{apply: func(s *Store) { s.credentialEpoch = epoch }}
+}

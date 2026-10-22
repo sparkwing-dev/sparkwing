@@ -113,7 +113,7 @@ func (e PaymentEvent) Identity() PaymentEvent {
 	return e
 }
 
-// VerifiedPaymentEvent can originate only from payment signature verification.
+// VerifiedPaymentEvent originates from a signed webhook.
 // Its zero value carries no event and must be refused by settlement.
 type VerifiedPaymentEvent struct {
 	event PaymentEvent

@@ -312,6 +312,9 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 		if err != nil {
 			return node, err
 		}
+		if record.Value.CredentialEpoch != tx.store.credentialEpoch {
+			return node, authorityError(apierr.Unauthenticated, "credential epoch has ended")
+		}
 		node.principal.Capability = record.Value
 		if record.Origin != nil {
 			node.requirement = record.Origin.Requirement
@@ -319,7 +322,7 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 		}
 		node.principal.Class = capability.CredentialBearer
 	} else {
-		var account, parent string
+		var account, parent, credentialEpoch string
 		var created, expires, epoch int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
@@ -327,9 +330,12 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 		if len(sessionChild) != 0 {
 			team = sessionChild[0].principal.Capability.Team
 		}
-		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(?,team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,COALESCE((SELECT epoch FROM session_membership_epochs WHERE session_hash=sessions.hash AND team=COALESCE(?,sessions.team)),-1) FROM sessions WHERE hash = ?", team, team, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
+		err := tx.QueryRowContext(ctx, "SELECT credential_epoch,principal,COALESCE(?,team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,COALESCE((SELECT epoch FROM session_membership_epochs WHERE session_hash=sessions.hash AND team=COALESCE(?,sessions.team)),-1) FROM sessions WHERE hash = ?", team, team, ref.ID).Scan(&credentialEpoch, &c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &epoch)
 		if err != nil {
 			return node, err
+		}
+		if credentialEpoch != tx.store.credentialEpoch {
+			return node, authorityError(apierr.Unauthenticated, "credential epoch has ended")
 		}
 		if account == "" {
 			return node, authorityError(apierr.Unauthenticated, "session identity is unavailable")

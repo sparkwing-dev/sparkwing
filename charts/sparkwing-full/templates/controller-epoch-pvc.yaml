@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sparkwing-full.componentFullname" (dict "root" . "component" "controller-credential-epoch") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Mi
+  {{- if .Values.controller.storage.pvc.storageClassName }}
+  storageClassName: {{ .Values.controller.storage.pvc.storageClassName | quote }}
+  {{- end }}

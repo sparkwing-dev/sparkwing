@@ -560,6 +560,7 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	c.Prefix = raw[:CredentialPrefixLength]
 	c.Digest = sha256.Sum256([]byte(raw))
 	c.IssuedAt = tx.now(ctx)
+	c.CredentialEpoch = tx.store.credentialEpoch
 	var origin *CapabilityOrigin
 	if len(provision) > 0 && provision[0] != nil {
 		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal}
