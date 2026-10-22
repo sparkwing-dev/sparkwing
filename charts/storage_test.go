@@ -1,8 +1,11 @@
 package charts
 
 import (
+	"io"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func TestChartsUseControllerDataWithoutCacheService(t *testing.T) {
@@ -33,6 +36,54 @@ func TestChartsUseControllerDataWithoutCacheService(t *testing.T) {
 						}
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestControllerEpochSurvivesPodAndDatabaseReplacement(t *testing.T) {
+	for _, storage := range []string{"pvc", "emptyDir"} {
+		t.Run(storage, func(t *testing.T) {
+			sets := []string{"controller.store=postgres", "controller.databaseSecret.name=database", "controller.storage.type=" + storage}
+			rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default", sets...)
+			pod := deploymentDocument(t, helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing", sets...)).Spec.Template.Spec
+			controller := pod.Containers[0]
+			if !containsArg(controller.Args, "--credential-epoch-dir=/var/lib/sparkwing/credential-epoch") {
+				t.Fatalf("controller does not select the persistent epoch directory: %v", controller.Args)
+			}
+			if !hasMount(controller.VolumeMounts, "credential-epoch", "/var/lib/sparkwing/credential-epoch") {
+				t.Fatalf("controller lacks the separate epoch volume: %+v", controller.VolumeMounts)
+			}
+			for _, mount := range controller.VolumeMounts {
+				if mount.Name == "credential-epoch" && mount.ReadOnly {
+					t.Fatal("credential epoch volume is read-only")
+				}
+				if mount.Name == "credentials" && !mount.ReadOnly {
+					t.Fatal("provider credentials must stay read-only")
+				}
+			}
+			claim := claimVolume(pod.Volumes, "credential-epoch")
+			if claim == "" || claim == claimVolume(pod.Volumes, "data") {
+				t.Fatalf("epoch needs a dedicated persistent claim: %+v", pod.Volumes)
+			}
+			found := false
+			dec := yaml.NewDecoder(strings.NewReader(rendered))
+			for {
+				var resource renderedClaim
+				if err := dec.Decode(&resource); err == io.EOF {
+					break
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if resource.Kind == "PersistentVolumeClaim" && resource.Metadata.Name == claim {
+					found = true
+					if resource.Metadata.Annotations["helm.sh/resource-policy"] != "keep" {
+						t.Fatal("epoch claim must survive chart uninstall")
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("epoch claim %s was not rendered", claim)
 			}
 		})
 	}

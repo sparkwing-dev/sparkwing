@@ -57,9 +57,12 @@ spec:
           args:
             - {{ printf "%d:%d" (int .Values.podSecurityContext.runAsUser) (int .Values.podSecurityContext.fsGroup) | quote }}
             - "/data"
+            - "/var/lib/sparkwing/credential-epoch"
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: credential-epoch
+              mountPath: /var/lib/sparkwing/credential-epoch
       {{- end }}
       containers:
         - name: controller
@@ -72,6 +75,7 @@ spec:
             - {{ printf "--addr=0.0.0.0:%d" (int .Values.controller.port) | quote }}
             - {{ printf "--deployment=%s" .Values.controller.deployment | quote }}
             - {{ printf "--store=%s" .Values.controller.store | quote }}
+            - "--credential-epoch-dir=/var/lib/sparkwing/credential-epoch"
             {{- with .Values.controller.dataStore.s3URL }}
             - {{ printf "--cache-blob-store=%s" . | quote }}
             {{- end }}
@@ -206,6 +210,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: credential-epoch
+              mountPath: /var/lib/sparkwing/credential-epoch
             - name: scratch
               mountPath: /tmp
             {{- if $credentialSources }}
@@ -235,6 +241,9 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 5
       volumes:
+        - name: credential-epoch
+          persistentVolumeClaim:
+            claimName: {{ include "sparkwing-full.componentFullname" (dict "root" . "component" "controller-credential-epoch") }}
         - name: data
           {{- if eq .Values.controller.storage.type "pvc" }}
           persistentVolumeClaim:

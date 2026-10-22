@@ -86,6 +86,7 @@ const RetrySourceManual = "manual"
 type Store struct {
 	creditMeteringOff  atomic.Bool
 	controllerEpoch    int64
+	credentialEpoch    string
 	controllerFailStop func(error)
 
 	runEnvCipher     SessionKeyCipher
@@ -1502,8 +1503,7 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 				"(it holds tables but no sparkwing_schema_version); point sparkwing at an empty database")
 		}
 	default:
-		return fmt.Errorf("sparkwing: this store predates the baseline (it records schema version %d, this build "+
-			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
+		return schemaMismatchError(version, remedy)
 	}
 	translated, err := TranslateSchema(schemaNeutral, s.dialect)
 	if err == nil {

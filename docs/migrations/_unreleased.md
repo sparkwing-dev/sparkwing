@@ -1,5 +1,15 @@
 # Migrating to the next release
 
+## Declared restore and credential epochs
+
+The external `credential-epoch` fences bearer tokens and dashboard sessions.
+Restore preparation rotates it and holds schedules until operator acknowledgment,
+which discards catch-up through its timestamp. The epoch directory must be
+writable and persistent; `--credential-epoch-dir` selects it when credentials
+are read-only. Helm uses a dedicated retained PVC independent of database storage.
+
+Recovery is manual; follow the operator runbook kept outside this repository.
+
 ## Cloud billing is prepaid
 
 Cloud usage now draws only on a prepaid balance; a team never owes for usage.

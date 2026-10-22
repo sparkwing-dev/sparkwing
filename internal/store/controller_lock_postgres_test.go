@@ -13,6 +13,31 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
+func TestPostgresRestoreExcludesServingController(t *testing.T) {
+	target := storetest.NewPostgres(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	active, err := store.OpenControllerPostgres(ctx, target.DSN(), func(err error) { t.Error(err) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = active.Close() }()
+	if restore, err := store.OpenRestore(ctx, store.DialectPostgres, target.DSN()); err == nil {
+		_ = restore.Close()
+		t.Fatal("restore opened beneath a serving controller")
+	}
+	if err := active.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restore, err := store.OpenRestore(ctx, store.DialectPostgres, target.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restore.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPostgresControllerPromotionFencesWrites(t *testing.T) {
 	target := storetest.NewPostgres(t)
 	observer := teststore.SQL(t, target.Open(t))

@@ -1,0 +1,93 @@
+WS15 decision 47 verification
+Base: 10a280dea (bw-3095-rewrite already merged)
+
+Go commands used:
+  GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache
+  Final commands also used TMPDIR=/tmp/sw-astra-WS15.
+
+PASS: focused normal restore/payment/epoch/chart/authentication checks.
+The first broad selection also passed store payment and team purge regressions;
+its controller deletion fixture could not open a socket (see below).
+
+Normal controller/store selection:
+  go test ./internal/controller ./internal/store -run 'Test(Restore|Payment|Provider|SchemaDocumentationNamesBaseline|OlderSchemaRequiresBackupBeforeDiscard|OpenRefusesASchemaFromTheFuture)' -count=1
+
+normal-focused.txt
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.547s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	18.133s
+
+rewrite-focused.txt
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.111s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.181s
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	19.663s
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.568s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	0.350s
+ok  	github.com/sparkwing-dev/sparkwing/charts	2.646s
+ok  	github.com/sparkwing-dev/sparkwing/tests/acceptance	0.440s
+
+store-final.txt
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	4.278s
+
+boundaries-final.txt
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.122s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.256s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	0.501s
+ok  	github.com/sparkwing-dev/sparkwing/charts	5.946s
+ok  	github.com/sparkwing-dev/sparkwing/tests/acceptance	37.250s
+ok  	github.com/sparkwing-dev/sparkwing/internal/doccheck	2.088s
+
+The rewrite_integration selection:
+  go test -tags rewrite_integration ./internal/credentials ./internal/capability ./internal/store ./internal/controller ./cmd/sparkwing-controller ./charts ./tests/acceptance -run 'Test(Epoch|Restore|PeerAuthenticationCreatesRootForCurrentEpoch|SchemaError|RecordsPaymentParent|Provider|Payment|ControllerEpoch|SchemaDocumentationNamesBaseline|OlderSchemaRequiresBackupBeforeDiscard|OpenRefusesASchemaFromTheFuture)' -count=1
+
+Final store selection (includes actual newer/older schema refusals):
+  go test ./internal/store -run 'Test(TeamDeletion|TeamPurge|Restore|SchemaError|SchemaDocumentation|OlderSchema|OpenRefusesAStoreFromAnotherBaseline|RewriteSchemaClassifiesEveryCreatedTable|TenantSQLScope)' -count=1
+
+Final boundary selection:
+  go test ./internal/credentials ./internal/capability ./cmd/sparkwing-controller ./charts ./tests/acceptance ./internal/doccheck -run 'Test(Epoch|Restore|Provider|Payment|ControllerEpoch|Published|Check|Repository|Protocol|YAML|Production)' -count=1
+
+PASS: go build -o /dev/null ./cmd/...
+PASS: go generate ./internal/store (directional schema diagnostic examples)
+PASS: bash bin/sync-docs.sh --check
+PASS: git diff --check
+
+Final architecture guard:
+  go run ./internal/guardcheck <worktree>
+guardcheck: every guard matches its allow-list
+
+The initial guard found one newly unused production export after the pull test
+was removed: Operator.RequestTeamDeletion. It is used only by store tests, so
+its wrapper moved to deletion_runtime_test.go. No allow-list was expanded.
+
+Sandbox-limited checks retained for the lead:
+- TestTeamPurgeWaitsForDeletionDelay (internal/controller): OAuth httptest server
+  failed to listen: socket: operation not permitted.
+- TestWebClient_Versions_HappyPath (pkg/docs): httptest server failed to listen:
+  socket: operation not permitted. internal/doccheck passed in that run.
+- Full suites, PostgreSQL, and other socket checks were left to the lead as
+  instructed. No CLI was installed or run against the user's real home.
+- Xwing environment inspection could not acquire its session index lock on the
+  read-only filesystem; repository Go tests/builds supplied local evidence.
+
+No commits were made; the harness owns committing this worktree.
+
+
+WS15 session 2: ws15b fixes
+Integration bw-3095-rewrite was already merged (HEAD ab6289744); no merge or commit was needed.
+All Go commands used GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache and go -C /home/bombuntu/.xwing/envs/1084/sparkwing.
+New cancellation and admin-state regressions were run before production changes: scheduled trigger/plan/node work had no cancellation, and a refused baseline mismatch overwrote credential_epoch, cleared bootstrap_admin, and added restore.state. Both now pass.
+Normal focused selection: go test ./internal/store ./internal/capability ./internal/credentials ./cmd/sparkwing-controller -run 'TestRestore|TestEpoch|TestAdmin|TestSQLiteControllerLock|TestRunCancellation|TestTenantSQLScope|TestSchemaErrorDocumentation|TestOpenExistingSchema|TestPayment|TestPaidCheckout|TestCompletedSetup|TestARecordedObject' -count=1: PASS (19.188s, 0.112s, 0.072s, 1.026s).
+The combined normal attempt also selected unrelated internal/controller TestAdminTokenReachesNoOperatorPower, which could not start its httptest server: socket: operation not permitted. This is left to the lead, not reported as a pass.
+Final normal drill: go test ./internal/controller -run ^TestRestoreDrill -count=1: PASS (0.682s).
+Tagged focused selection: go test -tags rewrite_integration ./internal/store ./internal/capability ./internal/credentials ./cmd/sparkwing-controller -run 'TestRestore|TestEpoch|TestAdmin|TestSQLiteControllerLock|TestRunCancellation|TestTenantSQLScope|TestSchemaErrorDocumentation|TestOpenExistingSchema|TestPayment|TestPaidCheckout|TestCompletedSetup|TestARecordedObject' -count=1:
+ok  	github.com/sparkwing-dev/sparkwing/internal/store	17.763s
+ok  	github.com/sparkwing-dev/sparkwing/internal/capability	0.110s
+ok  	github.com/sparkwing-dev/sparkwing/internal/credentials	0.061s
+ok  	github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller	1.030s
+Final tagged drill: go test -tags rewrite_integration ./internal/controller -run ^TestRestoreDrill -count=1:
+ok  	github.com/sparkwing-dev/sparkwing/internal/controller	0.395s
+go test ./internal/doccheck: PASS (2.969s).
+go build -o /dev/null ./cmd/...: PASS.
+bash bin/sync-docs.sh --check: PASS. git diff --check: PASS.
+Net production Go this round: +41. Growth cancels unfinished schedule-origin work through transitionRunTx and shares read-only trusted epoch reads with admin; generic payment-provider fetch was removed (-8 net lines). The prior decision-47 cut of 435 production lines remains, for 394 net deleted across these two rounds.
+Tenant SQL guards pass. One reviewed Operator scan is added for offline all-tenant restore cancellation; each lifecycle mutation still binds the discovered team/run. No .guards allow-list grows. Parallel masking/claims/admission areas were not edited.
+Full suite, PostgreSQL, socket tests, and heavy guards remain with the lead as instructed. No CLI was installed or run against the real home.

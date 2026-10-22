@@ -60,7 +60,7 @@ func (s *Server) handleTeamBillingRefill(w http.ResponseWriter, r *http.Request,
 // safety: operator alerting keys on this value, so renaming it silences the alert for a refused card payment.
 const cardPaymentRefusedAlert = "card_payment_refused"
 
-// safety: every signed payment outcome reports through here, so a refused payment alerts the operator and a failed
+// safety: every verified payment outcome reports through here, so a refused payment alerts the operator and a failed
 // refill reaches the owners whichever event settled it.
 func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.PaymentSettlement) {
 	attrs := []any{"team", string(settled.Team), "payment_intent", settled.Payment}

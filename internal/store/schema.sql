@@ -314,6 +314,7 @@ CREATE TABLE accounts (
 );
 
 CREATE TABLE sessions (
+    credential_epoch TEXT NOT NULL DEFAULT '',
     hash TEXT NOT NULL PRIMARY KEY,
     principal TEXT NOT NULL,
     scopes TEXT NOT NULL,
