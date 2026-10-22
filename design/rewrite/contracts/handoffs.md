@@ -1016,3 +1016,8 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-21 Korey decision 48: masking is a host feature
 
 - Ratifies decision 43's consequence: pipeline code run without a Sparkwing host (a pipeline binary or SDK invoked directly) gets no secret masking, as it gets no concurrency or other host-provided guarantees. Every supported run path (sparkwing run, runners, Cloud, sparkwingtest) goes through the host. Documented as a host feature, matching GitHub Actions, where masking happens in the runner's log stream.
+
+## 2026-10-21 Korey decision 49: only the length rule refuses a secret
+
+- Amends decision 43. Secrets containing `***` are not refused. The contrived case where masking one secret forms another secret that contains the marker is accepted (rare, low severity); the masking property test excludes marker-containing secrets with a comment explaining why.
+- Ratifies the narrowed length rule: refuse only values a customer stores or supplies that are shorter than 4 characters (stored secrets, supplied secret args and list items, non-empty secret defaults of the selected pipeline). Derived values (proxy credential parts, encodings) shorter than the minimum are skipped for masking, not refused; defaults of unselected pipelines and empty defaults are not validated.
