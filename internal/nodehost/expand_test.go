@@ -47,7 +47,7 @@ func evaluateExpansionBytes(t *testing.T, groups map[string]string) (json.RawMes
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	body, failure, err := evaluator.Expand(ctx, input)
+	body, _, failure, err := evaluator.Expand(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,9 +190,9 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	for i := range children {
 		children[i] = nodeproto.JobSpec{ID: fmt.Sprintf("test-%d", i), Needs: []string{"targets"}, Groups: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	}
-	fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: children})
-		return raw, nil, err
+		return raw, runspec.SecretRegistration{Version: 1}, nil, err
 	}
 	fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if input.NodeID == "summary" {
@@ -217,11 +217,11 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 	for _, mode := range []string{"generator-error", "source-failed", "source-skipped"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := newStoreHostFixture(t, fanOutDoc())
-			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				if mode != "generator-error" {
 					t.Error("unsuccessful source evaluated a generator")
 				}
-				return nil, &store.ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator panicked"}, nil
+				return nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator panicked"}, nil
 			}
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				if input.NodeID == "summary" {

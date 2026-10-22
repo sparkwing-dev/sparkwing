@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func decodeNDJSON[T any](t *testing.T, out string) []T {
@@ -72,7 +73,7 @@ func TestCommandsJSONHonorsPathFilter(t *testing.T) {
 
 func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 	full := Pipeline{
-		PipelineDescription: nodeproto.PipelineDescription{
+		PipelinePresentation: runspec.PipelinePresentation{
 			Name:     "release",
 			Short:    "Tag and publish",
 			Help:     "A long help essay that belongs behind describe.",
@@ -97,7 +98,7 @@ func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 		}
 	}
 
-	bare := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: "quiet", Help: "first line\nsecond line"}}
+	bare := Pipeline{PipelinePresentation: runspec.PipelinePresentation{Name: "quiet", Help: "first line\nsecond line"}}
 	if got := bare.index().Short; got != "first line" {
 		t.Errorf("a pipeline with no short summarized as %q, want the first line of its help", got)
 	}

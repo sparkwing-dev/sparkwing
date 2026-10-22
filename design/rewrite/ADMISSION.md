@@ -25,7 +25,9 @@ Approvals cannot declare concurrency groups. Acceptance points at the job after
 the approval. An approval's SkipIf runs on the coordinator before requesting
 approval, holding no capacity (decision 51). Both placements preserve declared
 dependency, secret and reference reads through one accepted-job rule and the exact
-evaluation fence. Generator expansion cannot borrow approval permissions. The
+evaluation fence. Pipeline references carry only the referenced pipeline and job,
+separate from the caller's run binding. Generator expansion cannot borrow approval
+permissions. The
 store never runs SDK code. One fenced verdict boundary commits skip, failure or
 approval opening. A true predicate stays skipped. Expansions share the release
 boundary.

@@ -12,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -21,7 +20,7 @@ import (
 
 type localRunPreparation struct {
 	identity     clisurface.PipelineIdentity
-	described    []nodeproto.PipelineDescription
+	declarations *runspec.DeclarationGate
 	git          runspec.Git
 	source       runspec.Source
 	environment  runspec.EnvSnapshot
@@ -56,16 +55,16 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	if err := userconfig.ValidateConfig(input.machine); err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	if input.identity.Name == "" || input.identity.Entrypoint == "" || input.source.Entrypoint != input.identity.Entrypoint || input.environment.Digest == "" || input.settings.Context.NumCPU <= 0 {
+	if input.identity.Name == "" || input.identity.Entrypoint == "" || input.source.Entrypoint != input.identity.Entrypoint || input.environment.Digest == "" || input.settings.Context.NumCPU <= 0 || input.declarations == nil {
 		return controllerwire.CreateRunRequest{}, errors.New("local preparation requires captured pipeline, source, environment and machine facts")
 	}
-	schema, err := boundPipelineSchema(input.described, input.identity)
+	schema, err := boundPipelineSchema(input.declarations.Declarations().Pipelines, input.identity)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	requested, err := parsePipelineArgs(schema, args)
 	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
+		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
 	}
 	inputs := input.settings
 	inputs.Context.Origin, inputs.Context.Submitter, inputs.Context.Local = runspec.OriginLocal, true, true
@@ -100,7 +99,7 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 		return controllerwire.CreateRunRequest{}, err
 	}
 	if err := enforceRiskGate(input.identity.Name, risksIn(schema), runFlags{allow: options.AllowRisk.Value, dryRun: options.DryRun.Value}); err != nil {
-		return controllerwire.CreateRunRequest{}, err
+		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
 	}
 	secretArgs := []string{}
 	for _, argument := range schema.Args {

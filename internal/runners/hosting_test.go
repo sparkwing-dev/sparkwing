@@ -29,7 +29,7 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Hash: "request-hash", Request: runspec.Request{Team: "team"}}
 	if kind == capability.UnitNode {
 		unit.Engine = &engine.Identity{Version: "v0.20.0"}
-		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
+		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: *unit.Engine, SecretRegistration: runspec.SecretRegistration{Version: 1}}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 		unit.Execution = &runspec.JobExecutionSettings{}
 	}
 	return unit

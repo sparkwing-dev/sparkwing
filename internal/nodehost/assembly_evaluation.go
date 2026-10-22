@@ -74,13 +74,13 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 		if runspec.NodeID(source.ID) != b.source.NodeID || target.RunID != "" && runspec.RunID(target.RunID) != b.source.RunID {
 			return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
 		}
-		if target.Pipeline != "" {
+		if target.Reference != nil {
 			if p.Capability.Unit == capability.UnitEval && !capability.EvaluationReadsDeclarations(source) {
 				return processBindingDenied()
 			}
 			declared := false
 			for _, ref := range source.References {
-				if ref.Pipeline == target.Pipeline && ref.Job != "" && ref.Job == target.NodeID {
+				if ref.Pipeline == target.Reference.Pipeline && ref.Job != "" && ref.Job == target.Reference.JobID {
 					declared = true
 				}
 			}

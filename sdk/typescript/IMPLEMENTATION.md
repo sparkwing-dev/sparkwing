@@ -6,7 +6,7 @@ open. This Linux environment cannot establish Windows support.
 
 | Finding                        | Status                                    | Change and regression evidence                                                                                                                                                                                                                                                                                                                                                                                |
 | ------------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Planning secret diagnostics | Fixed                                     | One PlanningDiagnostics owner collects defaults and supplied values before validation. Describe, argument resolution, plan and generation use it. Property tests cover pipeline/job/generated declarations, overlapping secrets, JSON/URI/base64 spellings, keys, nested values and primitive values. Describe shares discovered masks across pipelines.                                                      |
+| 1. Planning secret diagnostics | Fixed | The host gates planning output until declarations are known and registers values through the accepted registration projection. The SDK delegates masking to the host. |
 | 2. Frame/output limits         | Fixed                                     | Replies and logs use one checked writer. Only typed step outputs use the 16 MiB output validator. Encoded frames retain the 17 MiB bound. Tests reproduce the oversized log, 256-job declaration and large memo-key evaluation.                                                                                                                                                                               |
 | 3. Memo symlinks               | Fixed                                     | One length-prefixed entry encoder distinguishes regular files and link targets without reading target content. Tree roots reject symlink traversal. Shared Go/TS vectors cover entry type, Unicode and byte framing. Filesystem property tests cover target mutation, dangling links and replacement.                                                                                                         |
 | 4. Service cleanup window      | Fixed at SDK boundary                     | A random ownership label and host cleanup are established before Docker create. Cleanup can find unacknowledged containers without touching a colliding caller name. Cancellation and generated ownership cases exercise the registered cleanup program against a modeled Docker boundary. Real Docker/host-death acceptance remains lead-owned.                                                              |
@@ -44,9 +44,9 @@ is needed. No other cross-area DESIGN finding was found in this review.
 
 ## Mechanisms and assumptions
 
-- PlanningDiagnostics replaces the describe-only replacement because masking
-  only one message path leaves hints, nested values, keys and generated
-  declarations exposed. Its removal would restore the old catches.
+- The host sanitizes decoded protocol payloads and presentation output. The SDK
+  sends generator argument declarations on successful evaluation, so the host
+  can register their secret values before releasing gated output.
 - The checked frame writer replaces separate reply/log serialization because
   payload length alone excludes envelope and escaping costs. Typed-output
   validation stays separate. There is no new protocol limit.

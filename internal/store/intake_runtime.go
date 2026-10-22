@@ -194,7 +194,10 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = tx.QueryRowContext(ctx, `SELECT next_run_number FROM teams WHERE name=?`, team).Scan(&number); err != nil {
 		return AdmissionResult{}, err
 	}
-	result := AdmissionResult{RunID: id, Number: number, Request: snapshot.request}
+	result := AdmissionResult{RunID: id, Number: number, Request: snapshot.request, Inputs: runspec.DisplayRequest(snapshot.request)}
+	if snapshot.spec != nil {
+		result.Inputs = runspec.DisplaySpec(*snapshot.spec)
+	}
 	if request.IdempotencyKey == "" {
 		scope = ""
 		digest = ""
@@ -489,7 +492,7 @@ func admissionResultTx(ctx context.Context, tx *storeTx, team Team, id string) (
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, OwnerUnit: run.Owner, Replayed: true}
+	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, Inputs: run.Display(), OwnerUnit: run.Owner, Replayed: true}
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		result.OwnerUnit = nil
 	}

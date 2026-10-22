@@ -78,7 +78,7 @@ func TestNativeExecutorMemoHitUsesClaimAndReleasesAdmission(t *testing.T) {
 		daemon := newFakeDaemon()
 		var started []NodeInput
 		host, err := NewNodeExecutor(ExecutorDependencies{
-			Store: f.State, Mask: func(s string) string { return s }, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
+			Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 			EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			},

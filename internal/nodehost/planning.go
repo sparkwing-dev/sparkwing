@@ -12,7 +12,10 @@ import (
 )
 
 // PlanningInput supplies current validation for initial SDK planning.
-type PlanningInput struct{ Validation nodeproto.ValidationContext }
+type PlanningInput struct {
+	Validation   nodeproto.ValidationContext
+	declarations *runspec.DeclarationGate
+}
 
 // PlannedInitial contains validated declarations for AcceptPlan.
 type PlannedInitial struct {
@@ -22,7 +25,12 @@ type PlannedInitial struct {
 }
 
 // PlanInitial runs and validates SDK planning before acceptance.
-func PlanInitial(ctx context.Context, input PlanningInput, planSDK func(context.Context) (json.RawMessage, error)) (PlannedInitial, error) {
+func PlanInitial(ctx context.Context, input PlanningInput, planSDK func(context.Context) (json.RawMessage, error)) (result PlannedInitial, err error) {
+	defer func() {
+		if err != nil && input.declarations != nil && context.Cause(ctx) == nil {
+			err = input.declarations.Error(err)
+		}
+	}()
 	if err := context.Cause(ctx); err != nil {
 		return PlannedInitial{}, err
 	}

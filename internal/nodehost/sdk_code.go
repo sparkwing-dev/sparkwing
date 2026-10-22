@@ -41,9 +41,10 @@ func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage Sto
 }
 
 type executorSession struct {
-	process  ExecutorProcess
-	sequence atomic.Int64
-	failure  *nodeproto.JobFailure
+	arguments []nodeproto.ArgumentDescription
+	process   ExecutorProcess
+	sequence  atomic.Int64
+	failure   *nodeproto.JobFailure
 }
 
 func checkProcessBinding(parent, child nodeproto.ProcessBinding) error {
@@ -178,12 +179,29 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 
 func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure, kind string, payload json.RawMessage, settled []string) (json.RawMessage, error) {
 	var result nodeproto.EvalResult
+	if kind == "generate" {
+		if gate, ok := session.process.(declarationProcess); ok {
+			gate.gateDeclarations()
+		}
+	}
 	request := nodeproto.Request{Op: nodeproto.OpEval, Closure: closure, Input: payload}
 	if settled != nil {
 		request.Attempt, request.Settled = int(input.Attempt), settled
 	}
 	if err := session.call(ctx, request, &result, kind); err != nil {
+		if kind == "generate" {
+			return nil, executorError(apierr.SDKError, generatorFailureMessage)
+		}
 		return nil, err
+	}
+	if kind == "generate" {
+		if result.Error != nil {
+			return nil, executorError(apierr.SDKError, generatorFailureMessage)
+		}
+		session.arguments = append(session.arguments, result.Arguments...)
+		if err := finishGeneratorLogs(ctx, session.process, input.Accepted, result); err != nil {
+			return nil, err
+		}
 	}
 	return evalValue(result, kind)
 }

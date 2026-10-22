@@ -188,23 +188,11 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	if err != nil {
 		t.Fatal("real local controller admission:", err)
 	}
-	if !admitted.Request.Request.Options.OwnerExecutionTimeout.Set || admitted.Request.Request.Options.OwnerExecutionTimeout.Value != 0 {
-		t.Fatal("local admission gained a deadline")
-	}
-	if admitted.Request.Request.Options.Priority != request.Request.Options.Priority || admitted.Request.Request.Source != request.Request.Source {
-		t.Fatal("local admission lost explicit zero priority or acquisition location")
-	}
-	if admitted.Request.Request.Git.SHA != entry.SHA || admitted.Request.Request.Source.Ref != entry.SHA {
-		t.Fatal("local admission changed the acquired source commit")
-	}
-	if admitted.RunID == "" || admitted.Request.Request.Pipeline != "example" || admitted.Request.AuthorityRef.ID == "" {
-		t.Fatalf("incomplete admission: %+v", admitted)
-	}
 	replay, err := engine.CreateRun(t.Context(), request)
 	if err != nil || !replay.Replayed || replay.RunID != admitted.RunID {
 		t.Fatalf("replay: %+v: %v", replay, err)
 	}
-	exerciseLocalRun(t, options, admitted)
+	exerciseLocalRun(t, options, admitted, request.Request)
 	reader, err := client.NewRunReader(options)
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +242,7 @@ func signedLocalPolicy(t *testing.T) {
 	})}
 }
 
-func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted controllerwire.CreateRunResponse) {
+func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted controllerwire.CreateRunResponse, expected ...runspec.Request) {
 	t.Helper()
 	ctx := t.Context()
 	engine, err := client.NewEngineClient(options)
@@ -264,6 +252,13 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	award, err := engine.Claim(ctx, controllerwire.ClaimRequest{RunID: admitted.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: "v1.2.3", AvailableCores: 1})
 	if err != nil || award.Claim == nil {
 		t.Fatalf("owner claim: %+v: %v", award, err)
+	}
+	if len(expected) > 0 {
+		sealed := award.Claim.Request
+		request := expected[0]
+		if !sealed.Request.Options.OwnerExecutionTimeout.Set || sealed.Request.Options.OwnerExecutionTimeout.Value != 0 || sealed.Request.Options.Priority != request.Options.Priority || sealed.Request.Source != request.Source || sealed.Request.Git.SHA != request.Git.SHA || sealed.AuthorityRef.ID == "" {
+			t.Fatal("local claim lost its accepted inputs")
+		}
 	}
 	options.Bearer = func(context.Context) (string, error) { return award.Claim.Capability, nil }
 	ownerEngine, err := client.NewEngineClient(options)
@@ -284,7 +279,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Inline: true, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Claim.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {
 		t.Fatal("plan settings:", err)
 	}

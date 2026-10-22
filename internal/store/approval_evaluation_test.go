@@ -289,13 +289,13 @@ func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t
 				declared bool
 			}{
 				{"/api/v1/secrets/{name}", capability.Target{Team: string(tenant.team), SecretName: "TOKEN"}, change != "undeclared_secret"},
-				{"/api/v1/pipelines/{name}/latest", capability.Target{Team: string(tenant.team), Pipeline: "upstream", NodeID: "artifact"}, change != "undeclared_reference"},
+				{"/api/v1/pipelines/{name}/latest", capability.Target{Team: string(tenant.team), Reference: &capability.PipelineReferenceTarget{Pipeline: "upstream", JobID: "artifact"}}, change != "undeclared_reference"},
 			} {
 				if !read.declared {
 					if read.target.SecretName != "" {
 						read.target.SecretName = "OTHER"
 					} else {
-						read.target.Pipeline = "other"
+						read.target.Reference.Pipeline = "other"
 					}
 				}
 				route, ok := capability.LookupRoute("GET", read.path)
@@ -318,7 +318,7 @@ func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t
 
 func TestGeneratorEvaluationCannotReadApprovalSecretsOrPipelineReferences(t *testing.T) {
 	s, _, _, issued := zeroEvalFixture(t)
-	for _, target := range []capability.Target{{Team: "a", SecretName: "TOKEN"}, {Team: "a", Pipeline: "upstream", NodeID: "artifact"}} {
+	for _, target := range []capability.Target{{Team: "a", SecretName: "TOKEN"}, {Team: "a", Reference: &capability.PipelineReferenceTarget{Pipeline: "upstream", JobID: "artifact"}}} {
 		rule := capability.BindReadSet
 		if target.SecretName != "" {
 			rule = capability.BindDeclaredSecret

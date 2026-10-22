@@ -1,0 +1,9 @@
+[
+  {"input":" first-private , second-private ","want":["first-private","second-private"]},
+  {"input":"\u0085first-private\u00a0,\u1680second-private\u2007","want":["first-private","second-private"]},
+  {"input":"\u2028first-private\u2029,\tsecond-private\r\n","want":["first-private","second-private"]},
+  {"input":"\ufefffirst-private,\u200bsecond-private","want":["\ufefffirst-private","\u200bsecond-private"]},
+  {"input":", ,\t,first-private,,second-private,","want":["first-private","second-private"]},
+  {"input":"秘密-value,鍵-value","want":["秘密-value","鍵-value"]},
+  {"input":"","want":[]}
+]

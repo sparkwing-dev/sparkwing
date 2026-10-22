@@ -28,24 +28,24 @@ func TestDiagnosticOutputLimiter_BoundsOnlyPostTimeoutOutput(t *testing.T) {
 		policy:    execdiag.Policy{Expired: func() bool { return expired }},
 		remaining: 64,
 	}
-	if got, keep := limiter.filter("ordinary output"); !keep || got != "ordinary output" {
-		t.Fatalf("pre-timeout output = %q, %t", got, keep)
+	if got := string(limiter.capture([]byte("ordinary output"))); got != "ordinary output" {
+		t.Fatalf("pre-timeout output = %q", got)
 	}
 	expired = true
-	if got, keep := limiter.filter("short"); !keep || got != "short" {
-		t.Fatalf("in-budget diagnostic = %q, %t", got, keep)
+	if got := string(limiter.capture([]byte("short"))); got != "short" {
+		t.Fatalf("in-budget diagnostic = %q", got)
 	}
-	used := len("short") + 1
-	if got, keep := limiter.filter(strings.Repeat("x", 64)); !keep || got != diagnosticTruncationMarker {
-		t.Fatalf("first overflow = %q, %t", got, keep)
+	used := len("short")
+	if got := string(limiter.capture([]byte(strings.Repeat("x", 64)))); got != diagnosticTruncationMarker {
+		t.Fatalf("first overflow = %q", got)
 	} else {
-		used += len(got) + 1
+		used += len(got)
 	}
 	if used > 64 {
 		t.Fatalf("diagnostic output used %d bytes, limit 64", used)
 	}
-	if got, keep := limiter.filter("more"); keep || got != "" {
-		t.Fatalf("post-marker overflow = %q, %t", got, keep)
+	if got := limiter.capture([]byte("more")); len(got) != 0 {
+		t.Fatalf("post-marker overflow = %q", got)
 	}
 }
 

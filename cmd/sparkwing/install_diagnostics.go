@@ -1,9 +1,10 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"io"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type installDiagnostics struct {
@@ -17,7 +18,7 @@ func (w *installDiagnostics) Write(body []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.err == nil {
-		w.err = w.write(w.stream.Mask(string(body), false))
+		w.err = w.write(w.stream.Mask(string(body)))
 	}
 	if w.err != nil {
 		return 0, w.err
@@ -37,7 +38,7 @@ func (w *installDiagnostics) close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.err == nil {
-		w.err = w.write(w.stream.Mask("", true))
+		w.err = w.write(w.stream.Flush())
 	}
 	return w.err
 }

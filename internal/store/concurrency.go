@@ -108,10 +108,8 @@ type ConcurrencyHolder struct {
 	Cost             int
 	DeclaredCapacity int
 
-	// safety: unexported because the team is not part of what a caller
-	// names -- a concurrency key is authored in pipeline YAML and scoped
-	// by the handle that reads it -- while a fleet-wide reaper still has
-	// to know which team's row it just read to delete the right one.
+	// safety: the store derives keys from accepted declarations and placement.
+	// The fleet-wide reaper retains the team privately to delete the right row.
 	team Team
 }
 

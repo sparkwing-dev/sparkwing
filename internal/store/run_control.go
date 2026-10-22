@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // CreateAuthorizedDebugPause commits a masked pause under live run-control authority.
@@ -211,13 +210,9 @@ func controlTextTx(ctx context.Context, tx *storeTx, team Team, run RunRow, text
 	if err != nil {
 		return "", err
 	}
-	values, err := planSecretsTx(ctx, tx, team, spec, selection)
+	masker, err := planSecretsTx(ctx, tx, team, spec, selection)
 	if err != nil {
 		return "", err
-	}
-	masker := secrets.NewMasker()
-	for _, value := range values {
-		masker.Register(value)
 	}
 	if !utf8.ValidString(text) {
 		return "", authorityError(apierr.BadRequest, "control text must be UTF-8")

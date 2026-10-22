@@ -19,7 +19,7 @@ import (
 )
 
 func TestPlanningDefaults(t *testing.T) {
-	for _, secret := range []string{"private-sdk-default", "42"} {
+	for _, secret := range []string{"private-sdk-default", "4242"} {
 		for _, field := range []string{"job", "group", "step", "concurrency", "safe"} {
 			t.Run(secret+"/"+field, func(t *testing.T) { checkPlanningDefaults(t, secret, field) })
 		}
@@ -70,7 +70,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 	accepted := errors.New("stop at accepted plan")
 	f.Host.Project = func(store.RunSnapshot) (store.ScheduleSnapshot, error) { return store.ScheduleSnapshot{}, accepted }
 	masks := secrets.NewMasker()
-	f.Host.Mask, f.Host.Masks = masks.Mask, NewMaskRegistry(masks)
+	f.Host.Masker, f.Host.Masks = masks, NewMaskRegistry(masks)
 	f.Host.Planning.Validation.Placement = nodeproto.PlacementLocal
 	var processes []*scriptedSDK
 	f.Host.Planner = &SDKPlanner{

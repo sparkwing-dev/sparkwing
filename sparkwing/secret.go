@@ -7,39 +7,24 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
-// ErrSecretMissing classifies a "no entry for this name" outcome from
-// a SecretResolver as distinct from a transport / authorization error.
-// SDK helpers like ResolvePipelineSecrets treat optional fields whose
-// resolver error matches this sentinel as silently empty; other
-// errors surface as run-start failures.
-//
-// Every secrets backend returns this same value, so
-// `errors.Is(err, sparkwing.ErrSecretMissing)` matches a miss from any of
-// them.
+// ErrSecretMissing classifies a missing stored value separately from transport
+// and authorization failures. Use errors.Is to recognize a miss from any backend.
 var ErrSecretMissing = secretname.ErrMissing
 
-// secretResolver resolves names declared by SecretsProvider during describe.
-// sdkOperations.Context installs a service-backed resolver; Secret and Variable
-// resolve values lazily when jobs request them.
-//
-// The masked return drives strict matching at the SDK call site:
-// Secret errors on masked=false entries, Variable errors on masked=true
-// ones, so classification drift surfaces loudly.
+// Secrets are declared during describe and resolved lazily during execution.
+// The host registers masked values before releasing them. Secret and Variable reject classification drift.
 type secretResolver interface {
 	resolve(ctx context.Context, name string) (value string, masked bool, err error)
 }
 
-// secretResolverFunc adapts a function to secretResolver.
 type secretResolverFunc func(ctx context.Context, name string) (value string, masked bool, err error)
 
-// resolve satisfies secretResolver.
 func (f secretResolverFunc) resolve(ctx context.Context, name string) (string, bool, error) {
 	return f(ctx, name)
 }
 
 const keySecretResolver ctxKey = 100
 
-// withSecretResolver returns a derived ctx carrying the given resolver.
 func withSecretResolver(ctx context.Context, r secretResolver) context.Context {
 	return context.WithValue(ctx, keySecretResolver, r)
 }
@@ -54,8 +39,8 @@ func secretResolverFromContext(ctx context.Context) secretResolver {
 // Secret resolves a masked value through the resolver installed on
 // ctx. Errors when no resolver is installed, the source can't produce
 // a value, or the entry exists but was stored with masked=false (use
-// Variable for those). Lazy by design: a misspelled name fails at the
-// call site, not at run start.
+// Variable for those). Declare the name during describe before resolving it
+// from a step body or memo key function.
 //
 //	token, err := sparkwing.Secret(ctx, "ARGOCD_TOKEN")
 //	if err != nil { return err }

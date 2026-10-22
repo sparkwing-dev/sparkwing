@@ -106,7 +106,7 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 		if !inherited(k, row, known, name, b) {
 			continue
 		}
-		if err := registerMasks(b.Masker, name, value, !b.Local && k != HostChild && !ownerTool(b, row)); err != nil {
+		if err := registerMasks(b.Masker, name, value, !b.Local && k != HostChild && len(value) >= limits.OperatorEnvMaskMinLength); err != nil {
 			return nil, err
 		}
 		env[envKey(name)] = name + "=" + value
@@ -119,7 +119,7 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 			return nil, err
 		}
 		for _, a := range rt.Startup {
-			if err := registerMasks(b.Masker, a.Name, a.Value, !b.Local); err != nil {
+			if err := registerMasks(b.Masker, a.Name, a.Value, !b.Local && len(a.Value) >= limits.OperatorEnvMaskMinLength); err != nil {
 				return nil, err
 			}
 			env[envKey(a.Name)] = a.Name + "=" + a.Value
@@ -233,9 +233,10 @@ func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 	put("SPARKWING_GATE_INDEX", rt.GateIndex)
 }
 
-func registerMasks(masker *secrets.Masker, name, value string, remote bool) error {
+func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) error {
 	values := []string{}
-	if remote && len(value) >= limits.OperatorEnvMaskMinLength {
+	// Plain config remains usable even when it cannot be a masking pattern.
+	if maskValue && secrets.Validate(value) == nil {
 		values = append(values, value)
 	}
 	credentials, err := proxyCredentials(name, value)
@@ -244,13 +245,15 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 	}
 	values = append(values, credentials...)
 	for _, value := range values {
-		if value == "" {
+		if secrets.Validate(value) != nil {
 			continue
 		}
 		if masker == nil {
 			return errors.New("environment requires a secret masker")
 		}
-		masker.Register(value)
+		if err := masker.Register(value); err != nil {
+			return err
+		}
 	}
 	return nil
 }

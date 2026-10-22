@@ -150,12 +150,12 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 		}
 		return f.report(ctx, input, store.NodeSuccess)
 	})
-	owner.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	owner.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		if otherHeld.Load() {
-			return nil, nil, errors.New("expansion bypassed plan reacquisition")
+			return nil, runspec.SecretRegistration{}, nil, errors.New("expansion bypassed plan reacquisition")
 		}
 		expanded.Store(true)
-		return json.RawMessage(`{"jobs":[]}`), nil, nil
+		return json.RawMessage(`{"jobs":[]}`), runspec.SecretRegistration{Version: 1}, nil, nil
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

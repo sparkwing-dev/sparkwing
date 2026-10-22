@@ -105,7 +105,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					acquired, closed := 0, 0
 					owner := nodehost.OwnerHost{
-						Store: state, Mask: func(s string) string { return s },
+						Store: state, Masker: secrets.NewMasker(),
 						Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 						Wait:  func(context.Context, store.RunSnapshot) error { return errors.New("unexpected wait") },
 						Acquire: func(_ context.Context, input nodehost.RunInput) (*source.Entry, error) {

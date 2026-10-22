@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -19,7 +20,7 @@ import (
 func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	f, host, input := newOwnerFixture(t, true)
 	f.snapshot.Run.State = store.RunRunning
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Spec: json.RawMessage(`{"id":"gate"}`), Status: store.StatusPending}}
 	var layers []string
 	setTestPolicies(&host, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
@@ -80,7 +81,7 @@ func TestOwnerHostRefusesChangedResumeBeforeAcquisition(t *testing.T) {
 func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	for _, id := range []string{"blocked", "sibling"} {
-		f.snapshot.Nodes = append(f.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Status: store.StatusPending})
+		f.snapshot.Nodes = append(f.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: marshalEventFixture(t, nodeproto.JobSpec{ID: id}), Status: store.StatusPending})
 	}
 	blocked := make(chan struct{})
 	released := make(chan struct{})
@@ -122,7 +123,7 @@ func TestOwnerHostCommittedFailureRemainsSchedulable(t *testing.T) {
 	f, h, _ := newOwnerFixture(t, true)
 	sentinel := errors.New("attempt timed out")
 	for _, status := range []store.NodeStatus{store.StatusPending, store.StatusDone} {
-		f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: status}}
+		f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: status}}
 		if status == store.StatusDone {
 			f.snapshot.Nodes[0].Outcome = store.NodeFailed
 		}
@@ -138,7 +139,7 @@ func TestOwnerHostCommittedFailureRemainsSchedulable(t *testing.T) {
 
 func TestOwnerHostRemoteDispatchNeverSelfClaims(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}
 	f.snapshot.Nodes = []store.NodeRow{row}
 	setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
@@ -168,7 +169,7 @@ func FuzzOwnerHostSelfClaimPreservesExecutionIdentity(f *testing.F) {
 		}
 		probe := &ownerReconcileProbe{OwnerStore: &ownerFixture{}, result: store.ReconciledNode{Kind: store.Execute, Node: state.row, Claim: claim, Bearer: []byte("private-award")}}
 		adopted, executed := false, false
-		h := OwnerHost{executionAdmission: ComposeStartGate(probe.OwnerStore.(*ownerFixture), nil, false), Mask: func(s string) string { return s }, Store: probe, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
+		h := OwnerHost{executionAdmission: ComposeStartGate(probe.OwnerStore.(*ownerFixture), nil, false), Masker: testMasker(), Store: probe, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
 			adopted = true
 			if string(award.Bearer) != "private-award" {
 				t.Fatal("private award lost before adoption")
@@ -263,7 +264,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	input.Storage = StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"native"}}
 	entry := &source.Entry{Engine: engine.Resolved{Identity: engine.Identity{Version: "selected"}}}
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, Generation: 7, SpecHash: "job-seal"}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, Generation: 7, SpecHash: "job-seal"}
 	policies := 0
 	setTestPolicies(&host, func(_ context.Context, _ testPolicyName, evaluation EvaluationInput, persisted store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if !reflect.DeepEqual(binding, input.Storage) {

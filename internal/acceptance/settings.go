@@ -234,6 +234,7 @@ func classifiedDisplay() error {
 		return err
 	}
 	resolved.Args = map[string]string{"mode": "test"}
+	resolved.SecretRegistration = runspec.SecretRegistration{}
 	public, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Resolved: resolved, Plan: plan})
 	if err != nil {
 		return err

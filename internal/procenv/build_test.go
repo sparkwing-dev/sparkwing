@@ -345,7 +345,7 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 		{"npm_config_registry", "https://alice:private-password@proxy.example"},
 		{"HTTPS_PROXY", "http://alice:private%2Dpassword@proxy.example"},
 		{"HTTPS_PROXY", "http://alice:private-password@proxy.example/simple/@scope?next=@other"},
-		{"GOPROXY", "https://alice:private-password@proxy.example/@scope,https://bob:second-password@next.example|direct"},
+		{"GOPROXY", "https://alice:private-password@proxy.example/@scope,https://bobby:second-password@next.example|direct"},
 		{"PIP_EXTRA_INDEX_URL", "https://public.example/@scope https://alice:private-password@proxy.example/simple/@scope"},
 		{"npm_config_registry", "https://alice:private-password@proxy.example/@scope"},
 	} {
@@ -412,7 +412,7 @@ func TestSubmitEnvMalformedPatternsFailBeforeMatching(t *testing.T) {
 func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 	values := map[string]string{
 		"GOPROXY":     "https://public.example,https://alice:proxy-password@proxy.example|direct",
-		"GOSUMDB":     "sum.example+key https://bob:sumdb-password@sum.example",
+		"GOSUMDB":     "sum.example+key https://bobby:sumdb-password@sum.example",
 		"GOFLAGS":     "-mod=mod -modcacherw",
 		"GOPATH":      "/home/dev/go",
 		"GOPRIVATE":   "git.example/*",
@@ -437,7 +437,7 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 				t.Errorf("kind %d owner machine %s = %q, want %q", kind, name, got[name], value)
 			}
 		}
-		for _, credential := range []string{"alice", "proxy-password", "bob", "sumdb-password"} {
+		for _, credential := range []string{"alice", "proxy-password", "bobby", "sumdb-password"} {
 			if strings.Contains(masker.Mask(credential), credential) {
 				t.Errorf("kind %d left Go toolchain credential %q visible", kind, credential)
 			}
@@ -464,8 +464,8 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 				t.Errorf("kind %d owner-machine host left %q visible", kind, credential)
 			}
 		}
-		if masked := hostMasker.Mask(values["GOPATH"]); masked != values["GOPATH"] {
-			t.Errorf("kind %d owner-machine host masked a public Go setting: %q", kind, masked)
+		if masked := hostMasker.Mask(values["GOPATH"]); masked != "***" {
+			t.Errorf("kind %d owner-machine host left a Go setting visible: %q", kind, masked)
 		}
 		remote, err := buildEntries(kind, Base{Ambient: entries, Masker: secrets.NewMasker()}, Runtime{})
 		if err != nil {
@@ -475,6 +475,44 @@ func TestGoToolchainVariablesReachOwnerMachineProcessesOnly(t *testing.T) {
 			if _, present := envMap(remote)[name]; present {
 				t.Errorf("kind %d shared runner inherited %s", kind, name)
 			}
+		}
+	}
+}
+
+func TestOwnerToolchainValuesAreMaskedBeforeExecution(t *testing.T) {
+	for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
+		for _, tc := range []struct {
+			name, value, masked string
+		}{
+			{"GOFLAGS", "-race", "-race"},
+			{"GOSUMDB", "off", "off"},
+			{"GOPRIVATE", "*", "*"},
+			{"GOFLAGS", "12345678901", "12345678901"},
+			{"GOFLAGS", "123456789012", "***"},
+			{"GOFLAGS", "private-toolchain-setting", "***"},
+		} {
+			masker := secrets.NewMasker()
+			base := Base{OwnerMachine: true, Ambient: []string{tc.name + "=" + tc.value}, Masker: masker}
+			env, err := buildEntries(kind, base, Runtime{})
+			if err != nil || envMap(env)[tc.name] != tc.value || masker.Mask(tc.value) != tc.masked {
+				t.Fatalf("kind %d, %s=%s: env=%v masked=%q err=%v", kind, tc.name, tc.value, env, masker.Mask(tc.value), err)
+			}
+			if got := masker.Mask("starting kickoff"); got != "starting kickoff" {
+				t.Fatalf("kind %d, %s: public output changed: %q", kind, tc.name, got)
+			}
+			base.Masker = nil
+			_, err = Build(kind, base, Runtime{})
+			if (err != nil) != (tc.masked == "***") {
+				t.Fatalf("kind %d, %s: masker requirement err=%v", kind, tc.name, err)
+			}
+		}
+		masker := secrets.NewMasker()
+		_, err := Build(kind, Base{OwnerMachine: true, Ambient: []string{"GOPROXY=https://u:p@proxy.example"}, Masker: masker}, Runtime{})
+		if err != nil {
+			t.Fatalf("kind %d: derived short proxy credentials refused: %v", kind, err)
+		}
+		if masker.ContainsSecret("u") || masker.ContainsSecret("p") {
+			t.Fatal("registered an unsafe derived credential")
 		}
 	}
 }

@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
-func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, captured []string, options source.Options) (described []nodeproto.PipelineDescription, resultErr error) {
+func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, captured []string, options source.Options) (declarations *runspec.DeclarationGate, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -73,5 +73,5 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	if err != nil {
 		return nil, err
 	}
-	return []nodeproto.PipelineDescription{prepared.Description}, nil
+	return prepared.Declarations, nil
 }

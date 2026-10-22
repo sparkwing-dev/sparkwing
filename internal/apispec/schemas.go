@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -30,6 +31,9 @@ func (b *schemaBuilder) value(t reflect.Type) schema {
 	}
 	if t.Kind() == reflect.Pointer {
 		return nullable(b.value(t.Elem()))
+	}
+	if t == reflect.TypeFor[controllerwire.ScheduleArgs]() {
+		return schema{"type": "object", "additionalProperties": schema{"type": "string", "const": runspec.RedactedArgValue}}
 	}
 	if t == reflect.TypeFor[runspec.Provenance]() {
 		text := schema{"type": "string"}

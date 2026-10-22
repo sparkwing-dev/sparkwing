@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
@@ -98,12 +99,12 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 				request = request.WithContext(ctx)
 			}
 			if err := context.Cause(request.Context()); err != nil {
-				return processServiceError(err, service.Masks.mask)
+				return processServiceError(err, service.Masks.masker)
 			}
 			body, status, err := service.serve(request, auth, path)
 			err = errors.Join(err, context.Cause(request.Context()))
 			if err != nil {
-				return processServiceError(err, service.Masks.mask)
+				return processServiceError(err, service.Masks.masker)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
@@ -120,7 +121,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 	return nil
 }
 
-func processServiceError(err error, mask func(string) string) error {
+func processServiceError(err error, masker *secrets.Masker) error {
 	var canonical *apierr.Error
 	if !errors.As(err, &canonical) {
 		switch {
@@ -130,13 +131,16 @@ func processServiceError(err error, mask func(string) string) error {
 			err = errors.Join(executorError(apierr.Cancelled, "process service was cancelled"), err)
 		}
 	}
-	return maskHostError(err, mask)
+	return maskHostError(err, masker)
 }
 
 func processServiceTarget(_ context.Context, principal capability.Principal, target capability.Target) (capability.Target, error) {
 	bound := principal.Capability.Binding
 	if target.Team == "" {
 		target.Team = principal.Capability.Team
+	}
+	if target.Reference != nil {
+		return target, nil
 	}
 	if target.RunID == "" {
 		target.RunID = bound.RunID
@@ -156,9 +160,9 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 	case "/node/v1/secrets/{name}":
 		evidence.Target.SecretName = request.PathValue("name")
 	case "/node/v1/pipelines/{name}/latest":
-		evidence.Target.Pipeline = request.PathValue("name")
+		evidence.Target = capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: request.PathValue("name"), JobID: request.URL.Query().Get("job")}}
 	}
-	if evidence.Target.NodeID == "" {
+	if evidence.Target.Reference == nil && evidence.Target.NodeID == "" {
 		evidence.Target.NodeID = request.URL.Query().Get("job")
 	}
 	if request.Method == http.MethodGet || request.Method == http.MethodDelete {

@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -45,8 +44,8 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	if err != nil {
 		return "", err
 	}
-	write := blob.ScopeFor(response.Request.Provenance).CapabilityScope()
-	scope := capability.DataScope{Use: capability.DataPublish, RepositoryKey: string(response.Request.Request.Git.Repository.Key), RunID: response.RunID, WriteRef: write, ReadRefs: []string{write}}
+	write := response.WriteScope
+	scope := capability.DataScope{Use: capability.DataPublish, RepositoryKey: string(response.Inputs.Git.Repository.Key), RunID: response.RunID, WriteRef: write, ReadRefs: []string{write}}
 	publisher, err := OpenProfileData(ctx, options, scope)
 	if err != nil {
 		return response.RunID, err
@@ -65,11 +64,6 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 		return response.RunID, err
 	}
 	resolved := local.Spec.Resolved
-	resolved.Env = response.Request.Request.Env
-	resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: response.Request, Declarations: local.Spec.Declarations, Plan: plan, Context: settings.Context{Local: true}})
-	if err != nil {
-		return response.RunID, err
-	}
 	if _, err := controller.AcceptPlan(ctx, response.RunID, controllerwire.PlanSubmission{Declarations: local.Spec.Declarations, Resolved: resolved, Plan: raw}); err != nil {
 		return response.RunID, err
 	}

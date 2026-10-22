@@ -31,14 +31,14 @@ func (h *OwnerEvaluator) approvalSkipIf(ctx context.Context, input EvaluationInp
 func (h *OwnerEvaluator) policyError(ctx context.Context, err error) error {
 	cause := context.Cause(ctx)
 	if err == nil {
-		return maskHostError(cause, h.deps.Mask)
+		return maskHostError(cause, h.deps.Masker)
 	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
 		code = structured.Code
 	}
-	return maskHostError(errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Mask(err.Error()))}), h.deps.Mask)
+	return maskHostError(errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}), h.deps.Masker)
 }
 
 func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row store.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (OwnerLayerResult, error) {
@@ -55,7 +55,7 @@ func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, r
 		if context.Cause(ctx) != nil || store.IsProtocolErr(err) || errors.As(err, &refusal) && (refusal.Code == apierr.Forbidden || refusal.Code == apierr.Unauthenticated || refusal.Code == apierr.LockHeld) {
 			return OwnerLayerResult{}, err
 		}
-		return OwnerLayerResult{Transition: store.OwnerPolicyNode{Outcome: store.NodeFailed, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalFail, Generation: row.Generation}, Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: string(apierr.SDKError), MaskedError: boundedNodeErrText(h.deps.Mask(err.Error()))}}}, nil
+		return OwnerLayerResult{Transition: store.OwnerPolicyNode{Outcome: store.NodeFailed, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalFail, Generation: row.Generation}, Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: string(apierr.SDKError), MaskedError: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}}}, nil
 	}
 	for _, index := range result.TimedOut {
 		err := log(ctx, input.Accepted.RunID, input.NodeID, nodeproto.FrameLog{

@@ -47,7 +47,7 @@ process.exitCode = await main();
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names := pipelineNames(got); len(names) != 1 || names[0] != "ts-hello" {
+	if names := pipelineNames(got.Presentation().Pipelines); len(names) != 1 || names[0] != "ts-hello" {
 		t.Fatalf("pipelines = %v", names)
 	}
 	if names, ok := PipelineNamesIfBuilt(repo); !ok || len(names) != 1 || names[0] != "ts-hello" {

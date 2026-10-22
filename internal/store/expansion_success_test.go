@@ -15,6 +15,7 @@ func successfulExpansionFixture(t *testing.T) (*Tenant, ExpansionSubmission) {
 	t.Helper()
 	tenant, _, request := expansionFixture(t)
 	request.Failure = nil
+	request.Registration = runspec.SecretRegistration{Version: 1}
 	request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"],"deps":["job"],"retry":{"attempts":2}}]}`)
 	return tenant, request
 }
@@ -121,6 +122,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			var spec runspec.Spec
 			spec.Declarations.Version = 1
+			spec.Request.RunID = string(request.Source.RunID)
 			spec.Request.Request.Pipeline = "p"
 			spec.Request.Provenance = assertedProvenance(t, "p", "", "")
 			spec.Request.AllowedPools = []string{"prod"}
@@ -145,7 +147,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 					if mode == "decrypt_error" {
 						return "", errors.New("private diagnostic")
 					}
-					return "42", nil
+					return "4242", nil
 				})
 			}
 			if mode != "missing_requirement" {

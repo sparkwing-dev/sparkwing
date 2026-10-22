@@ -137,7 +137,7 @@ func TestIntakeSourcePublicGitHubUsesProductionLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{IdempotencyKey: "github", Request: input})
-	if err != nil || created.Request.Request.Git.Repository.Key != "gh:42" || created.Request.Request.Git.App.Set || calls < 1 {
+	if err != nil || created.Inputs.Git.Repository.Key != "gh:42" || created.Inputs.Git.App.Set || calls < 1 {
 		t.Fatalf("public GitHub intake: %+v calls=%d %v", created, calls, err)
 	}
 }
@@ -170,7 +170,7 @@ func TestIntakeSourcePrivateGitHubUsesStoredTeamCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{IdempotencyKey: "private-github", Request: input})
-	if err != nil || created.Request.Request.Git.Repository.Key != "gh:42" || created.Request.Request.Git.App.Set {
+	if err != nil || created.Inputs.Git.Repository.Key != "gh:42" || created.Inputs.Git.App.Set {
 		t.Fatalf("private GitHub intake: %+v %v", created, err)
 	}
 	raw, err := json.Marshal(created)
@@ -291,8 +291,8 @@ func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
 				if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
 					t.Fatal(err)
 				}
-				if created.Request.Request.Git.Repository.Key != "gh:42" || created.Request.Request.Git.App.Set || calls <= before {
-					t.Fatalf("unverified repository: %+v, calls=%d", created.Request.Request.Git, calls-before)
+				if created.Inputs.Git.Repository.Key != "gh:42" || created.Inputs.Git.App.Set || calls <= before {
+					t.Fatalf("unverified repository: %+v, calls=%d", created.Inputs.Git, calls-before)
 				}
 			} else if calls != before {
 				t.Fatal("malformed source reached GitHub")
@@ -338,8 +338,8 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 			t.Log(err)
 			return false
 		}
-		got := created.Request.Request
-		return !got.Git.App.Set && !got.Git.DefaultBranch.Set && got.Origin == runspec.OriginTrigger && got.Git.Repository.Key == input.Git.Repository.Key
+		got := created.Inputs
+		return !got.Git.App.Set && !got.Git.DefaultBranch.Set && got.Git.Repository.Key == input.Git.Repository.Key
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

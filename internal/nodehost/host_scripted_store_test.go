@@ -151,6 +151,7 @@ func newOwnerSealStore(row store.RunRow) *ownerSealFixture {
 		if !reflect.DeepEqual(input.Seal.Request, s.row.Request) {
 			return store.AcceptedPlan{}, errors.New("host replaced intake")
 		}
+		input.Seal.Resolved.SecretRegistration.Version = 1
 		hash, err := runspec.CanonicalHash(input.Seal.Plan)
 		if err != nil {
 			return store.AcceptedPlan{}, err
@@ -299,8 +300,14 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 	return s
 }
 
-func (s *scriptedHostStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied,error) { return store.Applied{}, nil }
+func (s *scriptedHostStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, nil
+}
 
-func (*scriptedHostStore) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse,error) { return store.AcquireSlotResponse{Kind:store.AcquireGranted},nil }
+func (*scriptedHostStore) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
+	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+}
 
-func (*scriptedHostStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error { return errors.New("unexpected provisional award relinquishment") }
+func (*scriptedHostStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
+}

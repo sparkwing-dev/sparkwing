@@ -34,7 +34,7 @@ func TestEvaluationBindingsSeparateApprovalDependenciesFromGeneratorSource(t *te
 					return store.NodeRow{Ref: ref, Spec: body}, err
 				}}
 				p := capability.Principal{Capability: capability.Capability{Unit: unit, Binding: capability.Binding{RunID: "run"}}}
-				for _, target := range []capability.Target{{RunID: "run", NodeID: "build"}, {Pipeline: "upstream", NodeID: "artifact"}} {
+				for _, target := range []capability.Target{{RunID: "run", NodeID: "build"}, {Reference: &capability.PipelineReferenceTarget{Pipeline: "upstream", JobID: "artifact"}}} {
 					err := binding.CheckBinding(t.Context(), p, capability.BindReadSet, target)
 					allowed := approval || unit == capability.UnitTrigger
 					if (err == nil) != allowed {

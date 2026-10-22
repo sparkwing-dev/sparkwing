@@ -65,9 +65,15 @@ func testGoSDKRefusesCollidingMasks(t *testing.T) {
 				}
 			}
 			_, err := host.RunStep(t.Context(), plan, job, step)
-			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), secret) {
-				t.Fatalf("colliding mask = %v", err)
+			if kind == "short" {
+				if err == nil || !strings.Contains(err.Error(), "plain config variable") || strings.Contains(err.Error(), secret) {
+					t.Fatalf("short mask = %v", err)
+				}
+			} else {
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), secret) {
+					t.Fatalf("colliding mask = %v", err)
+				}
 			}
 			if len(host.Masks()) != 0 {
 				t.Fatal("refused registration changed the mask registry")
@@ -115,7 +121,8 @@ func testGoSDKMaskRegistryGuardsLaterDeclarations(t *testing.T) {
 			})
 			plan := sparkwing.NewPlan()
 			source := sparkwing.Job(plan, "source", func(context.Context) error { return nil })
-			generator := source.Generate(func(_ context.Context, expansion *sparkwing.Plan) error {
+			generator := source.Generate(func(ctx context.Context, expansion *sparkwing.Plan) error {
+				sparkwing.Info(ctx, "before declaration mask-value")
 				sparkwing.Job(expansion, "child-mask-value", func(context.Context) error { return nil })
 				return nil
 			})
@@ -125,12 +132,19 @@ func testGoSDKMaskRegistryGuardsLaterDeclarations(t *testing.T) {
 				}
 			}
 			_, err := host.Eval(t.Context(), plan, "source", generator.ID(), nil)
-			if !registrationFirst {
-				if err != nil {
-					t.Fatal(err)
+			if registrationFirst {
+				if err == nil || err.Error() != "generator declaration failed" {
+					t.Fatalf("failed generator = %v", err)
 				}
-				err = sparkwing.Mask(host.Context(t.Context()), "mask-value")
+				if len(host.Records()) != 0 {
+					t.Fatalf("failed declarations released output: %+v", host.Records())
+				}
+				return
 			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sparkwing.Mask(host.Context(t.Context()), "mask-value")
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), "mask-value") {
 				t.Fatalf("late collision = %v", err)

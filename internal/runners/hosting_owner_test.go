@@ -42,7 +42,7 @@ func (hostingOwnerEngines) Ensure(context.Context, engine.Identity, releaseasset
 func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		unit, principal, original := hostingStateFor(t, capability.UnitTrigger)
-		spec := runspec.Spec{Request: unit.Request, Hash: "spec", PlanHash: "plan"}
+		spec := runspec.Spec{Request: unit.Request, Hash: "spec", PlanHash: "plan", Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 		unit.Accepted = &controllerwire.PlanAccepted{Spec: spec, Plan: []byte(`{"jobs":[]}`), PlanHash: "plan"}
 		state := hostingOwnerState{snapshot: original.snapshot}
 		state.snapshot.Run.State = store.RunRunning

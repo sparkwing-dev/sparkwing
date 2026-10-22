@@ -79,7 +79,7 @@ func (h *nodeExecutor) skipIf(ctx context.Context, input NodeInput, spec runspec
 		return h.withProcess(ctx, input, spec, evaluate)
 	}}
 	result, err := evaluator.skipIf(ctx, job)
-	return result, maskHostError(err, h.deps.Mask)
+	return result, maskHostError(err, h.deps.Masker)
 }
 
 func (h *nodeExecutor) withProcess(ctx context.Context, input NodeInput, spec runspec.Spec, evaluate func(*executorSession, NodeInput) error) (err error) {

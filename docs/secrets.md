@@ -38,3 +38,11 @@ Protect every branch a `source:` pin names as strictly as the default branch, or
 pin a full commit ID, which keeps the run's identity. See
 [OIDC](oidc.md#what-each-value-proves) and
 [caching](caching.md#who-shares-a-cache).
+
+## Values that can be secrets
+
+A masked secret needs at least four characters. Secrets containing `***` are accepted.
+Declared secret arguments and each nonempty item in a secret list follow the
+same rule. Use a plain config variable for values that do not qualify.
+The secret write API returns HTTP 400 with this guidance for a refused value.
+Masking is provided by the Sparkwing host. Pipeline code run on its own is unmasked.

@@ -24,6 +24,15 @@
         "step": {
           "type": "string"
         },
+        "stream": {
+          "type": "string"
+        },
+        "stream_data": {
+          "type": "string"
+        },
+        "stream_end": {
+          "type": "boolean"
+        },
         "ts": {
           "type": "string"
         }

@@ -114,8 +114,8 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				doc.Jobs[1].NeedsGenerated = []string{"children"}
 			}
 			fixture := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "consumer"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
-			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
-				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), nil, nil
+			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), runspec.SecretRegistration{Version: 1}, nil, nil
 			}
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				return fixture.report(ctx, input, store.NodeSuccess)

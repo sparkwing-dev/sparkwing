@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -78,7 +79,7 @@ type ExecutorDependencies struct {
 	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
 	ReadFailure      func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
 	ReadOutput       func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Mask             func(string) string
+	Masker           *secrets.Masker
 	Masks            *MaskRegistry
 }
 
@@ -90,8 +91,14 @@ type nodeExecutor struct {
 // NewNodeExecutor builds the common executor for local and dispatched claims.
 // Validation, hashing and deadlines are owned by their contract packages.
 func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
-	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
+	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("node executor requires store, process, engine and masking adapters")
+	}
+	if deps.Masks == nil {
+		deps.Masks = NewMaskRegistry(deps.Masker)
+	}
+	if deps.Masks.masker != deps.Masker {
+		return nil, errors.New("host requires one shared masking registry")
 	}
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
@@ -101,7 +108,7 @@ func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error) {
 	defer func() {
-		err = maskHostError(err, h.deps.Mask)
+		err = maskHostError(err, h.deps.Masker)
 	}()
 	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
 		return err
@@ -165,7 +172,7 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 		if err := h.saveMemo(ctx, input, memoHash, result); err != nil {
 			if cause := context.Cause(ctx); cause != nil {
 				runErr, result = errors.Join(cause, err), h.failure(errors.Join(cause, err))
-			} else if logErr := h.diagnostic(ctx, input, "warn", "memo_publish", "", "memo publication failed; a later run will execute again", map[string]any{"error": h.deps.Mask(err.Error())}); logErr != nil {
+			} else if logErr := h.diagnostic(ctx, input, "warn", "memo_publish", "", "memo publication failed; a later run will execute again", map[string]any{"error": h.deps.Masker.Mask(err.Error())}); logErr != nil {
 				runErr, result = logErr, h.failure(logErr)
 			}
 		}
@@ -303,7 +310,7 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 		}
 		wait := executorBackoff(input.Execution.RetryBackoff.Value, retry+1)
 		retryAt := time.Now().Add(wait)
-		result = recordNodeFailure(input.NodeID, result, h.deps.Mask)
+		result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
 		sourceAttempt := input.Attempt
 		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &sourceAttempt, Result: &result, RetryAt: &retryAt})
 		if err != nil {
@@ -359,7 +366,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 		return errors.Join(runErr, err)
 	}
 	if ctx.Err() != nil {
-		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Mask(context.Cause(ctx).Error()))}
+		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
 		var admission *AdmissionFailure
 		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == store.NodeSuperseded {
 			result.Outcome, result.Reason = admission.Outcome, admission.Reason
@@ -371,7 +378,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 	// safety: a cancelled context cannot send the final fenced report; the store still verifies current authority.
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	result = recordNodeFailure(input.NodeID, result, h.deps.Mask)
+	result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
 	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
 	return errors.Join(runErr, err)
 }
@@ -388,12 +395,12 @@ func (h *nodeExecutor) failure(err error) store.NodeResult {
 func (h *nodeExecutor) failureAt(err error, stage string) store.NodeResult {
 	result := store.NodeResult{Outcome: store.NodeFailed}
 	if err != nil {
-		result.MaskedError = limits.Error(h.deps.Mask(err.Error()))
+		result.MaskedError = limits.Error(h.deps.Masker.Mask(err.Error()))
 	}
 	var failure *apierr.Error
 	code := apierr.SDKError
 	if errors.As(err, &failure) {
-		code = maskedFailureCode(failure.Code, h.deps.Mask)
+		code = maskedFailureCode(failure.Code, h.deps.Masker.Mask)
 		result.Reason = string(code)
 	}
 	result.Failure = &nodeproto.JobFailure{Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}

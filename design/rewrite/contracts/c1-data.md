@@ -2262,7 +2262,7 @@ local publication transport and physical bytes remain integration obligations.
 
 | Export | Purpose |
 |---|---|
-| `AcceptedExpansionRow` | Keeps accepted expansion bytes, source fence and body hash in a consistent snapshot. |
+| `AcceptedExpansionRow` | Keeps accepted expansion bytes, private secret registration, source fence, body hash and combined acceptance digest in a consistent snapshot. |
 | `RunSnapshot.Scheduling` | Projects declarations and persisted state into the scheduling graph. |
 | `ScheduleNode`, `ScheduleExpansion`, `ScheduleSnapshot` | Carry the accepted graph, including empty generator groups. |
 | `DecisionKind`, `NodeDecision`, `ScheduleDecision`, `Decide` | Define one pure graph decision consumed by both owners. |
@@ -4266,7 +4266,10 @@ same evaluation-unit lifecycle as generated work. A shared accepted-job predicat
 distinguishes approval evaluation from generator expansion when deriving output,
 secret and pipeline-reference read permissions. Approval evaluation retains its
 declared `Needs` and data grants on both placements, with the exact evaluation
-fence still required. Expansion cannot borrow those approval permissions.
+fence still required. `PipelineReferenceTarget` carries only the referenced
+pipeline and job, independently of the caller's run binding. Process routing and
+controller reads use that canonical target. Expansion cannot borrow those approval
+permissions.
 
 The simulation models claim, owner and per-level capacity deadlines independently.
 Claim loss alone cannot reset arrival or waive FIFO. It asserts each expected
@@ -4363,3 +4366,20 @@ its job outcomes and resolves expansions, then derives the run verdict through
 the shared scheduler. Existing required-job failures retain their effect.
 Completion returns the committed outcome and reason, which the host reports
 and the foreground CLI uses for its exit status.
+
+## Sealed masking projection (decision 43)
+
+The accepted run seals `Resolved.SecretRegistration`. It retains secret defaults
+from every discovered pipeline, selected list argument kinds, and the complete
+raw/default/effective/item registration set. `BuildSecretRegistration` is the
+single derivation owner. Seal validation recomputes the projection and refuses
+drift. Accepted expansions extend this projection privately for generated args.
+Controllers and execution hosts use it rather than infer list semantics from
+joined values. Display receipts continue to use the accepted spec's latest secret
+classification.
+
+Stored secrets, supplied secret arguments and nonempty defaults of the selected
+pipeline require at least four characters, including each nonempty normalized
+list item. Empty and unselected defaults do not refuse a run. Short derived
+values are skipped. Secrets containing `***` are accepted. Plain config variables
+remain available for shorter values.

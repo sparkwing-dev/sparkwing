@@ -199,6 +199,7 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 				}
 				spec.Resolved.Settings.Jobs[input.NodeID] = input.Execution
 				input.Accepted.Spec, _ = json.Marshal(spec)
+				state.accepted = &input.Accepted
 			}
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {

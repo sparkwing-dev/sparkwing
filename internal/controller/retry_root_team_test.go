@@ -29,7 +29,7 @@ func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {
 		admitted, claim := tenantRunClaim(t, f)
 		plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "n1", Steps: []nodeproto.StepSpec{{ID: "work"}}}}}
 		declarations := runspec.CheckoutDeclarations{Version: 1}
-		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
+		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: claim.Request, Declarations: declarations, Plan: plan})
 		if err != nil {
 			t.Fatal(err)
 		}

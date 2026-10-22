@@ -96,7 +96,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 		path := "/api/v1/runs/" + admitted.RunID
 		plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
 		declarations := runspec.CheckoutDeclarations{Version: 1}
-		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
+		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: claim.Request, Declarations: declarations, Plan: plan})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -255,14 +255,14 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	input := triggerRequestInput{
 		home: t.TempDir(), source: selection, settings: inputs,
 		args: []string{"-r", "us-east", "--image", "release", "--password", password},
-		described: []nodeproto.PipelineDescription{
+		declarations: declarationFixture(t, []nodeproto.PipelineDescription{
 			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
 			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{
 				{Name: "region", Short: "r", Type: "string", Required: true},
 				{Name: "image", Type: "string", JobID: "rollout", Required: true},
 				{Name: "password", Type: "string", Secret: true},
 			}},
-		},
+		}),
 	}
 	request, err := prepareTriggerRequest(input)
 	if err != nil {
@@ -277,7 +277,7 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	if !reflect.DeepEqual(request.Request.RequestedArgs, map[string]string{"region": "us-east", "image": "release", "password": password}) || !request.Request.SecretArgs.Set || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
 		t.Fatalf("selected schema lost: %+v", request.Request)
 	}
-	_, err = prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, described: input.described[:1]})
+	_, err = prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, declarations: declarationFixture(t, input.declarations.Declarations().Pipelines[:1])})
 	if err == nil || !strings.Contains(err.Error(), "deploy-prod") {
 		t.Fatalf("missing registration used Go type name: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPrepareTriggerRequestSubmitsThroughTheFinalController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, idempotencyKey: "stable-key"})
+	request, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}), idempotencyKey: "stable-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 		home:           t.TempDir(),
 		idempotencyKey: "retained",
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		described:      []nodeproto.PipelineDescription{{Name: "Deploy"}},
+		declarations:   declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}),
 		settings:       settings.Inputs{Flags: settings.Values{Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: priority}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: output}}, Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runner}}}}, Context: settings.Context{NumCPU: 4}},
 		submittedEnv:   map[string][]byte{"DEPLOY_REGION": []byte("private-region")},
 	})
@@ -380,10 +380,10 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 	f.Fuzz(func(t *testing.T, value string) {
 		value = "private-" + value
 		request, err := prepareTriggerRequest(triggerRequestInput{
-			home:      t.TempDir(),
-			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			described: []nodeproto.PipelineDescription{{Name: "Deploy"}},
-			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
+			home:         t.TempDir(),
+			source:       preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
+			declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}),
+			settings:     settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
 		})
 		if strings.ContainsRune(value, 0) {
 			if err == nil || strings.Contains(err.Error(), value) {
@@ -423,10 +423,10 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 			args = []string{"--password=" + value, "--" + value}
 		}
 		_, err := prepareTriggerRequest(triggerRequestInput{
-			home:      t.TempDir(),
-			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
-			args:      args,
+			home:         t.TempDir(),
+			source:       preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
+			declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
+			args:         args,
 		})
 		var canonical *apierr.Error
 		if !errors.As(err, &canonical) || (canonical.Code != apierr.InvalidArgs && canonical.Code != apierr.Internal) {
@@ -445,9 +445,9 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 
 func TestPrepareTriggerRequestMasksQuotedEnumValues(t *testing.T) {
 	_, err := prepareTriggerRequest(triggerRequestInput{
-		source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		described: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}},
-		args:      []string{"--region=private-\x00value"},
+		source:       preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
+		declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}}),
+		args:         []string{"--region=private-\x00value"},
 	})
 	if err == nil || strings.Contains(err.Error(), `private-\x00value`) || !strings.Contains(err.Error(), "--region") {
 		t.Fatalf("enum diagnostic changed or disclosed input: %v", err)
@@ -550,7 +550,7 @@ func TestPrepareTriggerRequestSaltsEnvironmentWithTheHostKey(t *testing.T) {
 	}
 	prepare := func(home string) runspec.EnvSnapshot {
 		t.Helper()
-		request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, described: []nodeproto.PipelineDescription{{Name: "Deploy"}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte("west")}})
+		request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}), submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte("west")}})
 		if err != nil {
 			t.Fatal(err)
 		}

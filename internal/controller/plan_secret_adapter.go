@@ -16,7 +16,7 @@ func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, s
 	}
 	value, err := OpenSecretValue(c.cipher, team, &secret)
 	if err == nil && secret.Masked {
-		requestMasker(ctx).Register(value)
+		err = requestMasker(ctx).Register(value)
 	}
 	return value, err
 }

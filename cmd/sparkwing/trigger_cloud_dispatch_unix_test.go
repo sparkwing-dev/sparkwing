@@ -135,8 +135,8 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Request.Request.Dispatch != runspec.DispatchController || created.HereBearer != "" {
-		t.Fatalf("Cloud intake sealed dispatch=%s here=%v", created.Request.Request.Dispatch, created.HereBearer != "")
+	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchController || created.HereBearer != "" {
+		t.Fatalf("Cloud intake sealed dispatch=%s here=%v", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch, created.HereBearer != "")
 	}
 	if _, err := f.state.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "cloud-dispatch-test", time.Hour); err != nil {
 		t.Fatal(err)
@@ -150,18 +150,18 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: doc, Context: settings.Context{}})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: cloudDispatchRequest(t, f, created.RunID), Declarations: declarations, Plan: doc, Context: settings.Context{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolution := runspec.Resolved{Entrypoint: "Deploy", Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}, Engine: engineID, Env: created.Request.Request.Env}
+	resolution := runspec.Resolved{Entrypoint: "Deploy", Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}, Engine: engineID, Env: cloudDispatchRequest(t, f, created.RunID).Request.Env}
 	if _, err := f.open(planned.Capability, false).AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: resolution}); err != nil {
 		t.Fatalf("plan pod acceptance: %v", err)
 	}
 	cloud.finish(t)
 	cloud.complete(t, cloud.launch(t, capability.UnitNode, "source"))
 	evaluated := cloud.launch(t, capability.UnitEval, "source")
-	expansion, err := json.Marshal(controllerwire.ExpansionSubmission{SourceGeneration: evaluated.SourceGeneration, Body: json.RawMessage(`{"jobs":[{"id":"generated","groups":["expand"],"steps":[{"id":"run"}]}]}`)})
+	expansion, err := json.Marshal(controllerwire.ExpansionSubmission{SourceGeneration: evaluated.SourceGeneration, Registration: runspec.SecretRegistration{Version: 1}, Body: json.RawMessage(`{"jobs":[{"id":"generated","groups":["expand"],"steps":[{"id":"run"}]}]}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +189,8 @@ func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Request.Request.Dispatch != runspec.DispatchHost {
-		t.Fatalf("runner-selected Cloud trigger sealed dispatch=%s", created.Request.Request.Dispatch)
+	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchHost {
+		t.Fatalf("runner-selected Cloud trigger sealed dispatch=%s", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch)
 	}
 	poll := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 64, AvailableMemoryBytes: 64 << 30}
 	if empty, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || empty.Claim != nil {

@@ -63,7 +63,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	processes.Session.Environments.Base = config.Source.Base
 	processes.Session.Environments.Snapshots = config.Snapshots
 	validation := config.Validation
-	validation.Secrets = config.Masks
+	validation.Secrets = config.Masks.replayMasks
 	execution := ExecutorDependencies{Log: config.Executor.Log, BindStorage: config.Executor.BindStorage, Bind: config.Executor.Bind, ChildContext: config.Executor.ChildContext, PrepareArtifacts: config.Executor.PrepareArtifacts, PrepareCaches: config.Executor.PrepareCaches, PublishOutput: config.Executor.PublishOutput, Annotate: config.Executor.Annotate, ReadFailure: config.Executor.ReadFailure, ReadOutput: config.ReadOutput}
 	if execution.Log == nil {
 		execution.Log = func(ctx context.Context, input NodeInput, frame nodeproto.FrameLog) error {
@@ -71,7 +71,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		}
 	}
 	execution.Masks = config.Masks
-	execution.Store, execution.Mask = config.Store, config.Masks.masker.Mask
+	execution.Store, execution.Masker = config.Store, config.Masks.masker
 	execution.Start, execution.EnsureEngine = processes.Start, config.Source.Engines.Ensure
 	execution.Validation = validation
 	executor, err := NewNodeExecutor(execution)
@@ -80,7 +80,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	evaluation := EvaluationDependencies{Bind: config.Evaluation.Bind, ChildContext: config.Evaluation.ChildContext, ReadOutput: config.ReadOutput}
 	evaluation.Masks = config.Masks
-	evaluation.Store, evaluation.Mask = config.Store, config.Masks.masker.Mask
+	evaluation.Store, evaluation.Masker = config.Store, config.Masks.masker
 	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
 	evaluation.Validation = validation
 	evaluator, err := NewOwnerEvaluator(evaluation)
@@ -91,7 +91,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing
-	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
+	owner.Snapshots, owner.Masks, owner.Masker = config.Snapshots, config.Masks, config.Masks.masker
 	owner.Executor, owner.Planner = executor, &planner
 	owner.executionAdmission = config.Admission
 
@@ -113,13 +113,13 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		return evaluator.skipLayer(ctx, input, row, processes.Log)
 	}
 	if owner.Expand == nil {
-		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 			return evaluator.Expand(ctx, input)
 		}
 	}
 	claimed := &ClaimedNodeHost{
 		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
-		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.Admission,
+		Executor: executor, Masker: config.Masks.masker, Masks: config.Masks, Admission: config.Admission,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
 		return nil, nil, nil, err
@@ -141,7 +141,7 @@ type OwnerOperations struct {
 	AdoptClaim     func(context.Context, store.ReconciledNode) error
 	Delegator      OwnerDelegator
 	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
-	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
+	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error)
 }
 
 // ExecutionOperations supplies placement callbacks without shared host state.

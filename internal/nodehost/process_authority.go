@@ -293,7 +293,7 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 		return nil
 	}
 	target.Team = principal.Capability.Team
-	if target.Pipeline == "" {
+	if target.Reference == nil {
 		target.RunID = binding.RunID
 	}
 	if rule == capability.BindOwnNode && target.NodeID == "" {

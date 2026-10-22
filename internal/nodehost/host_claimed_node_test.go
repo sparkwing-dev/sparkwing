@@ -34,7 +34,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 				request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build"}}
 				request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
 				request.Request.Git.SHA, request.Request.Git.Repository.Key = strings.Repeat("a", 40), "example.com/acme/repo"
-				spec := runspec.Spec{Hash: "spec", PlanHash: ownerPlanHash, Request: request, Resolved: runspec.Resolved{Engine: identity}}
+				spec := runspec.Spec{Hash: "spec", PlanHash: ownerPlanHash, Request: request, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 				raw, err := json.Marshal(spec)
 				if err != nil {
 					t.Fatal(err)
@@ -50,8 +50,8 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				acquired, executed, joined := false, false, false
-				host := ClaimedNodeHost{Admission: ComposeStartGate(s,nil,false),
-					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Mask: func(string) string { return "masked" },
+				host := ClaimedNodeHost{Admission: ComposeStartGate(s, nil, false),
+					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: testMasker("private"),
 					Acquire: func(_ context.Context, projected source.Spec, _ source.Options) (*source.Entry, error) {
 						acquired = true
 						if s.beats.Load() != 1 || projected.SHA != request.Request.Git.SHA || projected.Engine == nil || *projected.Engine != identity {

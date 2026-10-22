@@ -16,25 +16,13 @@ func (h *nodeExecutor) diagnostic(ctx context.Context, input NodeInput, level, e
 	if err := executorLostAuthority(ctx); err != nil {
 		return err
 	}
-	for key, value := range attrs {
-		switch value := value.(type) {
-		case string:
-			attrs[key] = h.deps.Mask(value)
-		case []string:
-			masked := make([]string, len(value))
-			for i, text := range value {
-				masked[i] = h.deps.Mask(text)
-			}
-			attrs[key] = masked
-		}
-	}
 	raw, err := json.Marshal(attrs)
 	if err != nil {
 		return err
 	}
 	return h.deps.Log(ctx, input, nodeproto.FrameLog{
 		TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Event: event,
-		Step: h.deps.Mask(step), Message: h.deps.Mask(message), Attrs: raw,
+		Step: h.deps.Masker.Mask(step), Message: h.deps.Masker.Mask(message), Attrs: h.deps.Masker.Attributes(raw),
 	})
 }
 

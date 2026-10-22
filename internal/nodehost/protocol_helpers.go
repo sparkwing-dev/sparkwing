@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	LevelInfo   = "info"
-	LevelWarn   = "warn"
-	maxTextLine = 1 << 20
+	LevelInfo = "info"
+	LevelWarn = "warn"
 )
 
 var reapTimeout = 10 * time.Second

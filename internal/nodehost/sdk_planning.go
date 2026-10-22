@@ -22,6 +22,7 @@ import (
 // PlanningProcessInput holds acquired code and host-resolved inputs. Args contains
 // request/YAML winners; describe fills only absent keys. Planning has no job bearer.
 type PlanningProcessInput struct {
+	output      *planningLogs
 	Entry       *source.Entry
 	Entrypoint  string
 	Runner      nodeproto.RunnerIdentity
@@ -37,11 +38,13 @@ type PlanningProcessInput struct {
 // Args and SecretArgs belong in the resolved half submitted to AcceptPlan.
 // Prepare owns and closes describe; Plan owns and closes a fresh process.
 type PreparedPlanning struct {
-	Description nodeproto.PipelineDescription
-	Args        map[string]string
-	SecretArgs  []string
-	Input       PlanningInput
-	Plan        func(context.Context) (json.RawMessage, error)
+	SecretRegistration runspec.SecretRegistration
+	Declarations       *runspec.DeclarationGate
+	Description        nodeproto.PipelineDescription
+	Args               map[string]string
+	SecretArgs         []string
+	Input              PlanningInput
+	Plan               func(context.Context) (json.RawMessage, error)
 }
 
 // SDKPlanner prepares SDK planning with the current host inputs.
@@ -75,6 +78,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, nil, nil, nil); err != nil {
 		return PreparedPlanning{}, err
 	}
+	declarationsKnown := false
 	logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log}
 	var raw json.RawMessage
 	var prepared PreparedPlanning
@@ -96,19 +100,21 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	if err != nil {
 		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
 	}
+	declarationsKnown = logs.known
 	if prepared.Description.Error != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, true)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known)
 	}
 	input.Args = maps.Clone(prepared.Args)
+	planning.declarations = prepared.Declarations
 	planning.Validation.Secrets = planningSecrets{prior: planning.Validation.Secrets, masker: p.Masker}
 	prepared.Plan = func(ctx context.Context) (json.RawMessage, error) {
-		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: true}
+		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
 			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
-			return nil, p.planningError(ctx, err, true)
+			return nil, p.planningError(ctx, err, logs.known)
 		}
 		return raw, nil
 	}
@@ -156,6 +162,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 	}
 	input = clonePlanningProcessInput(input)
 	input.Entry.Engine = resolved
+	input.output = logs
 	process, err := p.Start(ctx, input, logs.write)
 	defer func() {
 		var closeErr error
@@ -189,6 +196,9 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 }
 
 func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) error {
+	if errors.Is(err, secrets.ErrInvalidValue) {
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: secrets.ErrInvalidValue.Error()}
+	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
@@ -204,6 +214,14 @@ func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) er
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}
 	failure := &apierr.Error{Code: code, Message: message}
+	if known {
+		if structured != nil {
+			failure = p.Masker.Error(structured)
+			failure.Message = message
+		} else {
+			failure = p.Masker.Error(failure)
+		}
+	}
 	if code == apierr.ProtocolMismatch {
 		failure.Hint = "Rebuild .sparkwing with the matching SDK."
 	}

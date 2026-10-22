@@ -121,6 +121,9 @@ func (l *localLogs) subject(ctx context.Context, node string) (capability.Princi
 }
 
 func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
+	if frame.Stream != "" || frame.StreamData != "" || frame.StreamEnd {
+		return errors.New("raw SDK streams require the host egress adapter")
+	}
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
@@ -132,7 +135,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(frame)
+	body, err := json.Marshal(l.masker.Log(frame))
 	if err != nil {
 		return err
 	}
@@ -156,7 +159,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 		}
 		l.sinks[string(key)] = sink
 	}
-	return sink.Append(l.masker.MaskJSON(body), "", 0, 0)
+	return sink.Append(body, "", 0, 0)
 }
 
 func (l *localLogs) close(ctx context.Context) error {

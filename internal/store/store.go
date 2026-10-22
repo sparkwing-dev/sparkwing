@@ -405,6 +405,7 @@ const InvocationSecretArgsKey = "secret_args"
 
 // Run is the redacted reporting view of a persisted run.
 type Run struct {
+	team            Team
 	RepoInherited   bool              `json:"repo_inherited,omitempty"`
 	ID              string            `json:"id"`
 	Number          int64             `json:"number"`
@@ -468,8 +469,8 @@ func (op *Operator) runOwnerTx(ctx context.Context, tx *storeTx, runID string) (
 	return Team(owner), true, nil
 }
 
-const runColumns = `runs.id,runs.number,runs.pipeline,runs.status,runs.trigger_source,runs.git_branch,runs.git_sha,
- runs.request_json,runs.spec_json,runs.plan_json,runs.error,runs.created_at,runs.started_at,runs.finished_at,
+const runColumns = `runs.team,runs.id,runs.number,runs.pipeline,runs.status,runs.trigger_source,runs.git_branch,runs.git_sha,
+ runs.request_json,runs.plan_json,runs.error,runs.created_at,runs.started_at,runs.finished_at,
  runs.parent_run_id,runs.repo_display,runs.retry_of,
  COALESCE((SELECT retry.id FROM runs retry WHERE retry.team=runs.team AND retry.retry_of=runs.id ORDER BY retry.created_at DESC,retry.id DESC LIMIT 1),''),
  runs.lineage_json,runs.replay_of_run_id,runs.replay_of_node_id,runs.annotation_count,runs.top_annotation,runs.annotations_json,runs.admission,` + runAttentionColumn
@@ -576,10 +577,16 @@ func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFil
 		}
 		out = append(out, r)
 	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	if err := s.refreshRunPresentations(ctx, out); err != nil {
+		return nil, err
+	}
 	if f.HasBeforeCursor() {
 		slices.Reverse(out)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // safety: the scanner maps every started_at at or below zero to the zero time, so a
@@ -702,13 +709,13 @@ type rowScanner interface {
 
 func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	var r Run
-	var request, spec, lineage, annotations []byte
+	var request, lineage, annotations []byte
 	var created int64
 	var started, finished sql.NullInt64
 	var parent sql.NullString
 	destinations := []any{
-		&r.ID, &r.Number, &r.Pipeline, &r.Status, &r.TriggerSource, &r.GitBranch, &r.GitSHA,
-		&request, &spec, &r.PlanSnapshot, &r.Error, &created, &started, &finished, &parent, &r.DeclaredRepo, &r.RetryOf, &r.RetriedAs,
+		&r.team, &r.ID, &r.Number, &r.Pipeline, &r.Status, &r.TriggerSource, &r.GitBranch, &r.GitSHA,
+		&request, &r.PlanSnapshot, &r.Error, &created, &started, &finished, &parent, &r.DeclaredRepo, &r.RetryOf, &r.RetriedAs,
 		&lineage, &r.ReplayOfRunID, &r.ReplayOfNodeID, &r.AnnotationCount, &r.TopAnnotation, &annotations, &r.Admission, &r.NeedsAttention,
 	}
 	if err := rs.Scan(append(destinations, tail...)...); err != nil {
@@ -724,16 +731,6 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	display := runspec.DisplayRequest(sealed)
 	r.RepoInherited = sealed.Request.Lineage.RepoInherited
 	r.RepoURL = sealed.Request.Source.Location.RemoteURL
-	if len(spec) > 0 {
-		var accepted runspec.Spec
-		if err := json.Unmarshal(spec, &accepted); err != nil {
-			return nil, fmt.Errorf("decode run spec: %w", err)
-		}
-		display = runspec.DisplaySpec(accepted)
-		r.Args = display.Args
-	} else {
-		r.Args = display.RequestedArgs
-	}
 	if len(annotations) > 0 {
 		if err := json.Unmarshal(annotations, &r.Annotations); err != nil {
 			return nil, fmt.Errorf("decode run annotations: %w", err)
@@ -1250,7 +1247,14 @@ type SpawnedChild struct {
 
 // GetTrigger returns one tenant trigger's sealed display and queue state.
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
-	return scanTrigger(t.s.queryRow(ctx, triggerSelect+` WHERE triggers.team=? AND triggers.id=?`, t.team, id))
+	trigger, err := scanTrigger(t.s.queryRow(ctx, triggerSelect+` WHERE triggers.team=? AND triggers.id=?`, t.team, id))
+	if err != nil {
+		return nil, err
+	}
+	if err := t.s.refreshTriggerPresentations(ctx, []*Trigger{trigger}); err != nil {
+		return nil, err
+	}
+	return trigger, nil
 }
 
 // TriggerFilter narrows ListTriggers; zero value matches all.
@@ -1308,7 +1312,13 @@ func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) (_ []*Trigge
 		}
 		out = append(out, trigger)
 	}
-	return out, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	if err := t.s.refreshTriggerPresentations(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func scanTrigger(rs rowScanner) (*Trigger, error) {

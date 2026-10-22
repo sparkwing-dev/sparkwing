@@ -65,13 +65,16 @@ func TestGeneratedJobArguments(t *testing.T) {
 					t.Fatal(err)
 				}
 				if tc.want != "" {
-					if result.Error == nil || result.Error.Code != tc.want || planJob(built.(*Plan), "child") != nil {
+					if result.Error == nil || result.Error.Code != tc.want || result.DeclarationsKnown || planJob(built.(*Plan), "child") != nil {
 						t.Fatalf("invalid generated arguments changed the plan: %+v", result)
 					}
 					return
 				}
 				if result.Error != nil {
 					t.Fatal(result.Error)
+				}
+				if !result.DeclarationsKnown || len(result.Arguments) == 0 {
+					t.Fatalf("successful expansion did not disclose its arguments: %+v", result)
 				}
 				want := jobargsArgs1{Replicas: 3, Image: "nginx:latest", Mode: "rolling"}
 				if tc.name == "overrides" {

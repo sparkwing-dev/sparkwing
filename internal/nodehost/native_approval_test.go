@@ -43,7 +43,7 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 	daemon := newFakeDaemon()
 	var process *executorProcess
 	evaluator, err := NewOwnerEvaluator(EvaluationDependencies{
-		Store: f.State, Mask: func(s string) string { return s },
+		Store: f.State, Masker: testMasker(),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return selected, nil
@@ -130,7 +130,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 			}
 			selected := engine.Resolved{Identity: accepted.Resolved.Engine}
 			var process *executorProcess
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Mask: func(s string) string { return s }, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			}, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) {
 				if state, err := f.Tenant.GetConcurrencyState(ctx, "job:global:approval"); !errors.Is(err, store.ErrNotFound) && (err != nil || len(state.Holders) != 0) {
@@ -179,9 +179,18 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 }
 
 func TestNativeApprovalPredicateReadsDeclaredDependencyOnBothPlacements(t *testing.T) {
+	testNativeApprovalPredicateReads(t, "approvalfixture", false)
+}
+
+func TestNativeApprovalPredicateReadsPipelineReferenceOnBothPlacements(t *testing.T) {
+	testNativeApprovalPredicateReads(t, "approvalreferencefixture", true)
+}
+
+func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	bin := buildNativeSDKFixture(t, ctx, "approvalfixture")
+	bin := buildNativeSDKFixture(t, ctx, fixture)
 	runner := nodeproto.RunnerIdentity{Name: "host", Type: "local", Labels: []string{}}
 	hello, plan := planNativeSDKFixture(t, ctx, bin, "p", map[string]string{}, nodeproto.RunContext{RunID: "describe", Pipeline: "p"}, runner)
 	selected := engine.Resolved{Identity: engine.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engine.Pin{SDK: engine.GoSDK, Version: hello.SDK.Version}}}
@@ -241,9 +250,17 @@ func TestNativeApprovalPredicateReadsDeclaredDependencyOnBothPlacements(t *testi
 					reads.Add(1)
 					return json.RawMessage("true"), nil
 				}
+				service.Latest = func(_ context.Context, auth capability.Authorized, pipeline, job string, _ time.Duration) (ProcessOutput, error) {
+					want := capability.PipelineReferenceTarget{Pipeline: "upstream", JobID: "artifact"}
+					if !reference || pipeline != want.Pipeline || job != want.JobID || auth.Target.Reference == nil || *auth.Target.Reference != want || auth.Target.RunID != "" || auth.Target.NodeID != "" || !reflect.DeepEqual(auth.Binding, principal.Capability.Binding) {
+						return ProcessOutput{}, errors.New("pipeline reference mixed caller identity with its resource or lost its exact evaluation fence")
+					}
+					reads.Add(1)
+					return ProcessOutput{RunID: "upstream-run", Output: json.RawMessage("true")}, nil
+				}
 				return service, err
 			}}
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Bind: claims.evaluate, Mask: func(s string) string { return s }, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Bind: claims.evaluate, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			}, Start: func(ctx context.Context, in EvaluationInput) (ExecutorProcess, error) {
 				return StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH")), Revoke: in.processRevoke})

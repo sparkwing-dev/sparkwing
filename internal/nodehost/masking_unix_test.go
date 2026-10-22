@@ -82,7 +82,7 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 	deps.Store = f.State
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
-	deps.Mask = masker.Mask
+	deps.Masker = masker
 	deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return input.Engine, nil
 	}
