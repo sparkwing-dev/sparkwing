@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -15,7 +16,8 @@ import (
 
 func authorityStore(t *testing.T) *Store {
 	t.Helper()
-	s := &Store{db: rewriteSchemaDB(t), dialect: DialectSQLite}
+	now := time.Now()
+	s := &Store{db: rewriteSchemaDB(t), dialect: DialectSQLite, clock: func() time.Time { return now }}
 	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
 	rewriteSchemaExec(t, s.db, "INSERT INTO team_counters(team) VALUES ('a'),('b')")
 	return s
@@ -28,6 +30,28 @@ func authorityRoot(id, team string) capability.Capability {
 		Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
 		Issuance: capability.Delegate, IssuedAt: time.Unix(1, 0).UTC(), ReservedPools: []string{}, Repositories: nil,
 	}
+}
+
+func TestAuthorityFixtureDoesNotConsumeLifetimeDuringSetup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := authorityStore(t)
+		opened := s.now()
+		root := authorityRoot("root", "a")
+		root.IssuedAt = opened
+		expires := opened.Add(time.Hour)
+		root.ExpiresAt = &expires
+		authorityPersist(t, s, root)
+		time.Sleep(2 * time.Hour)
+		snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{
+			Class: capability.CredentialBearer, Audience: capability.Controller, Digest: root.Digest,
+		}, capability.RequestEvidence{})
+		if err != nil {
+			t.Fatalf("fixture setup consumed authority lifetime: %v", err)
+		}
+		if !snapshot.Now.Equal(opened) {
+			t.Fatalf("fixture clocks diverged: snapshot %s, opened %s", snapshot.Now, opened)
+		}
+	})
 }
 
 func authorityPersist(t *testing.T, s *Store, c capability.Capability) {
