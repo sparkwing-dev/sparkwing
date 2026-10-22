@@ -233,7 +233,7 @@ func TestStatusHooks_FailsWhenTheConfigNoLongerLoads(t *testing.T) {
 }
 
 func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) {
-	for _, mode := range []string{"content", "version", "obsolete", "current"} {
+	for _, mode := range []string{"content", "version", "obsolete", "current", "notifier-content", "notifier-version"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newChainFixture(t)
 			f.asProcessEnv(t)
@@ -255,6 +255,14 @@ func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) 
 				writeRepoFile(t, path, strings.Replace(body, "#!/bin/sh\n", "#!/bin/sh\nexit 0\n", 1))
 			case "version":
 				writeRepoFile(t, path, strings.Replace(body, "(format 1)", "(format 0)", 1))
+			case "notifier-content", "notifier-version":
+				notify := renderHookScript("post-commit", []string{"notify"}, false)
+				if mode == "notifier-content" {
+					notify = "#!/bin/sh\nexit 0\n" + notify
+				} else {
+					notify = strings.Replace(notify, "(format 1)", "(format 0)", 1)
+				}
+				writeExec(t, filepath.Join(f.repo, ".git", "hooks", "post-commit"), notify)
 			case "obsolete":
 				writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), noTriggerProject)
 			}
@@ -262,9 +270,14 @@ func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) 
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("surveyFleet = %+v, %v", rows, err)
 			}
-			wantGated := mode == "current"
+			wantGated := mode == "current" || strings.HasPrefix(mode, "notifier-")
 			if rows[0].Gated() != wantGated {
 				t.Fatalf("Gated = %v, want %v: %+v", rows[0].Gated(), wantGated, rows[0])
+			}
+			if !wantGated {
+				if step, ok := missingHooksStep(Info{Project: InfoProject{Found: true, SparkwingDir: filepath.Join(f.repo, ".sparkwing")}}); !ok || !strings.Contains(step.Command, "pipeline hooks install") {
+					t.Errorf("info hides stale hook: %+v, %v", step, ok)
+				}
 			}
 			if !wantGated && rows[0].State != githooks.GateBroken {
 				t.Fatalf("state = %s, want broken", rows[0].State)
@@ -289,5 +302,46 @@ func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) 
 				t.Fatalf("fleet claims the stale blocking hook enforces commits: %s", fleet.String())
 			}
 		})
+	}
+}
+
+func TestHooksVerdicts_DeletedGlobalForwarderIsBroken(t *testing.T) {
+	f := newChainFixture(t)
+	f.asProcessEnv(t)
+	writeExec(t, filepath.Join(f.binDir, "go"), "#!/bin/sh\nprintf 'auto\\ngo1.26.9\\noff\\n'\n")
+	writeExec(t, filepath.Join(f.globalDir, "pre-push"), "#!/bin/sh\nexit 1\n")
+	f.registerRepos(t, f.repo)
+	installInto(t, f.tryGit, f.repo)
+	if err := os.Remove(filepath.Join(f.repo, ".git", "hooks", "pre-push")); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := surveyFleet(f.tryGit)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("surveyFleet = %+v, %v", rows, err)
+	}
+	if rows[0].Gated() || rows[0].State != githooks.GateBroken {
+		t.Errorf("missing global forwarder accepted: %+v", rows[0])
+	}
+	if step, ok := missingHooksStep(Info{Project: InfoProject{Found: true, SparkwingDir: filepath.Join(f.repo, ".sparkwing")}}); !ok || !strings.Contains(step.Purpose, "pre-push") {
+		t.Errorf("info hides missing forwarder: %+v, %v", step, ok)
+	}
+	out := captureStdout(t, func() {
+		if err := statusHooks(f.tryGit, f.repo, "json"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, `"state":"broken"`) || !strings.Contains(out, `"silenced_global":["pre-push"]`) {
+		t.Errorf("status hides missing global forwarder: %s", out)
+	}
+	report := inspectDoctorMachine(t.Context())
+	if report.GatesSurveyError != "" || report.GatesSurveyed != 1 || len(report.UngatedRepos) != 1 {
+		t.Errorf("doctor hides missing global forwarder: %+v", report)
+	}
+	var fleet strings.Builder
+	if err := renderHooksSurvey(&fleet, rows, "pretty"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fleet.String(), "broken") || strings.Contains(fleet.String(), "every declared gate fires") {
+		t.Errorf("fleet hides missing global forwarder: %s", fleet.String())
 	}
 }

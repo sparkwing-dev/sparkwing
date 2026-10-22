@@ -233,3 +233,39 @@ final TestProtocol normal/tagged, final command compilation, guardcheck -fast,
 gofmt and whitespace checks. The diagnostic rg search for the obsolete drift
 message had no matches (exit 1); it was not a build or guard failure.
 Scratch /tmp/sw-astra-CU removed at session end. The harness owns commits.
+
+CU cub continuation - base babef8417 (2026-10-22).
+RM integration d646f001e is an ancestor. Integration advanced to RA merge
+35b4de88b; merge attempt failed before changing files because shared Git metadata
+is read-only (ORIG_HEAD.lock). The harness must merge integration and commit.
+No git add/commit/reset/rebase/stash/checkout or Git environment overrides used.
+
+One per-hook observation now owns presence, content, format, executability,
+requirement and active-directory evidence. Status, fleet, doctor, Gated(), info
+and installation consume it. Blocking gates and global forwarders are required;
+notifiers are optional. Removed checkExpectedHooks, unforwardedGlobalHooks,
+hookExecutable, gatesLive, and the status command's independent filesystem scan.
+Docs, delivery policy, changelog and generated mirrors are aligned.
+
+RED on babef8417: TestHooksVerdicts_DeletedGlobalForwarderIsBroken reported armed
+and healthy from status, fleet, doctor and Gated after deleting global pre-push's
+local forwarder. The regression passes with the shared observation owner.
+Regressions also cover stale optional notifiers, info's repair recommendation,
+and required-forwarder collisions when only a notifier is declared.
+Independent ordinary correctness review found two caller gaps; both were fixed
+and the final review found no remaining issues or unnecessary mechanisms.
+
+PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache
+and TMPDIR=/tmp/sw-astra-CU:
+- Focused normal and rewrite_integration CLI hook/survey/doctor/info regressions.
+- Full internal/githooks and internal/doccheck package tests.
+- go build -o /dev/null ./cmd/...; guardcheck --fast.
+- Documentation mirror, changelog, formatter and git diff --check.
+Full/heavy/PostgreSQL suites remain with lead. pkg/docs' WebClient test cannot
+bind httptest's socket in this sandbox; its native package run remains with lead.
+Xwing candidate context also cannot create its read-only session-index lock.
+Lint: default rewrite baseline reports inherited issues. Whole touched files
+retain five unchanged findings; changed lines pass with 0 issues using
+--new-from-merge-base= --new-from-rev=HEAD. No unrelated lint repairs made.
+No local Git identity/core.worktree overrides or owned test processes remain.
+Session scratch and generated lint cache removed. The harness owns landing.

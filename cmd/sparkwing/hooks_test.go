@@ -358,21 +358,33 @@ func TestHooksInstall_ClaimsWhenTheSkippedHookIsNoneOfTheMachinesOwn(t *testing.
 }
 
 func TestHooksInstall_ReportsAGlobalHookNothingHandsOffToWhenTheClaimIsAlreadyInPlace(t *testing.T) {
-	repo := gateRepo(t)
-	hooksDir := filepath.Join(repo, ".git", "hooks")
-	global := t.TempDir()
-	if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git := &fakeGit{global: global, local: hooksDir}
-	writeRepoFile(t, filepath.Join(hooksDir, "prepare-commit-msg"), "#!/bin/sh\necho hand written\n")
+	for _, notifierOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(notifierOnly), func(t *testing.T) {
+			repo := gateRepo(t)
+			if notifierOnly {
+				writeRepoFile(t, filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), "pipelines:\n  - name: notify\n    entrypoint: Notify\n    on:\n      post_commit: {}\n")
+			}
+			hooksDir := filepath.Join(repo, ".git", "hooks")
+			global := t.TempDir()
+			if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			git := &fakeGit{global: global, local: hooksDir}
+			writeRepoFile(t, filepath.Join(hooksDir, "prepare-commit-msg"), "#!/bin/sh\necho hand written\n")
 
-	out := installInto(t, git.run, repo)
-	if len(git.writes) != 0 {
-		t.Errorf("the claim is already in place; install rewrote it: %v", git.writes)
-	}
-	if !strings.Contains(out, "global prepare-commit-msg does not fire here") {
-		t.Errorf("install should report the machine's hook it cannot forward, claim or no claim:\n%s", out)
+			out := captureStderr(t, func() {
+				gated, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"), installOptions{})
+				if err == nil || gated {
+					t.Fatalf("silenced required forwarder accepted: gated=%v, err=%v", gated, err)
+				}
+			})
+			if len(git.writes) != 0 {
+				t.Errorf("the claim is already in place; install rewrote it: %v", git.writes)
+			}
+			if !strings.Contains(out, "global prepare-commit-msg does not fire here") {
+				t.Errorf("install should report the machine's hook it cannot forward, claim or no claim:\n%s", out)
+			}
+		})
 	}
 }
 
@@ -828,8 +840,7 @@ func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
 			if strings.Contains(output, `"state":"armed"`) {
 				t.Fatalf("stale gate reported as armed: %s", output)
 			}
-			survey := githooks.Survey(git.run, repo, []string{"pre-commit", "post-commit"})
-			checkExpectedHooks(git.run, &survey)
+			survey := githooks.Survey(git.run, repo, expectedHooks)
 			var fleet bytes.Buffer
 			if err := renderHooksSurvey(&fleet, []githooks.RepoGates{survey}, "pretty"); err != nil {
 				t.Fatal(err)

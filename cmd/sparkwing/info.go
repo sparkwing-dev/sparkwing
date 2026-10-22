@@ -691,11 +691,7 @@ func missingHooksStep(info Info) (InfoNextStep, bool) {
 		return InfoNextStep{}, false
 	}
 	repoRoot := filepath.Dir(info.Project.SparkwingDir)
-	declared, err := declaredHookNames(repoRoot)
-	if err != nil {
-		return InfoNextStep{}, false
-	}
-	survey := githooks.Survey(runGit, repoRoot, declared)
+	survey := githooks.Survey(runGit, repoRoot, expectedHooks)
 	missing := append(append([]string(nil), survey.NotFiring()...), survey.Borrowed...)
 	if len(missing) == 0 {
 		return InfoNextStep{}, false

@@ -324,19 +324,20 @@ home's runs, locks or daemon.
 
 `sparkwing pipeline hooks status` compares each managed hook with the expected
 script and format version, and checks which directory Git reads. JSON hook
-records include `current`; a stale or edited script prints a warning to reinstall.
-Remove obsolete managed gates whose pipeline triggers are no longer declared, then run
-`sparkwing pipeline hooks install` to replace stale scripts. Fleet status also
-reports obsolete managed gates as broken. For a manual execution check, use a
-throwaway commit in a disposable checkout.
+records include `current`. The summary's `gates.hooks` observations record presence,
+content, format version, executability, and whether each hook is required.
+Status, fleet status, and doctor use these same observations. Blocking gates and
+global forwarders are required. A missing or stale required hook is broken,
+including a deleted forwarder for a global hook. Notifiers are optional.
+Remove obsolete managed hooks whose triggers or global hooks are no longer declared,
+then run `sparkwing pipeline hooks install` to replace stale scripts. For a manual
+execution check, use a throwaway commit in a disposable checkout.
 
-Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
-`pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--all-repos`
-summary count: a repository whose only missing hook is `post-commit` loses a
-notification rather than a gate, and one that declares no blocking hook has no
-gate to arm -- `--all-repos` counts it apart from the repositories it armed rather
-than among them, because a sweep that reports it as armed reports a gated
-fleet while every commit in that repository still goes unchecked.
+A repository is gated when a current declared `pre-commit` or `pre-push` hook
+fires and every required hook is current and active. `--ungated`, `doctor` and
+the `--all-repos` summary share that verdict. A missing `post-commit` notifier
+loses a notification. A repository that declares no blocking hook has no gate to
+arm, and fleet installation counts it separately.
 
 The list is the machine's repo registry -- the `repos` section of
 `~/.config/sparkwing/config.yaml`, which `sparkwing repos add --checkout <dir>`
