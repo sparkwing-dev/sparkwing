@@ -15,12 +15,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 )
 
-func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
+func typescriptMemoPlan(t *testing.T, declarations string) nodeproto.PlanDoc {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node is required for SDK parity")
@@ -31,17 +33,21 @@ func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
 	}
 	script := `import { Plan, compose, files, repoFiles, ignore, tree, env, constant, parts } from ` + string(mustMemoJSON(t, (&url.URL{Scheme: "file", Path: filepath.ToSlash(module)}).String())) + `;
  const plan = new Plan();
- plan.job("job", () => {}).memo(compose(files("**/*.txt"), repoFiles(ignore("cache/")), tree("tree"), env("MODE", "ABSENT"), constant("v1"), parts({z:2,a:["<秘密>",true]},3)));
+ ` + declarations + `
  console.log(JSON.stringify(plan.toDoc()));`
-	command := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script)
-	raw, err := command.Output()
+	raw, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ts nodeproto.PlanDoc
-	if err := json.Unmarshal(raw, &ts); err != nil {
+	var doc nodeproto.PlanDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
+	return doc
+}
+
+func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
+	ts := typescriptMemoPlan(t, `plan.job("job", () => {}).memo(compose(files("**/*.txt"), repoFiles(ignore("cache/")), tree("tree"), env("MODE", "ABSENT"), constant("v1"), parts({z:2,a:["<秘密>",true]},3)));`)
 	plan := sparkwing.NewPlan()
 	recipe := inputs.Compose(inputs.Files("**/*.txt"), inputs.RepoFiles(inputs.Ignore("cache/")), inputs.Tree("tree"), inputs.Env("MODE", "ABSENT"), inputs.Const("v1"), inputs.Parts(map[string]any{"a": []any{"<秘密>", true}, "z": 2}, 3))
 	sparkwing.Job(plan, "job", func(context.Context) error { return nil }).Memo(recipe)
@@ -157,8 +163,12 @@ func TestMemoLiteralNumbersSurvivePlanRoundTrip(t *testing.T) {
 
 func TestExecutorMemoRecipeErrorStopsBody(t *testing.T) {
 	input, state, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
-		job.Memo = &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "tree", Root: filepath.Join(t.TempDir(), "missing")}}
+		job.Memo = &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "tree", Root: "missing"}}
 	})
+	input.Entry.Directory = createTestRepository(t, map[string]string{"file": "content"})
+	deps.memoEnvironment = func(context.Context, NodeInput) (procenv.Env, error) {
+		return procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	}
 	host, _, _ := executorPolicyHost(t, deps, input)
 	if err := host.Execute(t.Context(), input); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("filesystem error lost: %v", err)
@@ -174,6 +184,35 @@ func TestExecutorMemoRecipeErrorStopsBody(t *testing.T) {
 		for _, request := range process.requests {
 			if request.Op == nodeproto.OpRunStep {
 				t.Fatal("body ran after recipe error")
+			}
+		}
+	}
+}
+
+func TestMemoConstantsSurviveTransportAndEmptyFailsAtHost(t *testing.T) {
+	ts := typescriptMemoPlan(t, `
+ plan.job("constant", () => {}).memo(constant("v1"));
+ plan.job("empty", () => {}).memo(constant(""));
+ plan.job("part", () => {}).memo(parts(""));`)
+	plan := sparkwing.NewPlan()
+	for i, recipe := range []sparkwing.MemoInput{inputs.Const("v1"), inputs.Const(""), inputs.Parts("")} {
+		sparkwing.Job(plan, ts.Jobs[i].ID, func(context.Context) error { return nil }).Memo(recipe)
+	}
+	goDoc := sdkserve.DefaultOperations.Document(plan)
+	for i, tsJob := range ts.Jobs {
+		goJob := goDoc.Jobs[i]
+		if string(mustMemoJSON(t, tsJob.Memo)) != string(mustMemoJSON(t, goJob.Memo)) {
+			t.Fatalf("constant transport differs: Go %+v, TS %+v", goJob.Memo, tsJob.Memo)
+		}
+		for _, job := range []nodeproto.JobSpec{goJob, tsJob} {
+			_, err := nodeproto.ValidatePlan(mustMemoJSON(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}), nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
+			if job.ID == "empty" {
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {
+					t.Fatalf("empty constant accepted by host: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("valid memo input refused by host: %v", err)
 			}
 		}
 	}

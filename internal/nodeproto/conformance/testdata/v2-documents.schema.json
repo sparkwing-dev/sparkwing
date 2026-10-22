@@ -422,6 +422,9 @@
         },
         "root": {
           "type": "string"
+        },
+        "value": {
+          "type": "string"
         }
       },
       "required": [

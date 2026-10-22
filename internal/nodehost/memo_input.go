@@ -23,6 +23,8 @@ func memoInputValue(ctx context.Context, input nodeproto.MemoInput, workspace st
 	var value any
 	var err error
 	switch input.Kind {
+	case "const":
+		value = input.Value
 	case "parts":
 		value = append([]any{}, input.Parts...)
 	case "compose":
@@ -39,10 +41,7 @@ func memoInputValue(ctx context.Context, input nodeproto.MemoInput, workspace st
 		values := map[string]any{}
 		for _, name := range input.Names {
 			values[name] = nil
-		}
-		for assignment := range environment.Values() {
-			name, v, ok := strings.Cut(assignment, "=")
-			if _, wanted := values[name]; ok && wanted {
+			if v, present := environment.LookupEnv(name); present {
 				values[name] = v
 			}
 		}
@@ -62,16 +61,13 @@ func memoInputValue(ctx context.Context, input nodeproto.MemoInput, workspace st
 			}
 		}
 	case "tree":
-		root := input.Root
-		if !filepath.IsAbs(root) {
-			var base string
-			base, err = memoCheckoutRoot(ctx, workspace, environment)
-			if err == nil {
-				root = filepath.Join(base, root)
-			}
+		if !filepath.IsLocal(input.Root) {
+			return nil, errors.New("memo tree root must be checkout-relative")
 		}
+		var base string
+		base, err = memoCheckoutRoot(ctx, workspace, environment)
 		if err == nil {
-			value, err = hashTree(ctx, root)
+			value, err = hashTree(ctx, base, input.Root)
 		}
 	default:
 		return nil, errors.New("unknown memo input kind")
@@ -88,7 +84,7 @@ func memoCheckoutRoot(ctx context.Context, workspace string, environment procenv
 }
 
 func memoNeedsEnvironment(input nodeproto.MemoInput) bool {
-	if input.Kind == "env" || input.Kind == "files" || input.Kind == "repo_files" || input.Kind == "tree" && !filepath.IsAbs(input.Root) {
+	if input.Kind == "env" || input.Kind == "files" || input.Kind == "repo_files" || input.Kind == "tree" {
 		return true
 	}
 	for _, child := range input.Inputs {

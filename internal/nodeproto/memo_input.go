@@ -9,6 +9,9 @@ import (
 // A recipe cannot smuggle fields which another host might interpret differently.
 func validMemoInputFields(input MemoInput) bool {
 	fields := []string{}
+	if input.Value != "" {
+		fields = append(fields, "value")
+	}
 	if len(input.Patterns) != 0 {
 		fields = append(fields, "patterns")
 	}
@@ -24,7 +27,7 @@ func validMemoInputFields(input MemoInput) bool {
 	if len(input.Inputs) != 0 {
 		fields = append(fields, "inputs")
 	}
-	allowed := map[string]string{"files": "patterns", "repo_files": "patterns", "tree": "root", "env": "names", "parts": "parts", "compose": "inputs"}
+	allowed := map[string]string{"const": "value", "files": "patterns", "repo_files": "patterns", "tree": "root", "env": "names", "parts": "parts", "compose": "inputs"}
 	field, ok := allowed[input.Kind]
 	return ok && (len(fields) == 0 || slices.Equal(fields, []string{field}))
 }
@@ -32,6 +35,9 @@ func validMemoInputFields(input MemoInput) bool {
 func validateMemoInput(input MemoInput, path string) error {
 	if !validMemoInputFields(input) {
 		return planInvalid(path, "invalid memo input kind or fields")
+	}
+	if input.Kind == "const" && input.Value == "" {
+		return planInvalid(path, "constant must not be empty")
 	}
 	if input.Kind == "tree" && input.Root == "" {
 		return planInvalid(path, "tree root is required")

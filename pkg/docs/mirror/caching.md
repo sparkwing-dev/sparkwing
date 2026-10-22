@@ -23,10 +23,12 @@ sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
 The `sparkwing/inputs` helpers declare recipes in the plan. `Files` selects
 tracked files, `RepoFiles` selects all tracked files with optional `Ignore`
 patterns, and `Tree` includes every regular file recursively, including untracked
-files, while skipping symlinks. Relative tree roots resolve against the checkout
-root. Missing or unreadable inputs fail on the host before the body runs.
-Tracked symlinks contribute their target text and entry type, without reading
-the target's contents.
+files, while skipping symlinks. Tree roots must be relative paths inside the
+checkout. Absolute paths and paths escaping the checkout are refused. Traversal
+and reads use scoped filesystem handles. Symlink directory components and files
+replaced by symlinks during tree hashing fail before the body runs.
+Tracked symlinks contribute their target text and entry type. Their target
+contents are never read. Missing or unreadable inputs fail on the host.
 
 Patterns without a slash match basenames anywhere. A trailing slash matches a
 literal directory prefix from the checkout root, so `cache/` excludes
@@ -35,8 +37,11 @@ where `**` spans path segments. These rules are shared by Go and TypeScript
 because the host performs all matching.
 
 `Env` reads the effective job environment, including startup and body declarations.
-Unset variables differ from empty values. `Parts` declares ordered JSON values,
-`Const` declares one string part, and `Compose` combines recipes in order.
+Names use the platform's comparison, including case-insensitive lookup on Windows.
+Unset variables differ from empty values. `Parts` declares ordered JSON values.
+TypeScript refuses nonfinite numbers and `undefined`, including nested values,
+because JSON transport would lose their identity. `Const` declares a nonempty
+string, validated by the host. `Compose` combines recipes in order.
 TypeScript provides `files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`, `constant` and
 `compose` with the same host semantics.
 

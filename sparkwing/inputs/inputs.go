@@ -24,14 +24,16 @@ func Files(patterns ...string) sparkwing.MemoInput {
 	return sparkwing.MemoInput{Kind: "files", Patterns: patterns}
 }
 
-// Tree declares regular files recursively, skipping symlinks. Relative roots resolve against the checkout root.
+// Tree declares regular files recursively, skipping symlinks. Roots must stay inside the checkout.
 func Tree(root string) sparkwing.MemoInput { return sparkwing.MemoInput{Kind: "tree", Root: root} }
 
 // Env declares effective job environment names. Unset differs from empty.
 func Env(names ...string) sparkwing.MemoInput { return sparkwing.MemoInput{Kind: "env", Names: names} }
 
-// Const declares a literal part.
-func Const(value string) sparkwing.MemoInput { return Parts(value) }
+// Const declares a nonempty literal string, validated by the host.
+func Const(value string) sparkwing.MemoInput {
+	return sparkwing.MemoInput{Kind: "const", Value: value}
+}
 
 // Parts declares ordered JSON values for host hashing.
 func Parts(parts ...any) sparkwing.MemoInput { return sparkwing.MemoInput{Kind: "parts", Parts: parts} }

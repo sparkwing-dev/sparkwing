@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
@@ -188,15 +189,6 @@ func TestDirPrefixIsBoundaryAware(t *testing.T) {
 	}
 }
 
-func TestSignatureIsMemoKeyFn(t *testing.T) {
-	_ = inputs.RepoFiles()
-	_ = inputs.RepoFiles(inputs.Ignore("*.md"))
-	_ = inputs.Files("src/**")
-	_ = inputs.Env("HOME")
-	_ = inputs.Const("v1")
-	_ = inputs.Compose(inputs.Const("a"), inputs.Const("b"))
-}
-
 func TestComposeIncorporatesAllParts(t *testing.T) {
 	first := resolvedKey(t, inputs.Compose(inputs.Const("x"), inputs.Const("y")))
 	second := resolvedKey(t, inputs.Compose(inputs.Const("x"), inputs.Const("z")))
@@ -241,4 +233,29 @@ func resolveTestMemo(t *testing.T, input sparkwing.MemoInput) (string, error) {
 		return "", err
 	}
 	return memoValueKey(value)
+}
+
+func TestEnvUsesPlatformNameComparison(t *testing.T) {
+	first, err := procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: []string{"Memo_Path=one"}}, procenv.Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: []string{"Memo_Path=two"}}, procenv.Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe := inputs.Env("MEMO_PATH")
+	a, err := memoInputValue(t.Context(), recipe, "", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := memoInputValue(t.Context(), recipe, "", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyA, _ := memoValueKey(a)
+	keyB, _ := memoValueKey(b)
+	if changed := keyA != keyB; changed != (runtime.GOOS == "windows") {
+		t.Fatalf("environment change affected memo = %v on %s", changed, runtime.GOOS)
+	}
 }

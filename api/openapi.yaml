@@ -4755,6 +4755,8 @@ components:
             - type: "null"
         root:
           type: string
+        value:
+          type: string
       required:
         - kind
       type: object

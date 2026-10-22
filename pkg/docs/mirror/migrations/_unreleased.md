@@ -3218,8 +3218,15 @@ resolve references or other inputs and return those values for host hashing.
 `Compose` / `compose` combine recipes. Combine author values inside a callback
 with `MemoKey` / `memoKey`.
 
+Tree roots must be relative paths inside the checkout. Absolute and escaping
+roots are refused. Symlink directory components and replacements cannot redirect
+fingerprinting outside that scope. Empty `Const` / `constant` values fail host
+validation. TypeScript recipe literals must be JSON values. Nonfinite numbers and
+`undefined` are refused, including nested values.
+
 Environment recipes read the effective job environment, including body and
-startup declarations. Filesystem errors are host errors. Go and TypeScript now
+startup declarations. Names compare case-insensitively on Windows. Unset remains
+distinct from empty. Filesystem errors are host errors. Go and TypeScript now
 use the same path rule: basenames match anywhere, trailing slashes match a
 literal prefix from the checkout root, and `**` spans path segments. TypeScript
 `ignore("cache/")` therefore keeps `nested/cache/data`. See [Caching](../caching.md).

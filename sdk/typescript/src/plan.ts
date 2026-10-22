@@ -1,3 +1,4 @@
+import { jsonValue } from "./protocol.ts";
 import { argument } from "./describe.ts";
 import { posix } from "node:path";
 import type * as API from "../index.d.ts";
@@ -445,7 +446,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     this.spec.memo = memo;
     this.callbacks = this.callbacks.filter((c) => c.kind !== "memo_key");
     if (typeof fn === "function") this.callbacks.push({ id: this.closureID("memo_key"), kind: "memo_key", fn, job: this });
-    else memo.input = structuredClone(fn);
+    else memo.input = jsonValue(fn, true) as API.MemoInput;
     return this;
   }
   cache(...caches: readonly API.CacheSpec[]): this {

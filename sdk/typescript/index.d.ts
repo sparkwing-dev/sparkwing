@@ -192,6 +192,7 @@ export declare const noMemo: unique symbol;
 export type MemoKeyFn = (ctx: Context) => Awaitable<unknown>;
 /** contract: Built-in memo recipes are evaluated by the executing host. */
 export type MemoInput =
+  | { readonly kind: "const"; readonly value: string }
   | { readonly kind: "files" | "repo_files"; readonly patterns: readonly string[] }
   | { readonly kind: "tree"; readonly root: string }
   | { readonly kind: "env"; readonly names: readonly string[] }
@@ -209,9 +210,9 @@ export declare function files(...globs: readonly string[]): MemoInput;
 export declare function env(...names: readonly string[]): MemoInput;
 /** contract: Declares ordered JSON values for host hashing. */
 export declare function parts(...values: readonly unknown[]): MemoInput;
-/** contract: Declares a literal part for host hashing. */
+/** contract: Declares a nonempty literal string, validated by the host. */
 export declare function constant(value: string): MemoInput;
-/** contract: Regular files contribute recursively, skipping symlinks; missing roots fail on the host. */
+/** contract: Regular files contribute recursively inside the checkout, skipping symlinks; missing roots fail on the host. */
 export declare function tree(path: string): MemoInput;
 /** contract: Repository-relative selection includes all tracked files except declared exclusions. */
 export declare function repoFiles(...options: readonly RepoFilesOption[]): MemoInput;

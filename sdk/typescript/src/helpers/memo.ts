@@ -21,7 +21,7 @@ export function env(...names: readonly string[]): MemoInput {
   return { kind: "env", names };
 }
 export function constant(value: string): MemoInput {
-  return { kind: "parts", parts: [value] };
+  return { kind: "const", value };
 }
 export function compose(...inputs: readonly MemoInput[]): MemoInput {
   return { kind: "compose", inputs };

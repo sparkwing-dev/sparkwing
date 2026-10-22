@@ -10,6 +10,7 @@ import {
   writeFile,
   glob,
   files,
+  parts,
   tree,
   repoFiles,
   ignore,
@@ -63,4 +64,26 @@ test("memo recipes can be declared during planning without filesystem or environ
     assert.equal(job.closures?.memo_key, undefined);
     assert.deepEqual(memoKey("ab", "c"), ["ab", "c"]);
   });
+});
+
+for (const value of [NaN, Infinity, -Infinity, undefined, { nested: undefined }, [undefined], { nested: NaN }, Array(1)]) {
+  test(`memo literals reject lossy JSON values: ${String(value)}`, () => {
+    for (const recipe of [parts(value), compose(constant("v1"), parts(value))]) {
+      assert.throws(() => new Plan().job("build", () => {}).memo(recipe), /JSON serializable/);
+    }
+  });
+}
+
+test("memo literals preserve JSON values and distinguish constants from parts", () => {
+  const plan = new Plan();
+  const literal = { nested: [null, "", 0, false] };
+  plan.job("build", () => {}).memo(parts(literal));
+  literal.nested[1] = "changed";
+  plan.job("constant", () => {}).memo(constant(""));
+  plan.job("part", () => {}).memo(parts(""));
+  assert.deepEqual(JSON.parse(JSON.stringify(plan.toDoc())).jobs.map((job: { memo: unknown }) => job.memo), [
+    { input: { kind: "parts", parts: [{ nested: [null, "", 0, false] }] } },
+    { input: { kind: "const", value: "" } },
+    { input: { kind: "parts", parts: [""] } },
+  ]);
 });

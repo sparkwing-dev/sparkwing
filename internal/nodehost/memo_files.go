@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -126,64 +127,78 @@ func globToRegex(pattern string) *regexp.Regexp {
 	return regexp.MustCompile(builder.String())
 }
 
-func hashTree(ctx context.Context, root string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(root)
+// Each directory handle is checked before use because entries can change during traversal.
+func openMemoDirectory(root *os.Root, name string) (*os.Root, error) {
+	if !filepath.IsLocal(name) {
+		return nil, fmt.Errorf("memo directory must be root-relative: %s", name)
+	}
+	current, err := root.OpenRoot(".")
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range strings.Split(filepath.Clean(name), string(filepath.Separator)) {
+		info, err := current.Lstat(part)
+		if err == nil && !info.IsDir() {
+			err = fmt.Errorf("memo directory %s is not a directory or is a symlink", name)
+		}
+		if err != nil {
+			current.Close()
+			return nil, err
+		}
+		next, err := current.OpenRoot(part)
+		current.Close()
+		if err != nil {
+			return nil, err
+		}
+		opened, err := next.Stat(".")
+		if err == nil && !os.SameFile(info, opened) {
+			err = fmt.Errorf("memo directory changed during traversal: %s", name)
+		}
+		if err != nil {
+			next.Close()
+			return nil, err
+		}
+		current = next
+	}
+	return current, nil
+}
+
+func hashTree(ctx context.Context, checkout, name string) (string, error) {
+	base, err := os.OpenRoot(checkout)
 	if err != nil {
 		return "", err
 	}
-	if resolved != filepath.Clean(root) {
-		return "", fmt.Errorf("Tree: %s traverses a symlink", root)
-	}
-	info, err := os.Lstat(root)
+	defer base.Close()
+	root, err := openMemoDirectory(base, name)
 	if err != nil {
 		return "", err
 	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("Tree: %s is not a directory", root)
-	}
+	defer root.Close()
 	var paths []string
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if entry.IsDir() {
-			return nil
+		if !entry.IsDir() && entry.Type().IsRegular() {
+			paths = append(paths, path)
 		}
-		if !entry.Type().IsRegular() {
-			return nil
-		}
-		relative, relativeError := filepath.Rel(root, path)
-		if relativeError != nil {
-			return relativeError
-		}
-		paths = append(paths, filepath.ToSlash(relative))
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	sort.Strings(paths)
-
-	digest := sha256.New()
-	for _, relative := range paths {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		contents, err := os.ReadFile(filepath.Join(root, relative))
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", relative, err)
-		}
-		writeHashPart(digest, []byte(relative))
-		writeHashPart(digest, contents)
-	}
-	sum := digest.Sum(nil)
-	return fmt.Sprintf("%x", sum), nil
+	return hashMemoFiles(ctx, root, paths, false)
 }
 
 func hashTrackedFiles(ctx context.Context, root string, keep pathMatcher, environment procenv.Env) (string, error) {
+	scoped, err := os.OpenRoot(root)
+	if err != nil {
+		return "", err
+	}
+	defer scoped.Close()
 	files, err := lsFiles(ctx, environment, root)
 	if err != nil {
 		return "", err
@@ -201,44 +216,69 @@ func hashTrackedFiles(ctx context.Context, root string, keep pathMatcher, enviro
 		}
 		files = filtered
 	}
-	sort.Strings(files)
+	return hashMemoFiles(ctx, scoped, files, true)
+}
 
+func hashMemoFiles(ctx context.Context, root *os.Root, files []string, tracked bool) (string, error) {
+	sort.Strings(files)
 	digest := sha256.New()
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		path := filepath.Join(root, file)
-		info, err := os.Lstat(path)
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", file, err)
-		}
-		var contents []byte
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(path)
-			if err != nil {
-				return "", fmt.Errorf("read %s: %w", file, err)
-			}
-			contents = []byte(target)
-		} else {
-			if !info.Mode().IsRegular() {
-				return "", fmt.Errorf("read %s: %w", file, &os.PathError{Op: "read", Path: path, Err: errors.New("memo input is not a regular file")})
-			}
-			contents, err = os.ReadFile(path)
-		}
+		contents, symlink, err := readMemoFile(root, filepath.FromSlash(file), tracked)
 		if err != nil {
 			return "", fmt.Errorf("read %s: %w", file, err)
 		}
 		writeHashPart(digest, []byte(file))
-		if info.Mode()&os.ModeSymlink != 0 {
-			writeHashPart(digest, []byte{1})
-		} else {
-			writeHashPart(digest, []byte{0})
+		if tracked {
+			kind := byte(0)
+			if symlink {
+				kind = 1
+			}
+			writeHashPart(digest, []byte{kind})
 		}
 		writeHashPart(digest, contents)
 	}
-	sum := digest.Sum(nil)
-	return fmt.Sprintf("%x", sum), nil
+	return fmt.Sprintf("%x", digest.Sum(nil)), nil
+}
+
+func readMemoFile(root *os.Root, name string, tracked bool) ([]byte, bool, error) {
+	if !filepath.IsLocal(name) {
+		return nil, false, fmt.Errorf("memo file must be root-relative: %s", name)
+	}
+	parent, err := openMemoDirectory(root, filepath.Dir(name))
+	if err != nil {
+		return nil, false, err
+	}
+	defer parent.Close()
+	name = filepath.Base(name)
+	info, err := parent.Lstat(name)
+	if err != nil {
+		return nil, false, err
+	}
+	if tracked && info.Mode()&os.ModeSymlink != 0 {
+		target, err := parent.Readlink(name)
+		return []byte(target), true, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, &os.PathError{Op: "read", Path: filepath.Join(parent.Name(), name), Err: errors.New("memo input is not a regular file")}
+	}
+	file, err := parent.Open(name)
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	// Compare the opened file before reading, including a replacement by an in-root symlink.
+	opened, err := file.Stat()
+	if err == nil && !os.SameFile(info, opened) {
+		err = errors.New("memo input changed before reading")
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	contents, err := io.ReadAll(file)
+	return contents, false, err
 }
 
 func writeHashPart(digest hash.Hash, part []byte) {

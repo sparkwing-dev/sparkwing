@@ -51,7 +51,7 @@ func TestTreeHashStopsAfterCancellation(t *testing.T) {
 	writeAll(t, root, map[string]string{"sample.txt": "sample"})
 	resolverContext, cancel := context.WithCancel(t.Context())
 	cancel()
-	hash, err := hashTree(resolverContext, root)
+	hash, err := hashTree(resolverContext, root, ".")
 	if hash != "" || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled tree = (%q, %v)", hash, err)
 	}

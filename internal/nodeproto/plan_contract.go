@@ -171,6 +171,7 @@ func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 // MemoInput declares inputs evaluated by the executing host against its checkout and job environment.
 type MemoInput struct {
 	Kind     string      `json:"kind"`
+	Value    string      `json:"value,omitempty"`
 	Patterns []string    `json:"patterns,omitempty"`
 	Root     string      `json:"root,omitempty"`
 	Names    []string    `json:"names,omitempty"`
