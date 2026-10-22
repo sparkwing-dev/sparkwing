@@ -52,20 +52,19 @@ func (l *Ledger) Used() (float64, uint64) {
 }
 
 type spec struct {
-	id                        string
-	admit                     uint64
-	ownerID                   string
-	ownerAdmit                uint64
-	priority                  int
-	class                     WorkloadClass
-	expectedP99MS             int64
-	reservationBypassBudgetMS int64
-	burstCores                bool
-	milliCores                int64
-	softCores                 bool
-	strictCores               bool
-	memory                    uint64
-	claims                    []claim
+	id            string
+	admit         uint64
+	ownerID       string
+	ownerAdmit    uint64
+	priority      int
+	class         WorkloadClass
+	expectedP99MS int64
+	burstCores    bool
+	milliCores    int64
+	softCores     bool
+	strictCores   bool
+	memory        uint64
+	claims        []claim
 }
 
 type claim struct {
@@ -600,17 +599,16 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		return spec{}, err
 	}
 	s := spec{
-		id:                        req.ID,
-		ownerID:                   req.OwnerID,
-		priority:                  req.Priority,
-		class:                     normalizeClass(req.Class),
-		expectedP99MS:             max(req.ExpectedP99MS, 0),
-		reservationBypassBudgetMS: max(req.ReservationBypassBudgetMS, 0),
-		burstCores:                req.BurstCores,
-		milliCores:                mc,
-		softCores:                 req.SoftCores,
-		strictCores:               req.StrictCores,
-		memory:                    req.MemoryBytes,
+		id:            req.ID,
+		ownerID:       req.OwnerID,
+		priority:      req.Priority,
+		class:         normalizeClass(req.Class),
+		expectedP99MS: max(req.ExpectedP99MS, 0),
+		burstCores:    req.BurstCores,
+		milliCores:    mc,
+		softCores:     req.SoftCores,
+		strictCores:   req.StrictCores,
+		memory:        req.MemoryBytes,
 	}
 	seen := make(map[string]bool, len(req.Semaphores))
 	for _, c := range req.Semaphores {
@@ -907,9 +905,6 @@ func (l *Ledger) delayBoundedBackfill(candidate spec, protected *waiter) bool {
 		return false
 	}
 	budget := l.scheduling.backfillDelayMS(protected.spec.class)
-	if candidate.reservationBypassBudgetMS > budget {
-		budget = candidate.reservationBypassBudgetMS
-	}
 	return budget > 0 && protected.backfillDelayMS <= budget-candidate.expectedP99MS
 }
 

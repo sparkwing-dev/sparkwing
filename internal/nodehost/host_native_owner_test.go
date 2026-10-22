@@ -21,7 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func TestNativeOwnerFailures(t *testing.T) {
+func TestNativeClosureFailures(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
@@ -107,24 +107,44 @@ func TestNativeOwnerFailures(t *testing.T) {
 				if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.SDKError || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" {
 					t.Fatalf("failed generator became topology: body=%s failure=%+v error=%v", body, failure, err)
 				}
-			case "skip":
-				decision, err := host.SkipIf(ctx, input)
-				if err == nil || decision.Skip || !strings.Contains(err.Error(), "predicate refused") {
-					t.Fatalf("failed predicate became a decision: %+v error=%v", decision, err)
+			case "skip", "memo":
+				input := NodeInput{Accepted: accepted, NodeID: jobID, SpecHash: string(jobHash), Generation: 3, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, Engine: selected, Entry: input.Entry, GrantedRunner: runner, RouteBinding: input.RouteBinding}
+				st.node.Generation, st.node.ClaimedBy, st.node.CapabilityPrefix = input.Generation, input.Authority.Holder, input.Authority.CapabilityPrefix
+				executor, err := NewNodeExecutor(ExecutorDependencies{
+					Store: st, Start: cfg.Start, Masker: testMasker(),
+					Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
+					EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+						return selected, nil
+					},
+					Bind: func(_ context.Context, input NodeInput) (ProcessGrant, error) {
+						binding := input.RouteBinding
+						binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "delegated-process"}
+						return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
 				}
-			case "memo":
-				key, err := host.MemoKey(ctx, input)
-				if err == nil || key != "" || !strings.Contains(err.Error(), "memo refused") {
-					t.Fatalf("failed memo closure became a miss: key=%q error=%v", key, err)
+				host := executor.(*nodeExecutor)
+				if jobID == "skip" {
+					decision, err := host.skipIf(ctx, input, spec, job)
+					if err == nil || decision.Skip || !strings.Contains(err.Error(), "predicate refused") {
+						t.Fatalf("failed predicate became a decision: %+v error=%v", decision, err)
+					}
+				} else {
+					key, err := executorPolicyMemoKey(ctx, host, input, spec, job)
+					if err == nil || key != "" || !strings.Contains(err.Error(), "memo refused") {
+						t.Fatalf("failed memo closure became a miss: key=%q error=%v", key, err)
+					}
 				}
 			}
 			if !revoked || !cleaned || st.count != 0 {
-				t.Fatalf("owner leaked authority or committed topology: revoked=%v cleaned=%v writes=%d", revoked, cleaned, st.count)
+				t.Fatalf("closure leaked authority or committed topology: revoked=%v cleaned=%v writes=%d", revoked, cleaned, st.count)
 			}
 			mu.Lock()
 			defer mu.Unlock()
 			if strings.Contains(strings.Join(logs, "\n"), "body ran") {
-				t.Fatal("owner evaluation invoked a job body")
+				t.Fatal("closure evaluation invoked a job body")
 			}
 		})
 	}

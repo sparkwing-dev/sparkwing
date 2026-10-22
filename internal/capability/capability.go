@@ -124,6 +124,8 @@ type Capability struct {
 	IssuedAt        time.Time                 `json:"issued_at"`
 	ExpiresAt       *time.Time                `json:"expires_at,omitempty"`
 	RevokedAt       *time.Time                `json:"revoked_at,omitempty"`
+	// ExecutionHost is sealed by the award owner, independently of the accountable subject.
+	ExecutionHost string `json:"execution_host,omitempty"`
 }
 
 // CredentialClass prevents deployment tokens from substituting for console sessions.

@@ -19,6 +19,7 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: claim.Team}
 			ref := controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
+			admitExecution(t, tenant, actor)
 			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)

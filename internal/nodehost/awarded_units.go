@@ -56,10 +56,12 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 
 // Evaluate submits a source expansion under its independent eval lease.
 func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID string, generation int64, fence capability.LeaseRef) (err error) {
+	bound := *h
+	h = &bound
 	if err := h.unitReady(input); err != nil {
 		return err
 	}
-	if input.Accepted == nil || sourceID == "" || generation < 0 || fence.Kind != capability.UnitEval || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 || h.Expand == nil {
+	if input.Accepted == nil || sourceID == "" || generation < 0 || fence.Kind != capability.UnitEval || fence.ID == "" || fence.Holder == "" || fence.Generation <= 0 {
 		return errors.New("eval unit requires accepted source, expansion lease and evaluator")
 	}
 	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Masker) }()
@@ -89,24 +91,43 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 			break
 		}
 	}
+	var job nodeproto.JobSpec
+	if json.Unmarshal(row.Spec, &job) != nil {
+		return errors.New("evaluation requires accepted declaration")
+	}
+	if job.Approval != nil {
+		if row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" || row.Outcome != "" {
+			return errors.New("approval evaluation requires its unreleased source")
+		}
+		return h.evaluateApproval(ctx, input, accepted, row, snapshot.Run)
+	}
+	if h.Expand == nil {
+		return errors.New("source expansion requires evaluator")
+	}
 	if row.Ref.NodeID == "" || row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
 		return errors.New("eval source is outside the awarded expansion")
 	}
-	entry, err := h.acquire(ctx, input, snapshot.Run)
-	if entry != nil {
-		defer func() { err = errors.Join(err, entry.Close()) }()
+	work := func(ctx context.Context) (err error) {
+		entry, err := h.acquire(ctx, input, snapshot.Run)
+		if entry != nil {
+			defer func() { err = errors.Join(err, entry.Close()) }()
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return errors.Join(err, cause)
+		}
+		if err != nil || entry == nil {
+			return h.commitExpansion(ctx, row, input.Owner, nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: apierr.PlanFailed, MaskedError: "evaluation source acquisition failed"})
+		}
+		body, registration, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+		if err != nil {
+			return err
+		}
+		return h.commitExpansion(ctx, row, input.Owner, body, registration, failure)
 	}
-	if cause := context.Cause(ctx); cause != nil {
-		return errors.Join(err, cause)
+	if h.executionAdmission.compute != nil {
+		return h.executionAdmission.compute.node(ctx, accepted, row, work)
 	}
-	if err != nil || entry == nil {
-		return h.commitExpansion(ctx, row, input.Owner, nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: apierr.PlanFailed, MaskedError: "evaluation source acquisition failed"})
-	}
-	body, registration, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
-	if err != nil {
-		return err
-	}
-	return h.commitExpansion(ctx, row, input.Owner, body, registration, failure)
+	return work(ctx)
 }
 
 func (h *OwnerHost) unitReady(input RunInput) error {
@@ -132,4 +153,32 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, acto
 		return h.Masks.Accept(plan, commit)
 	}
 	return commit()
+}
+
+func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow, run store.RunRow) (err error) {
+	if h.SkipPolicy == nil {
+		return errors.New("approval evaluation requires predicate policy")
+	}
+	entry, err := h.acquire(ctx, input, run)
+	if entry != nil {
+		defer func() { err = errors.Join(err, entry.Close()) }()
+	}
+	var result OwnerLayerResult
+	if err != nil || entry == nil {
+		if context.Cause(ctx) != nil {
+			return errors.Join(err, context.Cause(ctx))
+		}
+		result.Transition = store.OwnerPolicyNode{Outcome: store.NodeFailed, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalFail, Generation: row.Generation}, Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: string(apierr.PlanFailed), MaskedError: "approval evaluation source acquisition failed"}}
+	} else {
+		result, err = h.SkipPolicy(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+		if err != nil {
+			return err
+		}
+	}
+	var command store.NodeCommand = store.OpenApprovalNode{Ref: row.Ref, Actor: input.Owner}
+	if result.Transition != nil {
+		command = store.BindNodeCommand(result.Transition, row.Ref, input.Owner)
+	}
+	_, err = h.Store.TransitionNode(ctx, command)
+	return err
 }

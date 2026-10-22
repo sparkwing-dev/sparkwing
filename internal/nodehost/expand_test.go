@@ -29,7 +29,7 @@ func fanOutDoc() nodeproto.PlanDoc {
 func evaluateExpansionBytes(t *testing.T, groups map[string]string) (json.RawMessage, *store.ExpansionFailure) {
 	t.Helper()
 	input, state, dependencies, process := evaluationFixture(t)
-	dependencies.ValidatePlan = nodeproto.ValidatePlan
+
 	dependencies.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}
 	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 		if request.Op != nodeproto.OpEval {
@@ -146,7 +146,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hash, err := executorHash(job)
+			hash, err := runspec.CanonicalHash(job)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +158,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hash, err := executorHash(nodeproto.PlanDoc{Jobs: jobs})
+		hash, err := runspec.CanonicalHash(nodeproto.PlanDoc{Jobs: jobs})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +175,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			raw, err := json.Marshal(jobs)
 			return nodeproto.EvalResult{Value: raw}, err
 		}}
-		code := sdkCode{Store: state, CanonicalHash: executorHash, ValidatePlan: nodeproto.ValidatePlan, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
+		code := sdkCode{Store: state, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 		replayed, err := code.replaySource(t.Context(), &executorSession{process: process}, NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: json.RawMessage(`{}`)}}, source, GeneratorReplay{SourceJob: "targets", SourceGeneration: 1, GeneratorID: testGenerator, Output: json.RawMessage("null")}, snapshot, []nodeproto.JobSpec{source})
 		unchanged := siblingID == "sibling" && !optional && !add && !partial
 		if unchanged != (err == nil) || !unchanged && replayed != nil || len(state.nodes) != stored || len(state.changes) != 0 {

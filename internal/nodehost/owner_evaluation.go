@@ -47,19 +47,17 @@ type EvaluationInput struct {
 // terminal generation and return its recorded JSON, including explicit null.
 // Bind delegates a fresh process bearer; the host revokes it before joining and cleanup.
 // Start owns run-log attribution, masking and environment. Bound input requires Bind.
-// ChildContext applies the shared deadline policy to skip and memo evaluation.
+// ChildContext applies the shared deadline policy to approval predicates.
 type EvaluationDependencies struct {
-	Store         EvaluationStore
-	Bind          func(context.Context, EvaluationInput) (ProcessGrant, error)
-	Start         func(context.Context, EvaluationInput) (ExecutorProcess, error)
-	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
-	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash func(any) (runspec.Hash, error)
-	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
-	Validation    nodeproto.ValidationContext
-	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Masker        *secrets.Masker
-	Masks         *MaskRegistry
+	Store        EvaluationStore
+	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
+	Start        func(context.Context, EvaluationInput) (ExecutorProcess, error)
+	EnsureEngine func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
+	Validation   nodeproto.ValidationContext
+	ReadOutput   func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	Masker       *secrets.Masker
+	Masks        *MaskRegistry
 }
 
 // OwnerEvaluator reconstructs accepted code and evaluates owner closures. It
@@ -80,16 +78,10 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 	if deps.Masks.masker != deps.Masker {
 		return nil, errors.New("host requires one shared masking registry")
 	}
-	if deps.ValidatePlan == nil {
-		deps.ValidatePlan = nodeproto.ValidatePlan
-	}
-	if deps.CanonicalHash == nil {
-		deps.CanonicalHash = runspec.CanonicalHash
-	}
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
+	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, Validation: deps.Validation}}, nil
 }
 
 // Expand evaluates every declared generator from the source's recorded output
@@ -158,7 +150,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if input.RouteBinding.RunID != input.Accepted.RunID || input.RouteBinding.JobID != input.NodeID {
 		return spec, row, job, executorError(apierr.SpecDrift, "evaluation binding does not match the accepted job")
 	}
-	hash, err := h.CanonicalHash(input.Accepted.Plan)
+	hash, err := runspec.CanonicalHash(input.Accepted.Plan)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -175,7 +167,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {
 		return spec, row, job, executorError(apierr.PlanDrift, "evaluation source declaration is invalid")
 	}
-	hash, err = h.CanonicalHash(job)
+	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -186,7 +178,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 }
 
 func (h *OwnerEvaluator) expand(ctx context.Context, input EvaluationInput, spec runspec.Spec, job nodeproto.JobSpec, output json.RawMessage) (body json.RawMessage, registration runspec.SecretRegistration, err error) {
-	err = h.withProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
+	err = h.evaluateProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
 		body, registration, err = h.expansionBody(ctx, session, code, spec, job, output)
 		return err
 	})
@@ -219,7 +211,7 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	if err != nil {
 		return nil, runspec.SecretRegistration{}, err
 	}
-	plan, err := h.ValidatePlan(body, validation)
+	plan, err := nodeproto.ValidatePlan(body, validation)
 	if err != nil {
 		return nil, runspec.SecretRegistration{}, err
 	}

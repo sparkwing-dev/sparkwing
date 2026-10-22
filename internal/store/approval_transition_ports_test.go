@@ -74,12 +74,12 @@ func TestApprovalTransitionsKeepPendingRequestOrder(t *testing.T) {
 		{ID: "a", Approval: &nodeproto.ApprovalSpec{Message: "first"}},
 		{ID: "c", Approval: &nodeproto.ApprovalSpec{Message: "third"}},
 	}}
-	raw, err := json.Marshal(plan)
+	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.Seal.Plan = raw
-	request.Seal.Resolved.Settings, err = (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Plan: plan})
+	request.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: request.Seal.Request, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}

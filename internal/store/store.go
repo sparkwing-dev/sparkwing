@@ -94,13 +94,10 @@ type Store struct {
 	resultRecords    nodeResultRecords
 	materializations materializationRecords
 	claimProfiles    ClaimProfileResolver
-	intake           intakeContracts
 	intakePolicy     IntakePolicy
-	plans            planContracts
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
 	consolePolicy    consolePolicy
-	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
 	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	db               *sql.DB
@@ -133,7 +130,7 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 // txlock=immediate makes every transaction take the write lock at BEGIN
 // rather than upgrading a read lock to a write lock mid-transaction.
 // Without it, two connections that each SELECT-then-INSERT (the shape
-// of AcquireConcurrencySlot and most state mutations) can both read the
+// of admission and most state mutations) can both read the
 // same snapshot and then collide on the upgrade -- which surfaces as
 // SQLITE_BUSY_SNAPSHOT, a conflict busy_timeout does NOT retry. Taking
 // the lock up front turns that race into an ordinary busy-wait the

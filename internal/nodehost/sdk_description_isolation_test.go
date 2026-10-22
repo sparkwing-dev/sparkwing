@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestSelectedShortSecretDefaultKeepsConfigVariableGuidance(t *testing.T) {
@@ -56,19 +55,6 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 			}
 			var logs []string
 			var failurePhase string
-			validate, hash := p.ValidatePlan, p.CanonicalHash
-			p.ValidatePlan = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				if failurePhase == "validate" {
-					return nodeproto.PlanDoc{}, errors.New(unclassified)
-				}
-				return validate(raw, validation)
-			}
-			p.CanonicalHash = func(value any) (runspec.Hash, error) {
-				if failurePhase == "hash" {
-					return "", errors.New(unclassified)
-				}
-				return hash(value)
-			}
 			p.Log = func(_ context.Context, log nodeproto.FrameLog) error { logs = append(logs, log.Message); return nil }
 			start := p.Start
 			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
@@ -96,33 +82,36 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 				if err != nil || len(prepared.Description.Secrets) != 1 || prepared.Description.Secrets[0].Name != "HEALTHY_TOKEN" || prepared.Args["token"] != secret || len(prepared.SecretArgs) != 1 {
 					t.Fatalf("healthy pipeline lost its complete declarations: %+v: %v", prepared, err)
 				}
-				raw, err := prepared.Functions.Plan(t.Context())
+				raw, err := prepared.Plan(t.Context())
 				var plan nodeproto.PlanDoc
 				if err != nil || json.Unmarshal(raw, &plan) != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "job" {
 					t.Fatalf("healthy pipeline did not plan: %s: %v", raw, err)
 				}
-				for _, phase := range []string{"plan", "validate", "hash"} {
+				for _, phase := range []string{"plan", "declaration", "malformed"} {
 					failurePhase = phase
-					switch phase {
-					case "plan":
+					var err error
+					if phase == "plan" {
 						var result json.RawMessage
-						result, err = prepared.Functions.Plan(t.Context())
+						result, err = prepared.Plan(t.Context())
 						if len(result) != 0 {
 							t.Fatal("failed planning returned plan bytes")
 						}
-					case "validate":
-						_, err = prepared.Functions.Validate(raw, prepared.Input.Validation)
-					case "hash":
-						_, err = prepared.Functions.Hash(plan)
+					} else {
+						// Both malformed JSON and invalid declarations must withhold unknown author text.
+						body := json.RawMessage(`{"jobs":[{"id":"` + unclassified + `","unknown":true}]}`)
+						if phase == "malformed" {
+							body = json.RawMessage(`{"jobs":` + unclassified)
+						}
+						_, err = PlanInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) { return body, nil })
 					}
 					var failure *apierr.Error
-					if !errors.As(err, &failure) || failure.Code != apierr.SDKError || failure.Message != "describe failed: sdk_error (details withheld: secrets not yet known)" {
+					if !errors.As(err, &failure) || strings.Contains(failure.Message, unclassified) || !strings.Contains(failure.Message, "details withheld: secrets not yet known") {
 						t.Fatalf("partial describe released unclassified %s failure: %v", phase, err)
 					}
 				}
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || failure.Message != "describe failed: plan_failed (details withheld: secrets not yet known)" || prepared.Functions.Plan != nil {
+				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || failure.Message != "describe failed: plan_failed (details withheld: secrets not yet known)" || prepared.Plan != nil {
 					t.Fatalf("broken pipeline did not withhold unclassified failure details: %+v: %v", prepared, err)
 				}
 			}

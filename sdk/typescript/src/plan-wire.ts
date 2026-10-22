@@ -71,7 +71,6 @@ export interface ConcurrencySpec {
   cost?: number;
   on_limit?: string;
   queue_timeout_ms?: number;
-  cancel_timeout_ms?: number;
 }
 
 export interface ResourceSpec {

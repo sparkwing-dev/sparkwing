@@ -6,6 +6,8 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func authenticationBindingTx(ctx context.Context, tx *storeTx, c capability.Capability) (capability.BindingState, error) {
@@ -96,6 +98,13 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			}
 		}
 	}
+	if c.Unit == capability.UnitNode {
+		// Logical admission alone cannot revive an expired or completed execution award.
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM admission_work a JOIN nodes n ON n.team=a.team AND n.run_id=a.run_id AND n.node_id=a.node_id JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE a.team=? AND a.run_id=? AND a.node_id=? AND a.generation=? AND a.holder=? AND a.granted=1 AND a.lease_expires_at>? AND n.generation=a.generation AND n.claimed_by=a.holder AND n.status='running' AND n.lease_expires_at>? AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.finished_at IS NULL)`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation, c.Binding.Holder, tx.now(ctx).UnixNano(), tx.now(ctx).UnixNano()).Scan(&out.StartPermitted)
+		if err != nil {
+			return err
+		}
+	}
 	var sealed int
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='job_attempt' AND node_id=? AND generation=? AND attempt=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Binding.NodeID, out.Current.Generation, out.Current.Attempt).Scan(&sealed)
 	out.LogSealed = sealed > 0
@@ -111,10 +120,15 @@ func authenticationExpansionTx(ctx context.Context, tx *storeTx, c capability.Ca
 			return err
 		}
 	} else if expansion.Lease.Kind == capability.UnitEval {
+		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
+		if err != nil {
+			return err
+		}
+		expansion.ApprovalPredicate = pendingApprovalPredicate(row)
 		var owner string
 		var generation int64
 		var current, until sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.owner_lease_name,e.owner_generation,l.generation,l.until FROM eval_units e LEFT JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &owner, &generation, &current, &until)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.owner_lease_name,e.owner_generation,l.generation,l.until FROM eval_units e LEFT JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &owner, &generation, &current, &until)
 		if err != nil {
 			return err
 		}

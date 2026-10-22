@@ -766,7 +766,6 @@ func Registry() []Command {
 			{Name: "placement-liveness", Argument: "DURATION"},
 			{Name: "max-runs-per-principal-hour", Argument: "N"},
 			{Name: "shed-queue-depth", Argument: "N"},
-			{Name: "trigger-dedupe-window", Argument: "DURATION"},
 			{Name: "runners-per-token", Argument: "N"},
 			{Name: "limits-profile", Argument: "VALUE"},
 			{Name: "idle-claim-poll", Argument: "DURATION"},

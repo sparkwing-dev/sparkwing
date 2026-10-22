@@ -2,18 +2,27 @@ package store_test
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+func newRecoveryCapacityFixture(t *testing.T) *storeRecoveryFixture {
+	t.Helper()
+	return newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {
+		scope, capacity, cost, policy := "global", 1, 1, "queue"
+		doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "plan", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
+		for _, name := range []string{"node", "deploy"} {
+			doc.Jobs[0].Concurrency = append(doc.Jobs[0].Concurrency, nodeproto.ConcurrencySpec{Group: name, Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy})
+		}
+	})
+}
 
 func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name string) (store.Actor, error) {
 	authority := f.plan.Seal.Request.AuthorityRef
@@ -43,145 +52,37 @@ func (f *storeRecoveryFixture) capacityCompetitor(ctx context.Context) (string, 
 	return admitted.RunID, err
 }
 
-func checkRecoveryCapacity(t *testing.T) error {
+func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
+	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
-	f := newStoreRecoveryFixture(t, true)
-	competitor, err := f.capacityCompetitor(ctx)
-	if err != nil {
-		return err
+	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) { doc.Concurrency = nil })
+	admissionWant(t, f, blocker, award, store.AcquireGranted)
+	queued, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
+	if err != nil || queued.Kind != store.AcquireQueued {
+		t.Fatalf("queue=%+v %v", queued, err)
 	}
-	for _, group := range []struct{ key, node string }{{"node", "job"}, {"plan", ""}} {
-		request := store.AcquireSlotRequest{Key: group.key, HolderID: "original", RunID: string(f.ref.RunID), NodeID: group.node, Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
-		if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
-			return fmt.Errorf("acquire %s: %+v, %v", group.key, got, err)
-		}
-		request.RunID, request.HolderID = competitor, "waiting"
-		if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
-			return fmt.Errorf("queue %s: %+v, %v", group.key, got, err)
-		}
-	}
-	if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, teststore.Now(f.s).UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
-		return err
-	}
-	beat, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder)
-	if err != nil {
-		return fmt.Errorf("renew retained node: %w", err)
-	}
-	for _, key := range []string{"node", "plan"} {
-		state, err := f.tenant.GetConcurrencyState(ctx, key)
-		if err != nil || len(state.Holders) != 1 || !state.Holders[0].LeaseExpiresAt.Equal(beat.ExpiresAt) {
-			return fmt.Errorf("retained %s capacity must follow live job while owner expires: %+v, %v", key, state, err)
-		}
-	}
-	if units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued || runspec.RunID(units[0].RunID) != f.ref.RunID {
-		return fmt.Errorf("owner recovery: %+v, %v", units, err)
-	}
-	if err := f.reopen(ctx); err != nil {
-		return err
-	}
-	owner, err := f.claimOwner(ctx, string(f.ref.RunID), "successor")
-	if err != nil {
-		return err
-	}
-	for _, group := range []struct{ key, node string }{{"node", "job"}, {"plan", ""}} {
-		generation := f.holder.Generation
-		if group.node == "" {
-			generation = owner.Owner.Generation
-		}
-		adopted, err := f.tenant.AdoptCapacity(ctx, group.key, "original", store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: group.node, Generation: int64(generation)}, owner)
-		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || runspec.ClaimGeneration(adopted.Holder.Binding.Generation) != generation {
-			return fmt.Errorf("adopt %s: %+v, %v", group.key, adopted, err)
-		}
-		if promoted, err := f.tenant.PromoteNextWaiters(ctx, group.key, time.Hour); err != nil || len(promoted) != 0 {
-			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, promoted, err)
-		}
-	}
-	if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}); err != nil {
-		return fmt.Errorf("report retained node: %w", err)
-	}
-	if err := checkCapacityWinner(ctx, f.tenant, "node", competitor); err != nil {
-		return err
-	}
-	if state, err := f.tenant.GetConcurrencyState(ctx, "plan"); err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].HolderID != "original" {
-		return fmt.Errorf("job completion released plan capacity: %+v, %v", state, err)
-	}
-	if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: owner, Cause: store.RunFinish}, Unit: owner.Owner}); err != nil {
-		return fmt.Errorf("finish successor owner: %w", err)
-	}
-	return checkCapacityWinner(ctx, f.tenant, "plan", competitor)
-}
-
-func checkCapacityWinner(ctx context.Context, tenant *store.Tenant, key, competitor string) error {
-	promoted, err := tenant.PromoteNextWaiters(ctx, key, time.Hour)
-	if err != nil || len(promoted) != 1 || promoted[0].RunID != competitor {
-		return fmt.Errorf("released %s capacity: %+v, %v", key, promoted, err)
-	}
-	if repeated, err := tenant.PromoteNextWaiters(ctx, key, time.Hour); err != nil || len(repeated) != 0 {
-		return fmt.Errorf("duplicate %s promotion: %+v, %v", key, repeated, err)
-	}
-	state, err := tenant.GetConcurrencyState(ctx, key)
-	if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].RunID != competitor || len(state.Waiters) != 0 {
-		return fmt.Errorf("winner %s: %+v, %v", key, state, err)
-	}
-	return nil
-}
-
-func checkRecoveryCapacityMaintenance(t *testing.T) error {
-	ctx := t.Context()
-	f := newStoreRecoveryFixture(t, true)
-	competitor, err := f.capacityCompetitor(ctx)
-	if err != nil {
-		return err
-	}
-	request := store.AcquireSlotRequest{Key: "deploy", HolderID: "original", RunID: string(f.ref.RunID), NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
-	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
-		return fmt.Errorf("original capacity: %+v, %v", got, err)
-	}
-	request.HolderID, request.RunID = "waiting", competitor
-	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
-		return fmt.Errorf("competing capacity: %+v, %v", got, err)
-	}
-	if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND key='deploy' AND holder_id='original'`, f.tenant.Team()); err != nil {
-		return err
-	}
-	forged := f.lease
-	forged.Generation++
-	if _, err := f.s.AsOperator().MaintainConcurrency(ctx, forged, store.ConcurrencyMaintenanceOptions{}); err == nil {
-		return errors.New("forged reaper swept capacity")
-	}
-	result, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease, store.ConcurrencyMaintenanceOptions{})
-	if err != nil || len(result.StaleHolders) != 1 || result.Promoted != 1 {
-		return fmt.Errorf("elected capacity recovery: %+v, %v", result, err)
-	}
-	if err := f.reopen(ctx); err != nil {
-		return err
-	}
-	adopted, err := f.tenant.AdoptCapacity(ctx, "deploy", "original", store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: "job", Generation: int64(f.holder.Generation)}, f.owner)
-	if err != nil || adopted.Kind != store.AcquireAgain {
-		return fmt.Errorf("expired adoption: %+v, %v", adopted, err)
-	}
-	request.HolderID, request.RunID = "original", string(f.ref.RunID)
-	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
-		return fmt.Errorf("returning arrival: %+v, %v", got, err)
-	}
-	if repeated, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease, store.ConcurrencyMaintenanceOptions{}); err != nil || !reflect.DeepEqual(repeated, store.ConcurrencyMaintenanceResult{}) {
-		return fmt.Errorf("repeated capacity pass: %+v, %v", repeated, err)
-	}
-	state, err := f.tenant.GetConcurrencyState(ctx, "deploy")
-	if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].RunID != competitor || len(state.Waiters) != 1 || runspec.RunID(state.Waiters[0].RunID) != f.ref.RunID {
-		return fmt.Errorf("capacity after reopening: %+v, %v", state, err)
-	}
-	return nil
-}
-
-func TestStoreRecoveryCapacityAdoption(t *testing.T) {
-	if err := checkRecoveryCapacity(t); err != nil {
+	var arrival int64
+	if err := f.s.DB().QueryRowContext(ctx, `SELECT arrived_at FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, f.tenant.Team(), f.ref.RunID, f.ref.NodeID).Scan(&arrival); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestStoreRecoveryCapacityMaintenance(t *testing.T) {
-	if err := checkRecoveryCapacityMaintenance(t); err != nil {
-		t.Fatal(err)
+	for _, live := range []bool{true, false} {
+		until := time.Now().Add(time.Second).UnixNano()
+		if !live {
+			until = time.Now().Add(-time.Second).UnixNano()
+		}
+		if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_waiters SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, until, f.tenant.Team(), f.ref.RunID, f.ref.NodeID); err != nil {
+			t.Fatal(err)
+		}
+		beat, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var retained, renewed int64
+		if err := f.s.DB().QueryRowContext(ctx, `SELECT arrived_at,lease_expires_at FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, f.tenant.Team(), f.ref.RunID, f.ref.NodeID).Scan(&retained, &renewed); err != nil {
+			t.Fatal(err)
+		}
+		if retained != arrival || live && renewed < beat.ExpiresAt.UnixNano() || !live && renewed != until {
+			t.Fatalf("live=%t arrival=%d/%d expiry=%d/%d beat=%s", live, retained, arrival, renewed, until, beat.ExpiresAt)
+		}
 	}
 }

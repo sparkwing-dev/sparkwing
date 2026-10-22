@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -91,49 +90,27 @@ func TestFloodPolicy_ShedsAboveTheQueueDepthThreshold(t *testing.T) {
 	}
 }
 
-func TestFloodPolicy_DedupesIdenticalSubmissionsInsideTheWindow(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
-	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
-	repeat := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 200)
-	if repeat.RunID != first.RunID || !repeat.Replayed {
-		t.Fatalf("repeat = %+v, first = %+v", repeat, first)
-	}
-	different := floodRun(t, f.submit(f.token, "build", fortyHex(2)), 201)
-	if different.RunID == first.RunID {
-		t.Fatal("different source reused a run")
-	}
-}
-
-func TestFloodPolicy_UnsetWindowDedupesNothing(t *testing.T) {
+func TestFloodPolicyIdenticalSubmissionsWithoutKeysCreateSeparateRuns(t *testing.T) {
 	f := newFloodServer(t, controller.FloodPolicy{})
 	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
 	second := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
 	if first.RunID == second.RunID {
-		t.Fatal("unset window reused a run")
+		t.Fatal("identical submissions without keys reused a run")
 	}
 }
 
-func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
-	other := floodMember(t, f, "default", "other")
-	first := floodRun(t, f.submit(f.token, "build", fortyHex(7)), 201)
-	second := floodRun(t, f.submit(other, "build", fortyHex(7)), 201)
-	if first.RunID == second.RunID {
-		t.Fatal("another principal received the first principal's run")
-	}
-	repeat := floodRun(t, f.submit(f.token, "build", fortyHex(7)), 200)
-	if repeat.RunID != first.RunID || !repeat.Replayed {
-		t.Fatalf("repeat = %+v", repeat)
-	}
-}
-
-func TestFloodPolicyConcurrentIdenticalIntakeCommitsOneRun(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+func TestFloodPolicyConcurrentExplicitKeyCommitsOneRun(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
 	start := make(chan struct{})
 	responses := make(chan *httptest.ResponseRecorder, 8)
 	var wg sync.WaitGroup
 	for range cap(responses) {
-		wg.Go(func() { <-start; responses <- f.submit(f.token, "build", fortyHex(1)) })
+		wg.Go(func() {
+			<-start
+			body := computeIntake("build")
+			body.IdempotencyKey = "concurrent-intake"
+			responses <- f.intake(f.token, body)
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -161,8 +138,8 @@ func TestFloodPolicyConcurrentIdenticalIntakeCommitsOneRun(t *testing.T) {
 	}
 }
 
-func TestFloodPolicyExplicitIntakeKeysTakePrecedence(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+func TestFloodPolicyExplicitIntakeKeysIdentifyRuns(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
 	body := computeIntake("build")
 	body.IdempotencyKey = "one"
 	first := floodRun(t, f.intake(f.token, body), 201)
@@ -178,9 +155,10 @@ func TestFloodPolicyExplicitIntakeKeysTakePrecedence(t *testing.T) {
 	}
 }
 
-func TestFloodPolicyDedupeRechecksAuthorityAndReturnsHereBearerOnce(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+func TestFloodPolicyExplicitReplayRechecksAuthorityAndReturnsHereBearerOnce(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
 	body := computeIntake("build")
+	body.IdempotencyKey = "here-replay"
 	body.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	first := floodRun(t, f.intake(f.token, body), 201)
 	if first.HereBearer == "" {
@@ -203,40 +181,36 @@ func TestFloodPolicyDedupeRechecksAuthorityAndReturnsHereBearerOnce(t *testing.T
 }
 
 func TestFloodPolicyReplaysNeverConsumeOrExhaustTheBucket(t *testing.T) {
-	for _, explicit := range []bool{false, true} {
-		t.Run(strconv.FormatBool(explicit), func(t *testing.T) {
-			f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
-			body := computeIntake("build")
-			if explicit {
-				body.IdempotencyKey = "replay"
-			}
-			first := floodRun(t, f.intake(f.token, body), 201)
-			replay := floodRun(t, f.intake(f.token, body), 200)
-			if first.RunID != replay.RunID {
-				t.Fatal("replay changed run")
-			}
-			if got := f.submit(f.token, "other", fortyHex(7)); got.Code != 429 {
-				t.Fatalf("new run bypassed cap: %d %s", got.Code, got.Body)
-			}
-			floodRun(t, f.intake(f.token, body), 200)
-		})
+	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	body := computeIntake("build")
+	body.IdempotencyKey = "replay"
+	first := floodRun(t, f.intake(f.token, body), 201)
+	replay := floodRun(t, f.intake(f.token, body), 200)
+	if first.RunID != replay.RunID {
+		t.Fatal("replay changed run")
 	}
+	if got := f.submit(f.token, "other", fortyHex(7)); got.Code != 429 {
+		t.Fatalf("new run bypassed cap: %d %s", got.Code, got.Body)
+	}
+	floodRun(t, f.intake(f.token, body), 200)
 }
 
-func TestFloodPolicyDedupeRetryAfterStoreRefusal(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+func TestFloodPolicyExplicitKeyRetryAfterStoreRefusal(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	body := computeIntake("build")
+	body.IdempotencyKey = "retry-store-refusal"
 	if _, err := teststore.SQL(t, f.st).Exec(`CREATE TRIGGER refuse_intake BEFORE INSERT ON runs BEGIN SELECT RAISE(ABORT,'intake refused'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.submit(f.token, "build", fortyHex(1)); got.Code != 500 {
+	if got := f.intake(f.token, body); got.Code != 500 {
 		t.Fatalf("store refusal: %d %s", got.Code, got.Body)
 	}
 	if _, err := teststore.SQL(t, f.st).Exec(`DROP TRIGGER refuse_intake`); err != nil {
 		t.Fatal(err)
 	}
-	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
-	replay := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 200)
+	first := floodRun(t, f.intake(f.token, body), 201)
+	replay := floodRun(t, f.intake(f.token, body), 200)
 	if first.RunID != replay.RunID {
-		t.Fatal("retry did not establish dedupe")
+		t.Fatal("retry did not establish replay")
 	}
 }

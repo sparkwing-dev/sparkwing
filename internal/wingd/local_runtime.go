@@ -7,19 +7,15 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 )
 
 // LocalController supplies the owned store, workers and authorized HTTP handlers to the local process.
 type LocalController interface {
 	RunStore
-	// TypeSafeAPIKey reads the optional Jev key through the controller's owned secrets store.
-	TypeSafeAPIKey(context.Context) (string, error)
 	Reconcile(context.Context) (LocalActivity, error)
 	Run(context.Context, func(LocalActivity) error) error
 	HTTP() LocalHTTP
@@ -133,19 +129,6 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if d.cfg.admissionPolicy().Mode == admission.ModeJev && d.jevAdvisor == nil {
-		key, keyErr := controller.TypeSafeAPIKey(ctx)
-		key = strings.TrimSpace(key)
-		if keyErr == nil && key == "" {
-			keyErr = errors.New("not configured")
-		}
-		if keyErr != nil {
-			// safety: admission remains available through its existing fallback when Jev has no key.
-			d.cfg.logf("jev admission needs the TYPESAFE_API_KEY secret (sparkwing secrets set --secret TYPESAFE_API_KEY --file <path>): %v", keyErr)
-		} else {
-			d.jevAdvisor = newTypeSafeJevAdvisor(key, d.cfg.admissionPolicy().Jev)
-		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err

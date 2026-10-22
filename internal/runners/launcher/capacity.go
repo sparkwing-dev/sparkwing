@@ -18,10 +18,9 @@ import (
 )
 
 const (
-	capacityLabel      = "sparkwing.dev/capacity-request"
-	capacityPrefix     = "sw-capacity-"
-	demandAnnotation   = "sparkwing.dev/capacity-demand"
-	capacityObservedID = "capacity:"
+	capacityLabel    = "sparkwing.dev/capacity-request"
+	capacityPrefix   = "sw-capacity-"
+	demandAnnotation = "sparkwing.dev/capacity-demand"
 )
 
 type capacityDemand struct {
@@ -182,7 +181,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 			continue
 		}
 		name := jobName(d.Binding)
-		observation := CloudJobObservation{Binding: d.Binding, JobName: name, NodeUID: string(pod.UID), ReservationID: capacityObservedID + string(pod.UID), Unheld: held == nil || !sameBinding(held.Binding, d.Binding)}
+		observation := CloudJobObservation{Binding: d.Binding, JobName: name, Capacity: &CloudCapacityObservation{PodUID: string(pod.UID)}, Unheld: held == nil || !sameBinding(held.Binding, d.Binding)}
 		states, err := l.retirements(ctx, []CloudJobObservation{observation})
 		if err != nil && !capacityIdentityRefused(err) {
 			errs = append(errs, err)

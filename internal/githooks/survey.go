@@ -14,7 +14,7 @@ import (
 type GateState string
 
 const (
-	GateUndeclared GateState = "undeclared"
+	gateUndeclared GateState = "undeclared"
 
 	GateArmed GateState = "armed"
 
@@ -22,7 +22,7 @@ const (
 
 	GateUninstalled GateState = "uninstalled"
 
-	GateBorrowed GateState = "borrowed"
+	gateBorrowed GateState = "borrowed"
 
 	GateBroken GateState = "broken"
 )
@@ -110,17 +110,13 @@ func (r RepoGates) Fires() []string {
 	return out
 }
 
-// DeclaresBlocking reports whether any pipeline here asks for a hook that can
-// refuse work.
-func (r RepoGates) DeclaresBlocking() bool {
+func (r RepoGates) declaresBlocking() bool {
 	return slices.ContainsFunc(r.Declared, func(n string) bool {
 		return slices.Contains(BlockingHooks, n)
 	})
 }
 
-// RunsBlockingGate reports whether a declared blocking hook fires out of this
-// repository's own hook directory.
-func (r RepoGates) RunsBlockingGate() bool {
+func (r RepoGates) runsBlockingGate() bool {
 	return slices.ContainsFunc(r.Fires(), func(n string) bool {
 		return slices.Contains(BlockingHooks, n)
 	})
@@ -136,7 +132,7 @@ func (r RepoGates) Gated() bool {
 			return false
 		}
 	}
-	return r.RunsBlockingGate()
+	return r.runsBlockingGate()
 }
 
 func (r RepoGates) SilencedGlobal() []string {
@@ -154,7 +150,7 @@ func (r RepoGates) Summary() string {
 	if r.ConfigError != "" {
 		parts = append(parts, r.ConfigError)
 	}
-	if !r.DeclaresBlocking() {
+	if !r.declaresBlocking() {
 		parts = append(parts, undeclaredGateSummary(r.Fires()))
 	}
 	if len(r.Borrowed) > 0 {
@@ -194,17 +190,17 @@ func (r RepoGates) Remedy() string {
 		return fmt.Sprintf("repair the reported hooks, then sparkwing -C %s pipeline hooks install", r.Repo)
 	}
 
-	if !r.DeclaresBlocking() {
+	if !r.declaresBlocking() {
 		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
 	return fmt.Sprintf("sparkwing -C %s pipeline hooks install", r.Repo)
 }
 
 func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
-	row := RepoGates{Repo: repoRoot, State: GateUndeclared}
+	row := RepoGates{Repo: repoRoot, State: gateUndeclared}
 	hooksDir, err := Dir(repoRoot)
 	if err != nil {
-		return Broken(repoRoot, err)
+		return broken(repoRoot, err)
 	}
 	row.HooksDir = hooksDir
 	specs, err := expected(git, repoRoot, hooksDir)
@@ -216,7 +212,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 	var borrowed []string
 	if foreign {
 		row.ActiveDir, row.Scope = active, scope
-		borrowed = Gates(active)
+		borrowed = gates(active)
 	}
 	names := make([]string, 0, len(specs))
 	for name := range specs {
@@ -224,7 +220,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 	}
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Broken(repoRoot, err)
+		return broken(repoRoot, err)
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -300,7 +296,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 	case row.ConfigError != "":
 		row.State = GateBroken
 	case len(row.Borrowed) > 0:
-		row.State = GateBorrowed
+		row.State = gateBorrowed
 	case len(row.Missing) > 0:
 		row.State = GateUninstalled
 	case len(row.Shadowed) > 0:
@@ -311,9 +307,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 	return row
 }
 
-// Broken reports a repository whose project config does not load, so its
-// declared gates cannot be known.
-func Broken(repoRoot string, err error) RepoGates {
+func broken(repoRoot string, err error) RepoGates {
 	return RepoGates{Repo: repoRoot, State: GateBroken, ConfigError: err.Error(), Err: err}
 }
 

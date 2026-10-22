@@ -44,7 +44,6 @@ type AdmissionConfig struct {
 	Budget *string          `yaml:"budget,omitempty" json:"budget,omitempty"`
 	Mode   *string          `yaml:"mode,omitempty" json:"mode,omitempty"`
 	Custom *AdmissionCustom `yaml:"custom,omitempty" json:"custom,omitempty"`
-	Jev    *AdmissionJev    `yaml:"jev,omitempty" json:"jev,omitempty"`
 }
 
 // AdmissionCustom records explicit zero separately from the policy defaults.
@@ -60,16 +59,6 @@ type AdmissionBurst struct {
 	Cores      *float64 `yaml:"cores,omitempty" json:"cores,omitempty"`
 	MaxP99     *string  `yaml:"max_p99,omitempty" json:"max_p99,omitempty"`
 	MinSamples *int     `yaml:"min_samples,omitempty" json:"min_samples,omitempty"`
-}
-
-// AdmissionJev names the existing admission predictor and its failure bounds.
-type AdmissionJev struct {
-	Model          *string  `yaml:"model,omitempty" json:"model,omitempty"`
-	Endpoint       *string  `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
-	Timeout        *string  `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	MinConfidence  *float64 `yaml:"min_confidence,omitempty" json:"min_confidence,omitempty"`
-	MinProbability *float64 `yaml:"min_probability,omitempty" json:"min_probability,omitempty"`
-	MaxBackfill    *string  `yaml:"max_backfill,omitempty" json:"max_backfill,omitempty"`
 }
 
 // RunnerConfig supplies machine claim preferences; pools and billing facts come

@@ -1,47 +1,15 @@
 package settings
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-// ConfigPath resolves config_path from its permitted sources.
-func ConfigPath(in Inputs) (string, Origin, error) {
-	fallback := filepath.Join(in.Context.UserHome, ".config", "sparkwing", "config.yaml")
-	if in.Context.XDGConfigHome != "" {
-		fallback = filepath.Join(in.Context.XDGConfigHome, "sparkwing", "config.yaml")
-	}
-	value, origin, err := pick(in, "config_path", func(v Values) *string { return v.ConfigPath }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	if strings.TrimSpace(value) == "" {
-		err = invalid("config_path", origin, "must not be empty")
-	}
-	return value, origin, err
-}
-
-// Home resolves home from its permitted sources.
-func Home(in Inputs) (string, Origin, error) {
-	fallback := filepath.Join(in.Context.UserHome, ".sparkwing")
-
-	value, origin, err := pick(in, "home", func(v Values) *string { return v.Home }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	if strings.TrimSpace(value) == "" {
-		err = invalid("home", origin, "must not be empty")
-	}
-	return value, origin, err
-}
 
 // Profile resolves profile from its permitted sources.
 func Profile(in Inputs) (string, Origin, error) {
@@ -125,34 +93,6 @@ func Priority(in Inputs) (int, Origin, error) {
 	}
 	if op.Priority.Set && value > op.Priority.Value {
 		err = above("priority", origin, value, op.Priority.Value, fromOrigin(op.Priority.Origin))
-	}
-	return value, origin, err
-}
-
-// Toolchain resolves toolchain from its permitted sources.
-func Toolchain(in Inputs) (string, Origin, error) {
-	fallback := "auto"
-
-	value, origin, err := pick(in, "toolchain", func(v Values) *string { return v.Toolchain }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	if value != "auto" && value != "local" {
-		err = invalid("toolchain", origin, "must be auto or local")
-	}
-	return value, origin, err
-}
-
-// BoxID resolves machine.box_id from its permitted sources.
-func BoxID(in Inputs) (string, Origin, error) {
-	fallback := in.Context.Hostname
-
-	value, origin, err := pick(in, "machine.box_id", func(v Values) *string { return v.BoxID }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	if strings.TrimSpace(value) == "" {
-		err = invalid("machine.box_id", origin, "must not be empty")
 	}
 	return value, origin, err
 }
@@ -258,18 +198,6 @@ func PauseTimeout(in Inputs) (time.Duration, Origin, error) {
 	return value, origin, err
 }
 
-// CatchUp validates its independent duration bound.
-func CatchUp(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "schedule.catch_up", func(v Values) *time.Duration { return v.CatchUp }, limits.ScheduleCatchUpDefault)
-	if err == nil && value < limits.ScheduleCatchUpMin {
-		err = invalid("schedule.catch_up", origin, "duration is below the permitted minimum")
-	}
-	if err == nil && value > limits.ScheduleCatchUpMax {
-		err = above("schedule.catch_up", origin, value, limits.ScheduleCatchUpMax, Origin{Source: Default, Key: "schedule.catch_up"})
-	}
-	return value, origin, err
-}
-
 // MemoTTL validates its independent duration bound.
 func MemoTTL(in Inputs) (time.Duration, Origin, error) {
 	value, origin, err := pickRun(in, "job.memo_ttl", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.MemoTTL }, limits.MemoDefaultTTL)
@@ -324,24 +252,6 @@ func RetryBackoff(in Inputs) (time.Duration, Origin, error) {
 	value, origin, err := pickRun(in, "job.retry_backoff", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.RetryBackoff }, time.Duration(0))
 	if err == nil && (value < 0 || value > limits.RetryBackoff) {
 		err = invalid("job.retry_backoff", origin, "duration is outside the permitted bounds")
-	}
-	return value, origin, err
-}
-
-// TokenTTL validates its independent duration bound.
-func TokenTTL(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "token.ttl", func(v Values) *time.Duration { return v.TokenTTL }, time.Duration(0))
-	if err == nil && value < 0 {
-		err = invalid("token.ttl", origin, "duration is below the permitted minimum")
-	}
-	return value, origin, err
-}
-
-// IdlePoll validates its independent duration bound.
-func IdlePoll(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "idle_poll", func(v Values) *time.Duration { return v.IdlePoll }, limits.ClaimPoll)
-	if err == nil && value < 1 {
-		err = invalid("idle_poll", origin, "duration is below the permitted minimum")
 	}
 	return value, origin, err
 }
@@ -434,10 +344,4 @@ func JobTimeout(in Inputs) (time.Duration, Origin, error) {
 		err = above("job.timeout", origin, value, owner, from)
 	}
 	return value, origin, err
-}
-
-// Checkout combines each policy field without changing acquisition identity.
-func Checkout(in Inputs) (nodeproto.SourceSpec, Origin, error) {
-	value, err := checkoutSetting(in)
-	return value.Value.Policy, fromOrigin(value.Origin), err
 }

@@ -23,8 +23,8 @@ func TestProcessAuthority(t *testing.T) {
 	expires := now.Add(time.Hour)
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}
 	binding := capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 3, Attempt: 2}
-	parentPrincipal := capability.Principal{Authority: ref, Class: capability.CredentialBearer, Capability: capability.Capability{Prefix: ref.ID, Digest: sha256.Sum256([]byte("controller-parent")), Audience: capability.Controller, Team: "team", Binding: binding, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: &expires}}
-	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: parentPrincipal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
+	parentPrincipal := capability.Principal{Authority: ref, Class: capability.CredentialBearer, Capability: capability.Capability{Unit: capability.UnitNode, Prefix: ref.ID, Digest: sha256.Sum256([]byte("controller-parent")), Audience: capability.Controller, Team: "team", Binding: binding, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: &expires}}
+	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: parentPrincipal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires, StartPermitted: true}}}
 	validateCalls := 0
 	authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{
 		Parent: parent, Bindings: processBindingFunc(func(_ context.Context, principal capability.Principal, _ capability.BindingRule, target capability.Target) error {

@@ -27,7 +27,7 @@ func runOwnerSession(ctx context.Context, award controllerwire.ClaimedUnit, inpu
 	if session.host == nil || session.close == nil {
 		return completion, &apierr.Error{Code: apierr.Unavailable, Message: "run hosting requires a host and cleanup binding"}
 	}
-	input.Storage, input.Engines, input.PlanCache = session.input.Storage, session.input.Engines, session.input.PlanCache
+	input.Storage, input.Engines = session.input.Storage, session.input.Engines
 	input.Owner.Authority, input.Owner.CapabilityPrefix = session.input.Owner.Authority, session.input.Owner.CapabilityPrefix
 	if err := context.Cause(ctx); err != nil {
 		return completion, err

@@ -186,13 +186,13 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 	if v, _, err := ClaimWait(in); err != nil || v != 2*time.Hour {
 		t.Fatalf("queue %v: %v", v, err)
 	}
-	if v, _, err := ResourceLimits(in); err != nil || !v.Cores.Set || v.Cores.Value != 4.5 {
+	if v, err := resourceSetting(in); err != nil || !v.Value.Cores.Set || v.Value.Cores.Value != 4.5 {
 		t.Fatalf("resources %+v: %v", v, err)
 	}
 	if v, _, err := AdmissionClass(in); err != nil || v != "batch" {
 		t.Fatalf("class %q: %v", v, err)
 	}
-	if _, _, err := Checkout(in); err != nil {
+	if _, err := checkoutSetting(in); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -217,7 +217,7 @@ func TestCeilingsRefuseWithoutClamping(t *testing.T) {
 		if _, _, err := MemoTTL(in); err == nil {
 			t.Fatal("excess memo TTL accepted")
 		}
-		_, _, err := ResourceLimits(in)
+		_, err := resourceSetting(in)
 		var refusal *Error
 		if !errors.As(err, &refusal) || refusal.Value != "1.5" || refusal.Ceiling != "1.25" {
 			t.Fatalf("missing resource evidence: %v", err)

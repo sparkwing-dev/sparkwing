@@ -177,7 +177,7 @@ func (s *FileEnvironmentSnapshots) Load(ctx context.Context, seal runspec.EnvSna
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	if !planCacheDigestValid(seal.Digest) {
+	if !planningDigestValid(seal.Digest) {
 		return nil, errors.New("captured environment has no valid sealed identity")
 	}
 	file, err := fssecure.OpenPrivateConfig(s.path(seal))
@@ -220,7 +220,7 @@ func verifyCapturedEnvironment(ctx context.Context, expected runspec.EnvSnapshot
 	if err != nil {
 		return nil, err
 	}
-	if !planCacheDigestValid(expected.Digest) || actual.Digest != expected.Digest || !slices.Equal(actual.Names, expected.Names) {
+	if !planningDigestValid(expected.Digest) || actual.Digest != expected.Digest || !slices.Equal(actual.Names, expected.Names) {
 		return nil, errors.New("captured environment differs from the sealed request")
 	}
 	if err := context.Cause(ctx); err != nil {
@@ -234,7 +234,7 @@ func capturedBase(ctx context.Context, base procenv.Base, snapshots CapturedEnvi
 	if !base.Local {
 		return base, context.Cause(ctx)
 	}
-	if !planCacheDigestValid(seal.Digest) {
+	if !planningDigestValid(seal.Digest) {
 		return procenv.Base{}, errors.New("local execution requires the sealed environment identity")
 	}
 	captured := base.Captured

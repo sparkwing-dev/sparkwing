@@ -5,9 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -16,7 +15,9 @@ import (
 func TestClaimedNodeAdmissionCoversSourceAndJoinedExecution(t *testing.T) {
 	input, _, host, processes := claimedNodeFixture(t)
 	daemon := newFakeDaemon()
-	host.Admission = &LocalAdmission{Daemon: daemon, BoxID: testBox}
+	host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (store.AcquireSlotResponse, error) {
+		return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+	}}, &LocalAdmission{Daemon: daemon}, false)
 	acquire := host.Acquire
 	host.Acquire = func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
 		if live, _, _ := daemon.counts(); live != 1 {
@@ -39,10 +40,12 @@ func TestClaimedNodeCancellationWhileQueuedNeverAcquiresSource(t *testing.T) {
 	input, state, host, processes := claimedNodeFixture(t)
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
-	host.Admission = &LocalAdmission{Daemon: daemon, BoxID: testBox}
+	host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (store.AcquireSlotResponse, error) {
+		return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+	}}, &LocalAdmission{Daemon: daemon}, false)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	host.Admission.Queued = func(context.Context, controllerwire.NodeRef, wingwire.Queued) { cancel() }
+	host.Admission.compute.Queued = func(context.Context, controllerwire.NodeRef, wingwire.Queued) { cancel() }
 	host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 		t.Error("acquired source before admission")
 		return nil, errors.New("unadmitted source acquisition")
@@ -69,12 +72,12 @@ func FuzzClaimedNodeMachineLeasesKeepSeparateJobs(f *testing.F) {
 		}
 		accepted := localAdmissionSeal(t, localAdmissionOptions())
 		daemon := newFakeDaemon()
-		admission := LocalAdmission{Daemon: daemon, BoxID: testBox}
+		admission := LocalAdmission{Daemon: daemon}
 		row := localAdmissionRow(first)
 		row.Ref.RunID = runspec.RunID(accepted.RunID)
-		err := admission.ClaimedNode(t.Context(), accepted, row, func(ctx context.Context) error {
+		err := admission.node(t.Context(), accepted, row, func(ctx context.Context) error {
 			row.Ref.NodeID = runspec.NodeID(second)
-			return admission.ClaimedNode(ctx, accepted, row, func(context.Context) error {
+			return admission.node(ctx, accepted, row, func(context.Context) error {
 				requests := daemon.requests()
 				if live, _, _ := daemon.counts(); live != 2 || len(requests) != 2 || requests[0].RunID == requests[1].RunID || requests[0].SubLease || requests[1].SubLease {
 					t.Fatalf("separate claimed jobs shared machine ownership: %+v live=%d", requests, live)

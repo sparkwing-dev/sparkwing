@@ -12,6 +12,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -26,8 +28,6 @@ type stateFixture struct {
 }
 
 func (*stateFixture) Ready() error { return nil }
-
-func (*stateFixture) TypeSafeAPIKey(context.Context) (string, error) { return "", nil }
 
 func (s *stateFixture) Reconcile(ctx context.Context, lease store.SingletonLease) (wingd.LocalActivity, error) {
 	if s.reconcile != nil {
@@ -56,8 +56,8 @@ func serviceFixture(b Binding) Services {
 		Runner: runners.StoreRunnerConfig{
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
 			Bearer: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() },
-			Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {
-				return runners.NativeServices{}, errors.New("unexpected host")
+			Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+				return nodehost.NativeServices{}, errors.New("unexpected host")
 			},
 		},
 	}

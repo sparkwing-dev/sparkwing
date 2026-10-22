@@ -1142,8 +1142,9 @@ A mismatch leaves the ready row and its queue position unchanged.
 
 `Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
 Acquire `controller.reaper` through `Operator.AcquireSingletonLease` and pass that
-fence to `Operator.MaintainConcurrency(ctx, lease, options)`. The pass commits
-holder cleanup, waiter cleanup and promotion together. An error returns no
+fence to `Operator.MaintainConcurrency(ctx, lease)`. The pass removes dead
+reservations as complete group sets. Hosts retry `MayStart` for queued work, so
+only the durable admission owner can grant a complete set. An error returns no
 committed counts. The old concurrency-cache sweep and count APIs are removed.
 Memo-record retention uses `Operator.MaintainRetention` under its maintenance
 lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
@@ -2386,20 +2387,38 @@ Embedded controllers supply `WithOIDCReader` for authority-rechecked sealed
 identity and an effective ancestry expiry. The legacy claimed-run lookup and
 dispatched-node refusal are removed.
 
-## Concurrency credential routes
+## Concurrency admission and queue views
 
-Replace `/api/v1/concurrency/{key}/state` with
-`/api/v1/queue/groups/{group}`. Move `acquire`, `heartbeat`, `release`,
-`cancel-waiter`, `holder`, `resolve` and `force-release` under the same group
-path. Replace `node_id`, `leader_node_id` and `origin_node_id` with their
-`job_id`, `leader_job_id` and `origin_job_id` spellings. Group waiter positions
-are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds.
+Plan and job concurrency groups now have separate namespaces. A group named
+`deploys` on the plan and on a job names two independent budgets. Definitions
+need to agree only within their level. Persisted group keys now include `plan:`
+or `job:`. The store baseline is version 20; recreate stores at an
+earlier baseline before starting this build.
 
-Executable callers need a capability bound to the declared group and current
-work generation. Root runner tokens cannot acquire slots directly. Force
-release uses member `runs.control`. Embedded controllers supply
-`WithConcurrencyStore` for authority-bearing transactions. The old unfenced
-concurrency methods do not provide that adapter.
+Box scope is available only on job groups. Pipeline acceptance refuses a
+box-scoped plan group with an error naming the group and pointing at job-level
+box scope. A run can span machines, so move that declaration from
+`plan.Concurrency(group)` to the jobs that need a per-machine budget. Use global
+or run scope for a whole-run gate.
+
+If a run loses its plan reservation after releasing work, it waits to reacquire
+the group. Released jobs finish, and no further work releases until capacity
+returns. Reacquisition queues without a timeout, including when the original
+policy was skip, fail or cancel-others. Queue views show
+`waiting to reacquire <group>`.
+
+Group waiter rows and responses drop the retired coalesce cache hash and leader
+fields. Memo keys are no longer recognized as concurrency groups.
+
+Read a group through `GET /api/v1/queue/groups/{group}`. Group waiter positions
+are one-based. Member
+priority changes use `PUT /api/v1/queue/groups/{group}/priority`.
+
+The single-group `acquire`, `heartbeat`, `release`, `cancel-waiter`, `holder`,
+`resolve` and `force-release` endpoints are removed, including their older
+`/api/v1/concurrency/{key}` spellings. Execution hosts admit capacity through the
+shared admission owner under their unit's award. The store reads accepted groups,
+policies and lease bounds. Callers cannot choose them.
 
 ## Typed step reports
 
@@ -3141,6 +3160,21 @@ mutation methods no longer accept caller wall-clock arguments. The store capture
 database time for transaction decisions. Schema baseline 20 includes stored,
 generated cancellation deadlines. Older schema baselines require the declared
 restore workflow.
+
+## Durable start admission
+
+Schema baseline 20 includes durable admission records. Recreate stores at an older
+baseline. Owners propose releases. Hosts use the private `may-start` operation
+under the actual job award, including jobs without concurrency groups. The private
+`capacity/acquire` operation is removed. A wait grants no partial group set.
+Released jobs continue when the plan waits to reacquire capacity. Burst returns
+its provisional placement and job reservations when compute is unavailable.
+
+Approval predicates use fenced evaluation permission without job groups or compute.
+A true predicate records skip. Memo lookup preserves authority refusals, and only
+committed producer success makes a memo reusable. `cancel_others` replaces logical
+capacity immediately and requests cooperative cancellation. Cleanup or the
+five-minute drain deadline bounds disconnected holders.
 
 ## Host-provided masking
 

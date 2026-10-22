@@ -583,8 +583,7 @@ job billing. Plan and eval are separate billable units.
 Reservation, charging, claim renewal and settlement happen in store transactions.
 An unstarted claim refunds its reservation. A job that starts consumes the
 minimum. A host has a separate minimum. Plan and eval have zero minimum and
-charge their actual compute. A validated plan-cache hit incurs no planning
-charge. Customer-owned runner wait intervals are excluded.
+charge their actual compute. Customer-owned runner wait intervals are excluded.
 
 Billing reconciliation must distinguish cancellation, lease loss and execution
 start. Repeating a finish or payment event cannot create another charge.

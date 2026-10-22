@@ -57,3 +57,13 @@ type LocalBindingRequest struct {
 type LocalBindingChecked struct {
 	Checked bool `json:"checked"`
 }
+
+// LocalCapacityRequest names a job under its authenticated award.
+type LocalCapacityRequest struct {
+	Binding store.CapacityBinding `json:"binding"`
+}
+
+// LocalEvaluationRelease proposes expansion work under the current run owner.
+type LocalEvaluationRelease struct {
+	NodeID string `json:"job_id"`
+}

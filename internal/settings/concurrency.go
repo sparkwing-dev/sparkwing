@@ -12,7 +12,7 @@ func ResolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Con
 	result := make([]runspec.Concurrency, 0, len(declarations))
 	seen := map[string]bool{}
 	for i, declaration := range declarations {
-		group := runspec.Concurrency{Group: declaration.Group, Scope: "global", Capacity: 1, Cost: 1, OnLimit: "queue", QueueTimeoutMS: declaration.QueueTimeoutMS, CancelTimeoutMS: declaration.CancelTimeoutMS}
+		group := runspec.Concurrency{Group: declaration.Group, Scope: "global", Capacity: 1, Cost: 1, OnLimit: "queue", QueueTimeoutMS: declaration.QueueTimeoutMS}
 		if declaration.Scope != nil {
 			group.Scope = *declaration.Scope
 		}
@@ -28,10 +28,8 @@ func ResolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Con
 		if group.Group == "" || seen[group.Group] || group.Capacity < 1 || group.Cost < 1 || group.Cost > group.Capacity || group.Scope != "global" && group.Scope != "run" && group.Scope != "box" || group.OnLimit != "queue" && group.OnLimit != "skip" && group.OnLimit != "fail" && group.OnLimit != "cancel_others" {
 			return nil, fmt.Errorf("concurrency[%d]: invalid group policy", i)
 		}
-		for _, timeout := range []*int64{group.QueueTimeoutMS, group.CancelTimeoutMS} {
-			if _, err := milliseconds(timeout, "concurrency"); err != nil {
-				return nil, err
-			}
+		if _, err := milliseconds(group.QueueTimeoutMS, "concurrency"); err != nil {
+			return nil, err
 		}
 		seen[group.Group] = true
 		result = append(result, group)
@@ -49,9 +47,6 @@ func checkConcurrencyGroups(settings runspec.ExecutionSettings) error {
 			groups[group.Group] = group
 		}
 		return nil
-	}
-	if err := check(settings.Concurrency); err != nil {
-		return err
 	}
 	for _, job := range settings.Jobs {
 		if err := check(job.Concurrency); err != nil {

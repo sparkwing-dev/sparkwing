@@ -78,12 +78,12 @@ export type Scope = "run" | "box" | "global";
 /** contract: Capacity behavior never implies result reuse. */
 export type OnLimit = "queue" | "fail" | "skip" | "cancel_others";
 /** contract: Optional fields distinguish inherited policy from explicit values. */
-export interface ConcurrencyLimit { capacity?: number; scope?: Scope; onLimit?: OnLimit; queueTimeoutMs?: number; cancelTimeoutMs?: number; }
+export interface ConcurrencyLimit { capacity?: number; scope?: Scope; onLimit?: OnLimit; queueTimeoutMs?: number; }
 /** contract: One declaration lets all members share the same capacity policy. */
 export declare class ConcurrencyGroup { constructor(name: string, limit?: ConcurrencyLimit); readonly name: string; readonly limit: Readonly<ConcurrencyLimit>; toString(): string; }
 /** contract: Approval zero timeout preserves indefinite waits where the owner can wait. */
 export interface ApprovalOptions { message?: string; timeoutMs?: number; onTimeout?: "fail" | "deny" | "approve"; }
-/** contract: Approval dependencies are allowed without exposing dead execution hooks. */
+/** contract: Approvals cannot declare concurrency groups; put them on the job after the approval. skipIf runs on the run's coordinator before requesting approval, holding no capacity, and true settles as skipped. */
 export interface Approval { readonly id: string; skipIf(predicate: Predicate, options?: SkipOptions): this; needs(...jobs: readonly Dependency[]): this; needsIfPresent(...jobs: readonly Dependency[]): this; needsGenerated(...generators: readonly Generator<unknown>[]): this; optional(): this; continueOnError(): this; onFailure<T = unknown>(id: string, body: Body<T>): Job<T>; }
 /** contract: Dependencies refer to declared jobs, approvals, groups or stable IDs. */
 export type Dependency = Job<unknown> | Approval | JobGroup | string;

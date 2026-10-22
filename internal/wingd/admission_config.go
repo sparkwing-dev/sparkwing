@@ -1,7 +1,6 @@
 package wingd
 
 import (
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -28,7 +27,7 @@ func ResolveAdmissionPolicy() (AdmissionPolicy, string, error) {
 func admissionPolicyFrom(raw userconfig.AdmissionConfig) (AdmissionPolicy, error) {
 	policy := DefaultAdmissionPolicy()
 	policy.Mode = admission.Mode(configured(raw.Mode, string(policy.Mode)))
-	if policy.Mode == admission.ModeAuto || policy.Mode == admission.ModeJev || policy.Mode == admission.ModeCustom {
+	if policy.Mode == admission.ModeAuto || policy.Mode == admission.ModeCustom {
 		policy.Scheduling = admission.AutoPolicy()
 	}
 	type durationSetting struct {
@@ -36,7 +35,7 @@ func admissionPolicyFrom(raw userconfig.AdmissionConfig) (AdmissionPolicy, error
 		target *time.Duration
 	}
 	var durations []durationSetting
-	if custom := raw.Custom; custom != nil && (policy.Mode == admission.ModeCustom || policy.Mode == admission.ModeJev) {
+	if custom := raw.Custom; custom != nil && (policy.Mode == admission.ModeCustom) {
 		for name, value := range custom.BackfillDelay {
 			duration, err := time.ParseDuration(value)
 			if err != nil {
@@ -53,13 +52,6 @@ func admissionPolicyFrom(raw userconfig.AdmissionConfig) (AdmissionPolicy, error
 			policy.Scheduling.Burst.MinSamples = configured(burst.MinSamples, policy.Scheduling.Burst.MinSamples)
 			durations = append(durations, durationSetting{burst.MaxP99, &policy.Scheduling.Burst.MaxP99})
 		}
-	}
-	if jev := raw.Jev; jev != nil {
-		policy.Jev.Model = strings.TrimSpace(configured(jev.Model, policy.Jev.Model))
-		policy.Jev.Endpoint = strings.TrimSpace(configured(jev.Endpoint, policy.Jev.Endpoint))
-		policy.Jev.MinConfidence = configured(jev.MinConfidence, policy.Jev.MinConfidence)
-		policy.Jev.MinProbability = configured(jev.MinProbability, policy.Jev.MinProbability)
-		durations = append(durations, durationSetting{jev.Timeout, &policy.Jev.Timeout}, durationSetting{jev.MaxBackfill, &policy.Jev.MaxBackfill})
 	}
 	for _, setting := range durations {
 		if setting.value != nil {

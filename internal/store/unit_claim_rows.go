@@ -99,13 +99,8 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 				return err
 			}
 		}
-		var generation int64
-		var outcome, expansion string
-		if err = tx.QueryRowContext(ctx, `SELECT generation,outcome,expansion FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&generation, &outcome, &expansion); err != nil {
+		if err := evaluationSourceTx(ctx, tx, team, unit); err != nil {
 			return err
-		}
-		if generation != unit.SourceGeneration || (outcome != "success" && outcome != "memoized") || expansion != "expected" {
-			return holderRefusal()
 		}
 	} else {
 		var available int64
@@ -238,7 +233,7 @@ func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.Uni
 		query = `SELECT r.team,r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
 		args = append(args, now, now)
 	case capability.UnitEval:
-		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
+		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND ((n.outcome IN ('success','memoized') AND n.expansion='expected') OR (n.status='pending' AND n.ready_at IS NULL AND n.claimed_by IS NULL))`
 		args = append(args, now, now)
 	default:
 		query = `SELECT r.team,r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`

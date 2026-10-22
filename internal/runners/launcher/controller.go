@@ -148,7 +148,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if _, ok := byJob[observation.JobName]; ok {
 			return nil, errors.New("duplicate Cloud Job observation")
 		}
-		if observation.NodeUID == "" || observation.ReservationID == "" && (observation.JobNamespace == "" || observation.JobUID == "") || observation.ReservationID != "" && (observation.JobNamespace != "" || observation.JobUID != "") {
+		if observation.Capacity == nil && (observation.NodeUID == "" || observation.ReservationID == "" && (observation.JobNamespace == "" || observation.JobUID == "") || observation.ReservationID != "" && (observation.JobNamespace != "" || observation.JobUID != "")) {
 			return nil, errors.New("Cloud observation requires its local Job or reservation identity")
 		}
 		observed := controllerwire.LauncherObservation{Award: observation.Binding.LeaseRef(), Reservation: observation.ReservationID != "", Rejected: observation.Rejected}
@@ -159,7 +159,20 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 			return nil, errors.New("duplicate Cloud award observation")
 		}
 		byJob[observation.JobName], byAward[observed.Award] = i, i
-		request.Observed = append(request.Observed, observed)
+		if observation.Capacity != nil {
+			if observation.Capacity.PodUID == "" || observation.NodeUID != "" || observation.ReservationID != "" || observation.JobUID != "" || observation.JobNamespace != "" || observation.Activation != nil || observation.Rejected {
+				return nil, errors.New("capacity observation cannot supply an execution placement")
+			}
+			request.Capacity = append(request.Capacity, controllerwire.LauncherCapacityObservation{Award: observed.Award})
+		} else {
+			request.Observed = append(request.Observed, observed)
+			if r := observation.Activation; r != nil {
+				if r.Award != observed.Award || r.NodeUID != observation.NodeUID || r.JobName != observation.JobName || r.Team != observation.Binding.Team || r.NodeName == "" || r.ReservationID == "" || observation.ReservationID != "" || observation.Rejected {
+					return nil, errors.New("activation does not match the execution reservation")
+				}
+				request.Activations = append(request.Activations, controllerwire.LauncherActivation{Award: r.Award, NodeUID: r.NodeUID, ReservationID: r.ReservationID})
+			}
+		}
 		if !observation.Unheld {
 			request.Preparing = append(request.Preparing, observed.Award)
 		}

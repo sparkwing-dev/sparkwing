@@ -583,6 +583,14 @@ and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
   deletes only the refused Pod by UID and lets other requests and claims proceed.
   Transport, overload and service-credential errors retain the request for retry.
 
+Capacity observations carry only the award fence to the controller. A capacity
+Pod's UID and assigned node never become an execution host. After reserving a
+node and verifying the suspended Job and its bootstrap, the launcher sends an
+authenticated activation with that reservation's Node UID. The controller seals
+it on the award before the launcher unsuspends the Job. Ordinary sync and orphan
+reservation cleanup cannot change this host. Box concurrency waits for this
+activation and uses only the sealed identity after bootstrap exchange.
+
 Team NodePools need `disruption: {consolidationPolicy: WhenEmpty,
 consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by
 a launcher restart survives until its unit is re-awarded.

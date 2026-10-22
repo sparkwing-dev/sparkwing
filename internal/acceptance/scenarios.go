@@ -141,14 +141,14 @@ func Scenarios() []Scenario {
 			Sections: []string{"§3.7", "A60"}, Requires: []Area{C1, C3},
 			Placements: []Placement{RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"store", "clock", "repo", "processes"},
 			Steps:      []string{"Acquire capacity-one node and plan groups, dispatch a remote job and kill its run host while the job renews its claim.", "Queue a competing run, restart the owner and then finish the remote job."},
-			Assertions: []string{"The holder counts continuously through owner loss; the competitor never enters while the remote job is live.", "The successor adopts the retained holder and terminal transition releases capacity atomically, permitting exactly one waiting run."},
+			Assertions: []string{"The holder counts continuously through owner loss; the competitor never enters while the remote job is live.", "The successor adopts the retained holder and terminal transition releases capacity atomically, permitting exactly one waiting run. If plan capacity lapsed, recovery settles completed or released work immediately and gates only new releases until reacquisition."},
 		},
 		{
 			ID: "recovery-concurrency-no-revival", Group: "recovery",
 			Sections: []string{"§3.7", "A60"}, Requires: []Area{C1, C3},
 			Placements: []Placement{Local, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"store", "clock", "repo"},
 			Steps:      []string{"Expire every liveness source for a capacity-one holder; let a queued competitor acquire before the original owner returns.", "Repeat with a live waiter and an expired waiter, and exercise cancel_others."},
-			Assertions: []string{"Expired capacity never revives: the returning owner queues behind earlier waiters as a new request.", "A continuously live waiter retains arrival time; an expired waiter gets a new arrival; cancel_others marks superseded and delivers cancellation through renewal."},
+			Assertions: []string{"Expired capacity never revives: the returning owner queues behind earlier waiters as a new request.", "A continuously live waiter retains arrival time across owner handoff before adoption; queue selection, promotion and adoption use the same lease continuity. An expired waiter gets a new arrival; cancel_others marks superseded and delivers cancellation through renewal."},
 		},
 		{
 			ID: "recovery-controller-ownership", Group: "recovery",
@@ -267,8 +267,8 @@ func Scenarios() []Scenario {
 			ID: "credentials-matrix-node-child-slot", Group: "credentials",
 			Sections: []string{"§5.1", "A68"}, Requires: []Area{C1, C2},
 			Placements: []Placement{RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"catalog", "identities", "store"},
-			Steps:      []string{"Request data authority for the caller's job and a different path job, then exercise childOfBoundNode and slotOfBoundNode with own and foreign resources.", "Repeat mismatched slot requests using a deployment-admin credential and tokenless local mode."},
-			Assertions: []string{"The path job is enforced; only the bound job's child and slot are accessible with the required grants.", "Admin and tokenless mode do not bypass slot binding; denied requests neither mutate nor disclose foreign resources."},
+			Steps:      []string{"Request data authority for the caller's job and a different path job, then exercise childOfBoundNode and declared-group reads with own and foreign resources.", "Attempt the removed public single-group mutation and resolution endpoints, then repeat group reads with undeclared groups."},
+			Assertions: []string{"The path job is enforced; only the bound job's child and declared group are accessible with the required grants.", "Removed single-group endpoints return 404. Denied group reads do not disclose undeclared resources."},
 		},
 		{
 			ID: "credentials-matrix-pipeline-and-audience", Group: "credentials",
@@ -627,8 +627,8 @@ func Scenarios() []Scenario {
 			ID: "billing-plan-eval-cache-job-minimum", Group: "billing",
 			Sections: []string{"§3.1", "§12", "A59", "decision 100"}, Requires: []Area{C1, C2, C3},
 			Placements: []Placement{RunnerHosted, Launcher, GitHubActions}, Fixtures: []string{"repo", "sdk", "store", "clock", "stripe"},
-			Steps:      []string{"At a known fixture tariff run a cold seven-second plan, eleven-second eval and seven-second work job; run the same pipeline again with a valid default-enabled plan cache hit.", "Repeat work at exactly 60 and 61 seconds and record unit-specific reservations and settlements."},
-			Assertions: []string{"Plan bills seven seconds and eval eleven with no 60-second minimum; the plan-cache hit incurs zero planning compute.", "Work bills 60, 60 and 61 seconds respectively, with per-second accounting after its minimum; unit kind determines settlement rather than placement labels."},
+			Steps:      []string{"At a known fixture tariff run a cold seven-second plan, eleven-second eval and seven-second work job; run the same pipeline as a new run, then resume its accepted owner.", "Repeat work at exactly 60 and 61 seconds and record unit-specific reservations and settlements."},
+			Assertions: []string{"Plan bills seven seconds and eval eleven with no 60-second minimum; a new run plans again while an accepted resume retains its plan.", "Work bills 60, 60 and 61 seconds respectively, with per-second accounting after its minimum; unit kind determines settlement rather than placement labels."},
 		},
 		{
 			ID: "billing-reservation-disruption-replay", Group: "billing",
@@ -705,7 +705,7 @@ func Scenarios() []Scenario {
 			Sections: []string{"§3.2", "§3.7", "§6.3", "§6.6", "§7.5", "§7.6", "A27", "A38", "A39", "A60", "decision 99", "ch-sdk-protocol §4.1"}, Requires: []Area{C1, C3, C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"repo", "sdk", "store", "processes", "catalog"},
 			Steps:      []string{"Declare separate plan and job concurrency groups, including capacity-three/cost-two weighted members, using run, box and global scopes; submit overlapping fixture runs on two host identities with known box IDs.", "Inspect SDK plan output and admitted holder keys; repeat with per-plan and per-job resource pins of 0.5 cores and 1 GiB, no pins, and one resource value above the operator ceiling."},
-			Assertions: []string{"Only one cost-two member fits capacity three. Plan membership gates dispatch until acquired and lasts until run termination; job membership lasts until that job terminates.", "The host computes scoped keys: run scopes separate runs, box scopes coordinate runs sharing the configured host identity and separate different boxes, and global scopes coordinate the authorized fleet. The SDK cannot supply a pre-scoped key.", "Plan and job sizing preserve 0.5 cores and 1073741824 bytes at their respective admission boundaries; missing pins use measurements/default sizing, and a ceiling excess is refused at seal instead of clamped. Local pins do not create a new per-run cgroup limit.", "Controller-owned plan concurrency and box scope must execute by launch; a named capability gap records an outstanding parity failure rather than passing this scenario."},
+			Assertions: []string{"Only one cost-two member fits capacity three. Plan membership gates dispatch until acquired and lasts until run termination; job membership lasts until that job terminates.", "The store derives scoped keys from sealed awards: run scopes separate runs, box scopes coordinate jobs sharing the persisted execution host and separate different boxes, and global scopes coordinate the authorized fleet. The SDK cannot supply a pre-scoped key.", "Plan and job sizing preserve 0.5 cores and 1073741824 bytes at their respective admission boundaries; missing pins use measurements/default sizing, and a ceiling excess is refused at seal instead of clamped. Local pins do not create a new per-run cgroup limit.", "Controller-owned plan concurrency and box scope must execute by launch; a named capability gap records an outstanding parity failure rather than passing this scenario."},
 		},
 		{
 			ID: "lifecycle-approval-decisions-and-owner-rights", Group: "lifecycle",

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
@@ -32,6 +33,9 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: award.Node.Ref.RunID, NodeID: award.Node.Ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
+	if result, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(actor.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+		t.Fatalf("process admission: %+v %v", result, err)
+	}
 	if _, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +54,15 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	spec := capability.DelegateSpec{Parent: parent.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: snapshot.Binding.Current, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt}
 	if parent.Capability.Repositories == nil || len(parent.Capability.Repositories) == 0 {
 		t.Fatal("node award must retain its repository scope")
+	}
+	if _, err := teststore.Exec(t.Context(), f.Store, `UPDATE admission_work SET granted=0 WHERE team=? AND run_id=? AND node_id=?`, parent.Capability.Team, ref.RunID, ref.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	if issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
+		t.Fatalf("process delegation bypassed store permit: issued=%+v error=%v", issued, err)
+	}
+	if _, err := teststore.Exec(t.Context(), f.Store, `UPDATE admission_work SET granted=1 WHERE team=? AND run_id=? AND node_id=?`, parent.Capability.Team, ref.RunID, ref.NodeID); err != nil {
+		t.Fatal(err)
 	}
 	checkScope := func(seed uint64) bool {
 		for _, scope := range []struct {

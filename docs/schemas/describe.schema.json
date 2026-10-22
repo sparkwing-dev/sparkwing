@@ -146,10 +146,6 @@
     "concurrency": {
       "additionalProperties": false,
       "properties": {
-        "cancel_timeout_ms": {
-          "minimum": 0,
-          "type": "integer"
-        },
         "capacity": {
           "minimum": 1,
           "type": "integer"

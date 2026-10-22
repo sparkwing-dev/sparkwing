@@ -158,6 +158,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 		t.Fatal(err)
 	}
 	claim := exchanged.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
 	object := `{"id":"dispute","object":"dispute","livemode":false,"status":"lost","currency":"usd","amount":2000,"payment_intent":"payment","charge":"charge","reason":"fraudulent"}`
 	for _, id := range []string{"chargeback", "chargeback", "chargeback-replayed"} {

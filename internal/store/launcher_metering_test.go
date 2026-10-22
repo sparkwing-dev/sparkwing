@@ -11,7 +11,7 @@ import (
 func launcherMeteredFence(t *testing.T, s *Store, demand UnitDemand, claim UnitClaim, kind capability.UnitKind) (capability.AuthorityRef, capability.LeaseRef) {
 	t.Helper()
 	root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil)
+	awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
 	if err != nil || len(awards) != 1 {
 		t.Fatalf("launcher awards: %+v %v", awards, err)
 	}

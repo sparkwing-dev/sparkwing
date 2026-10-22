@@ -73,7 +73,7 @@ func sizedJob(id string, cores float64, memory int64) store.NodeRow {
 func TestJobWaitingOnChildKeepsItsReservation(t *testing.T) {
 	machine := wingwire.HostResources{Cores: 2, MemoryBytes: 2 * gib}
 	admitter := &budgetAdmitter{free: machine}
-	admission := &LocalAdmission{Daemon: admitter, BoxID: testBox}
+	admission := &LocalAdmission{Daemon: admitter}
 	accepted := localAdmissionSeal(t, runspec.Options{})
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -93,8 +93,8 @@ func TestJobWaitingOnChildKeepsItsReservation(t *testing.T) {
 			process, err := start(ctx, in, activity)
 			process.(*executorProcess).onRun = func(context.Context) {
 				defer activity.Await()()
-				hogErr = admission.ClaimedNode(ctx, accepted, sizedJob("hog", 0, gib+gib/2), func(context.Context) error { return nil })
-				childErr = admission.ClaimedNode(ctx, accepted, sizedJob("child", 1, gib/2), func(context.Context) error {
+				hogErr = admission.node(ctx, accepted, sizedJob("hog", 0, gib+gib/2), func(context.Context) error { return nil })
+				childErr = admission.node(ctx, accepted, sizedJob("child", 1, gib/2), func(context.Context) error {
 					childRan = true
 					return nil
 				})
@@ -103,7 +103,7 @@ func TestJobWaitingOnChildKeepsItsReservation(t *testing.T) {
 		}
 	})
 	persisted.row.Execution = input.Execution
-	host.Admission = admission
+	host.Admission = ComposeStartGate(persisted, admission, false)
 	if err := host.Execute(ctx, input); err != nil {
 		t.Fatal(err)
 	}

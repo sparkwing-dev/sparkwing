@@ -57,7 +57,7 @@ func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
 			planContext.ExistingJobs = append([]JobSpec(nil), ctx.ExistingJobs...)
 			planContext.ExistingJobs[0].Concurrency = nil
 			planContext.ExistingConcurrency = []ConcurrencySpec{group}
-			t.Run("plan-membership", func(t *testing.T) { check(t, planContext) })
+			t.Run("plan-membership", func(t *testing.T) { checkPlan(t, string(raw), planContext, "") })
 		})
 	}
 }

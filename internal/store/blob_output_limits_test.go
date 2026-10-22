@@ -53,6 +53,7 @@ func TestBlobRecordsMemoCannotBypassOutputLimit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			activateMemoFixture(t, s)
 			request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}, Destination: intent.Identity.Attempt.Value}
 			if hit, err := records.CopyMemo(t.Context(), request); err != nil || !hit.Found || hit.Output.Value != intent.Digest {
 				t.Fatalf("boundary-sized output copy=%+v: %v", hit, err)
@@ -68,6 +69,7 @@ func TestBlobRecordsOversizedMemoIsAMissWithoutPartialEdges(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	// safety: persisted cache corruption must not manufacture an oversized output edge.
 	rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", limits.NodeOutputBytes+1, intent.Digest)
 	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
@@ -93,4 +95,5 @@ func TestBlobRecordsMemoOutputLimitDoesNotCapManifests(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 }

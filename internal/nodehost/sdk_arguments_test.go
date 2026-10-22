@@ -104,7 +104,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = PlanInitial(t.Context(), prepared.Input, prepared.Functions)
+			_, err = PlanInitial(t.Context(), prepared.Input, prepared.Plan)
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != "initial plan argument declarations differ from SDK describe" {
 				t.Fatalf("conditional plan host error = %v", err)

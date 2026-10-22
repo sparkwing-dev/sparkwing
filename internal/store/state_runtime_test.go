@@ -163,6 +163,7 @@ func liveHolderFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	authorityPersist(t, tenant.s, c)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=?,execution_json=?,expansion='' WHERE team='a' AND run_id='run'`, expiry.UnixNano(), []byte(`{"retry":{"set":true,"value":1}}`))
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
+	admitExecution(t, tenant, actor)
 	return tenant, now, actor
 }
 

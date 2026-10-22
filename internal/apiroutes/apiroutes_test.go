@@ -419,13 +419,11 @@ func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes, err := Parse(src, nil)
-	if err != nil || len(routes) != 8 {
+	if err != nil || len(routes) != 1 {
 		t.Fatalf("routes=%+v error=%v", routes, err)
 	}
-	for _, r := range routes {
-		if r.Path == "/api/v1/queue/groups/{group}/force-release" && r.Scope != "runs.control" {
-			t.Fatalf("force-release=%+v", r)
-		}
+	if routes[0].Path != "/api/v1/queue/groups/{group}" || routes[0].Method != "GET" {
+		t.Fatalf("group read=%+v", routes[0])
 	}
 }
 

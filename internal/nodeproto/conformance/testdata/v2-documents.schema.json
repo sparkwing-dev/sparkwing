@@ -153,9 +153,6 @@
     "ConcurrencySpec": {
       "additionalProperties": false,
       "properties": {
-        "cancel_timeout_ms": {
-          "type": "integer"
-        },
         "capacity": {
           "type": "integer"
         },

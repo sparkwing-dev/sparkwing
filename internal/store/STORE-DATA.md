@@ -78,8 +78,11 @@ refs and memo hashes. The tests keep a manifest-reader fake for byte I/O.
 lookups, memo copies and terminal result attachment. `BlobRecords` uses that
 configured reader when its caller omits one. The controller's `WithDataObjects`
 installs it before sharing the store. Physical manifest corruption refuses a
-required record read and a terminal attachment. Memo and depcache retain their
-existing cache-miss rules.
+required record read and a terminal attachment. Memo and depcache distinguish cache absence from authorization or fence refusal.
+A refusal stays an error even when joined with missing or corrupt cache data.
+Memo publication stages a producer-owned record. Only successful settlement makes
+it reusable in that transaction. Unsuccessful settlement removes staged records.
+A rolled-back report cannot publish a reusable result.
 
 `Tenant.StorageStanding` reads policy, retained events, unique blobs, tagged log
 bytes and live upload holds in one snapshot. It shares the blob/log inventory
@@ -749,3 +752,19 @@ retry resets all response metadata, and a failed transaction returns none.
 Team deletion stores and reads request, completion, recheck and lease times in
 Unix nanoseconds. Lease expiry and recheck predicates preserve subsecond
 boundaries. Purge's account timestamp uses the same unit.
+
+## Durable admission
+
+Schema baseline 17 adds `admission_work`, keyed by tenant, run and job. The store
+commits complete logical group grants and one durable arrival per level. Plan
+admission commits with release permission. Job admission commits an award-bound
+permit enforced by starts and process delegation, including groupless jobs.
+Reservations retain their identity through owner handoff. Queue precedence,
+grant and renewal use claim-or-owner liveness. Expired reservations do not revive.
+Job and run terminal transitions release their records. Released work settles
+while plan reacquisition withholds only new releases.
+
+Approval predicates and generated expansions use store-owned evaluation release
+permission. Approval callbacks hold no groups or compute. Controller-owned
+approvals use source-fenced evaluation units. Typed outcomes settle the source
+and evaluation through the existing state machine and derived verdict owner.

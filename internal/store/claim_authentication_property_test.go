@@ -91,6 +91,7 @@ func TestCapabilityResultCannotChangeAfterCompletionOrLossProperty(t *testing.T)
 					t.Fatal(err)
 				}
 			} else {
+				admitExecution(t, tenant, actor)
 				started, err := tenant.TransitionNode(t.Context(), change)
 				if err != nil {
 					t.Fatal(err)

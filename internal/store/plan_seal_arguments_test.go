@@ -54,13 +54,13 @@ func TestPlanSealPreservesRawListInputsAcrossSubmissionSources(t *testing.T) {
 			}
 			persistPlanOwner(t, tenant.s, owner)
 			seedTriggerClaim(t, tenant.s, admitted.RunID, "host", owner.Prefix, 1, tenant.s.now().Add(time.Hour))
-			tenant.s.intake, tenant.s.plans = fakeIntakeContracts{}, sharedPlanContracts{}
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
-			resolved, err := tenant.s.intake.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
+			declarations := runspec.CheckoutDeclarations{Version: 1}
+			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{ArgumentDeclarations: []nodeproto.ArgumentDescription{{Name: "targets", Type: "[]string"}}, Args: map[string]string{"targets": "prod,dev"}, SecretArgs: []string{}, Settings: resolved}}}
+			request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{ArgumentDeclarations: []nodeproto.ArgumentDescription{{Name: "targets", Type: "[]string"}}, Args: map[string]string{"targets": "prod,dev"}, SecretArgs: []string{}, Settings: resolved}}}
 			accepted, err := tenant.AcceptPlan(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)

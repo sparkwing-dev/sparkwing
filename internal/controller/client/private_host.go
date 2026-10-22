@@ -376,3 +376,51 @@ var (
 		TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	} = (*LocalHostClient)(nil)
 )
+
+// MayStart admits exactly the unit's persisted concurrency declarations.
+func (c *LocalHostClient) MayStart(ctx context.Context, binding store.CapacityBinding, actor store.Actor) (store.AcquireSlotResponse, error) {
+	var result store.AcquireSlotResponse
+	if binding.RunID != c.run || c.node != "" && binding.NodeID != c.node {
+		return result, localHostClientRefusal()
+	}
+	if err := c.live(); err != nil {
+		return result, err
+	}
+	transport := c.transport
+	if c.node != "" || actor.Kind == store.ActorHolder {
+		var err error
+		transport, _, err = c.nodeTransport(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+		if err != nil {
+			return result, err
+		}
+	}
+	err := transport.request(ctx, "POST", "/api/v1/runs/{run}/local-host/may-start", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host/may-start", "", localhostwire.LocalCapacityRequest{Binding: binding}, &result)
+	return result, err
+}
+
+// RelinquishStart returns a provisional burst award when local compute is busy.
+func (c *LocalHostClient) RelinquishStart(ctx context.Context, binding store.CapacityBinding, actor store.Actor) error {
+	if binding.RunID != c.run || binding.NodeID == "" || c.node != "" && binding.NodeID != c.node {
+		return localHostClientRefusal()
+	}
+	if err := c.live(); err != nil {
+		return err
+	}
+	transport, _, err := c.nodeTransport(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+	if err != nil {
+		return err
+	}
+	return transport.request(ctx, "POST", "/api/v1/runs/{run}/local-host/relinquish-start", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host/relinquish-start", "", localhostwire.LocalCapacityRequest{Binding: binding}, nil)
+}
+
+func (c *LocalHostClient) ReleaseEvaluation(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.Applied, error) {
+	var result store.Applied
+	if string(ref.RunID) != c.run || c.node != "" || ref.NodeID == "" {
+		return result, localHostClientRefusal()
+	}
+	if err := c.live(); err != nil {
+		return result, err
+	}
+	err := c.transport.request(ctx, "POST", "/api/v1/runs/{run}/local-host/release-evaluation", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host/release-evaluation", "", localhostwire.LocalEvaluationRelease{NodeID: string(ref.NodeID)}, &result)
+	return result, err
+}

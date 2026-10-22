@@ -264,6 +264,9 @@ func engineActor(a capability.Authorized) store.Actor {
 			Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)},
 		}
 	}
+	if a.Principal.Capability.Unit == capability.UnitEval && b.Expansion != nil && b.Expansion.Kind == capability.UnitEval {
+		actor.Owner = store.OwnerLeaseRef{Kind: store.OwnerEval, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), SourceNodeID: runspec.NodeID(b.NodeID), SourceGeneration: runspec.ClaimGeneration(b.Generation), Holder: b.Expansion.Holder, Generation: runspec.ClaimGeneration(b.Expansion.Generation)}}
+	}
 	return actor
 }
 

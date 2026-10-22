@@ -72,7 +72,7 @@ func resourceDocument(r *ResourceHints) *nodeproto.ResourceSpec {
 
 func concurrencyDocument(g *ConcurrencyGroup, cost *int) nodeproto.ConcurrencySpec {
 	l := g.limit
-	spec := nodeproto.ConcurrencySpec{Group: g.name, Capacity: &l.Capacity, Cost: cost, QueueTimeoutMS: milliseconds(l.QueueTimeout), CancelTimeoutMS: milliseconds(l.CancelTimeout)}
+	spec := nodeproto.ConcurrencySpec{Group: g.name, Capacity: &l.Capacity, Cost: cost, QueueTimeoutMS: milliseconds(l.QueueTimeout)}
 	if l.Scope != "" {
 		scope := string(l.Scope)
 		spec.Scope = &scope

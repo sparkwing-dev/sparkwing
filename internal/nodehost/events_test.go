@@ -15,6 +15,13 @@ import (
 
 func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome store.NodeState) error {
 	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: input.Authority.CapabilityPrefix, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+	if outcome == store.NodeCancelled {
+		_, err := f.State.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt), Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}})
+		return err
+	}
+	if err := awaitStart(ctx, f.Tenant, store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil); err != nil {
+		return err
+	}
 	started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt)})
 	if err != nil {
 		return err

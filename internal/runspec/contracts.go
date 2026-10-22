@@ -342,16 +342,15 @@ type ExecutionSettings struct {
 	Jobs        map[string]JobExecutionSettings `json:"jobs"`
 }
 
-// Concurrency contains resolved author policy; the owner computes its scoped key.
+// Concurrency contains resolved author policy; the store derives its scoped key.
 // Nil timeout preserves the retained unbounded wait meaning, never an implicit zero.
 type Concurrency struct {
-	Group           string `json:"group"`
-	Scope           string `json:"scope"`
-	Capacity        int    `json:"capacity"`
-	Cost            int    `json:"cost"`
-	OnLimit         string `json:"on_limit"`
-	QueueTimeoutMS  *int64 `json:"queue_timeout_ms,omitempty"`
-	CancelTimeoutMS *int64 `json:"cancel_timeout_ms,omitempty"`
+	Group          string `json:"group"`
+	Scope          string `json:"scope"`
+	Capacity       int    `json:"capacity"`
+	Cost           int    `json:"cost"`
+	OnLimit        string `json:"on_limit"`
+	QueueTimeoutMS *int64 `json:"queue_timeout_ms,omitempty"`
 }
 
 // safety: Request is submitted to the one intake transaction on every placement.

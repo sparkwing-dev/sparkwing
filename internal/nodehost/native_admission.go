@@ -2,95 +2,60 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity *StoreAdmission) {
-	owner.retainRemote = local != nil
-	owner.bindAdmission = func(bound *OwnerHost, actor store.Actor) {
-		if capacity == nil {
-			return
-		}
-		copy := *capacity
-		copy.Owner = actor
-		configureNativeAdmission(bound, local, &copy)
-	}
-	if local != nil {
-		copy := *local
-		copy.storeGroups = capacity != nil
-		local = &copy
-	}
-	if capacity != nil {
-		copy := *capacity
-		copy.local = local != nil
-		capacity = &copy
-	}
-	owner.claimAdmission = local
-	owner.Around = func(ctx context.Context, accepted AcceptedRun, body func(context.Context) (RunCompletion, error)) (RunCompletion, error) {
-		spec, err := admissionSpec(accepted)
-		if err != nil {
-			return RunCompletion{}, err
-		}
-		if err := requireCapacity(capacity, local, spec.Resolved.Settings.Concurrency); err != nil {
-			return RunCompletion{}, err
-		}
-		work := body
-		if local != nil {
-			work = func(ctx context.Context) (RunCompletion, error) { return local.Run(ctx, accepted, body) }
-		}
-		if capacity != nil {
-			return capacity.Run(ctx, accepted, work)
-		}
-		return work(ctx)
-	}
-	owner.Admit = func(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
-		isLocal := owner.Local != nil && owner.Local(row)
-		if err := requireMachineAdmission(local, isLocal); err != nil {
-			return err
-		}
-		if err := requireCapacity(capacity, local, row.Execution.Concurrency); err != nil {
-			return err
-		}
-		work := body
-		if local != nil {
-			spec, err := admissionSpec(accepted)
-			if err != nil {
-				return err
-			}
-			work = func(ctx context.Context) error {
-				return local.node(ctx, accepted, row, isLocal && spec.Request.Request.Burst == nil, body)
-			}
-		}
-		if capacity != nil {
-			return capacity.Node(ctx, accepted, row, work)
-		}
-		return work(ctx)
-	}
+// StartGate asks the store for permission before acquiring optional host compute.
+type StartGate struct {
+	state    CapacityStore
+	compute  *LocalAdmission
+	required bool
+	Queued   func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error
 }
 
-func requireMachineAdmission(local *LocalAdmission, isLocal bool) error {
-	if isLocal && local == nil {
+func ComposeStartGate(state CapacityStore, compute *LocalAdmission, required bool) StartGate {
+	return StartGate{state: state, compute: compute, required: required}
+}
+
+func (g StartGate) claimedNode(ctx context.Context, input NodeInput, body func(context.Context) error) error {
+	if g.state == nil {
+		return errors.New("execution requires the store start boundary")
+	}
+	if g.required && g.compute == nil {
 		return errors.New("local execution requires machine admission")
 	}
-	return nil
-}
-
-func hasLocalConcurrency(groups []runspec.Concurrency) bool {
-	return slices.ContainsFunc(groups, func(group runspec.Concurrency) bool { return group.Scope == "run" || group.Scope == "box" })
-}
-
-func requireCapacity(capacity *StoreAdmission, local *LocalAdmission, groups []runspec.Concurrency) error {
-	if capacity != nil {
-		return nil
-	}
-	for _, group := range groups {
-		if local == nil || group.Scope == "global" {
-			return errors.New("concurrency admission requires a capacity store")
+	binding := store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}
+	if err := awaitStart(ctx, g.state, binding, executorActor(input), func(response store.AcquireSlotResponse) error {
+		if g.Queued == nil {
+			return nil
 		}
+		return g.Queued(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}, response)
+	}); err != nil {
+		return err
+	}
+	if g.compute == nil {
+		return body(ctx)
+	}
+	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: runspec.ClaimGeneration(input.Generation), Execution: input.Execution}
+	var spec runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+		return err
+	}
+	if spec.Request.Request.Burst == nil {
+		return g.compute.node(ctx, input.Accepted, row, body)
+	}
+	err := g.compute.tryNode(ctx, input.Accepted, row, body)
+	if !errors.Is(err, errComputeBusy) {
+		return err
+	}
+
+	if err := g.state.RelinquishStart(ctx, binding, executorActor(input)); err != nil {
+		return err
 	}
 	return nil
 }

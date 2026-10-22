@@ -112,7 +112,7 @@ func configPath(git Git, dir, scope string) string {
 	return filepath.Clean(v)
 }
 
-func Gates(hooksDir string) []string {
+func gates(hooksDir string) []string {
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
 		return nil
@@ -139,7 +139,7 @@ func Detect(git Git, repoRoot string) (*Shadow, error) {
 	if err != nil {
 		return nil, err
 	}
-	gates := Gates(hooksDir)
+	gates := gates(hooksDir)
 	if len(gates) == 0 {
 		return nil, nil
 	}

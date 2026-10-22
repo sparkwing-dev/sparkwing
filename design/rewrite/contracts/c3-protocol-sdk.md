@@ -1,38 +1,40 @@
 # C3 protocol and SDK contract
 
-## Burst release and machine admission
+## Release and start admission
 
-For a sealed burst request, the owner retains run/box concurrency before
-readiness without acquiring compute resources. Run resource settings still
-flow into each job's sealed settings. A self-claim acquires a job-specific machine lease before the shared store's
-fenced reconciliation. Waiting for machine capacity leaves the job unclaimed.
-A joined state follower cancels that wait when another claimant advances the
-job. Reconciliation still decides who executes after admission succeeds.
-No attempt starts before both admission and the award. Cleanup joins before release.
+The store is the durable admission owner in every placement. Owners propose ready,
+approval and expansion releases. Store transactions grant the complete plan group
+set with permission to release. `MayStart` accepts a job binding and actual award,
+derives all accepted groups and their host scope, and commits a complete job grant
+and award-bound start permit. Every job requires a permit. Skip and fail commit the
+terminal state through the common verdict owner. A wait holds no group from its set.
 
-Independently claimed burst jobs acquire compute resources without reacquiring
-the requester's logical concurrency. This also covers a registered runner on
-the requesting machine. The owner retains those semaphores until persisted job
-completion. Non-burst claimed-job admission keeps its existing concurrency rule.
-For independently awarded jobs, pre-execution machine-admission failure reports
-through the fenced setup result path, with attempt zero retained. A self-hosting
-owner's preclaim admission transport failure returns an error without claiming
-or finishing the job.
+A job's SkipIf and memo run on its executing host after job admission and compute.
+Job starts never reacquire parent plan groups. Recovery processes settlement while
+new releases wait for lapsed plan capacity. Retained reservation identity and one
+arrival sequence belong to run/job, independent of owner generation. Claim or owner
+liveness preserves a retained arrival. An expired reservation cannot revive.
 
-An unclaimed burst job retains its logical concurrency while waiting for
-placement. The owner follows the existing state subscription and retries the
-fenced reconciliation after persisted state or its execution eligibility
-changes. `StateFollower.Wait` includes the private owner's execution projection
-in its change comparison. A capacity observation only wakes reconciliation.
-It never grants an execution award. `WaitNode` retains its state-sequence rule.
+Approvals cannot declare concurrency groups. Initial and expansion acceptance
+refuse them with an error naming the approval and pointing at the job after it.
+An approval's SkipIf runs on the run's coordinator before requesting approval,
+holding no capacity. Store admission releases that SDK evaluation under an owner
+or evaluation-unit fence. The store never runs SDK code. It commits typed skip,
+failure or approval opening through that exact source boundary. Controller-owned
+predicates use evaluation units acting for the coordinator. Expansions use the
+same release permission and retain their own source fence. Completion follows
+the existing state machine, `Decide` and `runVerdictTx`.
 
-The internal machine `Lease` exposes its actual granted `Resources`. Every
-production adapter and test lease implements this method. The owner carries that amount in `ReconcileRequest.Reserved`. The store adds
-it to observed free resources within that reconciliation transaction, bounded
-by the authenticated machine's physical capacity. This input does not update
-stored availability. Execution and ordinary heartbeats report only free
-resources. A concurrent heartbeat cannot erase a job's reservation. The additive
-`reserved` wire field adds no persistent reservation or claim-release route.
+`StartGate` asks for a decision and then optional machine compute. It owns no
+logical semaphore. Burst uses a provisional award, logical admission, then a
+nonblocking compute request. Unavailable compute returns placement and reservations
+without resetting readiness ranking. Cleanup joins before compute releases. Job
+and run terminal transitions remove their durable logical reservations.
+
+Memo absence is a miss. Authorization and fence refusals remain errors, including
+when joined with missing or corrupt cache data. A memo record remains producer-owned
+until successful settlement makes it reusable in the same transaction. Failure,
+cancellation or a rolled-back report cannot publish a reusable result.
 
 ## Declared requester secrets in composed execution
 
@@ -82,8 +84,7 @@ Owner admission refusals use typed store policy results under the live owner and
 captured work generation. Job skip, failure and queue timeout finish the unreleased
 job. Plan refusal preserves completed work, finishes every remaining unreleased
 job, disposes unresolved expansions, and finishes the run and its owner unit in
-one transaction. An approval's true SkipIf persists success without an attempt
-and releases its dependents.
+one transaction. An approval's true SkipIf persists skip without an attempt.
 
 Hosting keeps one exact-unit keeper through preparation and execution, keyed by
 unit kind, run, job, holder and generation. OwnerHost and ClaimedNodeHost adopt
@@ -154,8 +155,8 @@ Session and StartSession. Retained planners and attempts use ProtocolSession.
 Native service and placement cutovers remain open.
 
 [The envelope consolidation](../w3-envelope-consolidation-progress.md) removes
-duplicate layer orders and the local planning loop. Retained local, trigger and
-pod paths use LayerTable and native progress handling. Native owner-policy and
+duplicate layer orders and the local planning loop. Local, trigger and
+pod paths use explicit ordered owner and executor operations and native progress handling. Native owner-policy and
 placement cutovers remain open.
 
 [Shared steps and alias callers](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
@@ -211,8 +212,8 @@ artifact layer. Native placement and cache assembly remain open.
 [Directory caching](w3-depcache-continuation.md) adds the executor depcache layer,
 package-manager resolution and opt-in remote directory-cache reads.
 [Memo verification](w3-memo-continuation.md) adds verified lookup/copy results
-and remote memo reads. Owner-side source selection and atomic materialization
-still need the C1 contract completions listed there.
+and remote memo reads. Executable-job memo evaluation and verified materialization
+run in the shared executor under the job award and concurrency slot.
 
 ## Amendment 1: shared host inputs
 
@@ -290,7 +291,7 @@ This is the implementation contract for node protocol 2, both author SDKs,
 the fake host, and the shared host library. It follows the frozen architecture
 and decisions 87-104. Declarations compile, but bodies marked
 `panic("unimplemented: c3-protocol-sdk")` do not provide runtime behavior.
-The capability and layer tables contain the complete target data.
+Capabilities remain declarative; owner and executor operations encode lifecycle order directly.
 
 ## Ownership
 
@@ -302,7 +303,7 @@ The capability and layer tables contain the complete target data.
 | Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
 | Checkout and entry acquisition | `internal/source/source.go` |
-| Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache.go` |
+| SDK planning, canonical validation and hashing | `internal/nodehost/planning.go` |
 | Exact engines, verified releases and signed version policy | `internal/engine` |
 | Go declarations and services | `sparkwing/sdk_contract.go`, `sparkwing/inputs/memo_contract.go`, retained API inventory below |
 | Author test host | `sparkwing/sparkwingtest/host_contract.go` |
@@ -338,47 +339,44 @@ are part of this contract.
 | `nodehost.AcceptedRun` | Carries canonical accepted spec/plan bytes and their sealed hashes. |
 | `nodehost.RunInput` | Gives a new or resumed owner the sealed request and existing acceptance. |
 | `nodehost.NewRunInput` | Captures an authenticated award's sealed inputs, owner fence and granted runner before placement preparation. |
-| `nodehost.RunCompletion` | Reports the verdict after atomic run/unit finish. |
+| `nodehost.RunCompletion` | Reports the committed verdict and reason returned by atomic run/unit finish, including cancellation after the scheduling snapshot. |
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
 | `nodehost.DebugBoundary`, `DebugBoundaryWaiter`, `OwnerHost.Debug` | Wait at sealed owner pause boundaries under the current owner and job generation. Released boundaries remain released on replay. Persistence and timeout release require an authority-bearing adapter. |
 | `nodehost.OwnerDelegator`, `OwnerHost.Delegator` | Resolve live owner ceilings and delegate expansion submission to the exact source generation under that owner lease. |
 | `nodehost.NewNativeHost`, `NativeHostConfig` | Assemble owner and claimed execution with one native executor and register their delegated process services. |
-| `nodehost.LocalAdmission`, `LocalAdmission.Run`, `LocalAdmission.Node` | Hold local run resources and run/box semaphores through joined scheduling, and job admission through execution and cleanup, using sealed settings. Nonlocal concurrency requires its store adapter. |
-| `nodehost.StoreAdmission`, `CapacityStore`, `NativeHostConfig.Capacity` | Admit sealed plan/job groups through tenant capacity and continuous adoption. Native assembly discovers the store and binds the current run owner on each invocation. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
-| `nodehost.AdmissionFailure` | Preserve admission outcome and reason through cancellation and fenced executor reports. |
-| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Admit scheduling and job release before readiness. Remote jobs retain run/box semaphores through persisted completion without local compute resources. Eviction requests holder cancellation before releasing the semaphore. |
+| `nodehost.LocalAdmission` | Supply the optional machine compute client. The shared admission owner holds CPU and memory for each execution or evaluation through joined cleanup. |
+| `nodehost.CapacityStore`, `StartGate`, `ComposeStartGate` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The thin client presents only its current job award. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
+| `nodehost.NativeHostConfig.Admission`, `NativeConfig.Admission` | Carry one composed admission value. Required requester compute is independent of placement eligibility. Runners may omit compute while retaining the supplied capacity store. |
+| `nodehost.AdmissionFailure` | Preserve the store decision while terminal settlement remains store-owned. |
+| `store.Tenant.ReleaseEvaluation`, ready transitions | Commit plan admission with release permission. Reconciliation starts immediately and settles released work while new releases wait. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
 | `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks, bounded by its persisted job timeout and parent deadline. |
-| `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
 | `nodehost.ProcessGrant` | Transfers a process binding and its idempotent revoker to the executor or owner evaluator. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
-| `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through the common cache boundary. |
-| `nodehost.CheckoutPlanningInput`, `SDKPlanner.PrepareCheckout`, `OwnerPlanning.Resolve` | Resolve acquired project declarations and guards, then compute the settings proposal from the validated fresh or cached plan before acceptance. |
+| `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through canonical validation and acceptance. |
+| `nodehost.CheckoutPlanningInput`, `SDKPlanner.PrepareCheckout`, `OwnerPlanning.Resolve` | Resolve acquired project declarations and guards, then compute the settings proposal from the validated fresh plan before acceptance. |
 | `nodehost.ProtocolSessionConfig.StartPlanning` | Launches unbound describe/plan processes and routes every output stream through the planning secret gate. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NewNodeInput` | Constructs execution from a persisted awarded row, its accepted seal, the selected engine and the granted runner. |
 | `nodehost.ProcessAuthorities`, `NewProcessAuthorities`, `ProcessAuthorityDependencies` | Own narrowed node-host bearers in memory, provide fresh authentication snapshots and process-bound resource checks, resolve live services, and revoke authority on process exit or registry shutdown. |
-| `nodehost.ConcurrencyKey`, `nodehost.ParseConcurrencyKey` | Encode and decode scoped group identity without separator collisions. |
+| `runspec.ConcurrencyKey`, `runspec.ParseConcurrencyKey`, `nodehost.ScopeLabelFromKey` | Share the persisted key codec and render its scope without separator collisions. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
 | `nodehost.ExecutorDependencies.Log` | Delivers masked host diagnostics under the committed attempt after step/retry writes. Delivery errors stop further author code, prevent retries and propagate after joining work. |
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
 | `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
 | `nodehost.DepcacheRecords`, `DepcacheRecords.Prepare` | Restore declared directories once and save cold successful caches after retries through the current storage binding. |
-| `nodehost.MemoRecords`, `MemoRecords.Lookup`, `MemoRecords.Copy` | Verify scoped lookup and copy results, including explicit remote reads, before returning reusable references. They grant no claim and write no lifecycle state. |
 | `nodehost.SDKEnvironment.CacheDirectory` | Resolve Go/npm cache directories with the captured environment, persisted job values and platform tool invocation. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
 | `nodehost.SDKEnvironment`, `ProtocolSessionConfig.Environments` | Project captured host inputs, sealed run facts and persisted job environment through the shared process policy before native SDK startup. |
 | `nodehost.FileEnvironmentSnapshots`, `NewFileEnvironmentSnapshots`, `CapturedEnvironmentLoader` | Store private local values and verify the request's environment identity before source acquisition or SDK startup. |
-| `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
-| `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
-| `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
+| `nodehost.OwnerOperations`, `ExecutionOperations`, `EvaluationOperations` | Supply placement callbacks to `NativeHostConfig`, which takes shared dependencies once. |
 | `nodehost.Reconciler.ReconcileNode` | Follows a holder and repeats atomic reconciliation after terminal or requeue events. |
 | `nodehost.StateFollower`, `StateReader`, `StateSubscription` | Share persisted catch-up and joined subscriptions between owner graph waits and node reconciliation. |
 | `nodehost.ExpansionStore` | Gives owner/eval hosts the Tenant's expansion persistence boundary. |
@@ -456,12 +454,16 @@ are part of this contract.
    SDK invocation. Terminal and blocked-step records carry the same holder,
    capability, generation and attempt as the job. A refused write stops further
    dispatch, joins active steps and fails loudly without an application retry.
-7. The layer table is authoritative: debug, skip_if, approval, memo and admission
-   belong to the owner. Artifacts, caches, retry and timeout belong to the executor.
-   A local in-process execution applies both sides once. A dispatched executor
-   applies only its side. A launcher pod may evaluate owner closures, but the
-   controller records their decisions through the same transitions. Bounce,
-   worker-cap and retry-auto layers do not exist.
+7. The owner gates new releases on plan admission and applies debug and approval
+   policies. Executable jobs acquire their job groups and machine resources under
+   the actual execution award. The shared executor evaluates SkipIf, then memo
+   checks, before staging artifacts and caches or invoking the body. A skip or
+   memo hit settles the job and releases its groups. The coordinator acquires no
+   job groups to evaluate these closures. The executor runs bodies under timeout
+   and retry before publishing and joining cleanup. Local and dispatched jobs
+   use this same path. Approval SkipIf remains an admission condition. Its host
+   placement awaits resolution because approval-only jobs have no execution award.
+   Bounce, worker-cap and retry-auto layers do not exist.
 8. Executor attempts replan only to reconstruct code and verify accepted hashes.
    Generated jobs replay their generator chain from recorded outputs for the same
    purpose. Replay cannot add, delete or change persisted topology. A mismatch
@@ -497,39 +499,23 @@ are part of this contract.
     holders and generations supplied by an SDK or arbitrary HTTP body grant no
     authority. The store derives binding from authenticated capability records.
 
-## Memo candidate verification
+## Memo materialization
 
-`MemoRecords.Lookup` calls the supplied transactional record client with the
-bound repository/ref and declared job key. Local hits require authoritative
-`HasMany` presence for output, manifest and member digests. Downloads must verify
-through EOF and close. Output must also satisfy the shared JSON/size rule.
-Declared output and artifacts require their references. Explicit JSON null and
-an empty artifact manifest remain valid. Missing, refused, corrupt, malformed or
-over-budget results return an empty miss. Parent cancellation remains an error.
-Diagnostics contain only a constant message.
+The store's `ReconcileNode` owns authorized memo/retry materialization and its
+terminal lifecycle event. A failed copy cannot publish partial result edges or
+report memoized success. Missing or corrupt required bytes become a miss; live
+authorization and claim-fence refusals remain errors. Owner policies supply a
+scoped source for retry and coalescing. Executable-job memo checks run in the
+shared executor after SkipIf under the actual job award and acquired groups.
+Verified memo bytes are copied into the awarded attempt before memoized success
+is reported. The store and storage adapters retain scope and copy authorization.
 
-`MemoRecords.Copy` sends the supplied CopyMemoRequest unchanged after checking
-its authority and destination against the binding. It verifies the returned hit
-by the same rules. The record store owns the atomic copy and repeats live
-authorization. The host cannot make a successful verdict from a failed copy.
-Copy requires the positive destination attempt declared by C1. It cannot serve
-owner hits before execution until C1 resolves the destination-identity gap.
-
-Explicit RemoteCache enables a remote lookup only after a clean local miss.
-Every remote download uses RemoteCache.Artifact. No remote digest reaches the
-local byte client, and these reads never call CopyMemo or CommitRecord. W7 owns
-the remote user's live authorization and verified-default provenance.
-
-These APIs verify candidates. ReconcileNode still owns terminal materialization
-and the sole lifecycle event. LookupMemo does not yet identify a definitive
-MaterializeSource, and the record contract does not specify memo publication
-encoding for optional outputs. Native owner composition, publication, coalesced
-followers and remote-to-local import remain open. The continuation lists the
-required contracts without changing another area's declarations.
+Explicit `RemoteCache` remains read-only. Artifact and depcache readers use its
+verified downloads; it grants no local upload receipt or lifecycle authority.
 
 ## Executor directory caches
 
-`DepcacheRecords.Prepare` implements the caches row of `LayerTable`. `Bind`
+`DepcacheRecords.Prepare` restores executor caches and returns their finalizer. `Bind`
 resolves a write destination for the current attempt and the derived
 `blob.DepcacheKey`. It must return a `JobUpload` whose authority, repository,
 ref, pipeline, job, cache name and key match those inputs. The controller still
@@ -560,40 +546,17 @@ safe warning and preserve the job verdict. `Budget` bounds cache reads only
 when its caller supplies a deadline. No cache timeout, size cap or expiry is
 added here.
 
-## Planning cache
+## SDK planning
 
-C3 owns the default-enabled `nodehost.PlanCache`. `PlanCacheInputs` includes the
-team/repository scope, exact engine/SDK, entry and source-tree digests, project
-settings, merged args, environment, checkout policy, describe result, secret
-registry version, granted runner and complete SDK-visible run context.
-`PlanCacheIdentity` canonicalizes that input with explicit presence. A changed
-input changes the key. An input whose dependency set cannot be established
-bypasses the cache and plans normally.
+`PlanInitial` runs SDK planning and calls `nodeproto.ValidatePlan` and
+`runspec.CanonicalHash` directly. `PlanningInput` carries the current validation
+context. `PlannedInitial` carries the validated declarations, canonical bytes
+and hash to `AcceptPlan`, which validates again in its acceptance transaction.
+Resumes use the persisted accepted plan.
 
-The complete run context includes run IDs and timestamps because the SDK can
-read them during planning. This conservative key permits reuse only when those
-inputs also match. Cross-run reuse needs an explicit SDK guarantee before any
-of those fields can be omitted. Key digests stay private, because hashes of
-secret-bearing inputs can reveal guesses.
-
-`PlanCache.Lookup`, `Put` and `Invalidate` own persistence. Entries hold raw
-validated declarations and their canonical hash, never another run's accepted
-seal or authority. Missing, corrupted, stale or unreadable entries are misses
-with a reason, followed by normal planning. There is no new cache-age cutoff.
-`ValidatePlanCacheHit` checks the key/digest and reruns `ValidatePlan` with the
-current capability table and secret matcher. It returns `ValidatedPlanHit`.
-
-Every hit still enters `AcceptPlan` with checkout-derived facts. The store
-reruns validation, settings resolution, operator ceilings, authority and secret
-preflight and commits seal point two. A hit bypasses SDK planning compute, so
-it has no planning charge. Cache writes happen only for validated initial
-plans; generator expansions remain under their own transactional barrier.
-`PlanningInput` supplies this dependency to every placement's planning path. Native host assembly uses a private scoped file cache under its source workspace, or the user cache directory when no workspace is configured. Checkout planning constructs the cache before describe; the native environment projection and acquired checkout/entry bytes supply fingerprints before lookup. Source fingerprints include Git metadata. Nonregular source dependencies, external Git metadata/alternates, and unresolved executables bypass reuse. Inputs that mutate externally after capture are unsupported varying inputs; capture does not lock the filesystem. `PlanningInput.Disabled` is the explicit opt-out; absent cache wiring is an error, while cache storage failures warn and plan normally.
-
-`PlanInitial` connects cache lookup, validation, invalidation and fresh planning.
-Its `PlanningFunctions` use the shared validator and canonical hasher by default.
-`PlannedInitial.CacheHit` records whether SDK planning ran. Every result still
-passes `AcceptPlan`. Cache diagnostics omit input hashes and declaration contents.
+`SDKPlanner`, `ExecutorDependencies` and `EvaluationDependencies` accept external
+process and storage adapters. They cannot replace validation or hashing.
+Execution and generator replay call the same canonical algorithms as planning.
 
 ## Host adapter boundaries
 
@@ -641,8 +604,8 @@ these errors may contain credentials before ordinary job logging starts.
 An acquisition adapter that returns success after cancellation cannot continue
 to acceptance or scheduling. Requested cancellation before acceptance finishes
 the run and owner unit atomically. Lease loss and failed resume setup leave the
-work to recovery. Initial planning retains the cancellation cause across cache
-lookup, hit validation, invalidation, fresh planning, hashing and publication.
+work to recovery. Initial planning retains the cancellation cause across SDK
+planning, hashing and acceptance.
 The owner seal acceptance check covers masked setup/acceptance errors and late
 acquisition success after cancellation with fake store and acquisition adapters.
 
@@ -774,9 +737,9 @@ nonprivate snapshots fail before acquisition or process startup. A read failure
 cannot select the daemon's environment.
 
 `PlanningProcessInput.Environment` carries the intake snapshot metadata through
-describe and plan. `SDKPlanner` includes its digest beside the host environment
-digest in the planning-cache inputs. Snapshot identity cannot replace missing
-host inputs or hide changes to a remote base.
+describe and plan. Planning runs for each invocation with the sealed snapshot
+and host environment. Snapshot identity cannot replace missing host inputs or
+hide changes to a remote base.
 Attempt and eval startup read the identity from the accepted request, including
 retry seals that retain the source run ID. Native child-process tests use the
 real procenv policy to check credential filtering and runtime identity after
@@ -827,26 +790,50 @@ The owner and claimed-node adapters preserve it. A successful cancellation reply
 uses that reason in `lease.CancelError`. An absent reason keeps `cancel_requested`.
 Failed renewal replies cannot request cancellation or replace the first cause.
 
-`OwnerEvaluator.SkipIf` evaluates predicates in declaration order and stops at
+The shared predicate evaluator evaluates predicates in declaration order and stops at
 the first true result. Each predicate reconstructs and checks the accepted code
 in its own process. An expired eval is cancelled by private request ID and joined
 before that process closes. The
 per-predicate budget is 30 seconds unless declared otherwise. Timeout means
-don't skip and records the predicate index in `SkipEvaluation.TimedOut` for host
+don't skip and records the predicate index in the evaluation diagnostics for host
 diagnostics. The next predicate starts after close and cleanup join. Null and
-non-boolean results, drift, SDK failures and cleanup errors prevent dispatch.
+non-boolean results, drift, SDK failures and cleanup errors prevent body execution.
 
-`NewNativeHost` installs this evaluator for the `skip_if` owner layer. Approval
-opening uses the store transition and state follower. Its caller-supplied
-`Owner.Layer` handles active debug, memo and admission policies. Jobs without
-those policies need no callback. Local execution requires machine CPU/memory
-admission independently from store concurrency groups, including when no group
-is declared. Selection uses the scheduler's dependency closure, including present
+`NewNativeHost` installs executable-job predicates in the shared executor after
+admission under the actual award. The owner evaluator retains approval
+conditions before the human wait. Approval opening uses the store transition and
+state follower. Approval evaluation uses store-owned release permission because these
+jobs have no execution award. Its caller-supplied `OwnerOperations` supplies
+active debug policy. Requester adapters
+require machine CPU/memory admission. Runner adapters enable compute admission
+only with `runner.local_admission`; placement eligibility does not decide this
+requirement. `ComposeStartGate` supplies the store decision client and optional compute.
+Remote owners propose releases through `RemoteHostStore`. Executable-job admission uses the
+actual job award before predicate and memo evaluation.
+Plan and job groups have separate persisted key namespaces. Pipeline acceptance
+refuses box-scoped plan groups because a run can span machines, naming the group
+and pointing at job-level box scope. Controller scheduling admits all plan
+groups before releasing work. Native owners revalidate the same plan admission
+before each subsequent release. After any work has been released, plan
+reacquisition queues without a timeout under every original on-limit policy.
+Released jobs finish while further releases wait. Queue views name the group
+being reacquired.
+The capacity store derives job-level box scope only from `Capability.ExecutionHost`, sealed
+on the award independently of its accountable subject. Machine roots and Actions
+push credentials use their machine subject. Account-backed here awards use the
+origin machine authenticated by the intake proof. Local peers use their peer
+identity. Launcher awards seal the reserved node identity only during authenticated
+activation of that node. Capacity-demand observations never seal an execution host. The identity survives child awards, delegation and
+bootstrap exchange. A later observation cannot replace it. An award without an
+execution host is refused for box scope; an unactivated launcher award waits. Compute admission settings do not select
+a concurrency namespace.
+The private client sends only the unit binding; the store admits all its groups.
+Selection uses the scheduler's dependency closure, including present
 optional dependencies and generator sources. The
-native layer logs timeout indices and proposes a skipped transition only after
-evaluation, revocation and cleanup join. Approval SkipIf success still requires
-the missing C1 owner approval-success edge. The native layer refuses that case
-instead of recording the approval as a skipped job.
+executor logs timeout indices and reports a skipped result only after evaluation,
+revocation and cleanup join. Approval SkipIf success uses the fenced
+PolicyApprovalBypass fenced transition, which records skip without
+creating an execution attempt.
 
 Both session implementations use one platform process launcher. The duplicate
 native launch functions and their forwarding file are removed. Native owner
@@ -867,12 +854,12 @@ SDK may already have consumed the frame while the writer has not yet published
 completion. A completed write proceeds to targeted cancellation and leaves the
 session usable. A blocked write still fails the session and joins the child.
 
-`OwnerEvaluator.MemoKey` evaluates the declared closure with its existing
-30-second budget. A nonempty string supplies the key; null disables memoization
-for the job. NoMemo bypasses reads while preserving key evaluation for later
-writes. The store and storage adapters still own scope, result authorization and
-materialization. Neither evaluator creates an attempt. Cancellation retains its
-cause, and other policy error text passes through masking.
+The shared executor evaluates the memo-key closure after SkipIf, inside the
+job's acquired concurrency slot, with its existing 30-second budget. A nonempty
+string supplies the key; null disables memoization for the job. NoMemo bypasses
+reads while preserving key evaluation for later writes. The store and storage adapters still own scope, result authorization and
+materialization. The executable job uses its awarded attempt. Cancellation
+retains its cause, and other policy error text passes through masking.
 
 `OwnerEvaluator.Expand` checks the persisted source generation and declaration
 hash, then reads its authorized recorded output. A successful or memoized source
@@ -975,17 +962,19 @@ byte/record transactions. Generated tests cover outside symlink chains and
 attempt/scope mismatches. Real upload binding, source record reads, edge checks
 and native placement assembly remain integration points.
 
-Owner reuse now probes MaterializeOnly before admission. A hit materializes;
-a miss returns Dispatch without awarding execution. DecisionCancelHolder uses
+Owner retry and coalescing reuse can probe MaterializeOnly before admission.
+Executable-job memo checks instead run inside the execution slot under the job
+award. A retry or coalescing hit materializes; a miss returns Dispatch without
+awarding execution. DecisionCancelHolder uses
 the run owner's scoped cancellation transition. Native store/HTTP assembly must
 still supply those transactions.
 
-Owner policy also needs a fenced store edge for a skip predicate that errors
-before dispatch. `NodeTransitions` permits owner dependency skips and cancels,
-but no pending-to-failed policy result. Debug pause status detail has no typed
+Executable-job predicate errors report a fenced failure from the executor under
+the job award. Owner approval-condition failures retain the owner policy result
+path. Debug pause status detail has no typed
 mutation in `TransitionExtra`. Neither path may fall back to legacy raw writers.
-Approval conditions need a pending-to-success edge when SkipIf returns true,
-because that bypass must release dependents. A skipped dependency would suppress
+Approval conditions use the pending-to-success PolicyApprovalBypass edge when
+SkipIf returns true, because that bypass must release dependents. A skipped dependency would suppress
 them. Approval waiting also needs the persisted opening time and resolution ID
 in the read contract so a replacement owner retains the original deadline.
 Eval log identity accepts a materialized source at generation zero because
@@ -1063,7 +1052,7 @@ tests for implementations, not claims that the declaration stubs execute.
 | Expansion replay and cancellation race | §3.6 | Same body replays, changed body conflicts, stale/cancelled authority writes nothing. |
 | Lease cancellation, rejection, silence and shedding | §2.4 | Exact cause, no liveness extension on 429/503, joined cleanup, watched jobs delivered. |
 | Direct source across placements and owner loss | §2.5, A15 | Exact SHA, retained default-branch trust, SSH/App/HTTPS, authorized submodules and bundle seed. |
-| Run and node admission adoption | §3.7 | Only continuously counted holders/waiters retain capacity or arrival order. |
+| Run and node reservation continuity | §3.7 | Only continuously counted holders/waiters retain capacity or arrival order. |
 | Artifacts, memo and directory-cache parity | §8.1 | Integrity, existence and reference-edge checks; unrelated-job digest refused. |
 | Author SDK and fake-host fixture | §6.6-6.8 | Every retained/new API compiles without runtime plumbing and Go/TS plans agree. |
 | Windows and cleanup | §5.6, §6.2 | Handles travel in argv, child tools inherit none, private files use fssecure. |
@@ -1186,10 +1175,10 @@ joined cleanup. Its SDK receives the filtered remote process environment.
 
 ## Burst claimed-job machine admission
 
-`ClaimedNodeHost.Admission` optionally holds the existing machine admission
-lease around source preparation, SDK execution and joined cleanup. Native
-composition supplies it through `NativeHostConfig.ClaimAdmission` for registered
-machines with local admission enabled. Independently claimed jobs have separate
+`ClaimedNodeHost.Admission` holds store-owned concurrency around source
+preparation, SDK execution and joined cleanup. `NativeHostConfig.Admission`
+composes that capacity store with optional CPU and memory admission for
+registered machines with local admission enabled. Independently claimed jobs have separate
 job-specific holders, including when they belong to one run. Admission refusal
 before source acquisition reports the claim's terminal setup result without
 starting an attempt. Cloud Job execution keeps its existing physical allocation.

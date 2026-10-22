@@ -78,15 +78,16 @@ func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
 	}
 }
 
-func TestOwnerPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
+func TestExecutorPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
 	for _, mode := range []string{"binding", "bind_error", "start_error", "nil_process", "revoke_error", "success"} {
 		t.Run(mode, func(t *testing.T) {
-			input, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+			input, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
+				job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
 				job.Closures.SkipIf = []string{"condition"}
 			})
 			input.RouteBinding.Routes.Bearer = "parent"
 			revoked := false
-			deps.Bind = func(_ context.Context, in EvaluationInput) (ProcessGrant, error) {
+			deps.Bind = func(_ context.Context, in NodeInput) (ProcessGrant, error) {
 				binding := in.RouteBinding
 				binding.Routes.Bearer = "child"
 				if mode == "binding" {
@@ -96,7 +97,7 @@ func TestOwnerPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
 					revoked = true
 					for _, process := range *processes {
 						if process.closed != 0 || process.cleaned != 0 {
-							t.Error("owner authority outlived join or cleanup")
+							t.Error("executor authority outlived join or cleanup")
 						}
 					}
 					if mode == "revoke_error" {
@@ -110,14 +111,14 @@ func TestOwnerPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
 				return grant, nil
 			}
 			start := deps.Start
-			deps.Start = func(ctx context.Context, in EvaluationInput) (ExecutorProcess, error) {
+			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 				if mode == "start_error" {
 					return nil, errors.New("start failed")
 				}
 				if mode == "nil_process" {
 					return nil, nil
 				}
-				p, err := start(ctx, in)
+				p, err := start(ctx, in, activity)
 				p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 					if request.Op == nodeproto.OpEval {
 						return nodeproto.EvalResult{Value: []byte("false")}, nil
@@ -126,11 +127,8 @@ func TestOwnerPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
 				}
 				return p, err
 			}
-			host, err := NewOwnerEvaluator(deps)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = host.SkipIf(t.Context(), input)
+			host, spec, job := executorPolicyHost(t, deps, input)
+			_, err := host.skipIf(t.Context(), input, spec, job)
 			if !revoked || (err == nil) != (mode == "success") {
 				t.Fatalf("revoked=%v error=%v", revoked, err)
 			}
@@ -177,6 +175,7 @@ func FuzzOwnerBindingRevocation(f *testing.F) {
 	f.Add("run", "build", "child", true)
 	f.Fuzz(func(t *testing.T, run, job, bearer string, bindError bool) {
 		input, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
+			job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
 			job.Closures.SkipIf = []string{"condition"}
 		})
 		input.RouteBinding.Routes.Bearer = "parent"
@@ -203,7 +202,7 @@ func FuzzOwnerBindingRevocation(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = host.SkipIf(t.Context(), input)
+		_, err = host.approvalSkipIf(t.Context(), input)
 		valid := !bindError && run == input.Accepted.RunID && job == input.NodeID && bearer != "" && bearer != "parent"
 		if !revoked || (len(*processes) != 0) != valid || (err == nil) != valid {
 			t.Fatalf("valid=%v revoked=%v processes=%d error=%v", valid, revoked, len(*processes), err)

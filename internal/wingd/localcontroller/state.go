@@ -6,24 +6,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 type localState struct {
 	binding Binding
-	cipher  controller.Cipher
 	mu      sync.Mutex
 	ready   bool
 }
 
-// NewState projects activity and opens secrets through the elected controller's store.
-func NewState(binding Binding, cipher controller.Cipher) (State, error) {
-	if binding.Store == nil || binding.Tenant == nil || binding.Tenant.Team() != store.DefaultTeam || cipher == nil {
-		return nil, errors.New("wingd: local state requires the owned default-team store and secrets cipher")
+// NewState projects activity from the elected controller's store.
+func NewState(binding Binding) (State, error) {
+	if binding.Store == nil || binding.Tenant == nil || binding.Tenant.Team() != store.DefaultTeam {
+		return nil, errors.New("wingd: local state requires the owned default-team store")
 	}
-	return &localState{binding: binding, cipher: cipher}, nil
+	return &localState{binding: binding}, nil
 }
 
 func (s *localState) Ready() error {
@@ -34,20 +32,6 @@ func (s *localState) Ready() error {
 		return errors.New("wingd: local state has not reconciled")
 	}
 	return s.binding.Store.AsOperator().Ping(context.Background())
-}
-
-func (s *localState) TypeSafeAPIKey(ctx context.Context) (string, error) {
-	if err := context.Cause(ctx); err != nil {
-		return "", err
-	}
-	secret, err := s.binding.Tenant.GetSecretRow("TYPESAFE_API_KEY", "")
-	if errors.Is(err, store.ErrNotFound) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return controller.OpenSecretValue(s.cipher, s.binding.Tenant.Team(), secret)
 }
 
 func (s *localState) Reconcile(ctx context.Context, lease store.SingletonLease) (wingd.LocalActivity, error) {

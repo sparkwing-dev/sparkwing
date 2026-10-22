@@ -105,7 +105,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	plan, err := tx.store.planServices().ValidatePlan(input.Plan, nodeproto.ValidationContext{Placement: RequestPlacement(run.Request.Request), Secrets: secrets})
+	plan, err := validatePlan(input.Plan, nodeproto.ValidationContext{Placement: RequestPlacement(run.Request.Request), Secrets: secrets})
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
@@ -115,7 +115,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if err := nodeproto.ValidateInitialJobArguments(input.Resolved.ArgumentDeclarations, plan.Jobs); err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	resolved, err := tx.store.intakeServices().ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: input.Declarations, Plan: plan, Context: settings.Context{Local: RequestPlacement(run.Request.Request) == nodeproto.PlacementLocal}})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: input.Declarations, Plan: plan, Context: settings.Context{Local: RequestPlacement(run.Request.Request) == nodeproto.PlacementLocal}})
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
@@ -139,7 +139,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 		return runspec.Spec{}, nil, err
 	}
 	input.Plan = body
-	spec, err := tx.store.intakeServices().SealSpec(input)
+	spec, err := runspec.SealSpec(input)
 	return spec, body, err
 }
 

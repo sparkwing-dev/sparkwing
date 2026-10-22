@@ -39,8 +39,8 @@ func TestPrivateNodeHostRoutesRequireBoundClaimAuthority(t *testing.T) {
 		for _, access := range route.Access {
 			read := operation.method == "GET" || operation.suffix == "/authentication" || operation.suffix == "/binding"
 			if access.Credential == capability.CredentialEval {
-				if !read || access.Binding != capability.BindRun || access.Liveness != capability.LiveExpansion || !slices.Equal(access.Grants, []capability.Grant{capability.ExpansionSubmit}) {
-					t.Errorf("private eval route exceeds its read boundary: %s %+v", path, access)
+				if !(read || operation.suffix == "/transition") || access.Binding != capability.BindRun || access.Liveness != capability.LiveExpansion || !slices.Equal(access.Grants, []capability.Grant{capability.ExpansionSubmit}) {
+					t.Errorf("private eval route exceeds its live expansion boundary: %s %+v", path, access)
 				}
 				continue
 			}
@@ -118,8 +118,8 @@ func TestAwardVocabulary(t *testing.T) {
 		if len(policy.Bindings) == 0 || len(policy.ClaimGrants) == 0 || policy.Parent == "" {
 			t.Errorf("incomplete policy for %s", policy.Unit)
 		}
-		if policy.Purpose == capability.PurposeEval && (!slices.Equal(policy.Grants, []capability.Grant{capability.ExpansionSubmit, capability.DataRead}) || policy.Unit != capability.UnitEval) {
-			t.Fatal("eval has authority outside expansion and source reads")
+		if policy.Purpose == capability.PurposeEval && (!slices.Equal(policy.Grants, []capability.Grant{capability.ExpansionSubmit, capability.DataRead, capability.SecretsRelease, capability.RefsRead}) || policy.Unit != capability.UnitEval) {
+			t.Fatal("eval grant vocabulary differs from evaluation reads and submission")
 		}
 		if policy.Purpose == capability.PurposeWork && policy.Unit != capability.UnitNode {
 			t.Fatal("work is not persisted as node")
@@ -198,5 +198,19 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 	}
 	if len(seen) != 14 {
 		t.Fatal("payment event inventory incomplete")
+	}
+}
+
+func TestPrivateCapacityRoutesRequireLiveExecutionAward(t *testing.T) {
+	for _, operation := range []string{"may-start", "relinquish-start"} {
+		path := "/api/v1/runs/{run}/local-host/" + operation
+		route, ok := capability.LookupRoute("POST", path)
+		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || route.Retry != capability.RetryExactBody || len(route.Access) != 1 {
+			t.Fatalf("missing start policy: %s %+v", path, route)
+		}
+		award := route.Access[0]
+		if award.Credential != capability.CredentialClaim || award.Binding != capability.BindRun || award.Liveness != capability.LiveSensitive || !slices.Equal(award.Grants, []capability.Grant{capability.NodeReport}) {
+			t.Fatalf("start exceeds job award: %s %+v", path, award)
+		}
 	}
 }

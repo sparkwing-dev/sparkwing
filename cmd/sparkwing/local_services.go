@@ -135,7 +135,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		return localcontroller.Services{}, err
 	}
 	cipher := keyring.For(b.Store.AsOperator())
-	state, err := localcontroller.NewState(b, cipher)
+	state, err := localcontroller.NewState(b)
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
@@ -209,7 +209,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 				resources := match.Resources{Cores: float64(runtime.NumCPU())}
 				return resources, resources, nil
 			},
-			Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+			Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
 				return newLocalNativeServices(ctx, b.Home, b.Store, binding, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
 			},
 		},

@@ -32,6 +32,7 @@ func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
 	raw := nativeClaimPresentation(t, engine, authorized)
 	server := engine.Server
 	handler := server.HTTP().API
+	engineAdmitBearer(t, engine.Store, raw)
 	engineClaimHTTP(t, handler, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{handler}}, Bearer: func(context.Context) (string, error) { return raw, nil }}
 	host, err := client.NewNodeHostClient(options, "run", "job")

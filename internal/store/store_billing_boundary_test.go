@@ -153,6 +153,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatal(err)
 	}
 	claim, actor := meteredUnitClaim(t, s, demand)
+	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, Cause: CauseStart, To: NodeRunning, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}

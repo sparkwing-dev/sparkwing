@@ -241,9 +241,9 @@ func TestDeclaredSchedulesReadsScheduleLists(t *testing.T) {
   - name: manual
     entrypoint: Manual
 `)
-	declared, err := DeclaredSchedules(root)
+	declared, err := declaredSchedules(root)
 	if err != nil {
-		t.Fatalf("DeclaredSchedules: %v", err)
+		t.Fatalf("declaredSchedules: %v", err)
 	}
 	if len(declared) != 2 {
 		t.Fatalf("declared %d schedules, want 2: %+v", len(declared), declared)
@@ -264,20 +264,20 @@ func TestDeclaredSchedulesReadsScheduleLists(t *testing.T) {
 }
 
 func TestDeclaredSchedulesRefusesToGuessAtAnUnreadableCheckout(t *testing.T) {
-	if _, err := DeclaredSchedules(t.TempDir()); err == nil {
+	if _, err := declaredSchedules(t.TempDir()); err == nil {
 		t.Fatal("a checkout with no config read as declaring nothing")
 	}
-	if _, err := DeclaredSchedules(filepath.Join(t.TempDir(), "gone")); err == nil {
+	if _, err := declaredSchedules(filepath.Join(t.TempDir(), "gone")); err == nil {
 		t.Fatal("a missing checkout read as declaring nothing")
 	}
 }
 
 func TestDeclaredSchedulesOnAConfigWithNoCadence(t *testing.T) {
-	declared, err := DeclaredSchedules(writeRepo(t, "svc", `  - name: manual
+	declared, err := declaredSchedules(writeRepo(t, "svc", `  - name: manual
     entrypoint: Manual
 `))
 	if err != nil {
-		t.Fatalf("DeclaredSchedules: %v", err)
+		t.Fatalf("declaredSchedules: %v", err)
 	}
 	if len(declared) != 0 {
 		t.Fatalf("declared %d schedules, want none", len(declared))
@@ -1230,13 +1230,13 @@ func TestHealthAcceptsAHostTickingFromItsOwnScheduler(t *testing.T) {
 
 func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {
 	repo, pipeline := "https://github.com/acme/app.git", "nightly"
-	if got, want := TeamScheduleID(store.DefaultTeam, repo, pipeline, "default"), ScheduleID(repo, pipeline, "default"); got != want {
+	if got, want := teamScheduleID(store.DefaultTeam, repo, pipeline, "default"), ScheduleID(repo, pipeline, "default"); got != want {
 		t.Errorf("the operator's id = %s, want the unchanged %s", got, want)
 	}
-	if TeamScheduleID("", repo, pipeline, "default") != ScheduleID(repo, pipeline, "default") {
+	if teamScheduleID("", repo, pipeline, "default") != ScheduleID(repo, pipeline, "default") {
 		t.Error("an empty team does not name the operator's id")
 	}
-	a, b := TeamScheduleID("team-a", repo, pipeline, "default"), TeamScheduleID("team-b", repo, pipeline, "default")
+	a, b := teamScheduleID("team-a", repo, pipeline, "default"), teamScheduleID("team-b", repo, pipeline, "default")
 	if a == b || a == ScheduleID(repo, pipeline, "default") {
 		t.Errorf("two teams arm one schedule under ids %s and %s", a, b)
 	}

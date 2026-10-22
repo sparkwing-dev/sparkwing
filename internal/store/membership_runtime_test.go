@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-
 	"math/rand/v2"
 	"slices"
 	"strings"

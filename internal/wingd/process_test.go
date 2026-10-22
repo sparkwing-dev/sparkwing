@@ -275,12 +275,12 @@ func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
 	home := shortHome(t)
 	victim := startProc(t, "hold", "--home", home, "--run", "victim",
 		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only",
-		"--cancel-timeout-ms", "5000", "--daemon-idle-ms", "3000")
+		"--daemon-idle-ms", "3000")
 	victim.waitOK(10 * time.Second)
 
 	aggressor := startProc(t, "hold", "--home", home, "--run", "aggressor",
 		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only",
-		"--cancel-timeout-ms", "5000", "--daemon-idle-ms", "3000")
+		"--daemon-idle-ms", "3000")
 	aggressor.waitOK(10 * time.Second)
 
 	got := victim.waitLine("EVICTED ", 10*time.Second)

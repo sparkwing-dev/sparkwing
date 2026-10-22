@@ -20,6 +20,9 @@ import (
 func (s *Server) localHostEndpoints() []Endpoint {
 	engine := s.engineController
 	return []Endpoint{
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/may-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostCapacity},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/release-evaluation", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostReleaseEvaluation},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/relinquish-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostRelinquishStart},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/data-authority", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDataAuthority},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDataAuthority},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localNodeSnapshot},

@@ -206,7 +206,7 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 		sha = c.Binding.Push.SHA
 	}
 	var generation any
-	if c.Binding.Generation != 0 {
+	if c.Binding.Generation != 0 || c.Unit == capability.UnitEval {
 		generation = c.Binding.Generation
 	}
 	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil

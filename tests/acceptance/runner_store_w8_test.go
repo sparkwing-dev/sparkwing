@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 
@@ -214,9 +216,9 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 			return nil, err
 		}
 		return storedRunnerClientW8(t.Context(), server, bearer)
-	}, Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+	}, Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 		t.Fatal("revoked award reached native binding")
-		return runners.NativeServices{}, capability.Principal{}, nil
+		return nodehost.NativeServices{}, capability.Principal{}, nil
 	}}
 	if err := host.Host(t.Context(), *response.Claim); err == nil {
 		t.Fatal("revoked root reached hosting")

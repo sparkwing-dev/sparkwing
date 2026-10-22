@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 )
@@ -28,9 +28,6 @@ func TestOwnerHostReadsAcquiredProjectForSharedPlanning(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry.Engine = process.Entry.Engine
-	planner.CanonicalHash = func(any) (runspec.Hash, error) {
-		return runspec.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), nil
-	}
 	f.snapshot.Run.Request.RunID = "run"
 	f.snapshot.Run.Request.Request.ExecutionLocation = "local"
 	input.SealedRequest, err = json.Marshal(f.snapshot.Run.Request.Request)
@@ -39,6 +36,7 @@ func TestOwnerHostReadsAcquiredProjectForSharedPlanning(t *testing.T) {
 	}
 	input.GrantedRunner = process.Runner
 	host.Prepare, host.Planner = nil, &planner
+	host.Planning = PlanningInput{Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal}}
 	host.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }
 	if _, err := host.Run(t.Context(), input); err != nil {
 		t.Fatal(err)

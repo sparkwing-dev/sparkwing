@@ -140,7 +140,7 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if source.Generation != runspec.ClaimGeneration(target.sourceGeneration) {
 		return nil, holderRefusal()
 	}
-	if source.Expansion != ExpansionExpected {
+	if !evaluationSourceCurrent(source) {
 		status := "done"
 		if source.Expansion == ExpansionFailed {
 			status = "failed"

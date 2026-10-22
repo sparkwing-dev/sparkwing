@@ -7,14 +7,14 @@ const (
 	MaxRetries int = 10
 	// MaxDisruptions bounds post-start lease-loss disruptions outside application retries; OOM remains ordinary job failure.
 	MaxDisruptions int = 3
-	// MaxJobs bounds jobs in an accepted plan.
-	MaxJobs int = 1000
-	// MaxFanOut bounds generated jobs per fan-out.
-	MaxFanOut int = 256
-	// MaxLabels bounds labels per job.
-	MaxLabels int = 32
-	// MaxPipelineRefs bounds pipeline references per plan.
-	MaxPipelineRefs int = 32
+	// maxJobs bounds jobs in an accepted plan.
+	maxJobs int = 1000
+	// maxFanOut bounds generated jobs per fan-out.
+	maxFanOut int = 256
+	// maxLabels bounds labels per job.
+	maxLabels int = 32
+	// maxPipelineRefs bounds pipeline references per plan.
+	maxPipelineRefs int = 32
 	// MaxChildDepth bounds a child-run chain, counting the root run as one level.
 	MaxChildDepth int = 10
 	// MaxChildrenPerRoot bounds the child runs started under one root run, at every depth.
@@ -25,22 +25,22 @@ const (
 	MaxEvents int = 50000
 	// MaxMetricSamples bounds metric samples per job.
 	MaxMetricSamples int = 10000
-	// MaxCleanups bounds cleanups per job.
-	MaxCleanups int = 16
-	// MaxCleanupArgs bounds arguments per cleanup.
-	MaxCleanupArgs int = 64
-	// JobIDBytes bounds maximum encoded job identifier.
-	JobIDBytes int64 = 200
-	// LabelBytes bounds maximum label length.
-	LabelBytes int64 = 128
+	// maxCleanups bounds cleanups per job.
+	maxCleanups int = 16
+	// maxCleanupArgs bounds arguments per cleanup.
+	maxCleanupArgs int = 64
+	// jobIDBytes bounds maximum encoded job identifier.
+	jobIDBytes int64 = 200
+	// labelBytes bounds maximum label length.
+	labelBytes int64 = 128
 	// NodeOutputBytes bounds typed output per job or step.
 	NodeOutputBytes int64 = 16 << 20
-	// RunOutputBytes bounds total typed outputs per run.
-	RunOutputBytes int64 = 1 << 30
+	// runOutputBytes bounds total typed outputs per run.
+	runOutputBytes int64 = 1 << 30
 	// ErrorBytes bounds UTF-8 head and tail error text after masking.
 	ErrorBytes int64 = 8 << 10
-	// FailureBytes bounds structured failure record.
-	FailureBytes int64 = 64 << 10
+	// failureBytes bounds structured failure record.
+	failureBytes int64 = 64 << 10
 	// AnnotationBytes bounds individual annotation and summary.
 	AnnotationBytes int64 = 128 << 10
 	// RunAnnotationBytes bounds annotations per run.
@@ -49,10 +49,10 @@ const (
 	EventBytes int64 = 256 << 10
 	// RunEventBytes bounds events per run.
 	RunEventBytes int64 = 64 << 20
-	// CleanupDescriptionBytes bounds cleanup description.
-	CleanupDescriptionBytes int64 = 256
-	// CleanupBodyBytes bounds cleanup body.
-	CleanupBodyBytes int64 = 16 << 10
+	// cleanupDescriptionBytes bounds cleanup description.
+	cleanupDescriptionBytes int64 = 256
+	// cleanupBodyBytes bounds cleanup body.
+	cleanupBodyBytes int64 = 16 << 10
 	// JobScratchBytes bounds fixed scratch volume for every runner Job.
 	JobScratchBytes int64 = 20 << 30
 	// AttemptLogBytes bounds logs per attempt.

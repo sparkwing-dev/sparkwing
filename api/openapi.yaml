@@ -1970,6 +1970,30 @@ components:
         - cause
       type: object
       x-sparkwing-go-type: controllerwire.JobTransitionRequest
+    internal.controllerwire.LauncherActivation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        node_uid:
+          type: string
+        reservation_id:
+          type: string
+      required:
+        - award
+        - node_uid
+        - reservation_id
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherActivation
+    internal.controllerwire.LauncherCapacityObservation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+      required:
+        - award
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherCapacityObservation
     internal.controllerwire.LauncherObservation:
       additionalProperties: true
       properties:
@@ -2008,6 +2032,18 @@ components:
     internal.controllerwire.LauncherSyncRequest:
       additionalProperties: true
       properties:
+        activations:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LauncherActivation'
+              type: array
+            - type: "null"
+        capacity:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LauncherCapacityObservation'
+              type: array
+            - type: "null"
         observed:
           anyOf:
             - items:
@@ -2783,17 +2819,11 @@ components:
         arrived_at:
           format: date-time
           type: string
-        cache_key_hash:
+        blocking_reason:
           type: string
-        cancel_timeout_ns:
-          type: integer
         cost:
           type: integer
         job_id:
-          type: string
-        leader_job_id:
-          type: string
-        leader_run_id:
           type: string
         policy:
           type: string
@@ -4292,6 +4322,24 @@ components:
         - inputs_digest
       type: object
       x-sparkwing-go-type: engine.Pin
+    internal.localhostwire.LocalCapacityRequest:
+      additionalProperties: true
+      properties:
+        binding:
+          $ref: '#/components/schemas/internal.store.CapacityBinding'
+      required:
+        - binding
+      type: object
+      x-sparkwing-go-type: localhostwire.LocalCapacityRequest
+    internal.localhostwire.LocalEvaluationRelease:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+      required:
+        - job_id
+      type: object
+      x-sparkwing-go-type: localhostwire.LocalEvaluationRelease
     internal.localhostwire.LocalNodeSnapshot:
       additionalProperties: true
       properties:
@@ -4473,10 +4521,6 @@ components:
     internal.nodeproto.ConcurrencySpec:
       additionalProperties: true
       properties:
-        cancel_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
         capacity:
           anyOf:
             - type: integer
@@ -5003,10 +5047,6 @@ components:
     internal.runspec.Concurrency:
       additionalProperties: true
       properties:
-        cancel_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
         capacity:
           type: integer
         cost:
@@ -6160,6 +6200,51 @@ components:
         - Registration
       type: object
       x-sparkwing-go-type: store.AcceptedExpansionRow
+    internal.store.AcquireSlotResponse:
+      additionalProperties: true
+      properties:
+        DriftNote:
+          type: string
+        FailureReason:
+          type: string
+        HolderID:
+          type: string
+        Holders:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.store.ConcurrencyHolder'
+              type: array
+            - type: "null"
+        Kind:
+          type: string
+        LeaseExpiresAt:
+          format: date-time
+          type: string
+        Position:
+          type: integer
+        PreviousCapacity:
+          type: integer
+        QueueLength:
+          type: integer
+        SupersededIDs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - FailureReason
+        - Kind
+        - HolderID
+        - LeaseExpiresAt
+        - SupersededIDs
+        - PreviousCapacity
+        - DriftNote
+        - Position
+        - QueueLength
+        - Holders
+      type: object
+      x-sparkwing-go-type: store.AcquireSlotResponse
     internal.store.Actor:
       additionalProperties: true
       properties:
@@ -6200,6 +6285,90 @@ components:
         - Owner
       type: object
       x-sparkwing-go-type: store.Actor
+    internal.store.Applied:
+      additionalProperties: true
+      properties:
+        Attempt:
+          type: integer
+        CancelRequested:
+          type: boolean
+        Generation:
+          type: integer
+        Outcome:
+          type: string
+        Reason:
+          type: string
+        Replayed:
+          type: boolean
+        StateSeq:
+          type: integer
+        Waiting:
+          type: boolean
+      required:
+        - Waiting
+        - Outcome
+        - Reason
+        - Replayed
+        - CancelRequested
+        - StateSeq
+        - Generation
+        - Attempt
+      type: object
+      x-sparkwing-go-type: store.Applied
+    internal.store.CapacityBinding:
+      additionalProperties: true
+      properties:
+        Generation:
+          type: integer
+        NodeID:
+          type: string
+        RunID:
+          type: string
+      required:
+        - RunID
+        - NodeID
+        - Generation
+      type: object
+      x-sparkwing-go-type: store.CapacityBinding
+    internal.store.ConcurrencyHolder:
+      additionalProperties: true
+      properties:
+        ClaimedAt:
+          format: date-time
+          type: string
+        Cost:
+          type: integer
+        DeclaredCapacity:
+          type: integer
+        HolderID:
+          type: string
+        Key:
+          type: string
+        LeaseExpiresAt:
+          format: date-time
+          type: string
+        NodeID:
+          type: string
+        QueueArrivedAt:
+          format: date-time
+          type: string
+        RunID:
+          type: string
+        Superseded:
+          type: boolean
+      required:
+        - Key
+        - HolderID
+        - RunID
+        - NodeID
+        - ClaimedAt
+        - QueueArrivedAt
+        - LeaseExpiresAt
+        - Superseded
+        - Cost
+        - DeclaredCapacity
+      type: object
+      x-sparkwing-go-type: store.ConcurrencyHolder
     internal.store.LocalPublication:
       additionalProperties: true
       properties:
@@ -6778,21 +6947,6 @@ components:
           type: integer
       type: object
       x-sparkwing-go-type: wingwire.HostResources
-    pkg.wingwire.JevAdmissionStats:
-      additionalProperties: true
-      properties:
-        admits:
-          type: integer
-        attempts:
-          type: integer
-        fallbacks:
-          type: integer
-      required:
-        - attempts
-        - admits
-        - fallbacks
-      type: object
-      x-sparkwing-go-type: wingwire.JevAdmissionStats
     pkg.wingwire.QueueState:
       additionalProperties: true
       properties:
@@ -6838,10 +6992,6 @@ components:
             - type: "null"
         ignore_external:
           type: boolean
-        jev:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.wingwire.JevAdmissionStats'
-            - type: "null"
         resources:
           anyOf:
             - items:
@@ -9965,186 +10115,6 @@ paths:
             binding: slotOfBoundNode
             liveness: reporting
         retry: safe
-  /api/v1/queue/groups/{group}/acquire:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/queue/groups/{group}/acquire
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/queue/groups/{group}/acquire
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: slotOfBoundNode
-            liveness: sensitive
-          - credential: awarded_or_delegated_claim
-            grants:
-              - runs.state
-            binding: slotOfBoundNode
-            liveness: sensitive
-        retry: idempotency_key
-      x-sparkwing-wire: undocumented
-  /api/v1/queue/groups/{group}/cancel-waiter:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/queue/groups/{group}/cancel-waiter
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/queue/groups/{group}/cancel-waiter
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: slotOfBoundNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - runs.state
-            binding: slotOfBoundNode
-            liveness: reporting
-        retry: safe
-      x-sparkwing-wire: undocumented
-  /api/v1/queue/groups/{group}/force-release:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/queue/groups/{group}/force-release
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/queue/groups/{group}/force-release
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: unbound_member_or_local
-            grants:
-              - runs.control
-            binding: none
-            liveness: credential
-        retry: safe
-      x-sparkwing-wire: undocumented
-  /api/v1/queue/groups/{group}/heartbeat:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/queue/groups/{group}/heartbeat
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/queue/groups/{group}/heartbeat
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: slotOfBoundNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - runs.state
-            binding: slotOfBoundNode
-            liveness: reporting
-        retry: safe
-      x-sparkwing-wire: undocumented
-  /api/v1/queue/groups/{group}/holder:
-    get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: GET /api/v1/queue/groups/{group}/holder
-      x-sparkwing-policy:
-        method: GET
-        path: /api/v1/queue/groups/{group}/holder
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: slotOfBoundNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - runs.state
-            binding: slotOfBoundNode
-            liveness: reporting
-        retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/queue/groups/{group}/priority:
     put:
       parameters:
@@ -10191,78 +10161,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-  /api/v1/queue/groups/{group}/release:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/queue/groups/{group}/release
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/queue/groups/{group}/release
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: slotOfBoundNode
-            liveness: reporting
-          - credential: awarded_or_delegated_claim
-            grants:
-              - runs.state
-            binding: slotOfBoundNode
-            liveness: reporting
-        retry: safe
-      x-sparkwing-wire: undocumented
-  /api/v1/queue/groups/{group}/resolve:
-    get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: GET /api/v1/queue/groups/{group}/resolve
-      x-sparkwing-policy:
-        method: GET
-        path: /api/v1/queue/groups/{group}/resolve
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - node.report
-            binding: slotOfBoundNode
-            liveness: sensitive
-          - credential: awarded_or_delegated_claim
-            grants:
-              - runs.state
-            binding: slotOfBoundNode
-            liveness: sensitive
-        retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runners:
     get:
       responses:
@@ -12992,6 +12890,47 @@ paths:
             liveness: result
         retry: exact_body
       x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/may-start:
+    post:
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.localhostwire.LocalCapacityRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.store.AcquireSlotResponse'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Ask to start a job under its current award
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/may-start
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: run
+            liveness: sensitive
+        retry: exact_body
   /api/v1/runs/{run}/local-host/nodes/{job}:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -13260,8 +13199,91 @@ paths:
               - node.result
             binding: runOfTrigger
             liveness: result
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: exact_body
       x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/release-evaluation:
+    post:
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.localhostwire.LocalEvaluationRelease'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.store.Applied'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Release source expansion under plan admission
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/release-evaluation
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - trigger.host
+            binding: runOfTrigger
+            liveness: sensitive
+        retry: exact_body
+  /api/v1/runs/{run}/local-host/relinquish-start:
+    post:
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.localhostwire.LocalCapacityRequest'
+        required: true
+      responses:
+        "204":
+          description: Completed without a response body.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Relinquish a provisional burst job award
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/relinquish-start
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: run
+            liveness: sensitive
+        retry: exact_body
   /api/v1/runs/{run}/local-host/snapshot:
     get:
       parameters:

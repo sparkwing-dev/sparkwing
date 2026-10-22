@@ -51,6 +51,7 @@ func childIntakeFixtureWith(t *testing.T, prepare func(*engineFixture)) (*engine
 	if err := json.Unmarshal(claimed.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("claim: %s: %v", claimed.Body, err)
 	}
+	engineAdmitBearer(t, e.Store, award.Claim.Capability)
 	engineClaimHTTP(t, h, award.Claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	return e, h, award.Claim.Capability
 }

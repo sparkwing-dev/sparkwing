@@ -77,6 +77,7 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitExecution(t, tenant, holder)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}

@@ -127,3 +127,8 @@ internal/store/owner_policy_result.go
 internal/store/run_state.go
 internal/store/scheduling_contract.go
 ```
+
+Decision 38 supersedes row 3's resumed-refusal behavior. A resumed run with
+released work queues to reacquire plan capacity. Completed results and expansion
+state survive. `TestResumedPlanWaitsToReacquireAndPreservesCompletedWork` replaces
+the refusal regression. Initial refusal of unreleased work remains covered.

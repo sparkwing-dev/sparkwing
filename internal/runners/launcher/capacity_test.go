@@ -209,7 +209,7 @@ func TestCapacityRequestLivesExactlyAsLongAsItsAward(t *testing.T) {
 	if err := l.Sync(t.Context()); err != nil || len(capacityPods(t, kube)) != 1 {
 		t.Fatalf("a Ready node lost its request before an award reserved it: %v", err)
 	}
-	if len(observed) != 1 || observed[0].Unheld || !sameBinding(observed[0].Binding, control.award.Binding) || observed[0].ReservationID != capacityObservedID+string(pod.UID) {
+	if len(observed) != 1 || observed[0].Unheld || !sameBinding(observed[0].Binding, control.award.Binding) || (observed[0].Capacity == nil || observed[0].Capacity.PodUID != string(pod.UID) || observed[0].NodeUID != "" || observed[0].ReservationID != "") {
 		t.Fatalf("held demand was not renewed through its award: %+v", observed)
 	}
 	restarted := &Launcher{Kube: l.Kube, Control: l.Control, Config: l.Config, Boundary: l.Boundary}
@@ -299,7 +299,7 @@ func TestUnheldObservationDoesNotRenewTheAward(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: binding, JobName: jobName(binding), NodeUID: "pod-uid", ReservationID: capacityObservedID + "pod-uid", Unheld: unheld}}); err != nil {
+		if _, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: binding, JobName: jobName(binding), Capacity: &CloudCapacityObservation{PodUID: "pod-uid"}, Unheld: unheld}}); err != nil {
 			t.Fatal(err)
 		}
 		if renewed := len(preparing) == 1; renewed == unheld {

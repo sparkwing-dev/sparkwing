@@ -60,16 +60,6 @@ func resourceSetting(in Inputs) (runspec.Setting[runspec.Resources], error) {
 	return out, nil
 }
 
-// ResourceLimits merges native dimensions and refuses each excess independently.
-func ResourceLimits(in Inputs) (runspec.Resources, Origin, error) {
-	setting, err := resourceSetting(in)
-	origin := fromOrigin(setting.Origin)
-	if !setting.Set {
-		origin = Origin{Source: Default, Key: "resources.cores"}
-	}
-	return setting.Value, origin, err
-}
-
 func clonePointer[T any](value *T) *T {
 	if value == nil {
 		return nil

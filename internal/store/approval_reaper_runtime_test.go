@@ -23,19 +23,15 @@ func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire
 		{ID: "after", Needs: []string{"gate"}},
 	}}
 	tenant, request, now := planFixture(t, runspec.DispatchController)
-	raw, err := json.Marshal(plan)
+	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.Seal.Plan = raw
-	execution, err := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Plan: plan})
+	execution, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: request.Seal.Request, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
-	gate := execution.Jobs["gate"]
-	gate.ApprovalWait = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Second}}
-	execution.Jobs["gate"] = gate
-	tenant.s.intake = fakeIntakeContracts{resolve: func(settings.PlanInputs) (runspec.ExecutionSettings, error) { return execution, nil }}
 	request.Seal.Resolved.Settings = execution
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)

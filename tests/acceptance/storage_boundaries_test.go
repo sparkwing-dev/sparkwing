@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"testing/synctest"
 	"time"
 	"unicode"
 
@@ -28,7 +27,6 @@ func storageBoundaryChecks() map[string]func(*testing.T) {
 		"storage-binary-provenance":                      checkStorageBinaryTrust,
 		"storage-owner-receipts-and-stream-verification": checkStorageOwnerReceipts,
 		"storage-hasmany-large-budget":                   checkStoragePresence,
-		"storage-memo-materialization-failures":          checkStorageMemoFailures,
 		"storage-local-remote-cache-opt-in":              checkStorageRemoteCache,
 	}
 }
@@ -339,73 +337,4 @@ func checkStoragePresence(t *testing.T) {
 			}
 		})
 	}
-}
-
-type storageMemo struct {
-	blob.RecordStore
-	hit  blob.MemoHit
-	err  error
-	wait bool
-}
-
-func (s storageMemo) CopyMemo(ctx context.Context, _ blob.CopyMemoRequest) (blob.MemoHit, error) {
-	if s.wait {
-		<-ctx.Done()
-		return blob.MemoHit{}, ctx.Err()
-	}
-	return s.hit, s.err
-}
-
-func checkStorageMemoFailures(t *testing.T) {
-	t.Run("budget", checkStorageMemoBudget)
-	for _, fault := range []string{"missing_output", "record_refused", "missing_bytes", "corrupt_bytes", "short_bytes", "members_without_manifest", "valid", "explicit_empty"} {
-		t.Run(fault, func(t *testing.T) {
-			body := []byte(`{"answer":42}`)
-			if fault == "explicit_empty" {
-				body = nil
-			}
-			digest := storageDigest(body)
-			records := storageMemo{hit: blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: digest}}}
-			download := storageDownload{transfer: blob.SignedTransfer{Digest: digest, Size: int64(len(body))}}
-			var wantErr error
-			switch fault {
-			case "missing_output":
-				records.hit.Output.Set = false
-			case "record_refused":
-				records.err = blob.ErrDigestNotReadable
-				wantErr = blob.ErrDigestNotReadable
-			case "missing_bytes":
-				download.err = blob.ErrNotFound
-			case "corrupt_bytes":
-				body = bytes.Clone(body)
-				body[0] ^= 1
-			case "short_bytes":
-				body = body[:len(body)-1]
-			case "members_without_manifest":
-				records.hit.Members = []blob.Member{{Digest: digest}}
-			}
-			store := blob.NewSignedStore(blob.SignedStoreOptions{Signer: download, HTTPClient: storageTransfer{body: body}})
-			result, err := blob.MaterializeMemo(t.Context(), store, records, blob.CopyMemoRequest{
-				Lookup: blob.MemoLookup{Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}},
-			})
-			if fault == "valid" || fault == "explicit_empty" {
-				if err != nil || !result.Hit.Found || !bytes.Equal(result.Output, body) {
-					t.Fatalf("verified memo missed: %+v, %v", result, err)
-				}
-			} else if !errors.Is(err, wantErr) || result.Hit.Found || result.Output != nil {
-				t.Fatalf("failed materialization returned a hit: %+v, %v", result, err)
-			}
-		})
-	}
-}
-
-func checkStorageMemoBudget(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		result, err := blob.MaterializeMemo(t.Context(), blob.NewSignedStore(blob.SignedStoreOptions{}), storageMemo{wait: true}, blob.CopyMemoRequest{
-			Lookup: blob.MemoLookup{Budget: blob.Budget{Deadline: time.Now().Add(time.Second)}},
-		})
-		if err != nil || result.Hit.Found || result.Output != nil {
-			t.Fatalf("exhausted memo budget returned a hit: %+v, %v", result, err)
-		}
-	})
 }

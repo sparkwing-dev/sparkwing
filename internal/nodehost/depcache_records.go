@@ -33,8 +33,8 @@ type directoryCache struct {
 }
 
 // Prepare restores caches once and saves successful cold directories after retries.
-func (d DepcacheRecords) Prepare(ctx context.Context, layer LayerSpec, input NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
-	if layer.Name != "caches" || len(job.Caches) == 0 {
+func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	if len(job.Caches) == 0 {
 		return nil, nil
 	}
 	if input.Entry == nil || input.Entry.Directory == "" || input.Storage.Bytes == nil || input.Storage.Records == nil || d.Bind == nil {

@@ -17,7 +17,7 @@ func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *t
 		tenant, request := successfulExpansionFixture(t)
 		id := fmt.Sprintf("generated-%x", random.Uint64())
 		refs := []nodeproto.PipelineReference{{Pipeline: fmt.Sprintf("pipeline-%x", random.Uint64()), Job: "result"}}
-		job := nodeproto.JobSpec{ID: id, Groups: []string{"group"}, Needs: []string{"job"}, References: refs}
+		job := nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "step"}}, Groups: []string{"group"}, Needs: []string{"job"}, References: refs}
 		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
 		if err != nil {
 			t.Fatal(err)

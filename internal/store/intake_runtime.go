@@ -35,7 +35,7 @@ func (t *Tenant) ReplayRun(ctx context.Context, request IntakeRequest) (Admissio
 		if err != nil {
 			return err
 		}
-		digest, err := intakeDigest(tx, request, admittedSnapshot{})
+		digest, err := intakeDigest(request, admittedSnapshot{})
 		if err != nil {
 			return err
 		}
@@ -75,7 +75,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	digest, err := intakeDigest(tx, request, snapshot)
+	digest, err := intakeDigest(request, snapshot)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
@@ -180,7 +180,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if request.Request.Dispatch == "" {
 			input.Dispatch = SelectDispatch(input)
 		}
-		snapshot.request, err = tx.store.intakeServices().SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings, Provenance: provenance})
+		snapshot.request, err = runspec.SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings, Provenance: provenance})
 		if err != nil {
 			return AdmissionResult{}, err
 		}
@@ -251,7 +251,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	return result, nil
 }
 
-func intakeDigest(tx *storeTx, request IntakeRequest, snapshot admittedSnapshot) (runspec.Hash, error) {
+func intakeDigest(request IntakeRequest, snapshot admittedSnapshot) (runspec.Hash, error) {
 	intent := request.Request
 	if request.Intent != nil {
 		intent = *request.Intent
@@ -263,10 +263,24 @@ func intakeDigest(tx *storeTx, request IntakeRequest, snapshot admittedSnapshot)
 	if snapshot.execution.Retry != nil {
 		identity = struct{ SourceRunID, Mode string }{snapshot.execution.Lineage.RetryOf, snapshot.execution.Retry.Mode}
 	}
-	return tx.store.planServices().CanonicalHash(identity)
+	return runspec.CanonicalHash(identity)
 }
 
 func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest) (capability.Principal, error) {
+	// The here proof adds a second authority leaf; discover both before locking either.
+	if prefix := capability.HereProofPrefix(request.OriginMachine); prefix != "" {
+		machine := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+		if _, err := discoverAuthorityChainTx(ctx, tx, machine); err == nil {
+			if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{request.Authority, machine}); err != nil {
+				return capability.Principal{}, err
+			}
+		} else {
+			var denied *apierr.Error
+			if !errors.As(err, &denied) {
+				return capability.Principal{}, err
+			}
+		}
+	}
 	p, err := tx.ResolveAuthority(ctx, request.Authority)
 	if err != nil {
 		return p, err
@@ -355,7 +369,7 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 	if source.Spec != nil {
 		in.Spec = runspec.Optional[runspec.Spec]{Set: true, Value: *source.Spec}
 	}
-	carried, err := tx.store.intakeServices().CarryRetry(in)
+	carried, err := runspec.CarryRetry(in)
 	if err != nil {
 		return admittedSnapshot{}, err
 	}

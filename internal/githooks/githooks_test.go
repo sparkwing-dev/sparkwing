@@ -1,4 +1,4 @@
-package githooks_test
+package githooks
 
 import (
 	"errors"
@@ -6,11 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-func stubGit(local, global string) githooks.Git {
+func stubGit(local, global string) Git {
 	return func(_ string, args ...string) (string, error) {
 		scope := ""
 		if len(args) > 1 {
@@ -39,7 +37,7 @@ func repoWithGate(t *testing.T, hookName string) (repoRoot, hooksDir string) {
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "#!/bin/sh\n# " + githooks.Marker + "\nsparkwing run gate\n"
+	body := "#!/bin/sh\n# " + Marker + "\nsparkwing run gate\n"
 	if err := os.WriteFile(filepath.Join(hooksDir, hookName), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +46,7 @@ func repoWithGate(t *testing.T, hookName string) (repoRoot, hooksDir string) {
 
 func TestDir_PlainCheckoutUsesItsOwnGitDirectory(t *testing.T) {
 	repo, want := repoWithGate(t, "pre-commit")
-	got, err := githooks.Dir(repo)
+	got, err := Dir(repo)
 	if err != nil {
 		t.Fatalf("Dir: %v", err)
 	}
@@ -75,7 +73,7 @@ func TestDir_LinkedWorktreeResolvesToTheMainCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := githooks.Dir(worktree)
+	got, err := Dir(worktree)
 	if err != nil {
 		t.Fatalf("Dir: %v", err)
 	}
@@ -86,7 +84,7 @@ func TestDir_LinkedWorktreeResolvesToTheMainCheckout(t *testing.T) {
 }
 
 func TestDir_RejectsADirectoryThatIsNotACheckout(t *testing.T) {
-	if _, err := githooks.Dir(t.TempDir()); err == nil {
+	if _, err := Dir(t.TempDir()); err == nil {
 		t.Fatal("Dir accepted a directory with no .git")
 	}
 }
@@ -99,19 +97,19 @@ func TestGates_ListsOnlyManagedHooksThatRunPipelines(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("pre-commit", "#!/bin/sh\n# "+githooks.Marker+"\nsparkwing run gate\n")
-	write("prepare-commit-msg", "#!/bin/sh\n# "+githooks.Marker+"\nexec \"$hook\" \"$@\"\n")
+	write("pre-commit", "#!/bin/sh\n# "+Marker+"\nsparkwing run gate\n")
+	write("prepare-commit-msg", "#!/bin/sh\n# "+Marker+"\nexec \"$hook\" \"$@\"\n")
 	write("pre-push", "#!/bin/sh\necho hand written\n")
 
-	got := githooks.Gates(dir)
+	got := gates(dir)
 	if len(got) != 1 || got[0] != "pre-commit" {
-		t.Errorf("Gates = %v, want only the managed hook that runs a pipeline", got)
+		t.Errorf("gates = %v, want only the managed hook that runs a pipeline", got)
 	}
 }
 
 func TestDetect_QuietWhenGitReadsTheHooksDirectory(t *testing.T) {
 	repo, _ := repoWithGate(t, "pre-commit")
-	shadow, err := githooks.Detect(stubGit("", ""), repo)
+	shadow, err := Detect(stubGit("", ""), repo)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
@@ -122,7 +120,7 @@ func TestDetect_QuietWhenGitReadsTheHooksDirectory(t *testing.T) {
 
 func TestDetect_QuietWhenTheOverridePointsAtTheHooksDirectory(t *testing.T) {
 	repo, hooksDir := repoWithGate(t, "pre-commit")
-	shadow, err := githooks.Detect(stubGit("", hooksDir), repo)
+	shadow, err := Detect(stubGit("", hooksDir), repo)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
@@ -136,7 +134,7 @@ func TestDetect_QuietWhenNoGateIsInstalled(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, ".git", "hooks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shadow, err := githooks.Detect(stubGit("", "/etc/git-hooks"), repo)
+	shadow, err := Detect(stubGit("", "/etc/git-hooks"), repo)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
@@ -147,7 +145,7 @@ func TestDetect_QuietWhenNoGateIsInstalled(t *testing.T) {
 
 func TestDetect_ReportsAGlobalOverrideShadowingTheGate(t *testing.T) {
 	repo, hooksDir := repoWithGate(t, "pre-push")
-	shadow, err := githooks.Detect(stubGit("", "/home/dev/.config/git/hooks"), repo)
+	shadow, err := Detect(stubGit("", "/home/dev/.config/git/hooks"), repo)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
@@ -161,7 +159,7 @@ func TestDetect_ReportsAGlobalOverrideShadowingTheGate(t *testing.T) {
 		t.Errorf("Detect named the wrong directories: %+v", shadow)
 	}
 	if len(shadow.Gates) != 1 || shadow.Gates[0] != "pre-push" {
-		t.Errorf("Gates = %v, want the installed pre-push gate", shadow.Gates)
+		t.Errorf("gates = %v, want the installed pre-push gate", shadow.Gates)
 	}
 	if !strings.Contains(shadow.Summary(), "never fire") || !strings.Contains(shadow.Summary(), "pre-push") {
 		t.Errorf("Summary does not say what stopped firing: %s", shadow.Summary())
@@ -174,7 +172,7 @@ func TestDetect_ReportsAGlobalOverrideShadowingTheGate(t *testing.T) {
 func TestDetect_PrefersTheRepositoryOverrideOverTheMachineOne(t *testing.T) {
 	repo, _ := repoWithGate(t, "pre-commit")
 	local := filepath.Join(t.TempDir(), ".githooks")
-	shadow, err := githooks.Detect(stubGit(local, "/home/dev/.config/git/hooks"), repo)
+	shadow, err := Detect(stubGit(local, "/home/dev/.config/git/hooks"), repo)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}

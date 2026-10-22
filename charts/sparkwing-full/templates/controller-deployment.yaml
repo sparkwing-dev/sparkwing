@@ -97,9 +97,6 @@ spec:
             {{- with .Values.controller.shedQueueDepth }}
             - {{ printf "--shed-queue-depth=%d" (int .) | quote }}
             {{- end }}
-            {{- with .Values.controller.triggerDedupeWindow }}
-            - {{ printf "--trigger-dedupe-window=%s" . | quote }}
-            {{- end }}
             {{- with .Values.controller.claimsPerRunnerMinute }}
             - {{ printf "--claims-per-runner-minute=%d" (int .) | quote }}
             {{- end }}

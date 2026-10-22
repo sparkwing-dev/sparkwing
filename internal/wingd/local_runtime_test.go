@@ -9,14 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -29,14 +27,6 @@ type runtimeControllerFixture struct {
 	http       func() LocalHTTP
 	closed     atomic.Bool
 	closeErr   error
-	key        func(context.Context) (string, error)
-}
-
-func (f *runtimeControllerFixture) TypeSafeAPIKey(ctx context.Context) (string, error) {
-	if f.key != nil {
-		return f.key(ctx)
-	}
-	return "", nil
 }
 
 func (f *runtimeControllerFixture) Reconcile(ctx context.Context) (LocalActivity, error) {
@@ -530,52 +520,6 @@ func TestLocalRuntimeCancellationJoinsReconciliation(t *testing.T) {
 			t.Fatal("store not closed after cancellation")
 		}
 	})
-}
-
-func TestLocalRuntimeLoadsJevKeyUnderElection(t *testing.T) {
-	for _, missing := range []bool{false, true} {
-		t.Run(fmt.Sprint(missing), func(t *testing.T) {
-			f := &runtimeControllerFixture{}
-			r := newRuntimeFixture(t, f)
-			policy := DefaultAdmissionPolicy()
-			policy.Mode = admission.ModeJev
-			r.cfg.Admission.AdmissionPolicy = &policy
-			var logs strings.Builder
-			r.cfg.Admission.Logf = func(format string, args ...any) { fmt.Fprintf(&logs, format, args...) }
-			reads := 0
-			f.key = func(context.Context) (string, error) {
-				reads++
-				if held, err := LockHeld(f.home); err != nil || !held {
-					t.Fatalf("key read before election: %v %v", held, err)
-				}
-				if missing {
-					return "", errors.New("secret unavailable")
-				}
-				return "private-key\n", nil
-			}
-			lifecycle := NewLocalLifecycle(r, nil)
-			if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
-				t.Fatal(err)
-			}
-			advisor := r.run.daemon.jevAdvisor
-			if err := lifecycle.Stop(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if reads != 1 {
-				t.Fatalf("key reads=%d", reads)
-			}
-			if missing {
-				if advisor != nil || !strings.Contains(logs.String(), "TYPESAFE_API_KEY") {
-					t.Fatalf("missing key must log and keep admission fallback: %T %s", advisor, logs.String())
-				}
-			} else if advisor == nil {
-				t.Fatal("configured Jev lost its advisor")
-			}
-			if strings.Contains(logs.String(), "private-key") {
-				t.Fatal("logged the admission key")
-			}
-		})
-	}
 }
 
 func TestLocalRuntimeReadinessDoesNotWaitForConsumerPreparation(t *testing.T) {

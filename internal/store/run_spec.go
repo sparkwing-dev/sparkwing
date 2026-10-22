@@ -314,6 +314,13 @@ func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUn
 }
 
 func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, now time.Time) error {
+	source, err := readNodeTx(ctx, tx, target.team, target.ref)
+	if err != nil {
+		return err
+	}
+	if pendingApprovalPredicate(source) {
+		return settleControllerTx(ctx, tx, target.team, string(target.ref.RunID), now)
+	}
 	state := ExpansionFailed
 	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
 	if status == "cancelled" {
@@ -415,7 +422,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		if err != nil {
 			return err
 		}
-		hash, err := tx.store.planServices().CanonicalHash(job)
+		hash, err := runspec.CanonicalHash(job)
 		if err != nil {
 			return err
 		}

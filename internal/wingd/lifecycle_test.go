@@ -19,51 +19,6 @@ func (lifecycleIdleProcSampler) CPUUsage(int) (wingd.ProcUsage, bool) {
 	return wingd.ProcUsage{}, true
 }
 
-func semReqCancel(runID, key string, cancelTimeoutMS int64) wingwire.AdmissionRequest {
-	return wingwire.AdmissionRequest{
-		RunID:          wingwire.HolderRef(runID),
-		SemaphoresOnly: true,
-		Semaphores: []wingwire.SemaphoreClaim{{
-			Name: key, Capacity: 1, Cost: 1,
-			Policy:          wingwire.PolicyCancelOthers,
-			CancelTimeoutMS: cancelTimeoutMS,
-		}},
-	}
-}
-
-func TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1})
-
-	vcl := ensure(t, home, "v1")
-	if _, err := vcl.Acquire(context.Background(), semReqCancel("victim", "lock", 200), nil); err != nil {
-		t.Fatalf("victim acquire: %v", err)
-	}
-
-	acl := ensure(t, home, "v1")
-	if _, err := acl.Acquire(context.Background(), semReqCancel("aggressor", "lock", 200), nil); err != nil {
-		t.Fatalf("aggressor acquire: %v", err)
-	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	poll := time.NewTicker(20 * time.Millisecond)
-	defer poll.Stop()
-	for time.Now().Before(deadline) {
-		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
-		if err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		if !holdsRun(qs, "victim") {
-			return
-		}
-		<-poll.C
-	}
-	t.Fatal("victim was never force-released after its cancel timeout")
-}
-
 func holdsRun(qs wingwire.QueueState, runID string) bool {
 	for _, h := range qs.Holders {
 		if h.RunID == runID {

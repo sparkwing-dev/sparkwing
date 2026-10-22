@@ -10,24 +10,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-func TestExpansionValidationReceivesAcceptedPlanConcurrency(t *testing.T) {
+func TestExpansionJobConcurrencyIsIndependentOfAcceptedPlanConcurrency(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	group := nodeproto.ConcurrencySpec{Group: "deploy", Capacity: new(3), Cost: new(1), Scope: new("global"), OnLimit: new("queue")}
 	plan := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{group}, Jobs: []nodeproto.JobSpec{{ID: "job", Closures: nodeproto.ClosureSpec{Generate: []string{"group"}}}}}
-	body, err := json.Marshal(plan)
+	body, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET plan_json=? WHERE id='run'`, body)
-	contracts := tenant.s.plans.(fakePlanContracts)
-	validate := contracts.validate
-	contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-		if !reflect.DeepEqual(ctx.ExistingConcurrency, plan.Concurrency) {
-			return nodeproto.PlanDoc{}, fmt.Errorf("accepted concurrency missing: %+v", ctx.ExistingConcurrency)
-		}
-		return validate(raw, ctx)
-	}
-	tenant.s.plans = contracts
+	request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"],"concurrency":[{"group":"deploy","capacity":2}]}]}`)
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +38,7 @@ func TestGeneratedDependenciesUseAcceptedTopologyProperty(t *testing.T) {
 			for i := range count {
 				jobs = append(jobs, nodeproto.JobSpec{ID: fmt.Sprintf("child-%d", i), Groups: []string{"group"}, Needs: []string{"job"}})
 			}
-			body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+			body, err := json.Marshal(testBodyPlan(nodeproto.PlanDoc{Jobs: jobs}))
 			if err != nil {
 				t.Fatal(err)
 			}

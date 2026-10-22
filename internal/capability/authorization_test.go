@@ -124,10 +124,9 @@ func TestDelegateCannotWiden(t *testing.T) {
 	requireCode(t, capability.ValidateDelegation(p, child, now), apierr.Unauthenticated)
 }
 
-func TestOwnJobInputAndSlotHaveNoAdminBypass(t *testing.T) {
+func TestOwnJobInputHasNoAdminBypass(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority"},
-		{"GET", "/api/v1/queue/groups/{group}/holder"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			route, ok := capability.LookupRoute(tc.method, tc.path)

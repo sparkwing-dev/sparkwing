@@ -35,6 +35,9 @@ func checkNodeOrderAfterStarts(t *testing.T, target *storetest.Target) {
 		}
 		claim := reconciled.Claim
 		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
+		if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(actor.RunID), NodeID: string(actor.NodeID), Generation: int64(actor.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+			t.Fatalf("execution admission: %+v, %v", result, err)
+		}
 		if _, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 			t.Fatal(err)
 		}

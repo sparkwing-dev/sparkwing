@@ -192,7 +192,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			input, st, deps, _ := executorFixture(t)
 			job := sdkStartupJob(value)
 			input.Accepted.Plan.Jobs = []nodeproto.JobSpec{job}
-			planHash, _ := executorHash(input.Accepted.Plan)
+			planHash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 			input.Accepted.PlanHash = string(planHash)
 			var spec runspec.Spec
 			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
@@ -201,7 +201,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			spec.PlanHash = planHash
 			input.Accepted.Spec, _ = json.Marshal(spec)
 			st.accepted = &input.Accepted
-			jobHash, _ := executorHash(job)
+			jobHash, _ := runspec.CanonicalHash(job)
 			st.row.Spec, _ = json.Marshal(job)
 			st.row.SpecHash, input.SpecHash = string(jobHash), string(jobHash)
 			exe, err := os.Executable()

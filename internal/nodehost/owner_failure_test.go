@@ -30,7 +30,7 @@ func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
 				prepare := host.Prepare
 				host.Prepare = func(ctx context.Context, input RunInput, entry *source.Entry) (OwnerPlanning, error) {
 					planning, err := prepare(ctx, input, entry)
-					planning.Functions.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
+					planning.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
 					return planning, err
 				}
 			case "accept":
@@ -102,7 +102,7 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 				prepare := h.Prepare
 				h.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 					out, err := prepare(ctx, in, entry)
-					out.Functions.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
+					out.Plan = func(context.Context) (json.RawMessage, error) { return nil, failure }
 					return out, err
 				}
 			}
@@ -110,7 +110,7 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 			if !errors.Is(err, failure) {
 				t.Fatalf("error = %v", err)
 			}
-			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.RunID == "" {
+			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.Cause != store.RunFinish {
 				t.Fatalf("unfinished preparation failure: %+v", f.finished)
 			}
 			if f.finished.Transition.MaskedError == failure.Error() {
@@ -186,10 +186,10 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 		}
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
-	h.Layer = func(ctx context.Context, _ LayerSpec, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(ctx context.Context, _ testPolicyName, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		_, err := f.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Outcome: store.NodeSkipped})
 		return OwnerLayerResult{}, errors.Join(failure, err)
-	}
+	})
 	_, err := h.Run(t.Context(), in)
 	if !errors.Is(err, failure) || f.finished.Transition.RunID != "" {
 		t.Fatalf("error = %v finish = %+v", err, f.finished)

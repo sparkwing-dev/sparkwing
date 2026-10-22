@@ -269,3 +269,32 @@ retain five unchanged findings; changed lines pass with 0 issues using
 --new-from-merge-base= --new-from-rev=HEAD. No unrelated lint repairs made.
 No local Git identity/core.worktree overrides or owned test processes remain.
 Session scratch and generated lint cache removed. The harness owns landing.
+
+
+CU integration reconciliation - base 81d025d3b (2026-10-22).
+Incoming integration MERGE_HEAD: 35b4de88b. All four conflict files have their
+markers resolved. The harness must stage resolutions and finish the merge.
+No Git mutations, commits, or Git environment overrides were used.
+
+Preserved initial declaration equality in PlanInitial after integration removed
+injectable planning functions and the plan cache. Updated CU fixtures to use the
+real settings resolver and current SDK planning API. The controller capacity
+fixture now uses leaseHolder instead of the deleted bucket measurement holder.
+Unexported six hook-only helpers/constants. Removed githooks' unused-export
+allowance and shrank bincache/objectguard counts to their measured values.
+No user-facing behavior change beyond preserving the approved CU contracts.
+
+RED: removing the restored PlanInitial declaration check with a Go overlay makes
+both Go and TypeScript undiscovered-secret regressions return no host error.
+GREEN: focused host argument/SDK planning/initial plan/replay checks; native sealed
+secret streams; store second-seal list/default/error checks; controller admission
+fixture checks; full githooks; CLI hook status/fleet/doctor regressions. Relevant
+checks pass normal and rewrite_integration. TestProtocol passes in both modes.
+Command compilation, nodeproto, doccheck, documentation mirrors and diff checks
+pass. Full architecture/unexport guard results follow below.
+Commands use GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache and
+TMPDIR=/tmp/sw-astra-CU/root. Full suites, PostgreSQL and socket checks remain
+with the lead. Xwing candidate inspection cannot write its session-index lock.
+Final PASS: full guardcheck (architecture, spawn and unused-export counts) matches
+all allow-lists. Tagged TestProtocol also passes. No owned test processes remain.
+No local Git identity/core.worktree overrides were found. Scratch removed.
