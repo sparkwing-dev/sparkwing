@@ -90,6 +90,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // Fragments correlate team keys with the final authenticated work/claimant pair.
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
+	"(*claimSQL).requirementsMatchSQL": "terms and alternatives bind the caller's scoped team and canonical requirement identity; this fragment cannot execute SQL",
 	"(*claimSQL).routesSQL":            "context routes join on both authenticated requirement team and requirement identity before selecting a tenant-keyed ready head",
 	"(*claimSQL).evaluationArrivalSQL": "the eval source correlates its run creation fallback on the same team and run identity",
 	"(*claimSQL).requirementRoutes":    "shared authenticated label routes restrict indexed selection before the final eligibility predicate",
@@ -100,7 +101,7 @@ var reviewedClaimSQLFragments = map[string]string{
 }
 
 func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {
-	files := []string{"claim_query.go", "claim_search.go", "approval_evaluation.go"}
+	files := []string{"claim_query.go", "claim_search.go", "claim_requirements.go", "approval_evaluation.go"}
 	check := func(n ast.Node) {
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch v := n.(type) {

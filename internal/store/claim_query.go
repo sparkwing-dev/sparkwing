@@ -202,7 +202,6 @@ type claimSQL struct {
 	target          *UnitRef
 	team            string
 	route           bool
-	routeJoin       bool
 	after           *claimHead
 	facts           []claimFacts
 	teams           []claimTeamFacts
@@ -312,7 +311,7 @@ func (q *claimSQL) predicate() string {
 		horizon = `CASE WHEN ` + w("burst") + ` IS NOT NULL OR (` + `w.run_anywhere=1` + `) THEN ` + fmt.Sprint(int64(time.Minute)) + ` ELSE 0 END`
 	}
 	live := `(` + n("current") + `=1 OR ((` + horizon + `)>0 AND ` + n("observed_at") + `>=clock.now-(` + horizon + `)))`
-	labels := q.terms("w.selectors", func(alt string) string { return q.contains(f("labels"), alt) })
+	labels := q.requirementsMatchSQL("w.team", "w.requirements", func(alt string) string { return q.contains(f("labels"), alt) })
 	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + q.contains("w.allowed_pools", q.text("pool.value")) + ` AND ` + q.anyAlternative("w.selectors", func(alt string) string { return alt + `='pool='||` + q.text("pool.value") }) + `))`
 	scopes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("scopes"), "scope") + ` WHERE NOT EXISTS (SELECT 1 FROM ` + q.array("scope.value", "pattern") + ` WHERE (` + q.at("pattern.value", "key") + `=w.repo_key AND w.repo_key<>'') OR (` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `)))`
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
@@ -322,7 +321,12 @@ func (q *claimSQL) predicate() string {
 	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('github_app','schedule'))))`
 	runnerKind := `COALESCE(` + w("options", "runner", "value", "kind") + `,'')`
 	runnerValue := `COALESCE(` + w("options", "runner", "value", "value") + `,'')`
-	runner := `(` + runnerKind + `<>'here' OR ` + f("here_run") + `=w.run_id OR (` + w("burst") + ` IS NOT NULL AND w.kind='node')) AND (` + runnerKind + `<>'name' OR (` + runnerValue + `<>'' AND ` + f("name") + `=` + runnerValue + `)) AND (` + runnerKind + `<>'github-actions' OR w.kind NOT IN ('trigger','plan') OR ` + n("actions") + `=1) AND (` + runnerKind + `<>'label' OR (` + runnerValue + `<>''))`
+	runnerLabels := `json_array(` + runnerValue + `)`
+	if q.dialect == DialectPostgres {
+		runnerLabels = `jsonb_build_array(` + runnerValue + `)::text`
+	}
+	runnerLabelMatch := q.terms(runnerLabels, func(alt string) string { return q.contains(f("labels"), alt) })
+	runner := `(` + runnerKind + `<>'here' OR ` + f("here_run") + `=w.run_id OR (` + w("burst") + ` IS NOT NULL AND w.kind='node')) AND (` + runnerKind + `<>'name' OR (` + runnerValue + `<>'' AND ` + f("name") + `=` + runnerValue + `)) AND (` + runnerKind + `<>'github-actions' OR w.kind NOT IN ('trigger','plan') OR ` + n("actions") + `=1) AND (` + runnerKind + `<>'label' OR (` + runnerValue + `<>'' AND ` + runnerLabelMatch + `))`
 	burst := `(` + w("burst") + ` IS NULL OR (` + f("here_run") + `=w.run_id AND w.kind<>'node') OR EXISTS (SELECT 1 FROM ` + q.array(w("burst", "preferences"), "step") + ` WHERE (` + q.at("step.value", "target") + `='cloud' AND ` + n("cloud") + `=1) OR (` + q.at("step.value", "target") + `='here' AND ` + f("here_run") + `=w.run_id) OR (` + q.at("step.value", "target") + `='machines' AND ` + n("personal") + `=1) OR ((` + n("personal") + `=1 OR ` + f("here_run") + `=w.run_id) AND ` + q.contains(f("labels"), q.at("step.value", "target")) + `)))`
 	foreground := `w.kind<>'trigger' OR COALESCE(` + q.at("w.request", "run_id") + `,'')<>w.run_id OR COALESCE(CAST(` + w("local_foreground") + ` AS TEXT),'false') NOT IN ('true','1') OR EXISTS (SELECT 1 FROM triggers ft WHERE ft.team=w.team AND ft.id=w.run_id AND ft.generation>0)`
 	foreground += ` OR (` + n("current") + `=1 AND ` + n("named") + `=1 AND ` + n("local") + `=1 AND ` + f("name") + `=w.created_principal)`
@@ -471,7 +475,7 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 		case capability.UnitNode:
 			// A private projection precedes readiness and never reserves work.
 			if q.projected {
-				queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,COALESCE(n.ready_at,clock.now) AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution FROM nodes n,clock WHERE `+q.sourceScope("n", kind))
+				queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,COALESCE(n.ready_at,clock.now) AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution,n.claim_requirements AS requirements FROM nodes n,clock WHERE `+q.sourceScope("n", kind))
 				continue
 			}
 			from := `nodes n,clock`
@@ -479,46 +483,34 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 				from = `source_heads sh JOIN nodes n ON n.team=sh.team AND n.run_id=sh.run_id AND n.node_id=sh.node_id,clock`
 			}
 			if q.route {
-				from = `clock CROSS JOIN `
-				if q.routeJoin {
-					from += `routes route CROSS JOIN `
-				}
-				from += `nodes n`
+				from = `nodes n`
 			}
-			queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,n.ready_at AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution FROM `+from+` WHERE `+q.sourceScope("n", kind)+` AND n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=clock.now AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND NOT EXISTS (SELECT 1 FROM runs dr WHERE dr.team=n.team AND dr.id=n.run_id AND dr.claim_wait_ns>0 AND (n.queue_started_at IS NULL OR n.queue_started_at<=clock.now-dr.claim_wait_ns))`)
+			queries = append(queries, `SELECT n.team,n.run_id,n.node_id,0 AS source_generation,n.ready_at AS arrived,'node' AS kind,`+q.blob("n.execution_json")+` AS execution,n.claim_requirements AS requirements FROM `+from+` WHERE `+q.sourceScope("n", kind)+` AND n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=clock.now AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND NOT EXISTS (SELECT 1 FROM runs dr WHERE dr.team=n.team AND dr.id=n.run_id AND dr.claim_wait_ns>0 AND (n.queue_started_at IS NULL OR n.queue_started_at<=clock.now-dr.claim_wait_ns))`)
 		case capability.UnitEval:
 			from := `eval_units e JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id`
 			clockJoin := `,clock`
 			if q.heads != nil {
 				from = `source_heads sh JOIN eval_units e ON e.team=sh.team AND e.run_id=sh.run_id AND e.source_node_id=sh.node_id AND e.source_generation=sh.source_generation JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id`
 			}
-			if (q.route && q.dialect == DialectSQLite) || q.routeJoin {
-				// The readiness range must drive the join before pending eval units.
-				prefix := `clock CROSS JOIN `
-				if q.routeJoin {
-					prefix += `routes route CROSS JOIN `
-				}
-				if q.dialect == DialectSQLite {
-					from = prefix + `nodes n CROSS JOIN eval_units e ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id`
-				} else {
-					from = prefix + from
-				}
+			if q.route {
 				clockJoin = ``
 			}
-			queries = append(queries, `SELECT e.team,e.run_id,e.source_node_id AS node_id,e.source_generation,`+q.evaluationArrivalSQL()+` AS arrived,'eval' AS kind,NULL AS execution FROM `+from+` JOIN leases l ON l.name=e.owner_lease_name`+clockJoin+` WHERE `+q.sourceScope("e", kind)+` AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='' AND (e.expires_at IS NULL OR e.expires_at>clock.now) AND l.name='controller.owner' AND l.until>clock.now AND n.generation=e.source_generation AND `+evaluationSourceSQL(q, "n"))
+			if q.route && q.dialect == DialectSQLite {
+				// The readiness range must drive the join before pending eval units.
+				from = `nodes n CROSS JOIN eval_units e ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id`
+				clockJoin = ``
+			}
+			from += ` JOIN triggers req ON req.team=e.team AND req.id=e.run_id`
+			queries = append(queries, `SELECT e.team,e.run_id,e.source_node_id AS node_id,e.source_generation,`+q.evaluationArrivalSQL()+` AS arrived,'eval' AS kind,NULL AS execution,req.claim_requirements AS requirements FROM `+from+` JOIN leases l ON l.name=e.owner_lease_name`+clockJoin+` WHERE `+q.sourceScope("e", kind)+` AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='' AND (e.expires_at IS NULL OR e.expires_at>clock.now) AND l.name='controller.owner' AND l.until>clock.now AND n.generation=e.source_generation AND `+evaluationSourceSQL(q, "n"))
 		default:
 			from := `triggers t JOIN runs tr ON tr.team=t.team AND tr.id=t.id,clock`
 			if q.heads != nil {
 				from = `source_heads sh JOIN triggers t ON t.team=sh.team AND t.id=sh.run_id JOIN runs tr ON tr.team=t.team AND tr.id=t.id,clock`
 			}
 			if q.route {
-				from = `clock CROSS JOIN `
-				if q.routeJoin {
-					from += `routes route CROSS JOIN `
-				}
-				from += `triggers t JOIN runs tr ON tr.team=t.team AND tr.id=t.id`
+				from = `triggers t JOIN runs tr ON tr.team=t.team AND tr.id=t.id`
 			}
-			queries = append(queries, `SELECT t.team,t.id AS run_id,'' AS node_id,0 AS source_generation,t.available_at AS arrived,`+q.param(string(kind))+` AS kind,NULL AS execution FROM `+from+` WHERE `+q.sourceScope("t", kind)+` AND t.unit_kind=`+q.param(string(kind))+` AND t.status='pending' AND t.claimed_by IS NULL AND t.capability_prefix='' AND t.cancel_requested_at IS NULL AND t.available_at<=clock.now AND (t.expires_at IS NULL OR t.expires_at>clock.now) AND (t.started_at IS NOT NULL OR tr.claim_wait_ns<=0 OR tr.created_at>clock.now-tr.claim_wait_ns)`)
+			queries = append(queries, `SELECT t.team,t.id AS run_id,'' AS node_id,0 AS source_generation,t.available_at AS arrived,`+q.param(string(kind))+` AS kind,NULL AS execution,t.claim_requirements AS requirements FROM `+from+` WHERE `+q.sourceScope("t", kind)+` AND t.unit_kind=`+q.param(string(kind))+` AND t.status='pending' AND t.claimed_by IS NULL AND t.capability_prefix='' AND t.cancel_requested_at IS NULL AND t.available_at<=clock.now AND (t.expires_at IS NULL OR t.expires_at>clock.now) AND (t.started_at IS NOT NULL OR tr.claim_wait_ns<=0 OR tr.created_at>clock.now-tr.claim_wait_ns)`)
 		}
 	}
 	return strings.Join(queries, ` UNION ALL `)
@@ -534,7 +526,19 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 		q.team = teams[0].Team
 	}
 	clock := `CAST(` + q.param(now) + ` AS BIGINT)`
-	factsParam, err := q.jsonParam(facts)
+	currentCTE := ``
+	sqlFacts := facts
+	if q.holdProof {
+		// Keep current rank separate so proof eligibility contains only observers.
+		current := claimFacts{Personal: facts[0].Personal, Name: facts[0].Name, Tier: facts[0].Tier}
+		raw, err := q.jsonParam(current)
+		if err != nil {
+			return "", err
+		}
+		currentCTE = `current_claimant(facts) AS (SELECT ` + raw + `),`
+		sqlFacts = facts[1:]
+	}
+	factsParam, err := q.jsonParam(sqlFacts)
 	if err != nil {
 		return "", err
 	}
@@ -556,7 +560,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 		if err != nil {
 			return "", err
 		}
-		headsCTE = `source_heads AS MATERIALIZED (SELECT ` + q.at("head.value", "Team") + ` AS team,` + q.at("head.value", "Unit", "RunID") + ` AS run_id,` + q.at("head.value", "Unit", "NodeID") + ` AS node_id,` + q.at("head.value", "Unit", "Kind") + ` AS kind,` + q.number(q.at("head.value", "Unit", "SourceGeneration")) + ` AS source_generation,` + q.at("head.value", "Requirements") + ` AS requirements FROM ` + q.array(raw, "head") + `),`
+		headsCTE = `source_heads AS MATERIALIZED (SELECT ` + q.at("head.value", "Team") + ` AS team,` + q.at("head.value", "Unit", "RunID") + ` AS run_id,` + q.at("head.value", "Unit", "NodeID") + ` AS node_id,` + q.at("head.value", "Unit", "Kind") + ` AS kind,` + q.number(q.at("head.value", "Unit", "SourceGeneration")) + ` AS source_generation FROM ` + q.array(raw, "head") + `),`
 	}
 	ready := q.source(kinds)
 	readyFilter := ""
@@ -585,7 +589,9 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	prefers := `CASE WHEN ready.kind='node' THEN COALESCE(` + q.at("ready.execution", "prefers", "value") + `,'[]') ELSE COALESCE(` + q.at(options, "prefers", "value") + `,'[]') END`
 	repository := "r.repo_identity"
 	class := `CAST(NULL AS BIGINT)`
-	if slices.ContainsFunc(facts, func(f claimFacts) bool { return f.Metered == 1 }) {
+	// Current funding cannot invalidate a hold for an eligible better tier.
+	fundingNeeded := slices.ContainsFunc(sqlFacts, func(f claimFacts) bool { return f.Metered == 1 })
+	if fundingNeeded {
 		var sizes []string
 		for ordinal, size := range match.CloudSizes() {
 			sizes = append(sizes, `SELECT '`+size.Label+`' AS label,`+fmt.Sprint(size.CreditClass)+` AS cpu_class,`+fmt.Sprint(ordinal)+` AS ordinal`)
@@ -594,41 +600,54 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 			return `(` + alt + `=size.label OR (NOT (substr(` + alt + `,1,10)='sparkwing-' AND substr(` + alt + `,-3)='cpu') AND ` + q.contains(q.at("unfunded.facts", "labels"), alt) + `))`
 		}) + ` ORDER BY size.ordinal LIMIT 1)`
 	}
-	raw := `SELECT ready.*,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + options + ` AS options,` + selectors + ` AS selectors,` + prefers + ` AS preferences,` + q.blob("r.allowed_pools") + ` AS allowed_pools,r.dispatch,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
+	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + selectors + ` AS selectors,` + prefers + ` AS preferences,` + q.blob("r.allowed_pools") + ` AS allowed_pools,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
  CASE WHEN r.created_subject_kind='account' THEN r.created_principal WHEN r.created_subject_kind='machine' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=r.created_principal AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
  FROM ready JOIN runs r ON r.team=ready.team AND r.id=ready.run_id JOIN teams tm ON tm.name=r.team,clock
  WHERE r.team IN (` + liveTeamsSQL + `) AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=clock.now)`
 	ancestorOrigin := q.at(q.blob("ar.request_json"), "request", "origin")
 	ancestorParent := `CASE WHEN ` + ancestorOrigin + `='retry' THEN ar.retry_of WHEN ` + ancestorOrigin + `='child' THEN COALESCE(ar.parent_run_id,'') ELSE '' END`
 	funded := `(` + q.number(q.at("sized.facts", "metered")) + `=0 OR (sized.cpu_class IS NOT NULL AND ((rates.price IS NULL AND ` + q.number(q.at("sized.facts", "current")) + `=1) OR (tf.held=0 AND tf.balance>=rates.price*` + fmt.Sprint(SliceSeconds) + ` AND (` + q.number(q.at("sized.facts", "cloud")) + `=0 OR tf.available>=sized.cpu_class)))))`
+
 	overflowAllowed := `(` + q.number(q.at("sized.facts", "cloud")) + `=0 OR ` + q.at("sized.request", "request", "burst") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=sized.team AND of.account=sized.created_principal AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + q.at("sized.request", "request", "burst", "overflow_minutes") + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(q.at("sized.request", "request", "burst", "overflow_minutes")) + `*60))))`
+	cloudObservers := slices.ContainsFunc(sqlFacts, func(f claimFacts) bool { return f.Cloud != 0 })
+	if q.holdProof && !cloudObservers {
+		overflowAllowed = `1=1`
+	}
 	claimants := `SELECT value,` + q.at("fact.value", "team") + `,` + q.number(q.at("fact.value", "cloud")) + ` FROM ` + q.array(factsParam, "fact")
-	factRoutes := ""
-	if q.holdProof {
-		factRoutes = `raw_facts(facts,prefix,team,is_cloud) AS MATERIALIZED (SELECT value,` + q.at("fact.value", "prefix") + `,` + q.at("fact.value", "team") + `,` + q.number(q.at("fact.value", "cloud")) + ` FROM ` + q.array(factsParam, "fact") + `),fact_labels AS MATERIALIZED (SELECT f.prefix,f.team,f.is_cloud,` + q.text("label.value") + ` AS label FROM raw_facts f CROSS JOIN ` + q.array(q.at("f.facts", "labels"), "label") + `),matched_facts AS MATERIALIZED (SELECT DISTINCT f.prefix FROM fact_labels f JOIN claim_requirement_terms term ON term.label=f.label AND (f.is_cloud=1 OR term.team=f.team) JOIN source_heads h ON h.team=term.team AND h.requirements=term.requirements),`
-		claimants = `SELECT f.facts,f.team,f.is_cloud FROM raw_facts f WHERE ` + q.number(q.at("f.facts", "current")) + `=1 OR f.prefix IN (SELECT prefix FROM matched_facts) OR EXISTS (SELECT 1 FROM source_heads h WHERE h.requirements='' AND (f.is_cloud=1 OR f.team=h.team))`
-	}
 	eligibility := q.predicate()
+	workProjection := "w.*"
 	if q.holdProof {
-		eligibility = `(` + q.flag("current") + `=1 OR (` + eligibility + `))`
+		workProjection = "w.team,w.run_id,w.node_id,w.source_generation,w.arrived,w.kind,w.claim_ranking,w.run_anywhere,w.pinned"
+		if fundingNeeded {
+			workProjection += ",w.selectors"
+		}
+		if cloudObservers || slices.ContainsFunc(q.facts, func(f claimFacts) bool { return f.Personal != 0 }) {
+			workProjection += ",w.request"
+		}
+		if cloudObservers {
+			workProjection += ",w.created_principal"
+		}
 	}
-	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + factRoutes + `claimants(facts,team,is_cloud) AS MATERIALIZED (` + claimants + `),
+	fundingCTEs := `,sized AS MATERIALIZED (SELECT unfunded.*,` + class + ` AS cpu_class FROM unfunded),eligible AS MATERIALIZED (SELECT sized.*,rates.price FROM sized LEFT JOIN rates ON rates.cpu_class=sized.cpu_class JOIN team_facts tf ON tf.team=sized.team WHERE ` + funded + ` AND ` + overflowAllowed + `)`
+	if !fundingNeeded {
+		fundingCTEs = `,eligible AS MATERIALIZED (SELECT sized.*,NULL AS cpu_class,NULL AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
+	}
+	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + currentCTE + `claimants(facts,team,is_cloud) AS MATERIALIZED (` + claimants + `),
  team_facts AS MATERIALIZED (SELECT ` + q.at("tf.value", "team") + ` AS team,` + q.number(q.at("tf.value", "available")) + ` AS available,` + q.number(q.at("tf.value", "balance")) + ` AS balance,` + q.number(q.at("tf.value", "held")) + ` AS held FROM ` + q.array(teamsParam, "tf") + `),
  claimant_scopes(team,facts) AS MATERIALIZED (SELECT tf.team,c.facts FROM team_facts tf JOIN claimants c ON c.is_cloud=1 UNION ALL SELECT c.team,c.facts FROM claimants c WHERE c.is_cloud=0),
  overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflowParam, "of") + `),
  rates AS MATERIALIZED (SELECT ` + q.number(q.at("rate.value", "cores")) + ` AS cpu_class,` + q.number(q.at("rate.value", "micro_per_second")) + ` AS price FROM ` + q.array(rateParam, "rate") + `),
- ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution) AS MATERIALIZED (` + ready + `),ready AS MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
+ ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
  ancestors(team,child,id,origin,parent) AS (SELECT ar.team,ar.id,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM runs ar JOIN work aw ON aw.team=ar.team AND aw.run_id=ar.id UNION SELECT a.team,a.child,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM ancestors a JOIN runs ar ON ar.team=a.team AND ar.id=a.parent),
- unfunded AS MATERIALIZED (SELECT w.*,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `),
- sized AS MATERIALIZED (SELECT unfunded.*,` + class + ` AS cpu_class FROM unfunded),
- eligible AS MATERIALIZED (SELECT sized.*,rates.price FROM sized LEFT JOIN rates ON rates.cpu_class=sized.cpu_class JOIN team_facts tf ON tf.team=sized.team WHERE ` + funded + ` AND ` + overflowAllowed + `)`
+ unfunded AS MATERIALIZED (SELECT ` + workProjection + `,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `)` + fundingCTEs
 	placement, err := q.placementCTEs(q.policy)
 	if err != nil {
 		return "", err
 	}
 	ctes += placement
 	if q.holdProof {
-		return ctes + ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM pairs w,clock WHERE ` + q.at("w.facts", "prefix") + `=` + q.param(demand.CapabilityPrefix) + ` AND w.ranked=1 AND ` + q.rankingHold(true), nil
+		currentRank := q.claimRankSQL("w", "current.facts")
+		return ctes + ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM pairs w CROSS JOIN current_claimant current,clock WHERE w.ranked=1 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND w.claim_rank>=0 GROUP BY w.team,w.run_id,w.node_id,w.source_generation,w.kind HAVING MIN(w.claim_rank)<MAX(` + currentRank + `)`, nil
 	}
 	final := ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM available w WHERE ` + q.at("w.facts", "prefix") + `=` + q.param(demand.CapabilityPrefix)
 	if demand.Target != nil {
@@ -740,6 +759,19 @@ func unitIdentitySQL(a, b string) string {
 	return a + `.team=` + b + `.team AND ` + a + `.run_id=` + b + `.run_id AND ` + a + `.kind=` + b + `.kind AND ` + a + `.node_id=` + b + `.node_id AND ` + a + `.source_generation=` + b + `.source_generation`
 }
 
+func (q *claimSQL) claimRankSQL(alias, facts string) string {
+	tier := q.at(facts, "tier")
+	if slices.ContainsFunc(q.facts, func(f claimFacts) bool { return f.Personal != 0 }) {
+		tier = `CASE WHEN ` + q.number(q.at(facts, "personal")) + `=1 AND ` + q.at(facts, "name") + `=COALESCE(` + q.at(alias+".request", "request", "origin_machine") + `,'') THEN 'here' ELSE ` + tier + ` END`
+	}
+	defaults := `CASE ` + tier
+	for rank, name := range DefaultClaimRanking {
+		defaults += ` WHEN ` + q.param(name) + ` THEN ` + fmt.Sprint(rank)
+	}
+	defaults += ` ELSE -1 END`
+	return `CASE WHEN ` + alias + `.claim_ranking='' THEN ` + defaults + ` ELSE COALESCE((SELECT ` + q.index("tier") + ` FROM ` + q.indexed(alias+".claim_ranking", "tier") + ` WHERE ` + q.text("tier.value") + `=` + tier + ` LIMIT 1),-1) END`
+}
+
 func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 	if q.placementFree {
 		return `,pairs AS MATERIALIZED (SELECT e.*,0 AS ranked,0 AS claim_rank FROM eligible e),available AS MATERIALIZED (SELECT * FROM pairs)`, nil
@@ -752,17 +784,10 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 			return "", err
 		}
 	}
-	defaults, err := q.jsonParam(DefaultClaimRanking)
-	if err != nil {
-		return "", err
-	}
-	opts := func(path ...string) string { return q.at("e.request", append([]string{"request"}, path...)...) }
 	ranked := `CASE WHEN e.run_anywhere=1 AND e.pinned=0 THEN 1 ELSE 0 END`
-	tier := `CASE WHEN ` + q.number(q.at("e.facts", "personal")) + `=1 AND ` + q.at("e.facts", "name") + `=COALESCE(` + opts("origin_machine") + `,'') THEN 'here' ELSE ` + q.at("e.facts", "tier") + ` END`
-	ranks := `CASE WHEN e.claim_ranking='' THEN ` + defaults + ` ELSE e.claim_ranking END`
-	ranking := `COALESCE((SELECT ` + q.index("tier") + ` FROM ` + q.indexed(ranks, "tier") + ` WHERE ` + q.text("tier.value") + `=` + tier + ` LIMIT 1),-1)`
+	ranking := q.claimRankSQL("e", "e.facts")
 	same := func(a, b string) string { return unitIdentitySQL(a, b) }
-	rankHold := q.rankingHold(false)
+	rankHold := q.rankingHold()
 	if q.preferencesFree {
 		pairs := `pairs AS MATERIALIZED (SELECT e.*,` + ranked + ` AS ranked,` + ranking + ` AS claim_rank FROM eligible e)`
 		available := `available AS MATERIALIZED (SELECT w.* FROM pairs w,clock WHERE w.ranked=0 OR (w.claim_rank>=0 OR w.claim_ranking='[]') AND NOT (` + rankHold + `))`
@@ -791,12 +816,7 @@ func firstPreferenceHold(policy ClaimPlacement) int64 {
 	return int64(policy.Preferences[0].Hold)
 }
 
-func (q *claimSQL) rankingHold(proof bool) string {
-	common := ""
-	if proof {
-		// Bound and personal claimants can distinguish identities within a policy context.
-		common = ` AND ` + q.number(q.at("b.facts", "personal")) + `=0 AND ` + q.at("b.facts", "here_run") + `='' AND ` + q.at("b.facts", "bind_run") + `='' AND ` + q.number(q.at("b.facts", "actions")) + `=0`
-	}
-	better := `EXISTS (SELECT 1 FROM pairs b WHERE ` + unitIdentitySQL("b", "w") + ` AND b.claim_rank>=0 AND b.claim_rank<w.claim_rank AND ` + q.number(q.at("b.facts", "free_slots")) + `>0` + common + `)`
+func (q *claimSQL) rankingHold() string {
+	better := `EXISTS (SELECT 1 FROM pairs b WHERE ` + unitIdentitySQL("b", "w") + ` AND b.claim_rank>=0 AND b.claim_rank<w.claim_rank AND ` + q.number(q.at("b.facts", "free_slots")) + `>0)`
 	return `w.claim_rank>0 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND ` + better
 }

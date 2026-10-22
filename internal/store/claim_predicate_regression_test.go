@@ -14,6 +14,8 @@ func clonePredicateRun(t *testing.T, s *Store, request []byte, creator, subject 
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,log_retention_class,log_retention_days) SELECT team,'later',2,pipeline,status,?,'later',request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,?,?,2,log_retention_class,log_retention_days FROM runs WHERE id='run'`, request, creator, subject)
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'later',unit_kind,2,2,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,'later',node_id,'pending',2,spec_json,execution_json FROM nodes WHERE run_id='run'`)
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "later", NodeID: "job"})
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "later"})
 }
 
 func TestClaimPredicateSkipsOverflowCappedHead(t *testing.T) {
@@ -126,6 +128,7 @@ func TestClaimPredicatePreservesSelectorWhitespaceAndCase(t *testing.T) {
 			fundUnitClaim(t, s)
 			body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{test.selector}}})
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, body)
+			indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 			demand.CapabilityPrefix = root.Prefix
 			demand.Labels = []string{test.label}
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)

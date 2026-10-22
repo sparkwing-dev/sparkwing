@@ -31,10 +31,18 @@ func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=? WHERE team='a'`, requirements); err != nil {
+		var execution []byte
+		if err := tx.QueryRowContext(t.Context(), `SELECT execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&execution); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(t.Context(), `WITH RECURSIVE sequence(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM sequence WHERE i<50000) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) SELECT 'a','run','old-'||i,'pending',1,spec_json,execution_json,claim_requirements FROM sequence,nodes WHERE team='a' AND node_id='job'`); err != nil {
+		claimContext, err := persistClaimContextTx(t.Context(), tx, "a", "run", capability.UnitNode, requirements, execution)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team='a'`, requirements, claimContext); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(t.Context(), `WITH RECURSIVE sequence(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM sequence WHERE i<50000) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT 'a','run','old-'||i,'pending',1,spec_json,execution_json,claim_requirements,claim_context FROM sequence,nodes WHERE team='a' AND node_id='job'`); err != nil {
 			return err
 		}
 		q := claimSQL{}
@@ -63,8 +71,8 @@ func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := visited.Load(); got < 1 || got > 2 {
-		t.Fatalf("route heads visited %d nodes; want at most two indexed head visits", got)
+	if got := visited.Load(); got != 1 {
+		t.Fatalf("route heads visited %d nodes; want one indexed head visit", got)
 	}
 }
 

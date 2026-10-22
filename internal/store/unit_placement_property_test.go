@@ -47,6 +47,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					t.Fatal(err)
 				}
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?,execution_json=?`, now.UnixNano(), body)
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				root := authorityRoot("preferred", "a")
 				if problem == "foreign" {
 					root.Team = "b"

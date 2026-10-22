@@ -44,8 +44,6 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		} `json:"request"`
 		Provenance struct {
 			Trust runspec.TrustClass `json:"trust"`
-			Ref   string             `json:"ref"`
-			SHA   string             `json:"sha"`
 		} `json:"provenance"`
 	}
 	if err := json.Unmarshal(request, &sealed); err != nil {

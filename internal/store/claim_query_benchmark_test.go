@@ -23,7 +23,7 @@ import (
 func BenchmarkClaimQuery50000(b *testing.B) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
 		b.Run(dialect.String(), func(b *testing.B) {
-			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "tied", "ranked", "metered", "fresh-ranked", "fresh-broad-ranked"} {
+			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "tied", "ranked", "metered", "fresh-ranked", "fresh-broad-ranked", "fresh-broad-alternatives", "fresh-broad-metered"} {
 				b.Run(scenario, func(b *testing.B) { benchmarkClaimQuery(b, dialect, scenario) })
 			}
 		})
@@ -127,16 +127,22 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 	state := &Store{db: db, dialect: dialect}
 	wrapped := &storeTx{tx: tx, dialect: dialect, store: state, operator: state.AsOperator(), clock: func(context.Context) (time.Time, error) { return time.Unix(1700000000, 0), nil }}
+	labelTerm := func(label string) string {
+		if scenario == "fresh-broad-alternatives" && label == "eligible" {
+			return "eligible,alternate"
+		}
+		return label
+	}
 	keys := make(map[string]string)
 	contexts := make(map[string]string)
 	for _, team := range teams {
 		for _, label := range []string{"eligible", "unavailable"} {
-			key, err := persistClaimRequirementsTx(ctx, wrapped, Team(team.Team), []string{label})
+			key, err := persistClaimRequirementsTx(ctx, wrapped, Team(team.Team), []string{labelTerm(label)})
 			if err != nil {
 				b.Fatal(err)
 			}
 			keys[team.Team+"/"+label] = key
-			body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{label}}})
+			body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{labelTerm(label)}}})
 			context, err := persistClaimContextTx(ctx, wrapped, Team(team.Team), "run-"+team.Team, capability.UnitNode, key, body)
 			if err != nil {
 				b.Fatal(err)
@@ -157,7 +163,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		if scenario == "broad" || scenario == "tied" || strings.HasPrefix(scenario, "fresh-broad-") || scenario != "no-match" && i == 49999 {
 			required = "eligible"
 		}
-		body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{required}}})
+		body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{labelTerm(required)}}})
 		arrived := int64(i + 1)
 		if freshRanked {
 			arrived += 1700000000000000000 - int64(time.Second)
@@ -175,13 +181,16 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		b.Fatal(err)
 	}
 	facts := []claimFacts{{Prefix: "benchmark", FreeSlots: 1, Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"eligible"}, Tier: TierCloud}}
-	if scenario == "metered" {
+	if scenario == "metered" || scenario == "fresh-broad-metered" {
 		facts[0].Metered = 1
 	}
 	for i := range 999 {
 		labels := []string{fmt.Sprintf("other-%04d", i)}
 		if strings.HasPrefix(scenario, "fresh-broad-") && i < len(teams) {
 			labels = []string{"eligible"}
+			if scenario == "fresh-broad-alternatives" {
+				labels = []string{"alternate"}
+			}
 		}
 		facts = append(facts, claimFacts{Prefix: fmt.Sprintf("observer-%04d", i), FreeSlots: 1, Team: teams[i%len(teams)].Team, ObservedAt: 1700000000000000000, Trust: "any", Kinds: []string{"node"}, Labels: labels, Tier: TierSelfHosted})
 	}
@@ -197,13 +206,17 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	b.ResetTimer()
 	for iteration := range b.N {
 		trace.enabled = dialect == DialectPostgres && iteration == b.N-1
+		before := examined.Load()
 		start := time.Now()
 		queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		_, err = searchClaimTx(queryCtx, wrapped, demand, &template)
 		cancel()
 		trace.enabled = false
 		samples = append(samples, time.Since(start))
-		if scenario == "no-match" || scenario == "fresh-broad-ranked" {
+		if dialect == DialectSQLite && strings.HasPrefix(scenario, "fresh-broad-") && examined.Load()-before > int64(2*len(teams)) {
+			b.Fatalf("held queue examined %d ready candidates; want at most two indexed heads per team", examined.Load()-before)
+		}
+		if scenario == "no-match" || strings.HasPrefix(scenario, "fresh-broad-") {
 			if !errors.Is(err, ErrNotFound) {
 				b.Fatalf("%s: %v", scenario, err)
 			}

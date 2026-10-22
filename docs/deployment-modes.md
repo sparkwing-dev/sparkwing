@@ -63,8 +63,9 @@ registered and online, unselected work waits with a `no_eligible_runner`
 notice. During the first 5 seconds after readiness, a job with no named runner
 is held for the best-ranked tier with a live claimant on the same team that
 matches its labels and offered a free slot in its latest poll. That claimant
-can take it at once. A busy or offline better tier causes no wait. After the
-5-second window, any eligible claimant may take it. There is no additional
+can take it at once. Each award consumes one advertised slot until the runner
+polls again. A busy or offline better tier causes no wait. After the 5-second
+window, any eligible claimant may take it. There is no additional
 grace period. The launcher takes part only while the team has credits or a
 saved card. A job that requires a `pool=`, `name=` or `class=` term skips the
 ranking and goes to the runners it names. Explicit `Prefers` placement holds

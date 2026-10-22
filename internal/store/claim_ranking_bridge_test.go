@@ -60,6 +60,8 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	s.testOnlyExec(t, `UPDATE runs SET dispatch='controller',created_principal='owner',created_subject_kind='account',git_branch='refs/heads/main',git_sha=?`, rankingSHA)
 	s.testOnlyExec(t, `UPDATE triggers SET unit_kind='plan',available_at=?`, f.ReadyAt.UnixNano())
 	s.testOnlyExec(t, `UPDATE nodes SET ready_at=?`, f.ReadyAt.UnixNano())
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitPlan, RunID: "run"})
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	return f
 }
 
@@ -101,6 +103,13 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	mutate(&request)
 	body := sealWith(t, runspec.SealedRequest{Request: request}, assertedProvenance(t, request.Pipeline, request.Git.Ref, request.Git.SHA))
 	f.Store.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=?,trigger_source=?`, body, string(request.Dispatch), string(request.Origin))
+	needs, err := json.Marshal(request.Options.Requires.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Store.testOnlyExec(t, `UPDATE triggers SET needs_labels=? WHERE team='a' AND id='run'`, needs)
+	indexFixtureUnit(t, f.Store, "a", UnitRef{Kind: capability.UnitPlan, RunID: "run"})
+	indexFixtureUnit(t, f.Store, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 }
 
 // Poll records a claimant offering one free slot at the current clock.
@@ -136,7 +145,7 @@ func (f *RankingFixture) Rank(t *testing.T, actor Actor, tiers ...string) error 
 // AddJob inserts another ready job of the fixture run.
 func (f *RankingFixture) AddJob(t *testing.T, id string, readyAt time.Time) {
 	t.Helper()
-	f.Store.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,status,?,spec_json,execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id, readyAt.UnixNano())
+	f.Store.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,?,status,?,spec_json,execution_json,claim_requirements,claim_context FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id, readyAt.UnixNano())
 }
 
 // RequireOnJobs sets every node's resolved requirements to terms.
@@ -147,6 +156,7 @@ func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 		t.Fatal(err)
 	}
 	f.Store.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, body)
+	indexFixtureUnit(t, f.Store, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 }
 
 // ClaimKinds polls and then claims from the ordered queue for any of the unit kinds.

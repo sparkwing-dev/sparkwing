@@ -402,3 +402,15 @@ func TestRankingAnExpiredBetterPollCausesNoWait(t *testing.T) {
 		t.Fatalf("expired better poll held plan: %+v %v", claim, err)
 	}
 }
+
+func TestRankingConsumingTheLastFreeSlotReleasesOtherJobs(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.At(time.Second)
+	f.PollWithSlots(t, f.Actions, 1)
+	wantNone(t, f, f.Self, capability.UnitPlan)
+	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Actions, Kinds: []capability.UnitKind{capability.UnitPlan}})
+	if err != nil || claim.Kind != capability.UnitPlan {
+		t.Fatalf("claim the better tier's last slot: %+v %v", claim, err)
+	}
+	wantAward(t, f, f.Self, capability.UnitNode, "job")
+}

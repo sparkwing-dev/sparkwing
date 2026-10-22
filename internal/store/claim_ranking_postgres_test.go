@@ -12,17 +12,25 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
+func TestSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testing.T) {
+	testSimultaneousRankedClaims(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
+}
+
 func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testing.T) {
+	testSimultaneousRankedClaims(t, func(t *testing.T) *store.Store { return storetest.NewPostgres(t).Open(t) })
+}
+
+func testSimultaneousRankedClaims(t *testing.T, open func(*testing.T) *store.Store) {
 	for round := range 3 {
 		t.Run(fmt.Sprint(round), func(t *testing.T) {
-			st := storetest.NewPostgres(t).Open(t)
+			st := open(t)
 			st.DB().SetMaxOpenConns(24)
 			f := st.TestOnlyRankingFixture(t, true)
 			second := f.SelfHosted(t, "second")
 			f.At(time.Second)
 			contenders := []string{f.Self, second, f.Launcher, f.Actions}
 			for _, prefix := range contenders {
-				f.Poll(t, prefix, capability.UnitPlan, capability.UnitNode)
+				f.PollWithSlots(t, prefix, 2)
 			}
 			start := make(chan struct{})
 			awards := make(chan store.UnitClaim, 4*len(contenders))

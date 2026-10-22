@@ -3272,4 +3272,5 @@ cause no wait. The hold ends after 5 seconds, when any eligible claimant may
 claim the job. The former recorded-ask winner and extra 2-second grace period
 are removed. Explicit `Prefers` holds remain; preference scores are removed.
 Runner claim clients can send `free_slots`; omission offers one slot, while
-an explicit zero reports that the claimant is busy.
+an explicit zero reports that the claimant is busy. Each award consumes one
+advertised slot until the next poll.

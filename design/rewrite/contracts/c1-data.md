@@ -825,21 +825,26 @@ repository access, trust, all selector terms, exclusions, placement and funding.
 Host plan acceptance and settings resolution share one label normalizer: trim
 outer whitespace, remove empty labels and keep the first occurrence. SDKs carry
 raw declarations. Selector terms and alternatives are indexed when work is sealed.
+Required-label eligibility and route selection share one reader of that index;
+runner selection keeps its label-term alternatives.
 `claim_contexts` assigns immutable policy contexts to source rows at intake,
 plan acceptance and expansion insertion. A context hash includes the request,
 provenance, resolved options and guards, job execution settings, repository
-scope, allowed pools and creator. Seal identities and timestamps and unrelated
-job declarations do not split otherwise equal contexts. The context row stores
+scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
+do not split otherwise equal contexts. The context row stores
 only its identity, requirement set and unit kind; it duplicates no run policy.
 
 Label lookups select matching requirement sets, then context routes. Ready
 source indexes use team, requirement set, context, arrival and identity. A
 transaction-local merge selects one head per unit kind from each route and
-compares those heads in the award order. The shared eligibility and ranking
-predicate proves holds in a batch. A proof supplied by an unbound shared
-claimant lets the context route seek its expired ranking window through the
-arrival index. Personal, bound and Actions claimants cannot supply that proof
-because they can distinguish runs within a context. Selected heads still pass
+compares those heads in the award order. Nodes and triggers carry explicit
+contexts; only evaluations use the context-free route. Indexed requirement
+alternatives narrow the proof's observers; the SQL predicate checks every term.
+The shared eligibility and ranking predicate proves holds in a batch. A proof supplied by an unbound shared
+claimant skips that context: its earliest ready job is inside the ranking
+window, so every later ready job is held too. Personal, bound and Actions
+claimants cannot supply that proof because they can distinguish runs within a
+context. Selected heads still pass
 the complete predicate and atomic award recheck. Rejected heads advance only
 that transaction's route. Named rechecks seek the complete team and unit key.
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
@@ -862,7 +867,8 @@ the job or the 5-second `RankingWindow` expires. Busy or offline higher tiers
 cause no wait. Any eligible claimant may take the job after the window; there is
 no post-window grace. `Prefers` holds remain. Preference scoring and durable asks
 are removed. Polls carry optional `free_slots`: absent means one available slot;
-zero means busy. Each loop reports its configured concurrency minus active awards.
+zero means busy. Each award consumes one advertised slot. Each loop reports
+its configured concurrency minus active awards.
 Context and requirement references prevent retention from removing policy still
 used by work. Run retention removes unused contexts before unreferenced
 requirement sets and their terms. Tenant purge follows the same dependency order. Work without ranking,

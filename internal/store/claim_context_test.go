@@ -80,7 +80,7 @@ func TestClaimContextsDistinguishPlacementPolicy(t *testing.T) {
 }
 
 func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
-	for _, difference := range []string{"repository", "labels"} {
+	for _, difference := range []string{"repository", "labels", "revision"} {
 		t.Run(difference, func(t *testing.T) {
 			s := authorityStore(t)
 			f := s.TestOnlyRankingFixture(t, true)
@@ -92,6 +92,15 @@ func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
 			s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,'younger',node_id,status,?,spec_json,execution_json FROM nodes WHERE team='a' AND run_id='run'`, f.ReadyAt.Add(time.Millisecond).UnixNano())
 			if difference == "repository" {
 				if _, err := s.db.Exec(`UPDATE runs SET repo_key='gh:2',repo_display='https://github.com/other/repo',repo_identity='github.com/other/repo' WHERE id='younger'`); err != nil {
+					t.Fatal(err)
+				}
+			} else if difference == "revision" {
+				var request []byte
+				if err := s.db.QueryRow(`SELECT request_json FROM runs WHERE id='younger'`).Scan(&request); err != nil {
+					t.Fatal(err)
+				}
+				request = []byte(strings.ReplaceAll(string(request), rankingSHA, strings.Repeat("b", 40)))
+				if _, err := s.db.Exec(`UPDATE runs SET request_json=? WHERE id='younger'`, request); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -126,7 +135,11 @@ func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.At(-time.Second)
-			f.Poll(t, observer.Prefix, capability.UnitNode)
+			prefix := observer.Prefix
+			if difference == "revision" {
+				prefix = f.Actions
+			}
+			f.Poll(t, prefix, capability.UnitNode)
 			f.At(time.Second)
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"sparkwing-4cpu", "gpu"}})
 			if err != nil || claim.RunID != "younger" {
@@ -154,7 +167,7 @@ func TestClaimContextsIgnoreRunSpecificExecutionInputs(t *testing.T) {
 		return id
 	}
 	firstRequest := `{"request":{"mode":"execute","dispatch":"controller","requested_args":{"x":"first"},"lineage":{"parent_run_id":"first","root_run_id":"first","retry_of":"first"},"options":{"owner_execution_timeout":{"value":1},"runner":{"set":false}},"git":{"repository":{"display":"https://github.com/acme/repo"},"app":{"value":{"delivery_key":"first"}}}},"provenance":{"trust":"asserted","ref":"main","sha":"abc","delivery":"first"}}`
-	nextRequest := `{"request":{"mode":"execute","dispatch":"controller","requested_args":{"x":"second"},"lineage":{"parent_run_id":"second","root_run_id":"second","retry_of":"second"},"options":{"owner_execution_timeout":{"value":99},"runner":{"set":false,"origin":{"key":"other"}}},"git":{"repository":{"display":"https://github.com/acme/repo"},"app":{"value":{"delivery_key":"second"}}}},"provenance":{"trust":"asserted","ref":"main","sha":"abc","delivery":"second"}}`
+	nextRequest := `{"request":{"mode":"execute","dispatch":"controller","requested_args":{"x":"second"},"lineage":{"parent_run_id":"second","root_run_id":"second","retry_of":"second"},"options":{"owner_execution_timeout":{"value":99},"runner":{"set":false,"origin":{"key":"other"}}},"git":{"repository":{"display":"https://github.com/acme/repo"},"app":{"value":{"delivery_key":"second"}}}},"provenance":{"trust":"asserted","ref":"feature","sha":"def","delivery":"second"}}`
 	firstSpec := `{"resolved":{"settings":{"options":{"requires":{"value":["linux"]},"prefers":{"value":["gpu"]},"owner_execution_timeout":{"value":1}}},"guards":{"passed":true}},"declarations":{"closures":{"skip_if":["first"]}}}`
 	nextSpec := `{"resolved":{"settings":{"options":{"requires":{"value":["linux"],"origin":{"key":"other"}},"prefers":{"value":["gpu"]},"owner_execution_timeout":{"value":99}}},"guards":{"passed":true}},"declarations":{"closures":{"skip_if":["second"]}}}`
 	firstExecution := `{"requires":{"value":["linux"]},"prefers":{"value":["gpu"]},"timeout":{"value":1},"concurrency":[{"group":"first"}],"closures":{"skip_if":["first"]}}`

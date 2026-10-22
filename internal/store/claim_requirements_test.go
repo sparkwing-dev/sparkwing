@@ -90,16 +90,8 @@ func TestClaimIndexedRequirementsPreserveLabelSemantics(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				id, err := persistClaimRequirementsTx(t.Context(), tx, "a", test.selectors)
-				if err != nil {
-					return err
-				}
-				_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET execution_json=?,claim_requirements=?`, execution, id)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, execution)
+			indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 			demand.Target, demand.Kinds, demand.Labels = nil, []capability.UnitKind{capability.UnitNode}, test.labels
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if test.want && (err != nil || claim.NodeID != "job") || !test.want && !errors.Is(err, ErrNotFound) {
@@ -170,6 +162,10 @@ func TestClaimRequirementReferencesProtectLiveWork(t *testing.T) {
 	for _, table := range []string{"nodes", "triggers"} {
 		t.Run(table, func(t *testing.T) {
 			s, _ := unitClaimFixture(t)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET claim_context='',claim_requirements=''`)
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET claim_context='',claim_requirements=''`)
+			rewriteSchemaExec(t, s.db, `DELETE FROM claim_contexts`)
+			rewriteSchemaExec(t, s.db, `DELETE FROM claim_requirements`)
 			var ref sql.NullString
 			if err := s.db.QueryRow(`SELECT claim_requirements_ref FROM ` + table).Scan(&ref); err != nil || ref.Valid {
 				t.Fatalf("empty requirements reference = %+v: %v", ref, err)

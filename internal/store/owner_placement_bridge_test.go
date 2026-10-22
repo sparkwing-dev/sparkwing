@@ -37,6 +37,7 @@ func (s *Store) TestOnlyOwnerSnapshotFunding(t *testing.T) {
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	s.testOnlyExec(t, `UPDATE nodes SET ready_at=NULL,spec_hash='declaration',execution_json=?`, []byte(`{}`))
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	if _, err := s.db.ExecContext(t.Context(), `UPDATE credit_grants SET amount_micro=(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`); err != nil {
 		t.Fatal(err)
 	}
