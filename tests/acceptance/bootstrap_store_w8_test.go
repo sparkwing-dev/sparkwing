@@ -140,6 +140,7 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		admitStoredUnitW8(t, server.Store, unit)
 		started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
 		if err != nil || started.Attempt != 1 {
 			t.Fatalf("Cloud start: attempt=%d error=%v", started.Attempt, err)

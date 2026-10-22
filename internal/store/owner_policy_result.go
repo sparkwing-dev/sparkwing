@@ -19,7 +19,8 @@ const (
 	PolicyAdmissionSkip  OwnerPolicyKind = "admission_skip"
 	PolicyAdmissionFail  OwnerPolicyKind = "admission_fail"
 	PolicyQueueTimeout   OwnerPolicyKind = "admission_queue_timeout"
-	PolicyApprovalBypass OwnerPolicyKind = "approval_bypass"
+	PolicyApprovalFail OwnerPolicyKind = "approval_fail"
+ PolicyApprovalBypass OwnerPolicyKind = "approval_bypass"
 )
 
 // OwnerPolicyResult binds a declared decision to its captured work generation.
@@ -32,10 +33,10 @@ func (p OwnerPolicyResult) outcome() NodeState {
 	switch p.Kind {
 	case PolicyAdmissionSkip:
 		return NodeSkipped
-	case PolicyAdmissionFail, PolicyQueueTimeout:
+	case PolicyAdmissionFail, PolicyQueueTimeout, PolicyApprovalFail:
 		return NodeFailed
 	case PolicyApprovalBypass:
-		return NodeSuccess
+		return NodeSkipped
 	default:
 		return ""
 	}
@@ -49,9 +50,9 @@ func checkNodeOwnerPolicy(row NodeRow, change nodeTransition) error {
 	if policy.Kind == PolicyQueueTimeout && result.Reason != FailureQueueTimeout {
 		return errors.New("queue timeout requires its policy reason")
 	}
-	if policy.Kind == PolicyApprovalBypass {
+	if policy.Kind == PolicyApprovalBypass || policy.Kind==PolicyApprovalFail {
 		var job nodeproto.JobSpec
-		if json.Unmarshal(row.Spec, &job) != nil || job.Approval == nil || len(job.Closures.SkipIf) == 0 || result.Reason != "skip_if" {
+		if json.Unmarshal(row.Spec, &job) != nil || job.Approval == nil || len(job.Closures.SkipIf) == 0 || policy.Kind==PolicyApprovalBypass && result.Reason != "skip_if" {
 			return errors.New("approval bypass requires its declared skip predicate")
 		}
 	}

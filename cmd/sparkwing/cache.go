@@ -193,7 +193,6 @@ func runCachePrune(inv clisurface.Invocation) error {
 			return
 		}
 		fmt.Printf("removed: %s across %d entries\n", humanBytes(result.LogicalRemovedBytes), result.ReclaimedEntries)
-		fmt.Printf("observed capacity gained: %s\n", humanBytes(result.ObservedCapacityGainedBytes))
 		fmt.Printf("examined: %d, active skipped: %d, busy skipped: %d\n",
 			result.ExaminedEntries, result.ActiveSkippedEntries, result.BusySkippedEntries)
 		fmt.Printf("goal satisfied: %t\n", result.GoalSatisfied)

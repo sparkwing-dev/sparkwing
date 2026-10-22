@@ -110,6 +110,10 @@ The Go module pipeline authors import:
 
 ## Authoring pipelines
 
+Executable jobs evaluate `SkipIf` and memo checks on their executing host, inside
+their concurrency slot. A skipped job still waits for that slot, then releases
+its groups without running its body. See [admission](docs/admission.md).
+
 ```go
 package jobs
 

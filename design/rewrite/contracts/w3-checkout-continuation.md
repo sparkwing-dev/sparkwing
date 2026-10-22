@@ -26,19 +26,17 @@ does not create App provenance.
 Guard diagnostics carry the predicate's field and index. They contain no raw
 predicate or argument value, so escaping cannot reveal a secret. Raw predicates
 remain in the restricted declarations and spec. A refusal bypasses SDK planning
-and every plan-cache read/write, then submits a validated empty plan and the
+and submits a validated empty plan and the
 refusal through normal acceptance. The shared decider produces the final verdict.
 
 `OwnerPlanning.Resolve` computes the final proposal from the validated plan.
-It runs for fresh plans and cache hits before acceptance. The store still reruns
+It runs for every planning invocation before acceptance. The store still reruns
 resolution and validation in its transaction. Intake secret classifications are
 unioned after resolution. Resolution failure cannot accept or dispatch work.
 
-Cache identity now binds the acquired project bytes and relative filename, plus
-the sealed team, repository and entrypoint. The placement still supplies complete
-source, executable, environment and secret-version fingerprints. Missing inputs
-remain a normal cache bypass. No ambient filesystem or environment fingerprint
-is substituted for an absent capture.
+The persistent plan cache is deleted under decision 28. Each planning invocation
+runs the SDK against the acquired project and sealed request. Accepted resumes
+retain their committed plan.
 
 The shared SDK run-context projection also retains pull-request Action and
 BaseSHA. The new acceptance assertion reproduced their omission before the fix.

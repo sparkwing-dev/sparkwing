@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -55,6 +57,18 @@ func runAnywherePlan(t *testing.T, f cloudDispatch, created controllerwire.Creat
 func runAnywhereComplete(t *testing.T, f cloudDispatch, unit *controllerwire.ClaimedUnit) {
 	t.Helper()
 	work := f.open(unit.Capability, false)
+	host, err := client.NewNodeHostClient(client.EngineOptions{URL: f.endpoint, Bearer: func(context.Context) (string, error) { return unit.Capability, nil }}, unit.RunID, unit.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := host.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if decision, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, store.Actor{}); err != nil || decision.Kind != store.AcquireGranted {
+		t.Fatalf("node admission: %+v: %v", decision, err)
+	}
 	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
 	if err != nil {
 		t.Fatal(err)

@@ -42,8 +42,23 @@ API is [index.d.ts](index.d.ts).
 Numeric duration options use milliseconds. Memory uses bytes. Omitted options
 remain unset. Explicit zero remains zero, including an
 indefinite approval timeout. Argument values stay strings, including `int64`.
+The host validates arguments after describe and before planning. Empty defaults
+mean no default. Required arguments with non-empty defaults are refused. NaN and
+infinity are refused. Help and describe inspect declarations without requiring
+invocation values. Errors come from host preparation as `invalid_args`.
 Duration arguments use Go syntax such as `1h30m`, including `0`, `+0` and `-0`.
-String-array arguments use comma splitting, trimming and empty-item removal.
+String-array arguments use comma splitting, trimming and empty-item removal in
+both the raw argument map and typed values. The host trims enum choices and checks
+each list item. Scalar string values keep their whitespace.
+SDK declarations and direct `toDoc()` calls rely on host validation of argument
+schemas, plan graphs and secret declarations. Generated jobs carry argument
+declarations in their job specification. The host validates and prepares values
+from the accepted run snapshot after generation, then sends them with execution
+requests. Enable `extra` for supplied flags that only a generator declares. Annotation locations are validated
+by the host service; TypeScript retains transport type checks.
+Initial jobs may only use argument declarations discovered by zero-input describe,
+with job IDs allowed to change. The gated expansion path registers secrets for new
+generated declarations before execution.
 
 `Context` provides lazy secrets and plain variables, typed outputs, references,
 annotations, summaries, acknowledged masking, OIDC, child runs and cleanup.

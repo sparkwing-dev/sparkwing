@@ -256,13 +256,10 @@ scope.
 with current authority, declared names, pipeline/shared precedence and pool
 restrictions. Trusted exact-row inspection still uses `GetSecretRow`.
 
-## Measurement leases and executable activity
+## Bucket measurement and executable activity
 
-`Operator.RunBucketMeasureLeased` uses the `bucket.measure` singleton and a
-store-clock success stamp in `settings`. Cron and measurement callbacks share
-one fenced window owner. A failed callback releases its captured lease without
-stamping success. A stale callback cannot stamp or release a successor. The
-Store method and the `sparkwing_meta` sweep-window implementation are removed.
+Bucket measurement runs on the controller's ordinary timer. The cross-controller
+`bucket.measure` lease and success stamp are removed (decision 50).
 
 `Tenant.ExecutionActivity` reads executable run, pending owner and live holder
 counts in one tenant-scoped snapshot. Lease expiration uses the store clock.
@@ -645,10 +642,9 @@ capability quota counts live roots. Expiry frees quota without deleting the
 retained authority rows.
 
 `Tenant.ReleaseConcurrencySlot`, `ResolveCoalesceFollowers` and
-`ActiveConcurrencyHolder` are removed. `ReleaseAndNotify` commits release,
-follower resolution and waiter promotion together. `ConcurrencyHolder` reads
-an unexpired holder, including a superseded one. Callers that require active
-capacity check its `Superseded` field.
+`ActiveConcurrencyHolder` are removed. Terminal node and run transitions release
+complete reservations. Hosts retry `MayStart` for grouped promotion. Raw holder
+release, follower resolution and per-group promotion exist only in ledger tests.
 
 `Operator.UsageMetrics`, its weekly-report types and `UsageWeekStart` are
 removed with the retired usage-metrics route. The unused
@@ -828,12 +824,24 @@ SQL eligibility predicate. It includes readiness, current grants and bindings,
 repository access, trust, all selector terms, exclusions, placement and funding.
 Host plan acceptance and settings resolution share one label normalizer: trim
 outer whitespace, remove empty labels and keep the first occurrence. SDKs carry
-raw declarations. Selector terms and alternatives are indexed when work is sealed. Ready
-source indexes are keyed by team, requirement set, arrival and identity. Label
-lookups select matching requirement sets, and a transaction-local merge checks
-each route's head with the shared predicate. Each route selects one head per
-unit kind through its source index, then compares those heads in the same order.
-Rejected heads advance only that transaction's route. Named rechecks seek the complete team and unit key.
+raw declarations. Selector terms and alternatives are indexed when work is sealed.
+`claim_contexts` assigns immutable policy contexts to source rows at intake,
+plan acceptance and expansion insertion. A context hash includes the request,
+provenance, resolved options and guards, job execution settings, repository
+scope, allowed pools and creator. Seal identities and timestamps and unrelated
+job declarations do not split otherwise equal contexts. The context row stores
+only its identity, requirement set and unit kind; it duplicates no run policy.
+
+Label lookups select matching requirement sets, then context routes. Ready
+source indexes use team, requirement set, context, arrival and identity. A
+transaction-local merge selects one head per unit kind from each route and
+compares those heads in the award order. The shared eligibility and ranking
+predicate proves holds in a batch. A proof supplied by an unbound shared
+claimant lets the context route seek its expired ranking window through the
+arrival index. Personal, bound and Actions claimants cannot supply that proof
+because they can distinguish runs within a context. Selected heads still pass
+the complete predicate and atomic award recheck. Rejected heads advance only
+that transaction's route. Named rechecks seek the complete team and unit key.
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate
 reserves the original intake's generation-zero trigger for a named claim by the
@@ -843,20 +851,21 @@ and subsequent lease recovery use normal queue eligibility. No process-local
 queue gate participates in this reservation.
 There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
-ordinal. Queue arbitration serializes asks and awards. Claims take the controller
+ordinal. Queue arbitration serializes holds and awards. Claims take the controller
 lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration after a ledger lock poisons the transaction before acquiring the queue
 lock. Award rechecks SQL eligibility and reserves the unit and funding atomically.
-A committed ask can still hold the award for its preferred claimant. Broad
-requests record asks for every eligible requested unit in its ranking window
-before selecting an award. Readiness range indexes bound the ask pass to fresh
-work. Ask collection uses the same label routes and narrows observers to the
-source teams before checking eligibility. Fresh-team discovery seeks one indexed
-head per requirement route instead of enumerating its jobs. Awarding another unit cannot discard
-those asks. The number of ask writes
-still depends on the number of fresh eligible units.
-Requirement references prevent retention from removing a set still used by work.
-Run retention removes unreferenced sets and their terms. Work without ranking,
+For a ready job naming no runner, the existing placement-hold predicate holds
+work for the best-ranked tier with a live claimant on the same team, matching
+labels and a free slot in its latest poll. The hold ends when that claimant takes
+the job or the 5-second `RankingWindow` expires. Busy or offline higher tiers
+cause no wait. Any eligible claimant may take the job after the window; there is
+no post-window grace. `Prefers` holds remain. Preference scoring and durable asks
+are removed. Polls carry optional `free_slots`: absent means one available slot;
+zero means busy. Each loop reports its configured concurrency minus active awards.
+Context and requirement references prevent retention from removing policy still
+used by work. Run retention removes unused contexts before unreferenced
+requirement sets and their terms. Tenant purge follows the same dependency order. Work without ranking,
 burst placement or preferences omits those relations from its SQL plan. Ranked
 work without preferences keeps ranking and omits preference relations.
 Named work without placement relations hydrates only its current claimant.
@@ -865,7 +874,7 @@ The predicate joins work to claimant scope by team before evaluating pairs.
 Cancelled, finished or expired named work reports its state refusal before
 funding diagnostics.
 Private owner placement projections use that same SQL predicate before readiness.
-They write no asks, awards, reservations or fair-share ordinals. Readiness is
+They write no awards, reservations or fair-share ordinals. Readiness is
 rechecked when the owner asks to execute.
 Runner matching has no CPU or memory fit. Cloud size labels map to credit classes
 in one catalog. Existing AND-between-terms and OR-within-terms semantics remain.
@@ -1503,14 +1512,19 @@ clears holder authority, consumes no disruption and fences every previous award.
 C2's billing start rule still determines whether compute began at award or awaits
 a qualifying pod renewal/start.
 
-`Operator.MaintainConcurrency(ctx, lease, options)` runs under that same
-`controller.reaper` fence. It locks affected capacity entries in tenant/key order,
-removes expired or terminal holders and abandoned waiters, and promotes live queued work in
-one transaction. The fence is checked before work and before commit. Any failure
+`Operator.MaintainConcurrency(ctx, lease)` runs under that same
+`controller.reaper` fence. It locks capacity entries in tenant/key order and
+removes dead holders and waiters in one transaction. Hosts retry `MayStart` to
+promote complete group sets through the sole admission owner. Maintenance never
+grants an individual group. The fence is checked before work and before commit. Any failure
 returns zero counters and rolls back the whole pass. Expired waiter leases never
 retain arrival order. Waiters bound to terminal or missing jobs cannot promote.
-Live blocked waiters retain their arrival and lease. Options retain the existing
-promotion lease and abandoned-waiter age defaults.
+Live blocked waiters retain their arrival and lease across owner generations.
+Queue precedence, grouped grants and renewal share claim-or-owner liveness. A job
+generation still fences replacement executions. A reservation identifies durable
+work, so supersession cancels its current job award rather than comparing the
+reservation's original claim generation. No separate promotion lease or waiter-age
+policy remains.
 
 `Store.MaintainConcurrency`, the `Maintenance` function registry and its six
 unfenced operations are removed. `OperatorStore` includes the leased pass. The
@@ -1619,21 +1633,21 @@ GetPipelineProfile, ListPipelineProfiles and CacheExcludedCounts. Tenant owns
 the complete profile API. Local orchestration, capacity stats and profile
 diagnostics select the registered DefaultTeam explicitly.
 
-Tenant owns concurrency acquisition, holder reads and renewal, release,
-follower resolution, promotion, waiter polling/cancellation and state reads.
+Tenant admission owns complete-set grants and award permits. State and terminal
+transitions own renewal and release. Tenant exposes scoped group and queue reads.
 The raw Store twins and unused deployment-wide ListConcurrencyStates are removed.
 The local adapter selects the registered DefaultTeam and propagates handle errors.
-Acquisition and promotion persist the work's current generation. Queued arrivals
-also persist their lease. Expired waiters cannot keep arrival order or promote.
-Admission, polling, renewal and capacity maintenance use the store clock. Promotion and
-waiter maintenance use the owner lease or a live run job claim instead of the
-removed run heartbeat. Run queries carry the selected tenant key.
+Permits capture the current award generation. Reservation identity and queue
+arrival survive handoff. Queued arrivals persist their lease. Expired waiters
+cannot keep arrival order or promote. Admission, renewal and maintenance use the
+store clock and one claim-or-owner liveness horizon. Run queries carry the selected tenant key.
 
 The SQLite recovery proof `recovery-concurrency-continuous-adoption/store-sqlite`
 holds node and plan capacity through owner loss, remote claim renewal and store
-reopening. It reclaims the owner through ClaimUnit and adopts both holders.
+reopening. It reclaims the owner through ClaimUnit and retains both reservations.
 Job completion releases node capacity. Run completion releases plan capacity.
-Each release allows one queued competitor, and repeated promotion admits none.
+Each release allows one queued competitor through `MayStart`, and retries never
+grant partial group sets.
 Enrollment is a contract fake. Native process recovery remains separate evidence.
 
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
@@ -2989,7 +3003,7 @@ schema version is added.
 | Create | `internal/storage/state_contract.go` |
 | Create | `internal/store/claim_contract.go` |
 | Create | `internal/store/completion.go` |
-| Create | `internal/store/capacity_adoption.go` |
+| Delete | `internal/store/capacity_adoption.go` |
 | Create | `internal/store/maintenance_contract.go` |
 | Create | `internal/store/node_state.go` |
 | Implement | `internal/store/result_metadata.go` |
@@ -3202,17 +3216,11 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AcknowledgeRunEffect` | AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev. |
 | `Tenant.RetryRunEffect` | RetryRunEffect records a failed delivery without overwriting a later desired state or its due work. |
 
-### internal/store/capacity_adoption.go
+### internal/store/capacity_admission.go
 
 | Export | Purpose |
 |---|---|
-| `CapacityBinding` | CapacityBinding makes capacity follow work across owner loss instead of following a process. |
-| `CapacityHolder` | CapacityHolder retains its own lease as proof that capacity has counted continuously. |
-| `CapacityWaiter` | CapacityWaiter keeps its arrival order only while its own lease remains live. |
-| `AdoptionKind` | AdoptionKind refuses to revive expired capacity; a new arrival goes through normal admission. |
-| `CapacityAdoption` | CapacityAdoption reports the store's liveness decision, never a caller-supplied original arrival time. |
-| `Tenant.AdoptCapacity` | AdoptCapacity checks continuity under the entry lock; expired holders and waiters are removed before a fresh request. |
-| `Tenant.SupersedeCapacity` | SupersedeCapacity marks the holder superseded and requests cancellation on its bound work in the same transaction. |
+| `Tenant.MayStart` | Derives the complete accepted job group set and award host, then commits a grant and start permit, wait or terminal policy outcome. |
 
 ### internal/store/maintenance_contract.go
 
@@ -4139,14 +4147,14 @@ Replacing the armer cannot admit a second run for an already committed instant.
 The tick reloads the tenant's stored row before passing it to the writer, so
 caller-supplied schedule fields cannot replace persisted intent.
 
-Tenant also implements all eight `ConcurrencyStore` transactions. They consume
-C2's resolved selectors, current authority and accepted declarations. Acquisition
-cannot replace declared capacity, cost or policy. Holder and waiter access checks
-the exact run, job and generation. Renewal and promotion respect authority and
-work deadlines. Release and force release notify and promote in their transaction.
-Claim group reads preserve contention accounting while removing memo keys and
-leader references outside the declared read set. Native host acquisition and the
-HTTP writer share the existing accounting helpers and lock order.
+`Tenant.MayStart` owns logical admission for every execution placement.
+It reads sealed declarations and actual job awards, grants complete job sets,
+and preserves reservation identity and queue arrival independently of owners.
+Store release transitions commit plan admission with release permission.
+The public queue API retains group reads and member priority control. Single-group
+mutation and resolution routes are deleted. `ConcurrencyStore` is a tenant read
+port. Claim group reads preserve contention accounting while removing memo keys
+and leader references outside the declared read set.
 
 Proofs use real SQLite, controller routing, source resolution and sealed intake.
 They cover concurrent due replay, consent revocation, membership loss, source
@@ -4158,10 +4166,11 @@ lead harness.
 
 Open integration points: following a private remote branch needs audited
 controller credentials during revision lookup. Pinned App schedules use the
-existing post-admission source release. HTTP box groups need persisted host
-identity, and memo requests need accepted namespace metadata. Missing authority
-is refused. Native box admission remains available. These gaps remain visible
-for the lead's launch integration work.
+existing post-admission source release. Box groups use only `ExecutionHost` sealed
+on the authenticated award. Launcher awards wait for activation to seal that
+identity. Other awards without it are refused. Memo requests need accepted
+namespace metadata. These gaps remain visible for the lead's launch integration
+work.
 
 
 ## W1b review integration, 2026-10-17
@@ -4213,16 +4222,17 @@ capacity continuity.
 
 The schema already refuses coalesce waiter rows. Its unused admission and
 promotion paths, follower draining, cached acquisition outcomes and constants
-are deleted. Memo and coalesced result selection remain in the blob/result
-transactions. Authorized leader reads still require declared read edges.
+are deleted. Memo result selection remains in the blob/result transactions.
+Coalesced source requests are refused. The remaining cache/leader fields and
+leader-read redaction path are removed with durable admission.
 
 `TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector` replaces the obsolete
 inheritance surface tests. Weighted admission, backfill, cancellation, promotion,
 owner-loss continuity and real result materialization retain their tests. The
 native harness still owns PostgreSQL and socket verification.
 
-The implemented capacity-adoption types and transaction now live in
-`internal/store/capacity_adoption.go`. The completed contract scaffold is removed.
+`internal/store/capacity_adoption.go` and reservation-generation adoption are
+removed. `capacity_admission.go` owns work identity, durable arrivals and permits.
 
 
 ## W1b committed output reporting and retired readers, 2026-10-17
@@ -4281,6 +4291,91 @@ environments without known provenance. Child intake copies its parent's
 environment and provenance in the ancestry transaction. A supplied snapshot or
 provenance that differs from the parent fails with `spec_drift`. Retry retains
 the original seal. Invocation origin never selects environment storage.
+
+
+## Durable admission
+
+`Tenant.MayStart` owns job admission in the controller or local store. It accepts
+only the work binding and authenticated job award. Owners propose releases through
+ready transitions and `ReleaseEvaluation`. The store commits plan admission with
+permission to release. Each complete group set grants atomically with one arrival.
+A wait holds none of that set, and a policy refusal settles through the existing
+node and run verdict owner. A job never reacquires its parent plan. The ledger
+creates and locks each group entry before locking its holders. A first arrival
+that found no entry follows the same order after inserting or losing an insert
+race. Lease bounds use the transaction clock after that lock is held.
+
+Concurrent admission tests enter through accepted declarations and authenticated
+awards. Per-key accounting fixtures cannot model this boundary: reaping discards
+the work's whole group set under the admission owner. Barrier snapshots check
+complete sets, capacity, live-waiter FIFO and settlement while admission, execution
+and maintenance race on both store dialects.
+
+Schema baseline 20 includes `admission_work`. Run/job identity and arrival survive
+owner handoff. Its generation and holder bind a start permit to the actual award.
+Every start requires a permit, including jobs without groups. Process delegation
+reads the same permit with its running attempt in one authentication snapshot.
+Logical reservation generations do not need adoption or rewriting. Claim or
+owner liveness preserves continuously retained arrival. Expired leases never revive.
+Queue timeouts apply only to ungranted work. Replaying a live complete grant
+retains its permit and arrival after the queue deadline.
+
+`StartGate` is a decision client followed by optional machine compute. It derives
+no groups or policies. The store alone derives accepted keys and the award's box
+identity. Plan/job namespaces and the prohibition on plan box scope remain.
+Burst awards are provisional until compute starts. Unavailable compute relinquishes
+the award and job reservations without resetting readiness ranking.
+
+Approval-only predicates and expansion callbacks receive store-issued evaluation
+permission. They hold no job groups. Approval callbacks hold no compute. Their
+typed outcomes commit under the exact source and live owner/evaluation fence.
+A predicate skip remains skipped. Controller-owned approval predicates use the
+same evaluation-unit lifecycle as generated work. A shared accepted-job predicate
+distinguishes approval evaluation from generator expansion when deriving output,
+secret and pipeline-reference read permissions. Approval evaluation retains its
+declared `Needs` and data grants on both placements, with the exact evaluation
+fence still required. `PipelineReferenceTarget` carries only the referenced
+pipeline and job, independently of the caller's run binding. Process routing and
+controller reads use that canonical target. Expansion cannot borrow those approval
+permissions.
+
+The simulation models claim, owner and per-level capacity deadlines independently.
+Claim loss alone cannot reset arrival or waive FIFO. It asserts each expected
+complete reservation set even when no rows are returned. Production `MayStart`
+fixtures replace the retired single-group test allocator. The source-writer check
+is architectural lint; behavioral permit and complete-set tests prove execution
+enforcement. Retired coalesce cache/leader fields and their redaction path are
+removed from requests, queue responses and the schema.
+
+## Launcher execution host sealing
+
+Launcher awards have no `ExecutionHost` when claimed, while waiting for capacity,
+or when a node is merely reserved. Only the launcher's authenticated activation
+of that execution reservation seals `node:<Node UID>` on the live bootstrap
+award. The transaction checks the award's ancestry, unit fence, lease and existing
+host. Replays preserve the host. Another node is refused. Bootstrap exchange
+copies this sealed identity to the execution credential.
+
+Box admission reads only the persisted award identity. A launcher award awaiting
+activation queues without creating a provisional concurrency key or holder.
+An award without launcher ancestry and without a host refuses admission.
+Capacity Pod UIDs and provisional Pod placement never supply a box identity.
+`TestLauncherCapacityWaitDoesNotSealExecutionHost` covers capacity waiting,
+reservation, activation, exchange and subsequent reconciliation through the
+launcher, controller and store. The Actions, account-backed here and unbound
+machine regressions retain their placement identity coverage.
+
+## Plan continuity after release
+
+The admission module derives plan reacquisition policy from committed release
+events. Once work has been released, plan groups queue without a timeout under
+every original on-limit policy. Initial admission still applies the accepted
+policy. Controller settlement processes terminal work while plan capacity is
+unavailable and withholds further release. Read-only group and queue views show
+`waiting to reacquire <group>` for that run. The controller continuity-lapse
+regression covers running-job completion, contention and subsequent release for
+queue, skip, fail and cancel-others. The native-owner regression covers the same
+release boundary with compute enabled and disabled.
 
 ## Fenced completion and transaction clocks
 

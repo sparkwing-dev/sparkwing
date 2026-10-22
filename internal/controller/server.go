@@ -544,7 +544,7 @@ func (s *Server) runLicenseAlarm(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) reapLeased(ctx context.Context) bool {
-	lease, err := s.operator.AcquireSingletonLease(ctx, "controller.reaper", s.measureHolder(), reaperLeaseTTL)
+	lease, err := s.operator.AcquireSingletonLease(ctx, "controller.reaper", s.leaseHolder, reaperLeaseTTL)
 	if errors.Is(err, store.ErrLockHeld) {
 		return false
 	}
@@ -557,7 +557,7 @@ func (s *Server) reapLeased(ctx context.Context) bool {
 }
 
 func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
-	concurrency, err := s.operator.MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+	concurrency, err := s.operator.MaintainConcurrency(ctx, lease)
 	if err != nil {
 		s.logger.Error("concurrency maintenance failed", "err", err)
 	}

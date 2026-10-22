@@ -104,10 +104,10 @@ func TestBoundedText(t *testing.T) {
 			}
 		})
 	}
-	for _, n := range []int{int(FailureBytes) - 1, int(FailureBytes), int(FailureBytes) + 1} {
+	for _, n := range []int{int(failureBytes) - 1, int(failureBytes), int(failureBytes) + 1} {
 		raw := []byte(strings.Repeat("x", n))
 		got, err := Failure(raw)
-		if (err != nil) != (n > int(FailureBytes)) {
+		if (err != nil) != (n > int(failureBytes)) {
 			t.Fatal("wrong failure bound")
 		}
 		if err == nil && string(got) != string(raw) {

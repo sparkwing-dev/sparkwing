@@ -3,7 +3,6 @@ import { test } from "node:test";
 import type { Context } from "../index.d.ts";
 import { ConcurrencyGroup, Generated, Plan, dir, goModules, npm, refTo, refToLastRun, startup } from "../src/plan.ts";
 import { SDKError } from "../src/errors.ts";
-import { resolveArgs } from "../src/args.ts";
 
 test("flat declarations keep zero and false settings and leave authority to the host", () => {
   const plan = new Plan()
@@ -22,13 +21,13 @@ test("flat declarations keep zero and false settings and leave authority to the 
     .env("CI", "1")
     .env("NODE_OPTIONS", "--stack-trace-limit=50", startup());
   build.cache(goModules(), npm(), dir("./web/node_modules/", "web/package-lock.json"));
-  const capacity = new ConcurrencyGroup("builds", { scope: "box", capacity: 2, queueTimeoutMs: 0, cancelTimeoutMs: 0 });
+  const capacity = new ConcurrencyGroup("builds", { scope: "box", capacity: 2, queueTimeoutMs: 0 });
   plan.concurrency(capacity);
   build.concurrency(capacity, 2);
   const doc = plan.toDoc();
   assert.deepEqual(Object.keys(doc).sort(), ["admission_class", "claim_wait_ms", "concurrency", "jobs", "priority", "source"]);
   assert.deepEqual(doc.source, { depth: 0, full_history: false, tags: false, submodules: false, lfs: false });
-  assert.deepEqual(doc.concurrency, [{ group: "builds", scope: "box", capacity: 2, queue_timeout_ms: 0, cancel_timeout_ms: 0 }]);
+  assert.deepEqual(doc.concurrency, [{ group: "builds", scope: "box", capacity: 2, queue_timeout_ms: 0 }]);
   assert.deepEqual(doc.jobs[0], {
     id: "gate",
     approval: { timeout_ms: 0, on_timeout: "deny" },
@@ -160,20 +159,17 @@ test("generators label expansions and insert replay code atomically", async () =
       ?.body({} as Context),
     3,
   );
-  const bad = new Generated(source, generator.id, plan);
-  bad.job("item-3", () => undefined);
-  assert.throws(() => plan.insert(bad), /duplicate job/);
-  assert.equal(plan.jobs().length, 3);
+
 });
 
-test("builder refuses malformed graphs and preserves host-owned ceilings", () => {
+test("builder forwards graph declarations and preserves host-owned ceilings", () => {
   const cycle = new Plan();
   cycle.job("a", () => undefined).needs("b");
   cycle.job("b", () => undefined).needs("a");
-  assert.throws(() => cycle.toDoc(), /cycle/);
+  assert.equal(cycle.toDoc().jobs.length, 2);
   const absent = new Plan();
   absent.job("a", () => undefined).needs("ghost");
-  assert.throws(() => absent.toDoc(), /needs ghost/);
+  assert.equal(absent.toDoc().jobs.length, 1);
   const p = new Plan();
   const j = p.job("j");
   j.step("a", () => undefined)
@@ -226,65 +222,26 @@ test("refs retain edges, max age and absence behavior", async () => {
   );
 });
 
-test("all argument types preserve serialized strings and validate defaults", () => {
-  const specs = [
-    { name: "text", type: "string" as const, default: "" },
-    { name: "bool", type: "bool" as const, default: "false" },
-    { name: "count", type: "int" as const, default: "0" },
-    { name: "wide", type: "int64" as const },
-    { name: "fraction", type: "float64" as const },
-    { name: "wait", type: "duration" as const },
-    { name: "list", type: "[]string" as const },
-  ];
-  assert.deepEqual(resolveArgs(specs, { wide: "9223372036854775807", fraction: "1.5", wait: "1h30m", list: " a, , b " }), {
-    text: "",
-    bool: "false",
-    count: "0",
-    wide: "9223372036854775807",
-    fraction: "1.5",
-    wait: "1h30m",
-    list: "a,b",
-  });
-  for (const args of [
-    { bool: "yes" },
-    { count: "1.1" },
-    { wide: "9223372036854775808" },
-    { fraction: "NaN" },
-    { wait: "later" },
-    { ghost: "x" },
-  ]) {
-    assert.throws(() => resolveArgs(specs, args), /argument|flag/);
-  }
-  assert.throws(
-    () => resolveArgs([{ name: "secret", type: "int", secret: true }], { secret: "private-value" }),
-    (error) => error instanceof Error && !error.message.includes("private-value"),
-  );
-  const plan = new Plan();
-  const job = plan.job("job", () => undefined).withArgs({ name: "count", type: "int", default: "4" });
-  assert.deepEqual(job.resolveArgs({ global: "yes", count: "0" }), { global: "yes", count: "0" });
-  assert.deepEqual(job.resolveArgs({ global: "yes" }), { global: "yes", count: "4" });
-});
-
-test("dangling generated waits, step cycles and cross-plan groups fail", () => {
+test("graph declarations reach the host while cross-plan groups fail locally", () => {
   const plan = new Plan();
   const job = plan.job("job");
   job.step("one", () => undefined).needs("two");
   job.step("two", () => undefined).needs("one");
-  assert.throws(() => plan.toDoc(), /steps: dependency cycle/);
+  assert.equal(plan.toDoc().jobs.length, 1);
   const elsewhere = new Plan().job("elsewhere", () => undefined);
   assert.throws(() => plan.groupJobs("other", elsewhere), /another plan/);
   const otherStep = new Plan().job("other").step("elsewhere", () => undefined);
   assert.throws(() => job.groupSteps("other", otherStep), /another job/);
   const waiting = new Plan();
   waiting.job("wait", () => undefined).needsGenerated(elsewhere.generate(() => undefined));
-  assert.throws(() => waiting.toDoc(), /generator which does not exist/);
+  assert.equal(waiting.toDoc().jobs.length, 1);
 });
 
-test("job argument names share one namespace and wire copies do not mutate declarations", () => {
+test("argument declarations reach the host and wire copies do not mutate declarations", () => {
   const plan = new Plan();
   plan.job("first", () => undefined).withArgs({ name: "arg", type: "string" });
   plan.job("second", () => undefined).withArgs({ name: "arg", type: "string" });
-  assert.throws(() => plan.toDoc(), /duplicate argument/);
+  assert.equal(plan.toDoc().jobs.length, 2);
   const single = new Plan();
   const j = single
     .job("work", () => undefined)
@@ -369,44 +326,6 @@ test("sealed declarations reject predicate mutations while accepting fresh expan
   assert.equal(plan.toDoc().jobs.length, 2);
 });
 
-test("an expansion cannot introduce a cycle through its settlement barrier", () => {
-  const plan = new Plan();
-  const source = plan.job("source", () => undefined);
-  const generator = source.generate(() => {});
-  plan.job("waiter", () => undefined).needsGenerated(generator);
-  plan.seal();
-  const generated = new Generated(source, generator.id, plan);
-  generated.job("added", () => undefined).needs("waiter");
-  assert.throws(() => plan.insert(generated), /cycle/);
-  assert.equal(plan.findJob("added"), undefined);
-});
-
-test("argument parsing preserves prototype-shaped names and refuses invalid numeric encodings", () => {
-  assert.deepEqual(resolveArgs([{ name: "__proto__", type: "string", default: "value" }], {}), JSON.parse('{"__proto__":"value"}'));
-  for (const value of ["0x10", "Infinity", " "])
-    assert.throws(() => resolveArgs([{ name: "float", type: "float64" }], { float: value }), /argument/);
-  assert.throws(() => resolveArgs([{ name: "duration", type: "duration" }], { duration: "2562048h" }), /argument/);
-  assert.deepEqual(resolveArgs([{ name: "duration", type: "duration" }], { duration: "-1.5ms" }), { duration: "-1.5ms" });
-});
-
-test("enum validation checks each normalized list member and declaration shape", () => {
-  const list = [{ name: "targets", type: "[]string" as const, enum: ["dev", "prod"], default: "dev, prod" }];
-  assert.deepEqual(resolveArgs(list, {}), { targets: "dev,prod" });
-  assert.deepEqual(resolveArgs(list, { targets: " prod, , dev " }), { targets: "prod,dev" });
-  assert.throws(() => resolveArgs(list, { targets: "dev,qa" }), /not an allowed value/);
-  assert.throws(() => resolveArgs([{ name: "target", type: "string", enum: ["dev"] }], {}), /enum requires/);
-  assert.throws(() => resolveArgs([{ name: "target", type: "int", enum: ["1"], default: "1" }], {}), /enum requires/);
-  assert.deepEqual(resolveArgs([{ name: "target", type: "string", enum: [], default: "anything" }], {}), { target: "anything" });
-  assert.deepEqual(resolveArgs([{ name: "target", type: "string", enum: [""], default: "" }], {}), { target: "" });
-});
-
-test("boolean arguments accept the retained Go spellings without changing their strings", () => {
-  for (const value of ["1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"]) {
-    assert.deepEqual(resolveArgs([{ name: "flag", type: "bool" }], { flag: value }), { flag: value });
-  }
-  assert.throws(() => resolveArgs([{ name: "flag", type: "bool" }], { flag: "yes" }), /argument/);
-});
-
 test("child targets compose parent and explicit repositories", () => {
   const plan = new Plan();
   plan.job("release", () => undefined).startsChildren("deploy").startsChildrenIn("gh:123", "publish").startsChildren("smoke");
@@ -422,10 +341,4 @@ test("runner label declarations leave normalization to the host", () => {
   const job = plan.toDoc().jobs[0];
   assert.deepEqual(job?.requires, ["", " gpu ", "gpu", "gpu"]);
   assert.deepEqual(job?.prefers, ["", " fast ", "fast"]);
-});
-
-test("list arguments trim Unicode White_Space as the Go parser does", () => {
-  const list = [{ name: "items", type: "[]string" as const }];
-  const raw = "\u1680alpha\u2000,\u3000,\u202fbravo\u205f";
-  assert.deepEqual(resolveArgs(list, { items: raw }), { items: "alpha,bravo" });
 });

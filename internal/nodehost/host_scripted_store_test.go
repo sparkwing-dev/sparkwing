@@ -151,9 +151,13 @@ func newOwnerSealStore(row store.RunRow) *ownerSealFixture {
 		if !reflect.DeepEqual(input.Seal.Request, s.row.Request) {
 			return store.AcceptedPlan{}, errors.New("host replaced intake")
 		}
-		s.row.Plan, s.row.PlanHash = input.Seal.Plan, ownerPlanHash
 		input.Seal.Resolved.SecretRegistration.Version = 1
-		s.row.Spec = &runspec.Spec{Declarations: input.Seal.Declarations, Request: input.Seal.Request, Hash: "spec", PlanHash: ownerPlanHash, Resolved: input.Seal.Resolved}
+		hash, err := runspec.CanonicalHash(input.Seal.Plan)
+		if err != nil {
+			return store.AcceptedPlan{}, err
+		}
+		s.row.Plan, s.row.PlanHash = input.Seal.Plan, string(hash)
+		s.row.Spec = &runspec.Spec{Declarations: input.Seal.Declarations, Request: input.Seal.Request, Hash: "spec", PlanHash: hash, Resolved: input.Seal.Resolved}
 		return store.AcceptedPlan{Spec: *s.row.Spec, Plan: s.row.Plan, PlanHash: s.row.PlanHash}, nil
 	}
 	s.transitionRun = func(_ context.Context, input store.RunTransition) (store.Applied, error) {
@@ -264,7 +268,7 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 			if err := json.Unmarshal(in.Body, &plan); err != nil {
 				return store.AcceptedExpansion{}, err
 			}
-			hash, err := expansionHash(plan)
+			hash, err := runspec.CanonicalHash(plan)
 			if err != nil {
 				return store.AcceptedExpansion{}, err
 			}
@@ -274,7 +278,7 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 				if err != nil {
 					return store.AcceptedExpansion{}, err
 				}
-				hash, err := expansionHash(job)
+				hash, err := runspec.CanonicalHash(job)
 				if err != nil {
 					return store.AcceptedExpansion{}, err
 				}
@@ -294,4 +298,16 @@ func newExpansionHostStore(row store.RunRow, node store.NodeRow) *expansionHostF
 		return store.Applied{}, errors.New("unexpected expansion fixture transition")
 	}
 	return s
+}
+
+func (s *scriptedHostStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, nil
+}
+
+func (*scriptedHostStore) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
+	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+}
+
+func (*scriptedHostStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
 }

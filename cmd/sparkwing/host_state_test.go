@@ -294,3 +294,11 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 		t.Fatalf("admission completion = %+v, %v", applied, err)
 	}
 }
+
+func (*cliOwnerStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
+}
+
+func (*cliOwnerStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, errors.New("unexpected evaluation release")
+}

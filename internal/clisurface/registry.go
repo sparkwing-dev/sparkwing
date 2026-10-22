@@ -48,16 +48,15 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing daemon", Flags: []Flag{}},
 		{Path: "sparkwing daemon events", Rules: []string{
-			"Show the newest 50 matching records by default, in chronological order within each page. Positive --limit and opaque --cursor continue toward older records with the same filters. Newer arrivals do not shift a continuation. Changed or removed unread history requires restarting without the cursor.",
-			"JSON emits event records followed by a page record with next_cursor and truncated. Plain and pretty output send continuation instructions to stderr. --explain reads the complete run timeline, including descendants, without pagination.",
+			"Show the newest 50 matching records by default, in chronological order within each page. Positive --limit controls the bounded output; increase it to include older records.",
+			"JSON emits event records followed by a page record with truncated. Plain and pretty output warn on stderr when older matching records are omitted. --explain reads the complete run timeline, including descendants, without pagination.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "ID"},
 			{Name: "since", Argument: "DURATION"},
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
 			{Name: "incarnation", Argument: "N", Minimum: 0, HasMinimum: true},
 			{Name: "limit", Argument: "N", Minimum: 1, HasMinimum: true},
-			{Name: "explain", Requires: []string{"run"}, Conflicts: []string{"since", "kind", "incarnation", "limit", "cursor"}},
-			{Name: "cursor", Argument: "CURSOR"},
+			{Name: "explain", Requires: []string{"run"}, Conflicts: []string{"since", "kind", "incarnation", "limit"}},
 		}},
 		{Path: "sparkwing daemon recover-state", Flags: []Flag{
 			{Name: "yes", Required: true},
@@ -219,7 +218,6 @@ func Registry() []Command {
 			{Name: "all-repos"},
 		}},
 		{Path: "sparkwing pipeline hooks status", Flags: []Flag{
-			{Name: "prove"},
 			{Name: "all-repos"},
 			{Name: "ungated"},
 		}},
@@ -767,7 +765,6 @@ func Registry() []Command {
 			{Name: "placement-liveness", Argument: "DURATION"},
 			{Name: "max-runs-per-principal-hour", Argument: "N"},
 			{Name: "shed-queue-depth", Argument: "N"},
-			{Name: "trigger-dedupe-window", Argument: "DURATION"},
 			{Name: "runners-per-token", Argument: "N"},
 			{Name: "limits-profile", Argument: "VALUE"},
 			{Name: "idle-claim-poll", Argument: "DURATION"},

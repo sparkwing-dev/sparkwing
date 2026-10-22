@@ -145,15 +145,10 @@ the preceding records, readable output and local files. Record authority is a
 contract fake. Controller intake, local provenance, `trust_local_builds` and
 the CLI's separate publication result still require their owning integrations.
 
-`MaterializeMemo` asks `RecordStore.CopyMemo` for an atomic, authorized copy,
-then verifies the output, manifest and every member within the lookup budget.
-Missing or corrupt bytes and non-authority copy failures produce a miss.
-Authorization, authentication and claim-fence failures remain errors.
-An absent output digest also produces a miss. Empty output remains valid when
-its explicit blob and output record were copied.
-Caller cancellation remains an error. Hosts query records before coordinating
-a cold execution, so verified default-branch fallback does not depend on an
-old run or a concurrency-cache row. A promoted waiter checks records again.
+Memo hits are materialized by the store's `ReconcileNode` transaction, which
+owns result edges, authority checks and the terminal lifecycle event. Missing or
+corrupt bytes become a miss; authorization and claim-fence failures remain errors.
+A host cannot turn a failed record copy into successful execution.
 The host resolves a fresh storage binding after execution before publishing
 artifacts, because an application retry advances the upload attempt.
 

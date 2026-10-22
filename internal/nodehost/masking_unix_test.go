@@ -75,6 +75,9 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 		t.Fatal(err)
 	}
 	input.Entry = entry
+	if response, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || response.Kind != store.AcquireGranted {
+		t.Fatalf("admission=%+v error=%v", response, err)
+	}
 	_, _, deps, _ := executorFixture(t)
 	deps.Store = f.State
 	masker := secrets.NewMasker()
@@ -91,9 +94,9 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 
 func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
 	f, input, deps := maskingExecutorFixture(t)
-	deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		return nil, outerLayerFailure()
-	}
+	})
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
 		t.Fatal(err)

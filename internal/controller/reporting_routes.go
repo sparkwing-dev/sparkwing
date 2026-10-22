@@ -61,7 +61,7 @@ func (s *Server) logScanSlot(next func(http.ResponseWriter, *http.Request, capab
 }
 
 func reportingPipelineTarget(r *http.Request) (capability.RequestEvidence, error) {
-	return capability.RequestEvidence{Target: capability.Target{Pipeline: r.PathValue("name")}}, nil
+	return capability.RequestEvidence{Target: capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: r.PathValue("name"), JobID: r.URL.Query().Get("job")}}}, nil
 }
 
 func (s *Server) reportingTenant(r *http.Request, a capability.Authorized) (*store.Tenant, error) {

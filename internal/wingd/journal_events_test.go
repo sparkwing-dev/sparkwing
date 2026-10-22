@@ -84,31 +84,3 @@ func TestJournalReattachRefusalPreservesEmptyRunID(t *testing.T) {
 		t.Fatalf("reattach journal = %+v", records)
 	}
 }
-
-func TestJournalPolicyRedactsEndpointCredentials(t *testing.T) {
-	policy := AdmissionPolicy{Jev: JevPolicy{Endpoint: "https://person:password@example.test/advise?token=secret&mode=fast"}}
-	jev := journalPolicy(policy)["jev"].(map[string]any)
-	if got := jev["endpoint"]; got != "https://example.test/advise" {
-		t.Fatalf("journal endpoint = %q", got)
-	}
-	policy.Jev.Endpoint = "https://person:password@[bad-host/advise?token=secret"
-	jev = journalPolicy(policy)["jev"].(map[string]any)
-	if got := jev["endpoint"]; got != "" {
-		t.Fatalf("malformed journal endpoint = %q", got)
-	}
-}
-
-func TestJournalEndpointKeepsOnlyLocation(t *testing.T) {
-	for raw, want := range map[string]string{
-		"https://person:password@example.test/advise?token=secret#fragment": "https://example.test/advise",
-		"//person:password@example.test/advise?token=secret#fragment":       "//example.test/advise",
-		"person@example.test/advise?token=secret#fragment":                  "//example.test/advise",
-		"person:password@example.test/advise?token=secret#fragment":         "",
-		"/advise?token=secret#fragment":                                     "/advise",
-		"mailto:person:password@example.test?token=secret#fragment":         "",
-	} {
-		if got := journalEndpoint(raw); got != want {
-			t.Errorf("journalEndpoint(%q) = %q, want %q", raw, got, want)
-		}
-	}
-}

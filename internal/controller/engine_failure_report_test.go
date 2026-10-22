@@ -30,6 +30,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := capability.Authorized{Principal: principal, Binding: claim.Claim.Binding, Target: owner.Target}
+	engineAdmitExecution(t, server.Store, executor.Principal)
 	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))}); err != nil {
 		t.Fatal(err)
 	}

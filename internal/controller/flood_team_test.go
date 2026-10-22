@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -74,12 +73,12 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 }
 
 func TestFloodPolicyTeamBucketsRemainIndependentProperty(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
+	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1})
 	i := 0
 	property := func(seed uint32) bool {
 		i++
 		teams := []store.Team{store.Team(fmt.Sprintf("a-%d-%d", i, seed)), store.Team(fmt.Sprintf("b-%d-%d", i, seed))}
-		f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
+		f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
 		for _, team := range teams {
 			if _, err := f.st.ForTeam(t.Context(), team); err != nil {
 				teststore.SeedTeam(t, f.st, team)

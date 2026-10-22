@@ -90,7 +90,7 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 			if award == nil || award.CPUCores != 2 || award.Memory != store.CPUClassMemoryBytes(2) {
 				t.Fatalf("award=%+v; want the committed two-core allocation", award)
 			}
-			states, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: award.Binding, JobName: jobName(award.Binding), NodeUID: "pod-uid", ReservationID: capacityObservedID + "pod-uid", Unheld: true}})
+			states, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: award.Binding, JobName: jobName(award.Binding), Capacity: &CloudCapacityObservation{PodUID: "pod-uid"}, Unheld: true}})
 			if err != nil || len(states) != 1 || states[0].Delete || states[0].Resources == nil || states[0].Resources.Cores != award.CPUCores || states[0].Resources.MemoryBytes != award.Memory {
 				t.Fatalf("sync did not return the committed allocation for a capacity request: %+v %v", states, err)
 			}

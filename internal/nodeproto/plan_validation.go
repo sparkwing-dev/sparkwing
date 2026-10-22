@@ -92,7 +92,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 			return PlanDoc{}, planInvalid("plan", "unknown placement")
 		}
 	}
-	if err := v.validateConcurrency(context.ExistingConcurrency, "existing_concurrency"); err != nil {
+	if err := v.validatePlanConcurrency(context.ExistingConcurrency, "existing_concurrency"); err != nil {
 		return PlanDoc{}, err
 	}
 	for i, job := range context.ExistingJobs {
@@ -100,7 +100,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 		if err := v.registerJob(job, path); err != nil {
 			return PlanDoc{}, err
 		}
-		if err := v.validateConcurrency(job.Concurrency, path+".concurrency"); err != nil {
+		if err := v.validateConcurrency(job.Concurrency, path+".concurrency", "job"); err != nil {
 			return PlanDoc{}, err
 		}
 	}
@@ -233,7 +233,7 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 			return err
 		}
 	}
-	if err := v.validateConcurrency(plan.Concurrency, "plan.concurrency"); err != nil {
+	if err := v.validatePlanConcurrency(plan.Concurrency, "plan.concurrency"); err != nil {
 		return err
 	}
 	for _, item := range []struct {
@@ -264,7 +264,16 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 	return nil
 }
 
-func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string) error {
+func (v *planValidator) validatePlanConcurrency(specs []ConcurrencySpec, path string) error {
+	for i, spec := range specs {
+		if spec.Scope != nil && *spec.Scope == "box" {
+			return planInvalid(fmt.Sprintf("%s[%d].scope", path, i), fmt.Sprintf("run-level concurrency group %q cannot use box scope; use job-level box scope", spec.Group))
+		}
+	}
+	return v.validateConcurrency(specs, path, "plan")
+}
+
+func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path, level string) error {
 	for i, spec := range specs {
 		at := fmt.Sprintf("%s[%d]", path, i)
 		if err := v.identifier(spec.Group, at+".group"); err != nil {
@@ -284,7 +293,7 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 				return err
 			}
 		}
-		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 || spec.CancelTimeoutMS != nil && *spec.CancelTimeoutMS < 0 {
+		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 {
 			return planInvalid(at, "timeout is negative")
 		}
 		if v.context.Expansion {
@@ -298,7 +307,7 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 			if spec.OnLimit != nil {
 				definition.onLimit = *spec.OnLimit
 			}
-			if existing, ok := v.concurrency[spec.Group]; ok {
+			if existing, ok := v.concurrency[level+":"+spec.Group]; ok {
 				field := ""
 				switch {
 				case existing.capacity != definition.capacity:
@@ -312,7 +321,7 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 					return planInvalid(at+"."+field, "concurrency group definition conflicts with another membership")
 				}
 			}
-			v.concurrency[spec.Group] = definition
+			v.concurrency[level+":"+spec.Group] = definition
 		}
 	}
 	return nil

@@ -42,6 +42,7 @@ func TestNativeTerminalResultReplayUsesCommittedProof(t *testing.T) {
 	raw := nativeClaimPresentation(t, e, a)
 	h := New(e.Store, nil).Handler()
 	path := "/api/v1/runs/run/jobs/job/transition"
+	engineAdmitBearer(t, e.Store, raw)
 	engineClaimHTTP(t, h, raw, "POST", path, `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	body := `{"to":"success","cause":"report","source_attempt":1,"result":{"outcome":"success"}}`
 	engineClaimHTTP(t, h, raw, "POST", path, body, 200)

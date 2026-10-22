@@ -61,6 +61,7 @@ func TestEngineWireRetryOrdinalCannotConsumeNextAttempt(t *testing.T) {
 			t.Fatal("unbound start consumed an attempt")
 		}
 	}
+	engineAdmitExecution(t, server.Store, actor.Principal)
 	started, err := server.TransitionJob(t.Context(), actor, start)
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("start: %+v %v", started, err)

@@ -282,7 +282,7 @@ A59 tests read the immutable award's payer, metered flag, executor class,
 reservation, start rule and unit kind. Change the root credential after award
 and prove settlement still uses the award. Hold a metered run host while work
 waits for a customer-owned runner and prove the wait is excluded. Plan/eval
-compute is per second without the job minimum, plan-cache hits are free, and
+compute is per second without the job minimum, new runs plan afresh, and
 executing work retains its 60-second minimum. Test retries, unstarted failure,
 disruption, cancellation, duplicate results and controller restart for exactly
 one settlement or refund and no negative/lost ledger delta.
@@ -467,3 +467,23 @@ change before activating the affected case. A polling sleep is not a substitute.
    execution restriction on the owner's behalf.
 
 <!-- design:end -->
+
+## Remote owner concurrency and optional compute
+
+`TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission` builds
+production runner composition and reaches self-claim with `runner.local_admission`
+on and off. The job declares `{group:serial, scope:run, capacity:1, on_limit:queue}`.
+Both settings require its controller concurrency holder before reconciliation.
+The enabled setting also requires a machine compute lease.
+`TestPrivateCapacityAdmitsPendingJobsAndPromotesAfterTerminalRelease` exercises
+the real controller and store with two pending jobs. The second queues until
+the first reaches a terminal transition, then adopts its promoted holder.
+`TestPrivateCapacityRejectsForeignTeamAndWrongUnit` refuses node, root and
+foreign-team credentials on every private capacity operation.
+`TestPrivateCapacityOwnerCannotChangeAcceptedDeclaration` presents a valid owner
+award with an undeclared group, altered capacity or cost, `cancel_others`, or an
+injected lease. Both the controller and direct owner admission refuse altered
+declarations. The other run's holder and cancellation state stay unchanged.
+`TestPrivateCapacityUsesSealedDeclarationAndOwnerDeadline` checks that a pending
+job receives its accepted capacity and cost with a lease bounded by its owner.
+The route inventory is checked by `TestFinalCredentialRouteDeclarations`.

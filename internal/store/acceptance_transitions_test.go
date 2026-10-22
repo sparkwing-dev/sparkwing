@@ -89,6 +89,9 @@ func checkStoreHeldTransitions(ctx context.Context, tenant *store.Tenant, withdr
 	if err != nil || !reflect.DeepEqual(before, after) {
 		return fmt.Errorf("refused start changed holder: %v", err)
 	}
+	if admitted, err := tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || admitted.Kind != store.AcquireGranted {
+		return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	}
 	start, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil || start.Attempt != 1 {
 		return fmt.Errorf("first start: %+v, %v", start, err)

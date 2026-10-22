@@ -301,6 +301,7 @@ func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 		t.Fatal("missing awarded capability")
 	}
 	raw := response.Claim.Capability
+	engineAdmitBearer(t, e.Store, raw)
 	w = engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	var started controllerwire.Applied
 	if json.Unmarshal(w.Body.Bytes(), &started) != nil || started.Attempt != 1 {

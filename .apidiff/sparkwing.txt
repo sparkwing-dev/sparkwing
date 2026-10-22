@@ -73,8 +73,6 @@ type ConcurrencyLimit struct {
 	OnLimit OnLimit
 
 	QueueTimeout time.Duration
-
-	CancelTimeout time.Duration
 }
 type ConsumeOption func(*consumeEdge)
 func Debug(ctx context.Context, format string, args ...any)

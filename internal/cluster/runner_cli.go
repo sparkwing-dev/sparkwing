@@ -30,6 +30,7 @@ type RunnerOptions struct {
 	actions          *githubActionsSource
 	Config           userconfig.RunnerConfig
 	ConfigPath       string
+	BoxID            *string
 	SubmitAccept     procenv.SubmitAccept
 	Loop             runners.LoopConfig
 	Heartbeat, Lease time.Duration
@@ -63,7 +64,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	if err != nil {
 		return parsedHelp(err)
 	}
-	config, accepted, err := cli.config(command, fs)
+	config, accepted, boxID, err := cli.config(command, fs)
 	if err != nil {
 		return err
 	}
@@ -71,6 +72,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	if err != nil {
 		return err
 	}
+	options.BoxID = boxID
 	if options.SubmitAccept, err = procenv.OperatorSubmitAccept(accepted); err != nil {
 		return err
 	}
@@ -124,7 +126,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	return runRunner(ctx, runner, options.MetricsAddress)
 }
 
-func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.RunnerConfig, accepted []string, err error) {
+func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.RunnerConfig, accepted []string, boxID *string, err error) {
 	if command == "start" {
 		read := cli.ReadConfig
 		if read == nil {
@@ -132,22 +134,25 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.Ru
 		}
 		path := textFlag(fs, "config")
 		if fs.Changed("config") && path == "" {
-			return cfg, nil, errors.New("--config must not be empty")
+			return cfg, nil, nil, errors.New("--config must not be empty")
 		}
 		if path == "" {
 			path, err = userconfig.Path()
 			if err != nil {
-				return cfg, nil, err
+				return cfg, nil, nil, err
 			}
 		}
 		file, err := read(path)
 		if err != nil {
-			return cfg, nil, err
+			return cfg, nil, nil, err
 		}
 		if file.Runner == nil {
-			return cfg, nil, errors.New("config requires a runner section")
+			return cfg, nil, nil, errors.New("config requires a runner section")
 		}
 		cfg = *file.Runner
+		if file.Machine != nil {
+			boxID = file.Machine.BoxID
+		}
 		if file.Run != nil {
 			accepted = file.Run.SubmitEnvAllow
 		}
@@ -173,11 +178,11 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (cfg userconfig.Ru
 	if fs.Changed("max-concurrent") {
 		value, err := strconv.Atoi(textFlag(fs, "max-concurrent"))
 		if err != nil {
-			return cfg, nil, errors.New("--max-concurrent requires an integer")
+			return cfg, nil, nil, errors.New("--max-concurrent requires an integer")
 		}
 		cfg.MaxConcurrent = &value
 	}
-	return cfg, accepted, nil
+	return cfg, accepted, boxID, nil
 }
 
 func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string) (RunnerOptions, error) {

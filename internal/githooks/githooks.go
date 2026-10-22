@@ -13,6 +13,25 @@ const Marker = "Installed by sparkwing"
 
 const pipelineCall = "sparkwing run "
 
+var gitHookNames = map[string]bool{
+	"applypatch-msg": true, "pre-applypatch": true, "post-applypatch": true,
+	"pre-commit": true, "pre-merge-commit": true, "prepare-commit-msg": true,
+	"commit-msg": true, "post-commit": true, "pre-rebase": true,
+	"post-checkout": true, "post-merge": true, "pre-push": true,
+	"pre-receive": true, "update": true, "proc-receive": true,
+	"post-receive": true, "post-update": true, "reference-transaction": true,
+	"push-to-checkout": true, "pre-auto-gc": true, "post-rewrite": true,
+	"sendemail-validate": true, "fsmonitor-watchman": true,
+	"p4-changelist": true, "p4-prepare-changelist": true,
+	"p4-post-changelist": true, "p4-pre-submit": true,
+	"post-index-change": true,
+}
+
+// IsHookName reports whether Git recognizes name as a hook filename.
+func IsHookName(name string) bool {
+	return gitHookNames[name]
+}
+
 type Git func(dir string, args ...string) (string, error)
 
 type Shadow struct {
@@ -112,14 +131,14 @@ func configPath(git Git, dir, scope string) string {
 	return filepath.Clean(v)
 }
 
-func Gates(hooksDir string) []string {
+func gates(hooksDir string) []string {
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
 		return nil
 	}
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || !IsHookName(e.Name()) {
 			continue
 		}
 		body, err := os.ReadFile(filepath.Join(hooksDir, e.Name()))
@@ -139,7 +158,7 @@ func Detect(git Git, repoRoot string) (*Shadow, error) {
 	if err != nil {
 		return nil, err
 	}
-	gates := Gates(hooksDir)
+	gates := gates(hooksDir)
 	if len(gates) == 0 {
 		return nil, nil
 	}

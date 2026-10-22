@@ -63,8 +63,6 @@ type Config struct {
 	BudgetOrigin string
 
 	AdmissionPolicy *AdmissionPolicy
-	JevAdvisor      JevAdvisor
-	TypeSafeAPIKey  string
 
 	Sampler HostSampler
 

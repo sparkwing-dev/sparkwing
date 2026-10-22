@@ -12,7 +12,7 @@ func TestLauncherRejectionFailsExactAward(t *testing.T) {
 			t.Run(string(kind)+map[bool]string{false: "/bootstrap", true: "/exchanged"}[exchange], func(t *testing.T) {
 				s, demand, claim, _ := launcherSnapshotFixture(t, kind)
 				root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil)
+				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
 				if err != nil || len(awards) != 1 {
 					t.Fatal(err)
 				}
@@ -25,7 +25,7 @@ func TestLauncherRejectionFailsExactAward(t *testing.T) {
 				if err = s.rejectLauncherAwards(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 					t.Fatal(err)
 				}
-				awards, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil)
+				awards, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
 				if err != nil || len(awards) != 0 {
 					t.Fatalf("rejected award retained: %+v %v", awards, err)
 				}
@@ -56,7 +56,7 @@ func FuzzLauncherRejectRequiresOwnExactAward(f *testing.F) {
 	f.Fuzz(func(t *testing.T, field uint8, change uint16) {
 		s, demand, claim, _ := launcherSnapshotFixture(t, capability.UnitNode)
 		root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-		awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil)
+		awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
 		if err != nil || len(awards) != 1 {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func FuzzLauncherRejectRequiresOwnExactAward(f *testing.F) {
 		if err = s.rejectLauncherAwards(t.Context(), root, []capability.LeaseRef{fence}); err == nil {
 			t.Fatal("forged rejection accepted")
 		}
-		after, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil)
+		after, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil, nil, nil, nil, nil)
 		if err != nil || len(after) != 1 || after[0].Claim.Award != awards[0].Claim.Award {
 			t.Fatalf("foreign rejection changed award: %+v %v", after, err)
 		}
@@ -84,7 +84,7 @@ func TestLauncherRejectionPreservesReplacementAward(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, first, _ := launcherSnapshotFixture(t, kind)
 			root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil)
+			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
 			if err != nil || len(awards) != 1 {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestLauncherRejectionPreservesReplacementAward(t *testing.T) {
 			if err = s.rejectLauncherAwards(t.Context(), root, []capability.LeaseRef{fence}); err != nil {
 				t.Fatal(err)
 			}
-			remaining, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil)
+			remaining, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
 			if err != nil || len(remaining) != 1 || remaining[0].Claim.Award != next.Award {
 				t.Fatalf("stale rejection damaged replacement: %+v %v", remaining, err)
 			}

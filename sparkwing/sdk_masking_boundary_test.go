@@ -46,7 +46,7 @@ func TestSDKHasNoMaskerOrAutomaticRegistration(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tsRoot, "diagnostics.ts")); !os.IsNotExist(err) {
 		t.Fatal("TypeScript SDK retains diagnostics.ts masker")
 	}
-	for _, name := range []string{"args.ts", "describe.ts", "plan.ts", "runner.ts"} {
+	for _, name := range []string{"describe.ts", "plan.ts", "runner.ts"} {
 		raw, err := os.ReadFile(filepath.Join(tsRoot, name))
 		if err != nil {
 			t.Fatal(err)

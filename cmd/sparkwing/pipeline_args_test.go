@@ -58,7 +58,7 @@ var argsFixture = nodeproto.PipelineDescription{
 		{Name: "env", Short: "e", Type: "string", Required: true, Description: "target environment", Enum: []string{"dev", "prod"}},
 		{Name: "replicas", Type: "int", Default: new("2"), Description: "pod count", JobID: "rollout"},
 		{Name: "force", Type: "bool", Description: "skip checks"},
-		{Name: "token", Type: "string", Secret: true},
+		{Name: "token", Type: "string", Secret: true, Default: new("")},
 	},
 	Examples: []nodeproto.UsageExample{{Comment: "ship to dev", Command: "sparkwing run deploy --env dev"}},
 }
@@ -126,6 +126,9 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 	if strings.Contains(out, "forwarded to the pipeline") {
 		t.Error("help mentions an extra bag the pipeline does not declare")
 	}
+	if strings.Contains(out, "(default: )") {
+		t.Error("help presents an empty value as a default")
+	}
 
 	buf.Reset()
 	printPipelineHelp(&buf, runspec.PipelinePresentation{Name: "lint", Extra: true})
@@ -143,7 +146,7 @@ func TestPipelineArgumentEnumDoesNotEchoSecretValue(t *testing.T) {
 }
 
 func TestPipelineArgumentSliceEnumChecksEachValue(t *testing.T) {
-	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "[]string", Enum: []string{"linux", "darwin"}}}}
+	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "[]string", Enum: []string{" linux ", " darwin "}}}}
 	for _, value := range []string{"linux,darwin", "linux, darwin,", ""} {
 		if _, err := parsePipelineArgs(schema, []string{"--target", value}); err != nil {
 			t.Fatalf("valid list: %v", err)

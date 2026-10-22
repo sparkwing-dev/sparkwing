@@ -41,11 +41,11 @@ func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
 }
 
 func TestLocalRuntimeConstructionRetainsAdmissionPolicyAndBudget(t *testing.T) {
-	for _, mode := range []string{"off", "auto", "jev", "custom", "classic"} {
+	for _, mode := range []string{"off", "auto", "custom", "classic"} {
 		t.Run(mode, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			body := "admission:\n  budget: 50%,ignore-external\n  mode: " + mode + "\n"
-			if mode == "custom" || mode == "jev" {
+			if mode == "custom" {
 				body += "  custom:\n    class_weight: {batch: 37}\n    aging_every: 5\n"
 			}
 			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -61,7 +61,7 @@ func TestLocalRuntimeConstructionRetainsAdmissionPolicyAndBudget(t *testing.T) {
 			if got.Home != home || got.AdmissionPolicy == nil || string(got.AdmissionPolicy.Mode) != mode || got.Budget.CoresFraction != .5 || !got.Budget.IgnoreExternal || got.BudgetSource != wingd.BudgetSourceConfig || got.BudgetOrigin != path+" admission.budget" {
 				t.Fatalf("lost admission configuration: %+v", got)
 			}
-			if (mode == "custom" || mode == "jev") && (got.AdmissionPolicy.Scheduling.ClassWeight["batch"] != 37 || got.AdmissionPolicy.Scheduling.AgingEvery != 5) {
+			if (mode == "custom") && (got.AdmissionPolicy.Scheduling.ClassWeight["batch"] != 37 || got.AdmissionPolicy.Scheduling.AgingEvery != 5) {
 				t.Fatalf("lost custom admission policy: %+v", got.AdmissionPolicy.Scheduling)
 			}
 		})
@@ -144,9 +144,6 @@ func TestProductionLocalControllerReconcilesAndServesSharedHandlers(t *testing.T
 	}
 	if err := owner.Ready(); err != nil {
 		t.Fatal(err)
-	}
-	if key, err := owner.TypeSafeAPIKey(t.Context()); err != nil || key != "" {
-		t.Fatalf("fresh home Jev key: configured=%t: %v", key != "", err)
 	}
 	for _, handler := range []struct {
 		name string

@@ -103,7 +103,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	f.Store.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=?,trigger_source=?`, body, string(request.Dispatch), string(request.Origin))
 }
 
-// Poll records the claimant's live observation at the current clock; only a held claim records an ask.
+// Poll records a claimant offering one free slot at the current clock.
 func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.UnitKind) {
 	t.Helper()
 	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"sparkwing-4cpu"}}); err != nil {
@@ -111,7 +111,7 @@ func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.U
 	}
 }
 
-// Claim polls and then asks the ordered queue for one unit kind.
+// Claim polls and then claims from the ordered queue for one unit kind.
 func (f *RankingFixture) Claim(t *testing.T, prefix string, kind capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kind)
@@ -149,7 +149,7 @@ func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 	f.Store.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, body)
 }
 
-// ClaimKinds polls and then asks the ordered queue for any of the unit kinds.
+// ClaimKinds polls and then claims from the ordered queue for any of the unit kinds.
 func (f *RankingFixture) ClaimKinds(t *testing.T, prefix string, kinds ...capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kinds...)
@@ -166,22 +166,10 @@ func (f *RankingFixture) LocalQueue(t *testing.T) string {
 	return root.Prefix
 }
 
-// OpenAsk holds claim arbitration while recording an ask. The returned function commits it.
-func (f *RankingFixture) OpenAsk(t *testing.T, prefix string, rank int, askedAt time.Time) func() {
+// PollWithSlots records the last advertised free-slot count.
+func (f *RankingFixture) PollWithSlots(t *testing.T, prefix string, slots int) {
 	t.Helper()
-	tx, err := f.Store.beginTx(t.Context())
-	if err != nil {
+	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Labels: []string{"sparkwing-4cpu"}, FreeSlots: &slots}); err != nil {
 		t.Fatal(err)
-	}
-	if err := lockClaimQueueTx(t.Context(), tx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(t.Context(), `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) VALUES ('a','run','node','job',?,?,?)`, prefix, rank, askedAt.UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	return func() {
-		if err := tx.Commit(); err != nil {
-			t.Error(err)
-		}
 	}
 }

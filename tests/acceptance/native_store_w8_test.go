@@ -137,7 +137,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	var renewals atomic.Int64
 	bound, acquired, closed, finishedThroughServices := false, false, false, false
 	done := make(chan struct{})
-	bind := func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+	bind := func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
 		bound = true
 		if binding.Tenant.Team() != store.DefaultTeam || binding.Principal.Capability.Binding.Holder == "" {
 			t.Fatal("native service binding lost authenticated tenant or holder")
@@ -156,20 +156,20 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Store: finishingStoreW9{NativeHostStore: binding.Tenant, finished: &finishedThroughServices},
 			Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: nativeStoreEnginesW8{}},
 			Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
-			Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
-			Planner:   nodehost.SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-			Executor: nodehost.ExecutorDependencies{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
+			Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
+			PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+			Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 				return nodehost.ProcessGrant{}, errors.New("unexpected work")
 			}},
-			Evaluation: nodehost.EvaluationDependencies{
+			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+				return nil, errors.New("unexpected output read")
+			},
+			Evaluation: nodehost.EvaluationOperations{
 				Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
 					return nodehost.ProcessGrant{}, errors.New("unexpected evaluation")
 				},
-				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
-					return nil, errors.New("unexpected output read")
-				},
 			},
-			Owner: nodehost.OwnerHost{
+			Owner: nodehost.OwnerOperations{
 				Renew: func(ctx context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
 					beat, err := s.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, computing)
 					if mode == "remote_renewal" && err == nil && renewals.Add(1) == 2 {
@@ -208,17 +208,17 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		if mode == "remote_renewal" {
 			cfg.Lease.Interval = time.Millisecond
 		}
-		return runners.NativeServices{Config: cfg, Close: func() error { closed = true; close(done); return authorities.Close() }}, nil
+		return nodehost.NativeServices{Config: cfg, Close: func() error { closed = true; close(done); return authorities.Close() }}, nil
 	}
 	var executionErr error
-	remote := runners.Hosting{ControllerURL: "https://controller.example", NewController: cloudStoreClientW8(t, server), Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+	remote := runners.Hosting{ControllerURL: "https://controller.example", NewController: cloudStoreClientW8(t, server), Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 		principal, err := s.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(unit.Capability)))
 		if err != nil {
-			return runners.NativeServices{}, principal, err
+			return nodehost.NativeServices{}, principal, err
 		}
 		tenant, err := s.ForTeam(ctx, store.Team(principal.Capability.Team))
 		if err != nil {
-			return runners.NativeServices{}, principal, err
+			return nodehost.NativeServices{}, principal, err
 		}
 		services, err := bind(ctx, runners.StoreBinding{Tenant: tenant, Principal: principal})
 		services.Config.Store = tenant
@@ -392,9 +392,9 @@ func FuzzNativeStoreAwardW8(f *testing.F) {
 			}
 			unit.Capability = nativeStoreDelegateW8(t, s, unit.Capability, grants)
 		}
-		host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {
+		host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
 			t.Fatal("changed award reached native service construction")
-			return runners.NativeServices{}, nil
+			return nodehost.NativeServices{}, nil
 		}}
 		if err := host.Host(t.Context(), unit); err == nil {
 			t.Fatal("changed award was accepted")
@@ -420,9 +420,9 @@ func TestNativeStoreRefusesDelegatedOwnerW8(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitTrigger)
 	unit.Capability = nativeStoreDelegateW8(t, s, unit.Capability, []capability.Grant{capability.TriggerHost})
 	bound := false
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {
+	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
 		bound = true
-		return runners.NativeServices{}, errors.New("delegated owner reached service construction")
+		return nodehost.NativeServices{}, errors.New("delegated owner reached service construction")
 	}}
 	if err := host.Host(t.Context(), unit); err == nil || bound {
 		t.Fatalf("delegated owner: bound=%v error=%v", bound, err)
@@ -435,8 +435,8 @@ func TestNativeStorePartialBindingW8(t *testing.T) {
 			s, unit := nativeStoreAwardW8(t, kind)
 			failure, closeFailure := errors.New("service bind failed"), errors.New("service close failed")
 			closed := 0
-			host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {
-				return runners.NativeServices{Close: func() error { closed++; return closeFailure }}, failure
+			host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+				return nodehost.NativeServices{Close: func() error { closed++; return closeFailure }}, failure
 			}}
 			if err := host.Host(t.Context(), unit); !errors.Is(err, failure) || !errors.Is(err, closeFailure) || closed != 1 {
 				t.Fatalf("partial native binding: closed=%d error=%v", closed, err)

@@ -90,14 +90,8 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return entry.Engine, nil
 		},
-		CanonicalHash: func(any) (runspec.Hash, error) { return ownerPlanHash, nil },
-		ValidatePlan: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-			var plan nodeproto.PlanDoc
-			err := json.Unmarshal(raw, &plan)
-			return plan, err
-		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: entrypoint, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Default: &defaultArg}, {Name: "secret", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
+			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: entrypoint, Extra: true, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Type: "string", Default: &defaultArg}, {Name: "secret", Type: "string", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
 			processes = append(processes, process)
 			return process, nil
 		},
@@ -106,7 +100,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		Masker: planner.Masker, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil },
 		Prepare: func(ctx context.Context, _ RunInput, e *source.Entry) (OwnerPlanning, error) {
-			return planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: sealed, Entry: e, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Project: project, ProjectFile: "sparkwing.yaml"})
+			return planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: sealed, Entry: e, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Project: project, ProjectFile: "sparkwing.yaml", Planning: PlanningInput{Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal}}})
 		},
 		Wait: func(context.Context, store.RunSnapshot) error { return errors.New("unexpected graph wait") },
 	}
@@ -174,7 +168,7 @@ func checkCheckoutGuardMask(t *testing.T, value string) {
 			return resolved, nil
 		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			return newCheckoutSDK(nodeproto.PlanDoc{}, nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Default: &secret, Secret: true}}}), nil
+			return newCheckoutSDK(nodeproto.PlanDoc{}, nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Default: &secret, Secret: true}}}), nil
 		},
 	}
 	prepared, err := planner.PrepareCheckout(t.Context(), CheckoutPlanningInput{Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build", ExecutionLocation: "local"}}, Entry: &source.Entry{Engine: resolved}, Project: project, ProjectFile: "sparkwing.yaml"})

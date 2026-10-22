@@ -158,9 +158,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 		for _, f := range []string{"capacity", "cost"} {
 			minimum(f, 1)
 		}
-		for _, f := range []string{"queue_timeout_ms", "cancel_timeout_ms"} {
-			minimum(f, 0)
-		}
+		minimum("queue_timeout_ms", 0)
 	case "resources":
 		minimum("cores", 0)
 		minimum("memory_bytes", 0)
@@ -189,8 +187,8 @@ func requestSchemaRules() []any {
 		{"hello", []string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding"}},
 		{"describe", nil, nil},
 		{"plan", []string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
-		{"run_step", []string{"job", "step", "attempt"}, []string{"job", "step", "attempt", "failure"}},
-		{"eval", []string{"closure"}, []string{"closure", "job", "step", "attempt", "input", "failure"}},
+		{"run_step", []string{"job", "step", "attempt"}, []string{"args", "job", "step", "attempt", "failure"}},
+		{"eval", []string{"closure"}, []string{"args", "closure", "job", "step", "attempt", "input", "failure"}},
 		{"cancel", nil, []string{"job", "step", "target"}},
 	} {
 		then := protocolSchema{}

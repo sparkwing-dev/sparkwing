@@ -123,6 +123,17 @@ CREATE TABLE claim_requirement_terms (
     FOREIGN KEY(team,requirements) REFERENCES claim_requirements(team,id) ON DELETE CASCADE
 );
 
+CREATE TABLE claim_contexts (
+    team TEXT NOT NULL REFERENCES teams(name),
+    id TEXT NOT NULL CHECK(id <> ''),
+    requirements TEXT NOT NULL DEFAULT '',
+    requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(requirements,'')) STORED,
+    unit_kind TEXT NOT NULL CHECK(unit_kind IN ('node','plan','trigger')),
+    PRIMARY KEY(team,id),
+    FOREIGN KEY(team,requirements_ref) REFERENCES claim_requirements(team,id)
+);
+CREATE INDEX idx_claim_contexts_requirements ON claim_contexts(team,requirements,unit_kind,id);
+
 CREATE TABLE nodes (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
@@ -136,6 +147,8 @@ CREATE TABLE nodes (
     queue_started_at BIGINT,
     claimed_by TEXT,
     claim_principal TEXT NOT NULL DEFAULT '',
+    claim_context TEXT NOT NULL DEFAULT '',
+    claim_context_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_context,'')) STORED,
     claim_requirements TEXT NOT NULL DEFAULT '',
     claim_requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_requirements,'')) STORED,
     capability_prefix TEXT NOT NULL DEFAULT '',
@@ -204,6 +217,7 @@ CREATE TABLE nodes (
     CHECK((output_record IS NULL AND manifest_record IS NULL) OR status = 'done'),
     CHECK(status <> 'done' OR (claimed_by IS NULL AND lease_expires_at IS NULL AND capability_prefix = '')),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,claim_context_ref) REFERENCES claim_contexts(team,id),
     FOREIGN KEY(team,claim_requirements_ref) REFERENCES claim_requirements(team,id)
 );
 
@@ -242,6 +256,8 @@ CREATE TABLE triggers (
     claimed_by TEXT,
     capability_prefix TEXT NOT NULL DEFAULT '',
     claim_principal TEXT NOT NULL DEFAULT '',
+    claim_context TEXT NOT NULL DEFAULT '',
+    claim_context_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_context,'')) STORED,
     claim_requirements TEXT NOT NULL DEFAULT '',
     claim_requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_requirements,'')) STORED,
     needs_labels BLOB NOT NULL,
@@ -259,6 +275,7 @@ CREATE TABLE triggers (
     CHECK((status IN ('done','failed')) = (finished_at IS NOT NULL)),
     CHECK(status <> 'pending' OR started_at IS NULL),
     FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,claim_context_ref) REFERENCES claim_contexts(team,id),
     FOREIGN KEY(team,claim_requirements_ref) REFERENCES claim_requirements(team,id)
 );
 
@@ -644,10 +661,6 @@ CREATE TABLE concurrency_waiters (
     holder_id TEXT NOT NULL DEFAULT '',
     arrived_at BIGINT NOT NULL,
     policy TEXT NOT NULL CHECK(policy IN ('queue','skip','cancel_others')),
-    cache_key_hash TEXT NOT NULL DEFAULT '',
-    leader_run_id TEXT NOT NULL DEFAULT '',
-    leader_node_id TEXT NOT NULL DEFAULT '',
-    cancel_timeout_ns BIGINT NOT NULL DEFAULT 0,
     cost BIGINT NOT NULL DEFAULT 1,
     declared_capacity BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),
@@ -656,8 +669,7 @@ CREATE TABLE concurrency_waiters (
     PRIMARY KEY (team, key, run_id, node_id),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
     CHECK(cost >= 0),
-    CHECK(declared_capacity >= 0),
-    CHECK(cancel_timeout_ns >= 0)
+    CHECK(declared_capacity >= 0)
 );
 
 
@@ -1343,18 +1355,6 @@ CREATE TABLE capabilities (
     FOREIGN KEY(team,bind_run) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
-CREATE TABLE unit_asks (
-    team TEXT NOT NULL REFERENCES teams(name),
-    run_id TEXT NOT NULL,
-    unit_kind TEXT NOT NULL CHECK(unit_kind IN ('plan','eval','node')),
-    node_id TEXT NOT NULL,
-    claimant TEXT NOT NULL,
-    claim_rank BIGINT NOT NULL CHECK(claim_rank >= 0),
-    asked_at BIGINT NOT NULL,
-    PRIMARY KEY (team,run_id,unit_kind,node_id,claimant),
-    FOREIGN KEY (team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-);
-
 CREATE TABLE blobs (
     team TEXT NOT NULL REFERENCES teams(name),
     digest TEXT NOT NULL,
@@ -1363,7 +1363,7 @@ CREATE TABLE blobs (
     PRIMARY KEY(team,digest)
 );
 
--- safety: cache records use NULL run_id so source retention cannot erase a live memo or binary.
+-- safety: reusable cache records use NULL run_id; pending memos cascade with their producer.
 -- safety: source_run_id is immutable provenance; output ownership uses the cascading run_id.
 CREATE TABLE blob_records (
     team TEXT NOT NULL REFERENCES teams(name),
@@ -1811,3 +1811,22 @@ CREATE TABLE source_uploads (
 CREATE INDEX idx_source_uploads_expiry ON source_uploads(expires_at,team,id);
 CREATE UNIQUE INDEX idx_credit_charges_one_reservation ON credit_charges(team,capability_prefix) WHERE kind = 'reservation';
 CREATE UNIQUE INDEX idx_credit_checkouts_one_open_refill ON credit_checkouts(team) WHERE kind = 'refill' AND closed_at IS NULL;
+
+CREATE TABLE admission_work (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    arrived_at BIGINT NOT NULL,
+    lease_expires_at BIGINT NOT NULL,
+    granted INTEGER NOT NULL DEFAULT 0 CHECK(granted IN (0,1)),
+    generation BIGINT NOT NULL DEFAULT 0,
+    holder TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(team,run_id,node_id),
+    UNIQUE(team,arrived_at),
+    CHECK(arrived_at>0 AND lease_expires_at>0),
+    CHECK(node_id='' OR (generation>0 AND holder<>'')),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_nodes_claim_context ON nodes(team,claim_requirements,claim_context,ready_at,run_id,node_id) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+CREATE INDEX idx_triggers_claim_context ON triggers(team,claim_requirements,claim_context,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;

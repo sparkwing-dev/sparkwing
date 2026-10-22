@@ -21,6 +21,8 @@ type UnitRef struct {
 // UnitDemand carries observed platform and labels. Identity, reservations and team
 // come from C2's capability; requirements and allowed pools come from persisted seals.
 type UnitDemand struct {
+	// FreeSlots is remaining poll capacity; nil offers one slot. Awards consume it.
+	FreeSlots          *int
 	CapabilityPrefix   string
 	Kinds              []capability.UnitKind
 	Labels             []string
@@ -75,7 +77,7 @@ type OperatorStore interface {
 	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
-	MaintainConcurrency(context.Context, SingletonLease, ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
+	MaintainConcurrency(context.Context, SingletonLease) (ConcurrencyMaintenanceResult, error)
 }
 
 var _ OperatorStore = (*Operator)(nil)

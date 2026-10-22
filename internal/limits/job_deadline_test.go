@@ -15,7 +15,7 @@ func TestJobDeadlineBoundsAndExpiry(t *testing.T) {
 	}{
 		{name: "unbounded"},
 		{name: "owner only", owner: now.Add(time.Hour), want: now.Add(time.Hour)},
-		{name: "attempt slack", attempt: now.Add(time.Minute), want: now.Add(time.Minute + JobSlack)},
+		{name: "attempt slack", attempt: now.Add(time.Minute), want: now.Add(time.Minute + jobSlack)},
 		{name: "equal attempt and owner", owner: now.Add(time.Minute), attempt: now.Add(time.Minute), want: now.Add(time.Minute)},
 		{name: "owner caps slack", owner: now.Add(5 * time.Minute), attempt: now.Add(time.Minute), want: now.Add(5 * time.Minute)},
 		{name: "expired owner", owner: now, expired: true},

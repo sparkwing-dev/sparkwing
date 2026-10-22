@@ -1,7 +1,7 @@
+import { argument } from "./describe.ts";
 import { posix } from "node:path";
 import type * as API from "../index.d.ts";
 import { failure, SDKError } from "./errors.ts";
-import { resolveArgs, validateArgSpecs } from "./args.ts";
 import type { ClosureSpec, ConcurrencySpec, JobSpec, PlanDoc, StepSpec } from "./plan-wire.ts";
 
 function identifier(kind: string, value: string): void {
@@ -38,7 +38,6 @@ export class ConcurrencyGroup implements API.ConcurrencyGroup {
     identifier("concurrency group", name);
     if (limit.capacity !== undefined) integer("concurrency capacity", limit.capacity, 1);
     if (limit.queueTimeoutMs !== undefined) integer("concurrency queue timeout", limit.queueTimeoutMs);
-    if (limit.cancelTimeoutMs !== undefined) integer("concurrency cancel timeout", limit.cancelTimeoutMs);
     if (limit.scope !== undefined && !["global", "run", "box"].includes(limit.scope)) throw new Error("invalid concurrency scope");
     if (limit.onLimit !== undefined && !["queue", "fail", "skip", "cancel_others"].includes(limit.onLimit))
       throw new Error("invalid concurrency onLimit");
@@ -60,7 +59,6 @@ function concurrency(group: API.ConcurrencyGroup, cost: number | undefined): Con
   if (cost !== undefined) spec.cost = cost;
   if (limit.onLimit !== undefined) spec.on_limit = limit.onLimit;
   if (limit.queueTimeoutMs !== undefined) spec.queue_timeout_ms = limit.queueTimeoutMs;
-  if (limit.cancelTimeoutMs !== undefined) spec.cancel_timeout_ms = limit.cancelTimeoutMs;
   return spec;
 }
 function addConcurrency(spec: { concurrency?: ConcurrencySpec[] }, group: API.ConcurrencyGroup, cost: number | undefined): void {
@@ -284,14 +282,12 @@ export class Declaration {
   argSpecs(): readonly API.ArgSpec[] {
     return [];
   }
-  resolveArgs(args: API.Args): Record<string, string> {
-    return resolveArgs(this.argSpecs(), args, { allowUnknown: true });
-  }
   closures(): Closure[] {
     return [...this.callbacks, ...this.steps().flatMap((step) => step.closures())];
   }
   toSpec(): JobSpec {
     const spec = structuredClone(this.spec);
+    if (this.argSpecs().length) spec.arguments = this.argSpecs().map((arg) => argument(arg, this.id));
     optionalField(spec, "closures", collect(this.callbacks));
     const steps = this.steps();
     if (steps.length) {
@@ -354,7 +350,6 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   withArgs(...args: readonly API.ArgSpec[]): this {
     this.assertMutable();
     const all = [...this.#args, ...args];
-    validateArgSpecs(all);
     this.#args = structuredClone(all);
     return this;
   }
@@ -689,15 +684,12 @@ export class Plan implements API.Plan {
     return this.declarations.flatMap((job) => job.closures()).find((closure) => closure.id === id);
   }
   toDoc(): PlanDoc {
-    validateArgSpecs(this.declarations.flatMap((job) => job.argSpecs()));
     const jobs = this.declarations.map((job) => job.toSpec());
-    checkGraph(jobs);
     return { jobs, ...structuredClone(this.settings) };
   }
   insert(generated: Generated): JobSpec[] {
     if (generated.parent !== this) throw new Error("generated jobs belong to another plan");
     const jobs = generated.toDoc().jobs;
-    checkGraph([...this.declarations.map((job) => job.toSpec()), ...jobs]);
     generated.seal();
     this.declarations.push(...generated.jobs());
     return jobs;
@@ -723,63 +715,9 @@ export class Generated extends Plan implements API.Generated {
   }
   override toDoc(): PlanDoc {
     if (Object.keys(this.settings).length) throw new Error("generated jobs cannot change plan settings");
-    validateArgSpecs([...this.parent.jobs(), ...this.declarations].flatMap((job) => job.argSpecs()));
     const jobs = this.declarations.map((job) => job.toSpec());
-    checkGraph([...this.parent.jobs().map((job) => job.toSpec()), ...jobs]);
     return { jobs };
   }
-}
-
-function acyclic(what: string, entries: readonly { id: string; deps: readonly string[] }[]): void {
-  const byID = new Map(entries.map((entry) => [entry.id, entry]));
-  for (const entry of entries)
-    for (const dep of entry.deps) if (!byID.has(dep)) throw new Error(`${what}: ${entry.id} needs ${dep}, which does not exist`);
-  const seen = new Set<string>(),
-    visiting = new Set<string>();
-  const visit = (id: string): void => {
-    if (visiting.has(id)) throw new Error(`${what}: dependency cycle`);
-    if (seen.has(id)) return;
-    visiting.add(id);
-    for (const dep of byID.get(id)?.deps ?? []) visit(dep);
-    visiting.delete(id);
-    seen.add(id);
-  };
-  for (const entry of entries) visit(entry.id);
-}
-function checkGraph(jobs: readonly JobSpec[]): void {
-  const ids = new Set<string>();
-  const generators = new Map(jobs.flatMap((job) => (job.closures?.generate ?? []).map((id) => [id, job.id] as const)));
-  for (const job of jobs) {
-    if (ids.has(job.id)) throw new Error(`duplicate job ${job.id}`);
-    ids.add(job.id);
-    if (!job.approval && !job.steps?.length) throw new Error(`job ${job.id} has neither a body nor steps`);
-    acyclic(
-      `job ${job.id} steps`,
-      (job.steps ?? []).map((step) => ({ id: step.id, deps: step.needs ?? [] })),
-    );
-  }
-  acyclic(
-    "plan",
-    jobs.map((job) => {
-      const generatorSources = (job.needs_generated ?? [])
-        .map((id) => {
-          const source = generators.get(id);
-          if (source === undefined) throw new Error(`job ${job.id} waits on a generator which does not exist`);
-          return [source, ...jobs.filter((member) => member.groups?.includes(id)).map((member) => member.id)];
-        })
-        .flat();
-      return {
-        id: job.id,
-        deps: unique([
-          ...(job.deps ?? []),
-          ...(job.deps_if_present ?? []).filter((id) => ids.has(id)),
-          ...generatorSources,
-          ...(job.on_failure_of ? [job.on_failure_of] : []),
-          ...(job.consumes ?? []).map((input) => input.producer),
-        ]),
-      };
-    }),
-  );
 }
 
 export function refTo<T>(job: API.Job<T>): API.Ref<T> {
@@ -824,13 +762,6 @@ const registry = new Map<string, API.PipelineDef>();
 export function definePipeline(definition: API.PipelineDef): API.PipelineDef {
   identifier("pipeline", definition.name);
   if (registry.has(definition.name)) throw new Error(`pipeline ${definition.name} is already defined`);
-  validateArgSpecs(definition.args ?? []);
-  const secrets = new Set<string>();
-  for (const secret of definition.secrets ?? []) {
-    identifier("secret", secret.name);
-    if (secrets.has(secret.name)) throw new Error("duplicate secret declaration");
-    secrets.add(secret.name);
-  }
   registry.set(definition.name, definition);
   return definition;
 }

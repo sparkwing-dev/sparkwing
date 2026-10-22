@@ -21,6 +21,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	files = append(files, filepath.Join(directory, "schema.sql"))
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
@@ -29,7 +30,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"launcherSweep", "launcher_sweep/", "launcher_claim_team", "queuedLauncherUnitTx", "SAVEPOINT launcher_award", "lockRankedUnitTx", `"ranking:"`, "rankingHoldTx", "unitPlacementTx", "placementRunnerTx"} {
+		for _, forbidden := range []string{"launcherSweep", "launcher_sweep/", "launcher_claim_team", "queuedLauncherUnitTx", "SAVEPOINT launcher_award", "lockRankedUnitTx", `"ranking:"`, "rankingHoldTx", "unitPlacementTx", "placementRunnerTx", "unit_asks", "recordUnitAsksTx", "collectUnitAsksTx", "pruneUnitAsksTx", "RankingAward"} {
 			if strings.Contains(string(raw), forbidden) {
 				t.Fatalf("%s restores %s", path, forbidden)
 			}
@@ -89,16 +90,17 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // Fragments correlate team keys with the final authenticated work/claimant pair.
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
-	"(*claimSQL).requirementRoutes": "shared authenticated label routes restrict both asks and indexed selection before the final eligibility predicate",
-	"(*claimSQL).sourceScope":       "the globally unique run ID supplies the team index key; the shared predicate still authorizes its claimant",
-	"(*claimSQL).predicate":         "eligibility correlates every tenant row with the work team's authenticated claimant facts",
-	"(*claimSQL).source":            "the final predicate restricts the union of ready work to authorized teams",
-	"(*claimSQL).query":             "the generated query joins tenant-keyed source rows and applies authenticated scope before selection or asks",
-	"(*claimSQL).placementCTEs":     "ranking asks correlate with the already eligible tenant/work pair",
+	"(*claimSQL).routesSQL":            "context routes join on both authenticated requirement team and requirement identity before selecting a tenant-keyed ready head",
+	"(*claimSQL).evaluationArrivalSQL": "the eval source correlates its run creation fallback on the same team and run identity",
+	"(*claimSQL).requirementRoutes":    "shared authenticated label routes restrict indexed selection before the final eligibility predicate",
+	"(*claimSQL).sourceScope":          "the globally unique run ID supplies the team index key; the shared predicate still authorizes its claimant",
+	"(*claimSQL).predicate":            "eligibility correlates every tenant row with the work team's authenticated claimant facts",
+	"(*claimSQL).source":               "the final predicate restricts the union of ready work to authorized teams",
+	"(*claimSQL).query":                "the generated query joins tenant-keyed source rows and applies authenticated scope before selection",
 }
 
 func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {
-	files := []string{"claim_query.go", "claim_search.go"}
+	files := []string{"claim_query.go", "claim_search.go", "approval_evaluation.go"}
 	check := func(n ast.Node) {
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch v := n.(type) {

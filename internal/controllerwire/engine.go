@@ -77,6 +77,7 @@ type PlanAccepted struct {
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
+	FreeSlots          *int                  `json:"free_slots,omitempty"`
 	OS                 string                `json:"os,omitempty"`
 	Arch               string                `json:"arch,omitempty"`
 	RunnerVersion      string                `json:"runner_version"`
@@ -124,10 +125,24 @@ type LauncherObservation struct {
 	Rejected    bool                `json:"rejected,omitempty"`
 }
 
+// LauncherCapacityObservation reports demand without an execution placement.
+type LauncherCapacityObservation struct {
+	Award capability.LeaseRef `json:"award"`
+}
+
+// LauncherActivation binds a verified execution reservation before its Job is unsuspended.
+type LauncherActivation struct {
+	Award         capability.LeaseRef `json:"award"`
+	NodeUID       string              `json:"node_uid"`
+	ReservationID string              `json:"reservation_id"`
+}
+
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
 type LauncherSyncRequest struct {
-	Observed  []LauncherObservation `json:"observed"`
-	Preparing []capability.LeaseRef `json:"preparing,omitempty"`
+	Observed    []LauncherObservation         `json:"observed"`
+	Capacity    []LauncherCapacityObservation `json:"capacity,omitempty"`
+	Activations []LauncherActivation          `json:"activations,omitempty"`
+	Preparing   []capability.LeaseRef         `json:"preparing,omitempty"`
 }
 
 // LauncherPreparation carries a bootstrap fence and its committed lease deadline.

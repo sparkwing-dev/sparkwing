@@ -152,13 +152,12 @@ type NodeExecutionGrant struct {
 }
 
 type NodeToolSlotGrant struct {
-	Group              string `json:"group"`
-	Scope              string `json:"scope"`
-	Capacity           int    `json:"capacity"`
-	OnLimit            string `json:"on_limit"`
-	MaxCost            int    `json:"max_cost"`
-	QueueTimeoutNanos  int64  `json:"queue_timeout_nanos"`
-	CancelTimeoutNanos int64  `json:"cancel_timeout_nanos"`
+	Group             string `json:"group"`
+	Scope             string `json:"scope"`
+	Capacity          int    `json:"capacity"`
+	OnLimit           string `json:"on_limit"`
+	MaxCost           int    `json:"max_cost"`
+	QueueTimeoutNanos int64  `json:"queue_timeout_nanos"`
 }
 
 type NodeAwaitGrant struct {
@@ -726,7 +725,7 @@ func normalizeExecutionGrant(grant *NodeExecutionGrant) error {
 		if grant.ToolSlot != nil && grant.ToolSlot.MaxCost >= 1 && grant.ToolSlot.MaxCost <= grant.ToolSlot.Capacity && grant.ToolSlot.Capacity <= 1_000_000 &&
 			(grant.ToolSlot.Scope == "run" || grant.ToolSlot.Scope == "box" || grant.ToolSlot.Scope == "global") &&
 			(grant.ToolSlot.OnLimit == "queue" || grant.ToolSlot.OnLimit == "fail" || grant.ToolSlot.OnLimit == "skip" || grant.ToolSlot.OnLimit == "cancel_others") &&
-			grant.ToolSlot.QueueTimeoutNanos >= 0 && grant.ToolSlot.CancelTimeoutNanos >= 0 &&
+			grant.ToolSlot.QueueTimeoutNanos >= 0 &&
 			validateExactIdentity("tool slot group", grant.ToolSlot.Group) == nil {
 			return nil
 		}

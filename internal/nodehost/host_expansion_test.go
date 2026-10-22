@@ -2,13 +2,12 @@ package nodehost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,12 +58,6 @@ func strictExpansionJobs(mode, closure string) json.RawMessage {
 	return raw
 }
 
-func expansionHash(value any) (runspec.Hash, error) {
-	raw, err := json.Marshal(value)
-	sum := sha256.Sum256(raw)
-	return runspec.Hash(hex.EncodeToString(sum[:])), err
-}
-
 func TestOwnerExpansion(t *testing.T) {
 	t.Helper()
 	for _, mode := range []string{"success", "empty", "failure", "refused", "unknown", "duplicate", "null", "concurrency", "mismatch_capacity", "mismatch_scope", "mismatch_on_limit", "cost", "cycle", "fan256", "fan257"} {
@@ -73,12 +66,13 @@ func TestOwnerExpansion(t *testing.T) {
 			defer cancel()
 			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
 			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}}
+			job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}
+			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 			if mode == "cycle" {
 				plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "consumer", Steps: []nodeproto.StepSpec{{ID: "body"}}, NeedsGenerated: []string{"first"}})
 			}
-			planHash, _ := expansionHash(plan)
-			jobHash, _ := expansionHash(job)
+			planHash, _ := runspec.CanonicalHash(plan)
+			jobHash, _ := runspec.CanonicalHash(job)
 			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
 			request := runspec.SealedRequest{RunID: "run", Hash: "request", Request: runspec.Request{Pipeline: "pipeline"}}
@@ -86,6 +80,23 @@ func TestOwnerExpansion(t *testing.T) {
 			rawPlan, _ := json.Marshal(plan)
 			rawJob, _ := json.Marshal(job)
 			s := newExpansionHostStore(store.RunRow{ID: "run", State: store.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Expansion: store.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
+			var mu sync.Mutex
+			changed := make(chan struct{}, 1)
+			readSnapshot, acceptExpansion := s.readSnapshot, s.acceptExpansion
+			s.readSnapshot = func(ctx context.Context, run string) (store.RunSnapshot, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return readSnapshot(ctx, run)
+			}
+			s.acceptExpansion = func(ctx context.Context, in store.ExpansionSubmission) (store.AcceptedExpansion, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				result, err := acceptExpansion(ctx, in)
+				if err == nil {
+					changed <- struct{}{}
+				}
+				return result, err
+			}
 			if mode == "cycle" {
 				raw, err := json.Marshal(plan.Jobs[1])
 				if err != nil {
@@ -100,7 +111,7 @@ func TestOwnerExpansion(t *testing.T) {
 			process := newExpansionSDK(plan, mode)
 			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
-			}, CanonicalHash: expansionHash, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+			}, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 				if ref != s.node.Ref || generation != 4 {
 					t.Fatal("output read lost source fence")
 				}
@@ -111,7 +122,14 @@ func TestOwnerExpansion(t *testing.T) {
 			}
 			entry := &source.Entry{Engine: resolved}
 			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(ctx context.Context, _ store.RunSnapshot) error {
+				select {
+				case <-changed:
+					return nil
+				case <-ctx.Done():
+					return context.Cause(ctx)
+				}
+			}, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}

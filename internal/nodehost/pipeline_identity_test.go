@@ -19,7 +19,7 @@ func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
 			switch request.Op {
 			case nodeproto.OpDescribe:
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "target", Required: true}, {Name: "build.image", Required: true, JobID: "build"}}}}}, nil
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "string", Required: true}, {Name: "build.image", Type: "string", Required: true, JobID: "build"}}}}}, nil
 			case nodeproto.OpPlan:
 				if request.Pipeline != "Deploy" || request.Run.Pipeline != "deploy-prod" || request.Args["target"] != "production" || request.Args["build.image"] != "release" {
 					t.Fatalf("pipeline identity or arguments changed: %+v", request)
@@ -37,10 +37,10 @@ func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Resolved.Entrypoint != "Deploy" || prepared.Planning.Inputs.Entrypoint != "Deploy" || prepared.Planning.Inputs.Pipeline != "deploy-prod" {
-		t.Fatalf("resolved selection = %+v, cache = %+v", prepared.Resolved, prepared.Planning.Inputs)
+	if prepared.Resolved.Entrypoint != "Deploy" {
+		t.Fatalf("resolved selection = %+v, cache = %+v", prepared.Resolved, prepared.Planning)
 	}
-	if _, err := PlanInitial(t.Context(), prepared.Planning, prepared.Functions); err != nil {
+	if _, err := PlanInitial(t.Context(), prepared.Planning, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	for _, process := range *processes {

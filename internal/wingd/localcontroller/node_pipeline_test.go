@@ -191,7 +191,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		services.HTTP = server.HTTP()
 		services.Policies = server.StorePolicies()
 		services.Policies.ClaimProfiles = claimant
-		state, err := NewState(binding, stateCipher(t))
+		state, err := NewState(binding)
 		services.State = state
 		return services, err
 	})
@@ -271,7 +271,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := nativeServices(ctx, WithClient(NativeConfig{Home: b.Home, Version: "v1.2.3", Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.AsOperator().RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private), func(string, string) (net.Listener, error) { return &processListener{closed: make(chan struct{})}, nil })
+	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{Home: b.Home, Admission: nodehost.ComposeStartGate(private, &nodehost.LocalAdmission{Daemon: pipelineAdmission{}}, true), Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.AsOperator().RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,6 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		}
 		return adopt(ctx, claim)
 	}
-	services.Config.Admission.Daemon = pipelineAdmission{}
 	bind := services.Config.Executor.Bind
 	if grant, err := bind(ctx, nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: admitted.RunID}, NodeID: "first", Generation: actor.Owner.Generation, Authority: nodehost.ClaimAuthority{CapabilityPrefix: principal.Capability.Prefix}}); err == nil || grant.Binding.Routes.Bearer != "" {
 		t.Fatal("owner authority substituted for a missing node award")
@@ -317,7 +316,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 			return grant, errors.New("process substituted owner or foreign node authority")
 		}
 		bound, err := services.Config.Processes.Authorities.Resolve(ctx, capability.Authorized{Principal: snapshot.Authorities[0].Principal, Binding: process.Binding})
-		if err != nil || bound == nil || !completeServices(*bound) || bound.Job.ID != input.NodeID {
+		if err != nil || bound == nil || (bound.Secret == nil || bound.Output == nil || bound.Latest == nil || bound.OIDC == nil || bound.Annotation == nil || bound.Summary == nil || bound.StartChild == nil || bound.AwaitChild == nil) || bound.Job.ID != input.NodeID {
 			return grant, fmt.Errorf("process services were incomplete at construction: %w", err)
 		}
 		mu.Lock()

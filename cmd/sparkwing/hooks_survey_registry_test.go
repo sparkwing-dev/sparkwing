@@ -80,7 +80,7 @@ func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 	for name, run := range map[string]func() error{
 		"install": func() error { return installFleet(installOptions{}) },
-		"fire":    func() error { return parseHooksStatus([]string{"--prove", "--all-repos", "-o", "plain"}) },
+		"status":  func() error { return parseHooksStatus([]string{"--all-repos", "-o", "plain"}) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newChainFixture(t)

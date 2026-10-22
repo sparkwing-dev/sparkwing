@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -59,12 +61,12 @@ func TestRunnerControllerW8Components(t *testing.T) {
 				}
 				events = append(events, "connect")
 				return bound, nil
-			}, Bind: func(_ context.Context, got controllerwire.ClaimedUnit, controller controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+			}, Bind: func(_ context.Context, got controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 				if !reflect.DeepEqual(got, unit) || controller != bound {
 					t.Fatal("native binder received another award or controller")
 				}
 				events = append(events, "bind")
-				return runners.NativeServices{}, capability.Principal{}, reached
+				return nodehost.NativeServices{}, capability.Principal{}, reached
 			}}
 			if err := host.Host(t.Context(), unit); !errors.Is(err, reached) {
 				t.Fatal(err)
@@ -123,11 +125,11 @@ func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
 			<-release
 			bearer, err := options.Bearer(t.Context())
 			return clients[bearer], err
-		}, Bind: func(_ context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+		}, Bind: func(_ context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 			if controller != clients[unit.Capability] {
 				t.Error("native binding shared another award's client")
 			}
-			return runners.NativeServices{}, capability.Principal{}, reached
+			return nodehost.NativeServices{}, capability.Principal{}, reached
 		}}
 		loop := runners.Loop{
 			Config: runners.LoopConfig{Version: "v0.20.0", MaxConcurrent: 2, MaxClaims: 2}, Controller: root, Host: host,
@@ -185,8 +187,8 @@ func FuzzRunnerControllerBindingW8(f *testing.F) {
 					}
 					return controllerwire.RenewalResponse{}, nil
 				}}, nil
-			}, Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
-				return runners.NativeServices{}, capability.Principal{}, prepared
+			}, Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
+				return nodehost.NativeServices{}, capability.Principal{}, prepared
 			},
 		}
 		if err := host.Host(t.Context(), unit); !errors.Is(err, prepared) {

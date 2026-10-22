@@ -275,3 +275,29 @@ func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention
 	}
 	return errors.Join(errs...)
 }
+
+func consumeClaimSlotTx(ctx context.Context, tx *storeTx, prefix, team string) error {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT claim_observation_json FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`, prefix, team).Scan(&raw); err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var poll runnerPoll
+	if err := json.Unmarshal(raw, &poll); err != nil {
+		return err
+	}
+	slots := 1
+	if poll.FreeSlots != nil {
+		slots = *poll.FreeSlots
+	}
+	slots = max(0, slots-1)
+	poll.FreeSlots = &slots
+	raw, err := json.Marshal(poll)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=? WHERE prefix=? AND COALESCE(team,'')=?`, raw, prefix, team)
+	return err
+}

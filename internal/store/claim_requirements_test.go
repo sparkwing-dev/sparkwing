@@ -55,7 +55,7 @@ func TestAcceptedWorkPersistsClaimRequirements(t *testing.T) {
 	}
 	execution := acceptance.Seal.Resolved.Settings.Jobs["job"]
 	execution.Requires.Optional = runspec.Optional[[]string]{Set: true, Value: []string{"linux"}}
-	acceptance.Seal.Plan = []byte(`{"jobs":[{"id":"job","requires":["linux"]}]}`)
+	acceptance.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"body"}],"requires":["linux"]}]}`)
 	acceptance.Seal.Resolved.Settings.Jobs["job"] = execution
 	if _, err := tenant.AcceptPlan(t.Context(), acceptance); err != nil {
 		t.Fatal(err)

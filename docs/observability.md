@@ -104,7 +104,7 @@ the logs.
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
 | `agent_lost` | The runner holding the job's claim stopped renewing it. Started work requeues in the same run until three disruptions have occurred. | Check the runner and `job_requeued` events. Recovery preserves the application retry budget. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
-
+| `credits_exhausted` | The team's prepaid balance or a funding hold refused the next execution slice, and the job stopped within its drain deadline. | Add credits or resolve the funding hold, then start the run again. |
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, so no claim can be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The terminal job event records the `unpriced_cpu_class` reason. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
@@ -494,9 +494,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `sparkwing_runs_total` | Counter | `pipeline`, `status` | Runs that reached a terminal state |
-| `sparkwing_run_duration_seconds` | Histogram | `outcome`, `pipeline` | End-to-end wall time from create to finish |
-| `sparkwing_nodes_claimed_total` | Counter | `pipeline` | Successful node claims |
 | `sparkwing_pending_nodes` | Gauge | (none) | Claim-queue depth (ready, unclaimed nodes of active runs) |
 | `sparkwing_active_runners` | Gauge | (none) | Distinct runners with a non-expired lease in the last 2 minutes |
 | `sparkwing_http_requests_total` | Counter | `method`, `route`, `status` | HTTP requests the controller answered |
@@ -519,7 +516,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
 | `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
 | `sparkwing_queue_depth` | Gauge | `state` | Each unfinished job of an active run counts once: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. A held job stays claimed until recovery commits, including after lease expiry. Jobs retained by a finished run do not count. |
-| `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
 | `sparkwing_claim_empty_total` | Counter | `claimant` | Queued claim polls that matched no unit, by claimant (`launcher`, `runner`, `here`). A launcher that only polls empty while runs wait matches none of their units |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
@@ -555,13 +551,6 @@ credits, so the `sparkwing_credits_*` totals are paid work by construction and
 carry no free-versus-paid split; the split an operator wants is
 `sparkwing_node_seconds_total{placement}` for work and
 `sparkwing_credits_granted_micro_total{kind}` for funding.
-
-`sparkwing_node_claim_wait_seconds` measures from `placement_hold_from`, the
-instant the node became claimable, which survives the `ready_at` bump a
-label-mismatched claim applies. A node re-claimed after a lease-expiry requeue is not
-observed, because the only wait it could report is the previous attempt's. An
-automatic retry is observed, because the retry clears the hold instant and the
-claim generation, which makes its next claim a first claim.
 
 Per-run and per-team attribution lives in the ledger, not in the metrics:
 `GET /api/v1/credits/history` returns each charge with its run and node. A run
@@ -668,8 +657,8 @@ sparkwing operator object-store status --profile prod
 sparkwing operator object-store reset-breaker --profile prod
 ```
 
-A reset clears every tripped class and both window counters, and thaws a
-frozen bucket ceiling; lifetime request and trip totals survive so the
+A reset clears every tripped class and both window counters. Lifetime request
+and trip totals survive so the
 metrics keep their history. A budget that keeps tripping wants a larger
 limit or a caller that stops retrying, not a repeated reset.
 
@@ -721,17 +710,11 @@ has written since it started.
 
 The ceiling is the controller's alone; no other process takes one.
 
-Three properties keep the measurement from becoming the cost it bounds.
-One replica measures per window: the controllers claim a store-wide
-lease, so N replicas cost one listing rather than N. A completed measurement
-advances the window only while its captured lease is live. An expired worker
-cannot overwrite a successor's window. The measurement's
-requests sit outside the object-store request budget, because totalling
-a million-object bucket spends twice the per-minute list budget in one
-pass and would otherwise leave every other reader refused for the rest
-of the minute. And the walk itself is bounded, at `--bucket-measure-pages` listings
-(1000 by default, a thousand objects each) and at half the
-reconciliation interval, whichever comes first.
+The controller measures on its ordinary timer. Measurement requests sit outside
+the object-store request budget, because totalling a million-object bucket would
+otherwise spend the per-minute list budget and refuse other readers. The walk
+is bounded at `--bucket-measure-pages` listings (1000 by default, a thousand
+objects each) and at half the reconciliation interval, whichever comes first.
 
 A measurement that stops at either bound is discarded rather than folded
 in, because a total short of the truth would thaw a store that is still
@@ -759,21 +742,10 @@ measured). Alarm on
 `BucketSizeBytes` and `NumberOfObjects` daily at no charge, which is the
 same signal from the account side.
 
-Clearing a freeze is an operator decision:
-
-```bash
-sparkwing operator object-store reset-breaker --profile prod
-```
-
-A thaw is refused while no measurement is scheduled
-(`--bucket-reconcile 0`), because nothing would ever end it and the
-ceiling would be off until the process restarts; raise the ceiling
-instead. Otherwise it thaws the bucket and holds the thaw until the next
-measurement: writes counted in between do not freeze it again, so the
-operator gets the whole window to act. The measurement then decides, and freezes again
-while the bucket is still over the ceiling. Raise the ceiling on the
-controller to keep writes flowing, or delete objects until the
-measurement falls back under it.
+To clear a storage freeze, raise the ceiling or delete objects until the next
+measurement puts the bucket under it. With `--bucket-reconcile 0`, restart the
+controller to take a new measurement after cleanup. Request-budget resets leave
+the storage ceiling in force.
 
 ## Egress budgets
 

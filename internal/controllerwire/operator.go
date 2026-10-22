@@ -82,7 +82,6 @@ type ObjectStoreCeiling struct {
 	Reconcile    string    `json:"reconcile_interval,omitempty"`
 	Warning      bool      `json:"warning"`
 	Frozen       bool      `json:"frozen"`
-	Thawed       bool      `json:"thawed"`
 	FrozenAt     time.Time `json:"frozen_at,omitzero"`
 	FrozenReason string    `json:"frozen_reason,omitempty"`
 	Freezes      uint64    `json:"freezes_total"`
@@ -99,7 +98,6 @@ type ObjectStoreBreaker struct {
 	Classes []ObjectStoreClassState `json:"classes"`
 	Ceiling ObjectStoreCeiling      `json:"ceiling"`
 	Cleared []string                `json:"cleared,omitempty"`
-	Thawed  bool                    `json:"thawed,omitempty"`
 }
 
 // OperatorManager manages team creation, operational guards and storage budgets under operator authority.

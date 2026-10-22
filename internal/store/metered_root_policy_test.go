@@ -47,6 +47,7 @@ func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
 			}
 			setMarker(!metered)
 			tenant := &Tenant{s: s, team: "a"}
+			admitExecution(t, tenant, actor)
 			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)

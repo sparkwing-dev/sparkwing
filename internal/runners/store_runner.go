@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -14,7 +16,7 @@ import (
 type StoreRunnerConfig struct {
 	Bearer  func(context.Context) (string, error)
 	Loop    LoopConfig
-	Bind    func(context.Context, StoreBinding) (NativeServices, error)
+	Bind    func(context.Context, StoreBinding) (nodehost.NativeServices, error)
 	OnError func(error)
 }
 

@@ -310,6 +310,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		parent = claimant
 	}
 	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
+	c.ExecutionHost = awardExecutionHost(chain, sealed, here)
 	c.Binding = capability.Binding{Kind: policy.Bindings[0], RunID: row.run, NodeID: row.node, Generation: row.generation, Holder: row.holder, Attempt: 0}
 	if row.expiry.Valid {
 		deadline := time.Unix(0, row.expiry.Int64).UTC()

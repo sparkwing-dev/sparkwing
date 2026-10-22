@@ -241,7 +241,7 @@ Helpers enforce planning purity before side effects. They do not expose the Go p
 
 ## Acceptance evidence required from implementations
 
-1. Drive Go and TypeScript through the same hello/describe/plan/run_step/eval/cancel fixtures. Compare normalized v2 plans for every public policy, including plan concurrency, box scope, groups, per-job args and risk.
+1. Drive Go and TypeScript through the same hello/describe/plan/run_step/eval/cancel fixtures. Compare normalized v2 plans for every public policy, including separate plan/job concurrency namespaces, plan-level box-scope refusal, job-level box scope, groups, per-job args and risk.
 2. Run a declared secret fixture under a real host. Verify lazy reads, optional absence, undeclared refusal, plain variables, acknowledged dynamic masks, and secret-bearing ID refusals on plans and expansions.
 3. Produce and consume artifacts, reuse memo outputs, restore each depcache helper, and refuse foreign or unrelated-job digests. Verify file/env/tree/repo memo helpers are deterministic and bypass composition cannot create a hit.
 4. Assert annotation file/line/end-line/column, summary and debug filtering. Assert exec usage events and cleanup after SDK termination.

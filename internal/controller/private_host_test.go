@@ -72,6 +72,12 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 
 func localHostFixture(t *testing.T, opts ...store.Option) (*serverFixture, *client.LocalHostClient, *store.Tenant, capability.Principal) {
 	t.Helper()
+	server, host, tenant, principal, _ := localHostAwardFixture(t, opts...)
+	return server, host, tenant, principal
+}
+
+func localHostAwardFixture(t *testing.T, opts ...store.Option) (*serverFixture, *client.LocalHostClient, *store.Tenant, capability.Principal, string) {
+	t.Helper()
 	engine, tenant := engineRuntimeStore(t, opts...)
 	engineRuntimeClaim(t, engine, capability.UnitNode)
 	engineSQL(t, engine.Store, `DELETE FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`)
@@ -90,7 +96,7 @@ func localHostFixture(t *testing.T, opts ...store.Option) (*serverFixture, *clie
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = host.Close() })
-	return &serverFixture{Server: server, store: engine.Store, engine: engine}, host, tenant, principal
+	return &serverFixture{Server: server, store: engine.Store, engine: engine}, host, tenant, principal, string(award.Bearer)
 }
 
 func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) {
@@ -103,7 +109,11 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 	if err != nil || snapshot.Run.ID != "run" || len(snapshot.Nodes) != 0 {
 		t.Fatalf("snapshot: %+v %v", snapshot, err)
 	}
-	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','build','pending',1,?,?)`, []byte(`{"id":"build"}`), []byte(`{}`))
+	acceptCapacityPlan(t, server, tenant, owner, "global", "queue", 1, 1, "build")
+	ownerActor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
+	if _, err := tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Actor: ownerActor}); err != nil {
+		t.Fatal(err)
+	}
 	authorized := capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
 	actor := engineActor(authorized)
 	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Actor: actor, Policy: store.SourceNone})
@@ -114,6 +124,9 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 		t.Fatal(err)
 	}
 	nodeActor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: claim.Node.Generation}}
+	if response, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: string(claim.Node.Ref.NodeID), Generation: int64(claim.Node.Generation)}, nodeActor); err != nil || response.Kind != store.AcquireGranted {
+		t.Fatalf("permit=%+v error=%v", response, err)
+	}
 	started, err := host.TransitionNode(t.Context(), store.StartNode{Ref: claim.Node.Ref, Actor: nodeActor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("start: %+v %#v", started, err)
@@ -221,7 +234,11 @@ func TestLocalHostRunTransitionCannotLeaveTerminalOwnerClaimed(t *testing.T) {
 func TestLocalHostPrivateTransportDrainsCancelledOwner(t *testing.T) {
 	server, host, tenant, owner := localHostFixture(t)
 	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
-	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','build','pending',1,?,?)`, []byte(`{"id":"build"}`), []byte(`{}`))
+	acceptCapacityPlan(t, server, tenant, owner, "global", "queue", 1, 1, "build")
+	ownerActor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
+	if _, err := tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Actor: ownerActor}); err != nil {
+		t.Fatal(err)
+	}
 	a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
 	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: engineActor(a), Policy: store.SourceNone})
 	if err != nil {
@@ -231,6 +248,9 @@ func TestLocalHostPrivateTransportDrainsCancelledOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: claim.Node.Generation}}
+	if response, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(actor.Generation)}, actor); err != nil || response.Kind != store.AcquireGranted {
+		t.Fatalf("permit=%+v error=%v", response, err)
+	}
 	started, err := host.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)

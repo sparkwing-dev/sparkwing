@@ -216,8 +216,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			done := make(chan claimOutcome, 1)
 			pending = done
+			freeSlots := l.Config.MaxConcurrent - len(active)
 			go func() {
 				request, err := l.request(claims)
+				request.FreeSlots = &freeSlots
 				var response controllerwire.ClaimResponse
 				if err == nil {
 					response, err = l.Controller.Claim(claims, request)

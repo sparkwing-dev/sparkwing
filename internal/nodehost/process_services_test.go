@@ -159,7 +159,7 @@ func TestProcessServicesRefuseUnknownStepsAndPropagateMaskedWrites(t *testing.T)
 		calls++
 		return sentinel
 	}
-	for _, body := range []string{`null`, `{"value":null}`, `{"level":"warning","message":"text"}`, `{"level":"warn","message":"text","step":"unknown"}`, `{"level":"warn","step":"step","step":"other"}`, `{"level":"warn"} {}`} {
+	for _, body := range []string{`null`, `{"value":null}`, `{"level":"warning","message":"text"}`, `{"message":"range","line":5,"end_line":4}`, `{"message":"negative","line":-1}`, `{"level":"warn","message":"text","step":"unknown"}`, `{"level":"warn","step":"step","step":"other"}`, `{"level":"warn"} {}`} {
 		if _, err := callService(t, routes, auth, "/node/v1/annotations", body); err == nil {
 			t.Fatal("accepted malformed record")
 		}
@@ -207,12 +207,12 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
 	registry := NewMaskRegistry(secrets.NewMasker())
 	host.Masks = registry
-	job := nodeproto.JobSpec{ID: "persisted"}
+	job := nodeproto.JobSpec{ID: "persisted", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	prepare := host.Prepare
 	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 		planning, err := prepare(ctx, in, entry)
-		planning.Functions.Validate = func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-			return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}, nil
+		planning.Plan = func(context.Context) (json.RawMessage, error) {
+			return json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
 		}
 		return planning, err
 	}

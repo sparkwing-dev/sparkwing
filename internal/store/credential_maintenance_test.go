@@ -152,9 +152,8 @@ func TestCredentialRotationEmptyAndMissingTransforms(t *testing.T) {
 }
 
 func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
-	tenant, a, _ := sourceReleaseFixture(t)
+	tenant, a := sourceReleaseFixture(t)
 	authorityMember(t, tenant.s, "owner", RoleReader)
-	tenant.s.sourcePolicy = nil
 	_, first, err := tenant.ReleaseSourceCredential(t.Context(), a)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +181,7 @@ func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
 }
 
 func TestSourceReleaseAuditsRenderDeletedAccount(t *testing.T) {
-	tenant, authorized, _ := sourceReleaseFixture(t)
+	tenant, authorized := sourceReleaseFixture(t)
 	authorityMember(t, tenant.s, "owner", RoleReader)
 	if _, _, err := tenant.ReleaseSourceCredential(t.Context(), authorized); err != nil {
 		t.Fatal(err)

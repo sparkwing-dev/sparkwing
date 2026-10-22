@@ -70,7 +70,9 @@ func FuzzProcessServiceNamedSelectorsBelongOnlyToTheirRoute(f *testing.F) {
 		if len(name) > 1024 {
 			t.Skip()
 		}
-		routes, _, _ := serviceFixture(t)
+		routes, _, auth := serviceFixture(t)
+		auth.Principal.Capability.Binding = auth.Binding
+		auth.Principal.Capability.Team = "team"
 		for _, endpoint := range routes.endpoints {
 			if endpoint.Method != http.MethodGet {
 				continue
@@ -88,8 +90,14 @@ func FuzzProcessServiceNamedSelectorsBelongOnlyToTheirRoute(f *testing.F) {
 			case "/node/v1/pipelines/{name}/latest":
 				wantPipeline = name
 			}
-			if evidence.Target.SecretName != wantSecret || evidence.Target.Pipeline != wantPipeline {
+			if evidence.Target.SecretName != wantSecret || (evidence.Target.Reference != nil && evidence.Target.Reference.Pipeline != wantPipeline || evidence.Target.Reference == nil && wantPipeline != "") {
 				t.Fatalf("%s confused its secret and pipeline selectors", endpoint.Pattern)
+			}
+			if evidence.Target.Reference != nil {
+				target, err := endpoint.ResolveTarget(t.Context(), auth.Principal, evidence.Target)
+				if err != nil || target.RunID != "" || target.NodeID != "" || target.BodyRunID != "" || target.Reference == nil || target.Reference.Pipeline != name {
+					t.Fatalf("reference acquired caller selectors: %+v: %v", target, err)
+				}
 			}
 		}
 	})
@@ -128,7 +136,7 @@ func TestProcessServicesReadUnderBoundAuthorityAndMaskBeforeDelivery(t *testing.
 	}
 	service.Latest = func(_ context.Context, got capability.Authorized, pipeline, id string, age time.Duration) (ProcessOutput, error) {
 		check(got)
-		if pipeline != "release" || id != "producer" || got.Target.NodeID != id || age != 3*time.Second {
+		if pipeline != "release" || id != "producer" || (got.Target.Reference == nil || got.Target.Reference.JobID != id || got.Target.Reference.Pipeline != pipeline) || age != 3*time.Second {
 			t.Fatal("latest output selectors changed")
 		}
 		return ProcessOutput{RunID: "previous", Output: json.RawMessage(`{"image":"recorded"}`)}, nil

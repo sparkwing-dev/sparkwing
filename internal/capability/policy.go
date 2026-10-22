@@ -157,6 +157,12 @@ type RoutePolicy struct {
 	Retry          RetryPolicy
 }
 
+// PipelineReferenceTarget names a declared output independently of the caller's run.
+type PipelineReferenceTarget struct {
+	Pipeline string
+	JobID    string
+}
+
 // Target contains server-resolved ownership plus decoded path/body selectors.
 // BodyRunID includes parent lineage on POST /runs; it cannot be authorized inside the handler.
 // NodeID names the path job, or the parent job for child intake.
@@ -179,7 +185,6 @@ type Target struct {
 	Pipeline             string
 	ChildRunID           string
 	SlotKey              string
-	SlotHolderID         string
 	SlotRunID            string
 	SlotNodeID           string
 	SlotGeneration       int64
@@ -187,6 +192,7 @@ type Target struct {
 	AccountID            string
 	SecretName           string
 	CleanupID            string
+	Reference            *PipelineReferenceTarget
 	Data                 *DataTarget
 }
 

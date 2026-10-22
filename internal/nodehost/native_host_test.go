@@ -6,16 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"slices"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -25,6 +21,10 @@ import (
 type nativeHostState struct {
 	OwnerStore
 	ClaimStore
+}
+
+func (s nativeHostState) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, nil
 }
 
 func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
@@ -49,23 +49,24 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 	authorities, _, _, _, _ := processAuthorityFixture(t)
 	t.Cleanup(func() { _ = authorities.Close() })
 	config := NativeHostConfig{
-		Store: nativeHostState{ClaimStore: state}, Lease: claimed.Lease,
-		Source:       source.Options{Engines: claimEngine{resolved: input.Engine}},
-		Masks:        NewMaskRegistry(secrets.NewMasker()),
-		Router:       &serviceRegistrar{},
-		Processes:    &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
-		ValidatePlan: execution.ValidatePlan, CanonicalHash: execution.CanonicalHash,
-		Executor: execution,
-		Evaluation: EvaluationDependencies{
+		Admission: ComposeStartGate(state, nil, false),
+		Store:     nativeHostState{ClaimStore: state}, Lease: claimed.Lease, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
+		Source:    source.Options{Engines: claimEngine{resolved: input.Engine}},
+		Masks:     NewMaskRegistry(secrets.NewMasker()),
+		Router:    &serviceRegistrar{},
+		Processes: &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
+
+		Executor: executionOperationsFixture(execution),
+		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+			return json.RawMessage("null"), nil
+		},
+		Evaluation: EvaluationOperations{
 			Bind: func(context.Context, EvaluationInput) (ProcessGrant, error) {
 				return ProcessGrant{}, errors.New("fixture delegation unavailable")
 			},
-			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
-				return json.RawMessage("null"), nil
-			},
 		},
-		Planner: SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-		Owner:   OwnerHost{Renew: func(context.Context, store.Actor, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
+		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Owner:       OwnerOperations{Renew: func(context.Context, store.Actor, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
 	}
 	return config, input, state, claimed
 }
@@ -131,7 +132,7 @@ func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 }
 
 func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
-	for _, mode := range []string{"remote", "local", "concurrency", "memo", "debug", "debug-after"} {
+	for _, mode := range []string{"remote", "local", "concurrency", "debug", "debug-after"} {
 		t.Run(mode, func(t *testing.T) {
 			config, _, state, _ := nativeHostFixture(t)
 			input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
@@ -143,6 +144,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			persistNativeAcceptance(t, state, input.Accepted)
 			if mode == "local" {
 				config.Owner.Local = func(store.NodeRow) bool { return true }
+				config.Admission = ComposeStartGate(nil, nil, true)
 			}
 			if mode == "concurrency" {
 				state.row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Capacity: 1, Cost: 1, Scope: "global", OnLimit: "queue"}}
@@ -168,10 +170,10 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 				t.Fatal(err)
 			}
 			request, err := releasedRequest(owner, t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionReady)
-			if request != nil || (err != nil) != (mode != "remote") {
+			if (request != nil) != (mode == "local") || (err != nil) != (mode == "debug" || mode == "debug-after") {
 				t.Fatalf("request=%+v error=%v", request, err)
 			}
-			if mode == "remote" && (len(state.changes) != 1 || state.changes[0].To != store.NodeReady) || mode != "remote" && len(state.changes) != 0 {
+			if (mode == "remote" || mode == "concurrency" || mode == "local") && (len(state.changes) != 1 || state.changes[0].To != store.NodeReady) || (mode == "debug" || mode == "debug-after") && len(state.changes) != 0 {
 				t.Fatalf("changes=%+v", state.changes)
 			}
 		})
@@ -181,6 +183,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 	config, _, state, _ := nativeHostFixture(t)
 	input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
+		job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
 		job.Closures.SkipIf = []string{"guard"}
 	})
 	state.executorStore = policyState
@@ -190,86 +193,18 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 		return ProcessGrant{}, refused
 	}
 	var layers []string
-	config.Owner.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
 		return OwnerLayerResult{}, nil
-	}
+	})
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	run := RunInput{GrantedRunner: input.GrantedRunner}
 	request, err := releasedRequest(owner, t.Context(), run, input.Accepted, input.Entry, state.row, store.DecisionReady)
-	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SDKError || failure.Message != refused.Error() || request != nil || len(layers) != 0 || len(state.changes) != 0 {
+	if err != nil || request != nil || len(layers) != 0 || len(state.changes) != 1 || state.changes[0].To != store.NodeFailed || state.changes[0].Extra.Result.MaskedError != refused.Error() {
 		t.Fatalf("request=%+v layers=%v changes=%+v error=%v", request, layers, state.changes, err)
-	}
-}
-
-func TestNativeHostSkipPolicyJoinsEvaluationBeforeTransition(t *testing.T) {
-	config, _, state, _ := nativeHostFixture(t)
-	input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
-	state.executorStore = policyState
-	persistNativeAcceptance(t, state, input.Accepted)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "owner_policy"}
-	authorities, parent, lookup, delegation, services := processAuthorityFixture(t)
-	t.Cleanup(func() { _ = authorities.Close() })
-	config.Processes.Authorities, config.Processes.URL = authorities, "http://host"
-	config.Processes.Session = ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec}
-	config.Source.Base = procenv.Base{Captured: []string{"GORACE=atexit_sleep_ms=0"}}
-	deadlines := make(chan context.CancelCauseFunc, 2)
-	config.Evaluation.ChildContext = func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
-		bounded, cancel := context.WithCancelCause(ctx)
-		deadlines <- cancel
-		return bounded, func() { cancel(context.Canceled) }, nil
-	}
-	var diagnostics []nodeproto.FrameLog
-	config.Processes.Log = func(_ context.Context, _, _ string, record nodeproto.FrameLog) error {
-		if record.Message == "slow entered" {
-			(<-deadlines)(context.DeadlineExceeded)
-		}
-		if record.Level == "warn" {
-			diagnostics = append(diagnostics, record)
-		}
-		return nil
-	}
-	delegated := 0
-	config.Evaluation.Bind = func(ctx context.Context, input EvaluationInput) (ProcessGrant, error) {
-		delegated++
-		delegation.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: input.Accepted.RunID, NodeID: input.NodeID, Holder: "owner", Generation: 4}
-		parent.snapshot.Authorities[0].Principal.Capability.Binding = delegation.Binding
-		parent.snapshot.Binding.Current = delegation.Binding
-		services.RunID, services.Job = input.Accepted.RunID, input.Accepted.Plan.Jobs[0]
-		return config.Processes.Delegate(ctx, lookup, delegation, *services)
-	}
-	var layers []string
-	config.Owner.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
-		layers = append(layers, layer.Name)
-		return OwnerLayerResult{}, nil
-	}
-	owner, _, _, err := NewNativeHost(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	run := RunInput{GrantedRunner: input.GrantedRunner}
-	request, err := releasedRequest(owner, ctx, run, input.Accepted, input.Entry, state.row, store.DecisionReady)
-	if err != nil || request != nil || delegated != 2 || len(layers) != 0 || len(state.changes) != 1 || state.changes[0].To != store.NodeSkipped {
-		t.Fatalf("request=%+v layers=%v changes=%+v delegations=%d error=%v", request, layers, state.changes, delegated, err)
-	}
-	if len(diagnostics) != 1 || string(diagnostics[0].Attrs) != `{"predicate":0}` {
-		t.Fatalf("timeout diagnostics=%+v", diagnostics)
-	}
-	authorities.mu.RLock()
-	live := len(authorities.live)
-	authorities.mu.RUnlock()
-	if live != 0 {
-		t.Fatal("owner transition retained a delegated process")
 	}
 }
 
@@ -299,7 +234,6 @@ func TestNativeHostRegistersServicesAgainstLiveProcessAuthority(t *testing.T) {
 
 func TestNativeHostIssuedMaskSurvivesReplanAndRunStep(t *testing.T) {
 	config, input, _, _ := nativeHostFixture(t)
-	config.ValidatePlan = nodeproto.ValidatePlan
 	config.Validation.Placement = nodeproto.PlacementLocal
 	_, claimed, _, err := NewNativeHost(config)
 	if err != nil {

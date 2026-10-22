@@ -78,8 +78,11 @@ refs and memo hashes. The tests keep a manifest-reader fake for byte I/O.
 lookups, memo copies and terminal result attachment. `BlobRecords` uses that
 configured reader when its caller omits one. The controller's `WithDataObjects`
 installs it before sharing the store. Physical manifest corruption refuses a
-required record read and a terminal attachment. Memo and depcache retain their
-existing cache-miss rules.
+required record read and a terminal attachment. Memo and depcache distinguish cache absence from authorization or fence refusal.
+A refusal stays an error even when joined with missing or corrupt cache data.
+Memo publication stages a producer-owned record. Only successful settlement makes
+it reusable in that transaction. Unsuccessful settlement removes staged records.
+A rolled-back report cannot publish a reusable result.
 
 `Tenant.StorageStanding` reads policy, retained events, unique blobs, tagged log
 bytes and live upload holds in one snapshot. It shares the blob/log inventory
@@ -614,7 +617,7 @@ collect possible copied bytes and release every quota dimension.
 ## Run-anywhere claim ranking
 
 `SelectDispatch` seals controller dispatch for an executing run with no runner
-selection, `pool=` requirement or burst preferences, on every controller. A
+selection or `pool=` requirement, on every controller. A
 unit is ranked when its run is run anywhere and the unit's own requirements pin
 no `pool=`, `name=` or `class=` term. Tiers come from the authenticated chain:
 here (the personal machine sealed as `OriginMachine` from a verified proof),
@@ -628,12 +631,33 @@ arrival and stable unit identity break ties. Failed awards advance no ordinal.
 There is no launcher scan frontier, demand hash or probing savepoint. Repository
 routing identities are normalized by the source URL owner when intake writes the run.
 
-Inside `limits.RankingWindow`, lower tiers wait for a live, eligible higher tier
-and record an ask in `unit_asks`. During `limits.RankingAward` after the window,
-the recorded winner takes the unit. SQL applies those holds before `LIMIT 1`,
-so a held prefix cannot hide eligible work. Explicit placement and burst holds
-also compare only eligible live claimants. An award deletes its unit's asks.
-Preference scores do not reorder jobs ahead of fair share and arrival.
+`claim_contexts` groups work by immutable claim policy. Its hash covers the
+request and provenance, resolved options and guards, job execution settings,
+repository access, allowed pools and creator. It omits seal timestamps and
+unrelated jobs. Intake, plan acceptance and expansion insertion write context
+references with their source rows. The context table stores only identity,
+requirement set and unit kind; run policy remains on the run.
+
+Label lookups select matching requirement sets. Each context then seeks one
+ready head per unit kind through an index on team, requirement set, context,
+arrival and identity. A batched proof uses the same eligibility and ranking
+predicate to identify contexts held for a better shared claimant. Those routes
+seek past the ranking window through the arrival index. Bound, personal and
+Actions claimants cannot supply this shared proof because their eligibility can
+depend on a particular run. Every selected head still passes the full predicate
+and atomic award recheck. Context and requirement references prevent pruning
+policy used by live work. Retention removes unused contexts before requirement
+sets; tenant purge uses the same dependency order.
+
+Inside the 5-second `limits.RankingWindow`, placement holds reserve unnamed work
+for the best-ranked tier with a live claimant on the same team, matching labels
+and a free slot in its latest poll. A busy or offline better tier causes no wait.
+After the window, any eligible claimant may take it. SQL applies holds before
+`LIMIT 1`, so a held prefix cannot hide eligible work. Explicit placement, burst
+and `Prefers` holds remain. There are no ask rows, ask retention or post-window
+grace period. Preference scoring is removed; fair share and arrival order select
+between eligible jobs. Polls report free slots; an omitted count offers one slot,
+and an explicit zero means busy.
 `explainUnitEligibilityTx` supplies diagnostics for notices; it never selects
 or awards work.
 
@@ -754,3 +778,19 @@ retry resets all response metadata, and a failed transaction returns none.
 Team deletion stores and reads request, completion, recheck and lease times in
 Unix nanoseconds. Lease expiry and recheck predicates preserve subsecond
 boundaries. Purge's account timestamp uses the same unit.
+
+## Durable admission
+
+Schema baseline 17 adds `admission_work`, keyed by tenant, run and job. The store
+commits complete logical group grants and one durable arrival per level. Plan
+admission commits with release permission. Job admission commits an award-bound
+permit enforced by starts and process delegation, including groupless jobs.
+Reservations retain their identity through owner handoff. Queue precedence,
+grant and renewal use claim-or-owner liveness. Expired reservations do not revive.
+Job and run terminal transitions release their records. Released work settles
+while plan reacquisition withholds only new releases.
+
+Approval predicates and generated expansions use store-owned evaluation release
+permission. Approval callbacks hold no groups or compute. Controller-owned
+approvals use source-fenced evaluation units. Typed outcomes settle the source
+and evaluation through the existing state machine and derived verdict owner.

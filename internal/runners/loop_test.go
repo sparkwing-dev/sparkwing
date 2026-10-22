@@ -817,8 +817,11 @@ func TestLoopObservesHostCompletionDuringBlockedClaim(t *testing.T) {
 		loop := &Loop{
 			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, IdleExit: time.Minute},
 			CheckVersion: func(context.Context, string) error { return nil },
-			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			Controller: claimFunc(func(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				claims++
+				if request.FreeSlots == nil || *request.FreeSlots != 3-claims {
+					t.Errorf("poll %d free slots: %v", claims, request.FreeSlots)
+				}
 				if claims == 1 {
 					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
 				}

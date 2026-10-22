@@ -7,6 +7,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -76,10 +78,10 @@ func TestRunnerDeadlineW8Components(t *testing.T) {
 						t.Fatal("renewal lost the earliest deadline")
 					}
 					return lease.Beat{}, nil
-				}), Bind: func(ctx context.Context, _ controllerwire.ClaimedUnit, _ controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+				}), Bind: func(ctx context.Context, _ controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 					boundNative = true
 					<-ctx.Done()
-					return runners.NativeServices{Close: func() error { closed = true; return nil }}, capability.Principal{}, context.Cause(ctx)
+					return nodehost.NativeServices{Close: func() error { closed = true; return nil }}, capability.Principal{}, context.Cause(ctx)
 				}}
 				if err := host.Host(ctx, unit); !errors.Is(err, context.DeadlineExceeded) || !boundNative || !closed {
 					t.Fatalf("bound=%v closed=%v error=%v", boundNative, closed, err)
@@ -171,9 +173,9 @@ func assertRunnerAuthorityW8(t *testing.T, unit controllerwire.ClaimedUnit, allo
 	renewed, bound := false, false
 	host := runners.Hosting{
 		ControllerURL: "https://controller.example", NewController: runnerControllerFactoryW8(func(context.Context) (lease.Beat, error) { renewed = true; return lease.Beat{}, nil }),
-		Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+		Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
 			bound = true
-			return runners.NativeServices{}, capability.Principal{}, reached
+			return nodehost.NativeServices{}, capability.Principal{}, reached
 		},
 	}
 	err := host.Host(t.Context(), unit)

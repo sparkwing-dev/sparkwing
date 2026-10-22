@@ -14,13 +14,13 @@ import (
 func expansionFixture(t *testing.T) (*Tenant, *time.Time, ExpansionSubmission) {
 	t.Helper()
 	tenant, now, _ := stateFixture(t)
-	plan := []byte(`{"jobs":[{"id":"job","closures":{"generate":["group"]}}]}`)
-	spec, err := json.Marshal(runspec.Spec{Version: 1, Request: runspec.SealedRequest{Version: 1, RunID: "run", Request: runspec.Request{Pipeline: "p", Dispatch: runspec.DispatchHost}, Provenance: assertedProvenance(t, "p", "", "")}})
+	plan := []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"closures":{"generate":["group"]}}]}`)
+	spec, err := json.Marshal(runspec.Spec{Version: 1, Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: runspec.SealedRequest{Version: 1, RunID: "run", Request: runspec.Request{Pipeline: "p", Dispatch: runspec.DispatchHost}, Provenance: assertedProvenance(t, "p", "", "")}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=?,spec_hash='spec',plan_hash='plan',plan_json=?,sealed_at=1 WHERE id='run'`, spec, plan)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',spec_json=? WHERE run_id='run'`, now.UnixNano(), []byte(`{"id":"job","closures":{"generate":["group"]}}`))
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',spec_json=? WHERE run_id='run'`, now.UnixNano(), []byte(`{"id":"job","steps":[{"id":"step"}],"closures":{"generate":["group"]}}`))
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','run','claimed','trigger',1,1,'host','owner',5,?,?,?,1)`, now.Add(time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
 	owner := authorityRoot("owner", "a")
 	owner.Grants = []capability.Grant{capability.ExpansionSubmit}

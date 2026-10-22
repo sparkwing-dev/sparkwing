@@ -58,71 +58,6 @@ func TestRankingTopTierPresentClaimsImmediately(t *testing.T) {
 	wantAward(t, f, f.Personal, capability.UnitNode, "job")
 }
 
-func TestRankingLowerTiersWaitOutTheWindowAndTheBestAskerWins(t *testing.T) {
-	f := rankingFixture(t, true)
-	livePolls(t, f, f.Actions)
-	f.At(time.Second)
-	wantNone(t, f, f.Launcher, capability.UnitPlan)
-	f.At(2 * time.Second)
-	wantNone(t, f, f.Self, capability.UnitPlan)
-	f.At(6 * time.Second)
-	wantNone(t, f, f.Launcher, capability.UnitPlan)
-	f.At(6500 * time.Millisecond)
-	wantAward(t, f, f.Self, capability.UnitPlan, "")
-}
-
-func TestRankingAwardDeadlineFollowsTheWindow(t *testing.T) {
-	t.Run("nobody better asked in the window", func(t *testing.T) {
-		f := rankingFixture(t, true)
-		livePolls(t, f, f.Personal, f.Actions)
-		f.At(limits.RankingWindow + time.Second)
-		wantAward(t, f, f.Launcher, capability.UnitPlan, "")
-	})
-	t.Run("the window winner did not return by the award deadline", func(t *testing.T) {
-		f := rankingFixture(t, true)
-		livePolls(t, f, f.Actions)
-		f.At(time.Second)
-		wantNone(t, f, f.Self, capability.UnitPlan)
-		f.At(limits.RankingWindow + limits.RankingAward - 100*time.Millisecond)
-		wantNone(t, f, f.Launcher, capability.UnitPlan)
-		f.At(limits.RankingWindow + limits.RankingAward)
-		wantAward(t, f, f.Launcher, capability.UnitPlan, "")
-	})
-}
-
-func TestRankingAskSurvivesTheAwardOfAnotherUnit(t *testing.T) {
-	f := rankingFixture(t, true)
-	f.At(-time.Second)
-	f.Poll(t, f.Actions, capability.UnitPlan)
-	f.At(time.Second)
-	claim, err := f.ClaimKinds(t, f.Self, capability.UnitPlan, capability.UnitNode)
-	if err != nil || claim.Kind != capability.UnitNode {
-		t.Fatalf("self-hosted scan: %+v %v", claim, err)
-	}
-	f.At(limits.RankingWindow + time.Second)
-	wantNone(t, f, f.Launcher, capability.UnitPlan)
-	wantAward(t, f, f.Self, capability.UnitPlan, "")
-}
-
-func TestRankingAClaimAsksForEveryEligibleJobBehindTheAward(t *testing.T) {
-	f := rankingFixture(t, true)
-	f.AddJob(t, "second", f.ReadyAt.Add(100*time.Millisecond))
-	f.AddJob(t, "third", f.ReadyAt.Add(200*time.Millisecond))
-	f.At(-time.Second)
-	f.Poll(t, f.Actions, capability.UnitNode)
-	f.At(time.Second)
-	claim, err := f.ClaimKinds(t, f.Self, capability.UnitPlan, capability.UnitNode)
-	if err != nil || claim.Kind != capability.UnitPlan {
-		t.Fatalf("self-hosted scan: %+v %v", claim, err)
-	}
-	f.At(limits.RankingWindow + time.Second)
-	wantNone(t, f, f.Launcher, capability.UnitNode)
-	for _, job := range []string{"job", "second", "third"} {
-		wantAward(t, f, f.Self, capability.UnitNode, job)
-		wantNone(t, f, f.Launcher, capability.UnitNode)
-	}
-}
-
 func TestRankingSeesTheLocalQueue(t *testing.T) {
 	f := rankingFixture(t, true)
 	local := f.LocalQueue(t)
@@ -164,18 +99,6 @@ func TestRankingCreditHoldOnlyWhenCloudCouldTakeTheUnit(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestRankingALaterPollKeepsTheWindowAsk(t *testing.T) {
-	f := rankingFixture(t, true)
-	livePolls(t, f, f.Actions)
-	f.At(4900 * time.Millisecond)
-	wantNone(t, f, f.Self, capability.UnitPlan)
-	f.At(5100 * time.Millisecond)
-	f.Poll(t, f.Self, capability.UnitNode)
-	f.At(5500 * time.Millisecond)
-	wantNone(t, f, f.Launcher, capability.UnitPlan)
-	wantAward(t, f, f.Self, capability.UnitPlan, "")
 }
 
 func TestRankingHereIsTheSubmittingMachine(t *testing.T) {
@@ -289,7 +212,7 @@ func TestRankingLeavesAPinnedJobInsideARunAnywhereRun(t *testing.T) {
 	wantAward(t, f, f.Self, capability.UnitNode, "job")
 }
 
-func TestRankingReplacesPreferenceHolds(t *testing.T) {
+func TestRankingPreservesPreferenceHolds(t *testing.T) {
 	f := rankingFixture(t, true)
 	if err := f.Rank(t, f.Admin); err != nil {
 		t.Fatal(err)
@@ -299,8 +222,8 @@ func TestRankingReplacesPreferenceHolds(t *testing.T) {
 	f.Poll(t, f.Launcher, capability.UnitNode)
 	ctx := store.WithClaimPlacement(t.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: []string{"name=runner"}, Hold: time.Hour}, {}}, Liveness: time.Hour})
 	claim, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}})
-	if err != nil || claim.NodeID != "job" {
-		t.Fatalf("first-come ranking still applied a preference hold: %+v %v", claim, err)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ranked job bypassed its preference hold: %+v %v", claim, err)
 	}
 }
 
@@ -410,16 +333,6 @@ func TestRankingPersonalMachinesTakeOnlyTheirOwnersManualRuns(t *testing.T) {
 	}
 }
 
-func TestRankingAwardDeadlineAdmitsOnlyTheWindowWinner(t *testing.T) {
-	f := rankingFixture(t, true)
-	livePolls(t, f, f.Personal)
-	f.At(4900 * time.Millisecond)
-	wantNone(t, f, f.Actions, capability.UnitPlan)
-	f.At(5100 * time.Millisecond)
-	wantNone(t, f, f.Personal, capability.UnitPlan)
-	wantAward(t, f, f.Actions, capability.UnitPlan, "")
-}
-
 func TestRankingNoticeUsesTheClaimLivenessHorizon(t *testing.T) {
 	for _, horizon := range []time.Duration{5 * time.Second, 2 * time.Minute} {
 		t.Run(horizon.String(), func(t *testing.T) {
@@ -441,5 +354,51 @@ func TestRankingNoticeUsesTheClaimLivenessHorizon(t *testing.T) {
 				t.Fatalf("horizon %v notice %q; online=%t", horizon, view.Waiting.NoEligible, wantOnline)
 			}
 		})
+	}
+}
+
+func TestRankingHoldEndsAtTheWindowWithoutAwardGrace(t *testing.T) {
+	f := rankingFixture(t, true)
+	livePolls(t, f, f.Actions)
+	f.At(limits.RankingWindow - time.Nanosecond)
+	wantNone(t, f, f.Self, capability.UnitPlan)
+	f.At(limits.RankingWindow)
+	wantAward(t, f, f.Launcher, capability.UnitPlan, "")
+}
+
+func TestRankingAnOfflineBetterTierCausesNoWait(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.At(time.Second)
+	wantAward(t, f, f.Self, capability.UnitPlan, "")
+}
+
+func TestRankingABusyBetterTierCausesNoWait(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.At(-time.Second)
+	f.PollWithSlots(t, f.Personal, 0)
+	f.At(time.Second)
+	wantAward(t, f, f.Self, capability.UnitPlan, "")
+}
+
+func TestRankingHoldsOnlyForMatchingLabels(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.RequireOnJobs(t, "gpu")
+	livePolls(t, f, f.Personal)
+	f.At(time.Second)
+	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Self, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"gpu"}})
+	if err != nil || claim.NodeID != "job" {
+		t.Fatalf("nonmatching better tier held job: %+v %v", claim, err)
+	}
+}
+
+func TestRankingAnExpiredBetterPollCausesNoWait(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.At(-time.Second)
+	f.Poll(t, f.Personal)
+	f.At(time.Second)
+	ctx := store.WithClaimPlacement(t.Context(), store.ClaimPlacement{Liveness: time.Second})
+	claim, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Self, Kinds: []capability.UnitKind{capability.UnitPlan}})
+	if err != nil || claim.Kind != capability.UnitPlan {
+		t.Fatalf("expired better poll held plan: %+v %v", claim, err)
 	}
 }

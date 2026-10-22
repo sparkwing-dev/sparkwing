@@ -181,7 +181,7 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 				t.Fatal(err)
 			}
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-			result, _, err := server.Store.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, []capability.LeaseRef{held.Award}, nil, nil)
+			result, _, err := server.Store.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, []capability.LeaseRef{held.Award}, nil, nil, nil)
 			if err == nil || len(result) != 0 {
 				t.Fatalf("store authorized a fabricated award: mode=%d result=%+v: %v", mode, result, err)
 			}

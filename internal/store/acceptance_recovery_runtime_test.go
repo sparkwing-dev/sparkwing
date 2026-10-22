@@ -35,6 +35,10 @@ func newStoreRecoveryFixture(t *testing.T, started bool) *storeRecoveryFixture {
 }
 
 func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Target, edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
+	return newStoreRecoveryFixtureForAt(t, started, target, string(acceptanceTeam), edits...)
+}
+
+func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.Target, identity string, edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
 	t.Helper()
 	ctx := t.Context()
 	f := &storeRecoveryFixture{target: target}
@@ -48,8 +52,10 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 			t.Error(err)
 		}
 	})
+	now := time.Now().UTC()
+	f.s.SetTestClock(t, func() time.Time { return now })
 	var plan store.PlanAcceptance
-	f.tenant, plan, err = storePlanSealRequestWith(ctx, f.s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+	f.tenant, plan, err = storePlanSealRequestFor(ctx, f.s, identity, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}, Retry: &nodeproto.RetrySpec{Attempts: 2}}}
 		for _, edit := range edits {
 			edit(doc)
@@ -67,7 +73,7 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 		t.Fatal(err)
 	}
 	authority := plan.Seal.Request.AuthorityRef
-	issued, err := f.s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:runner", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	issued, err := f.s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:" + identity + ":runner", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +93,9 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 		t.Fatal(err)
 	}
 	if started {
+		if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+			t.Fatalf("fixture admission: %+v, %v", admitted, err)
+		}
 		if _, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 			t.Fatal(err)
 		}
@@ -207,6 +216,9 @@ func checkRecoveryUnstarted(t *testing.T) error {
 		kinds = append(kinds, "job_ready", "job_claimed")
 		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: next.Node.Ref.RunID, NodeID: next.Node.Ref.NodeID, Holder: next.Claim.Holder, Generation: next.Claim.Generation}}
 	}
+	if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+		return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	}
 	applied, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return err
@@ -233,6 +245,9 @@ func checkRecoveryStartedCap(t *testing.T) error {
 	ref := f.ref
 	var kinds []string
 	for ordinal := 1; ordinal <= 3; ordinal++ {
+		if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+			return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+		}
 		started, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(int64(ordinal - 1))})
 		if err != nil {
 			return err
@@ -306,6 +321,9 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 	ctx := t.Context()
 	f := newStoreRecoveryFixture(t, false)
 	ref := f.ref
+	if admitted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != store.AcquireGranted {
+		return fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	}
 	started, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil || started.Attempt != 1 {
 		return fmt.Errorf("first execution: %+v %v", started, err)

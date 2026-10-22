@@ -153,6 +153,9 @@ ORDER BY r.finished_at,r.team,r.id LIMIT ?`, cutoff.UnixNano(), limit)
 	}
 	slices.Sort(teams)
 	for _, team := range teams {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM claim_contexts WHERE team=? AND id NOT IN (SELECT claim_context FROM nodes WHERE team=? UNION SELECT claim_context FROM triggers WHERE team=?)`, team, team, team); err != nil {
+			return 0, 0, err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM claim_requirements WHERE team=? AND id NOT IN (SELECT claim_requirements FROM nodes WHERE team=? UNION SELECT claim_requirements FROM triggers WHERE team=?)`, team, team, team); err != nil {
 			return 0, 0, err
 		}

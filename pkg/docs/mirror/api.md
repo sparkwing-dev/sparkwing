@@ -162,7 +162,7 @@ Other actors and causes omit the field. The store refuses a mismatched ordinal
 and replays an identical transition without consuming another attempt.
 
 Run completion returns the committed verdict in `Applied.outcome` and its reason
-in `Applied.reason`. Hosts use that result for completion output and exit status
+in `Applied.reason`. Local and remote hosts use that result for completion output and exit status
 because cancellation can commit after their last scheduling snapshot.
 
 Step reports carry a positive `source_attempt`, step ID, state, optional masked
@@ -289,7 +289,7 @@ Logs use controller-proxied reads, separate from byte-storage downloads.
 Concurrency operations use `/api/v1/queue/groups/{group}`. The former
 `/api/v1/concurrency/{key}` routes are removed. Requests and responses use
 `job_id`, `leader_job_id` and `origin_job_id`. A group read returns `QueueGroup`
-with one-based waiter positions and numeric `cancel_timeout_ns`.
+with one-based waiter positions.
 
 Acquire and waiter resolution require a live claim bound to the declared group.
 After cancellation, the holder can still heartbeat, release and cancel its

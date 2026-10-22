@@ -52,7 +52,7 @@ func (f *githubSourceFake) InstallationTokenByIDs(_ context.Context, installatio
 
 func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authorized, *githubSourceFake) {
 	t.Helper()
-	tenant, auth, _ := sourceReleaseFixture(t)
+	tenant, auth := sourceReleaseFixture(t)
 	s := tenant.s
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {

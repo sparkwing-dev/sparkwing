@@ -122,9 +122,8 @@ func parseInputsSchema(t reflect.Type) (inputSchema, error) {
 		return inputSchema{}, fmt.Errorf("Inputs type must be a struct, got %s", t.Kind())
 	}
 	var schema inputSchema
-	seenShort := map[string]string{}
 	seenName := map[string]string{}
-	if err := walkInputFields(t, nil, &schema, seenShort, seenName, 0); err != nil {
+	if err := walkInputFields(t, nil, &schema, seenName, 0); err != nil {
 		return schema, err
 	}
 	return schema, nil
@@ -134,7 +133,6 @@ func walkInputFields(
 	t reflect.Type,
 	parentIndex []int,
 	schema *inputSchema,
-	seenShort map[string]string,
 	seenName map[string]string,
 	depth int,
 ) error {
@@ -152,7 +150,7 @@ func walkInputFields(
 					ft = ft.Elem()
 				}
 				if ft.Kind() == reflect.Struct {
-					if err := walkInputFields(ft, idxPath, schema, seenShort, seenName, depth+1); err != nil {
+					if err := walkInputFields(ft, idxPath, schema, seenName, depth+1); err != nil {
 						return err
 					}
 				}
@@ -195,11 +193,8 @@ func walkInputFields(
 		if field.Name == "" {
 			return fmt.Errorf("field %s: flag:\"\" must be either a name or \",extra\"", f.Name)
 		}
-		if prev, dup := seenName[field.Name]; dup {
-			if depth > 0 {
-				continue
-			}
-			return fmt.Errorf("field %s: flag name %q already declared on %s", f.Name, field.Name, prev)
+		if _, dup := seenName[field.Name]; dup && depth > 0 {
+			continue
 		}
 		seenName[field.Name] = f.Name
 
@@ -207,28 +202,9 @@ func walkInputFields(
 		field.Default = f.Tag.Get("default")
 		field.Required = boolTag(f.Tag.Get("required"))
 		field.Secret = boolTag(f.Tag.Get("secret"))
-		if short := f.Tag.Get("short"); short != "" {
-			if len(short) != 1 || short[0] > 127 {
-				return fmt.Errorf("field %s: short:%q must be a single ASCII letter", f.Name, short)
-			}
-			if prev, dup := seenShort[short]; dup {
-				if depth > 0 {
-					continue
-				}
-				return fmt.Errorf("field %s: short %q already declared on %s", f.Name, short, prev)
-			}
-			seenShort[short] = f.Name
-			field.Short = short
-		}
+		field.Short = f.Tag.Get("short")
 		if enumTag := f.Tag.Get("enum"); enumTag != "" {
-			vals := strings.Split(enumTag, ",")
-			for j, v := range vals {
-				vals[j] = strings.TrimSpace(v)
-			}
-			field.Enum = vals
-		}
-		if field.Required && field.Default != "" {
-			return fmt.Errorf("field %s: required:\"true\" and default:%q are mutually exclusive", f.Name, field.Default)
+			field.Enum = strings.Split(enumTag, ",")
 		}
 
 		kind := classifyKind(f.Type)
@@ -253,20 +229,6 @@ func walkInputFields(
 			return fmt.Errorf("field %s: unsupported type %s (supported: string, bool, int, int64, float64, time.Duration, []string)", f.Name, f.Type)
 		}
 
-		if len(field.Enum) > 0 {
-			if kind != kindString && kind != kindStringSlice {
-				return fmt.Errorf("field %s: enum requires a string or []string field, got %s", f.Name, f.Type)
-			}
-			if !field.Required && field.Default == "" {
-				return fmt.Errorf("field %s: enum requires either default:\"...\" or required:\"true\"", f.Name)
-			}
-			if field.Default != "" {
-				if !inEnum(field.Default, field.Enum) && !(kind == kindStringSlice && allInEnum(argvalue.List(field.Default), field.Enum)) {
-					return fmt.Errorf("field %s: default %q not in enum %v", f.Name, field.Default, field.Enum)
-				}
-			}
-		}
-
 		schema.Fields = append(schema.Fields, field)
 	}
 	return nil
@@ -287,25 +249,11 @@ func populateInputs(schema inputSchema, dst reflect.Value, m map[string]string) 
 		}
 		raw, present := m[f.Name]
 		if !present {
-			if f.Default != "" {
-				fv, err := fieldByIndexAlloc(dst, f.fieldIndex)
-				if err != nil {
-					return fmt.Errorf("--%s: %w", f.Name, err)
-				}
-				if err := setField(fv, f, f.Default); err != nil {
-					return fmt.Errorf("default for --%s: %w", f.Name, err)
-				}
-			} else if f.Required {
-				return fmt.Errorf("--%s is required", f.Name)
-			}
 			continue
 		}
 		fv, err := fieldByIndexAlloc(dst, f.fieldIndex)
 		if err != nil {
 			return fmt.Errorf("--%s: %w", f.Name, err)
-		}
-		if err := checkEnum(f.Name, fv.Kind() == reflect.Slice, f.Enum, raw); err != nil {
-			return err
 		}
 		if err := setField(fv, f, raw); err != nil {
 			return fmt.Errorf("--%s: %w", f.Name, err)
@@ -313,11 +261,6 @@ func populateInputs(schema inputSchema, dst reflect.Value, m map[string]string) 
 	}
 
 	if !schema.Extra {
-		for k := range m {
-			if _, ok := byName[k]; !ok {
-				return fmt.Errorf("unknown flag --%s", k)
-			}
-		}
 		return nil
 	}
 	for _, f := range schema.Fields {
@@ -454,40 +397,6 @@ func boolTag(s string) bool {
 	}
 	v, err := strconv.ParseBool(s)
 	return err == nil && v
-}
-
-func checkEnum(name string, slice bool, enum []string, raw string) error {
-	if len(enum) == 0 {
-		return nil
-	}
-	values := []string{raw}
-	if slice {
-		values = argvalue.List(raw)
-	}
-	for _, v := range values {
-		if !inEnum(v, enum) {
-			return fmt.Errorf("--%s=%q not allowed (must be one of %s)", name, v, strings.Join(enum, ", "))
-		}
-	}
-	return nil
-}
-
-func inEnum(v string, enum []string) bool {
-	for _, e := range enum {
-		if e == v {
-			return true
-		}
-	}
-	return false
-}
-
-func allInEnum(vals, enum []string) bool {
-	for _, v := range vals {
-		if !inEnum(v, enum) {
-			return false
-		}
-	}
-	return true
 }
 
 func flattenInputs[T any](in T) (map[string]string, error) {

@@ -219,6 +219,7 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 		t.Fatalf("unstarted job read: %+v %v", row, err)
 	}
 	holder := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
+	admitExecution(t, tenant, holder)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: new(runspec.AttemptOrdinal)}); err != nil {
 		t.Fatal(err)
 	}

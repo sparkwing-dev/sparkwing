@@ -14,10 +14,10 @@ See [Config reference](config-reference.md).
 | --- | --- |
 | `profiles` | Named controller connections containing `controller.url` and an optional `controller.token`. |
 | `repos` | Registered checkout paths, `fallback_paths`, `auto_register` and `include_worktrees`. |
-| `admission` | Machine admission `mode`, `budget`, `custom` and `jev` policy. |
+| `admission` | Machine admission `mode`, `budget` and `custom` policy. |
 | `runner` | Controller URL, `credentials_dir`, permitted `repos`, labels and local capacity preferences. |
 | `cache` | Local binary-cache `max_bytes` and `max_entries`. Explicit zero disables a bound. |
-| `machine` | An optional `box_id` for box-scoped concurrency. |
+| `machine` | An optional `box_id` for standalone machine admission. |
 | `debug` | `pause_timeout`. |
 | `run` | `submit_env_allow` and the opt-in `cache_from` controller profile. |
 
@@ -80,6 +80,9 @@ with `--profile`. See [Controller connections](backends.md).
 Enrollment saves the machine's display name in `runner.holder_prefix`.
 `sparkwing-runner start --config PATH` accepts this saved metadata. The Cloud
 controller supplies the runner identity and claim holder for each award.
+Controller-backed concurrency uses this persisted machine identity for box
+scope, independently of `machine.box_id` and `runner.local_admission`. A local
+controller uses its persisted local peer identity in its private store.
 
 ## Permissions and writes
 

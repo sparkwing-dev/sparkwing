@@ -103,6 +103,9 @@ func wireOperations() map[string]wireOperation {
 		"POST /node/v1/summary":                                operation("Write a masked summary", nodeproto.SummaryRequest{}, nodeproto.ServiceAcknowledged{}),
 	}
 	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
+	result["POST /api/v1/runs/{run}/local-host/may-start"] = operation("Ask to start a job under its current award", localhostwire.LocalCapacityRequest{}, store.AcquireSlotResponse{})
+	result["POST /api/v1/runs/{run}/local-host/release-evaluation"] = operation("Release source expansion under plan admission", localhostwire.LocalEvaluationRelease{}, store.Applied{})
+	result["POST /api/v1/runs/{run}/local-host/relinquish-start"] = operation("Relinquish a provisional burst job award", localhostwire.LocalCapacityRequest{}, nil)
 	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, store.LocalPublication{})
 	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
 

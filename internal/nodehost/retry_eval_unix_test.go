@@ -71,6 +71,12 @@ func TestRetryTargetSchedulesOnlyUnfinishedGeneratedWork(t *testing.T) {
 
 type retryMissingOutput struct{ OwnerStore }
 
+func (s retryMissingOutput) ReadSnapshot(ctx context.Context, runID string) (store.RunSnapshot, error) {
+	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, runID)
+	snapshot.Run.Retry = &store.RetrySelection{Mode: "failed", Results: map[string]store.MaterializedResultSource{"targets": {Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}
+	return snapshot, err
+}
+
 func (s retryMissingOutput) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (store.ReconciledNode, error) {
 	if request.Policy != store.SourceManualRetry {
 		return s.OwnerStore.ReconcileNode(ctx, request)
@@ -88,12 +94,7 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 	plan.Jobs, plan.Jobs[1].Needs = plan.Jobs[:2], nil
 	f := newStoreHostFixture(t, plan)
 	f.Host.Store = retryMissingOutput{f.State}
-	f.Host.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
-		if layer.Name == "memo" && row.Ref.NodeID == "targets" {
-			return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}, nil
-		}
-		return OwnerLayerResult{}, nil
-	}
+
 	var bodies []string
 	var mu sync.Mutex
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
@@ -151,6 +152,9 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	f, sourceInput := retryWithRecordedExpansion(t)
 	input := claimedFixtureNode(t, f, "bad")
 	input.Entry = &source.Entry{Engine: input.Engine}
+	if result, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || result.Kind != store.AcquireGranted {
+		t.Fatalf("execution admission: %+v %v", result, err)
+	}
 	before, err := f.Tenant.ReadSnapshot(t.Context(), f.Accepted.RunID)
 	if err != nil {
 		t.Fatal(err)

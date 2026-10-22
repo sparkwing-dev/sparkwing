@@ -354,11 +354,7 @@ func TestHooksStatus_LocalShadowRemedyReachesFiringHooks(t *testing.T) {
 			t.Fatalf("remedial install: %v", err)
 		}
 	})
-	declared, err := declaredHookNames(f.repo)
-	if err != nil {
-		t.Fatalf("declaredHookNames: %v", err)
-	}
-	if survey := githooks.Survey(f.tryGit, f.repo, declared); survey.State != githooks.GateArmed {
+	if survey := githooks.Survey(f.tryGit, f.repo, expectedHooks); survey.State != githooks.GateArmed {
 		t.Fatalf("advertised remedy left hooks unfired: %+v", survey)
 	}
 	f.git(t, "add", "-A")

@@ -32,7 +32,7 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, err := executorHash(job)
+	hash, err := runspec.CanonicalHash(job)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, err = executorHash(expansion)
+	hash, err = runspec.CanonicalHash(expansion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +98,9 @@ func FuzzNodeExecutorMasksOuterAndPublicationFailures(f *testing.F) {
 		deps.Masker = masker
 		failure := errors.New(strings.Repeat("h", nodeErrTextHeadBytes-10) + secret + "\n" + strings.Repeat("y", 2*nodeErrTextMaxBytes))
 		if outer {
-			deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+			setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
 				return nil, failure
-			}
+			})
 		} else {
 			job := input.Accepted.Plan.Jobs[0]
 			job.ResultStep = "body"
@@ -213,7 +213,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hash, err := executorHash(jobs[i])
+		hash, err := runspec.CanonicalHash(jobs[i])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hash, err = executorHash(expansion)
+		hash, err = runspec.CanonicalHash(expansion)
 		if err != nil {
 			t.Fatal(err)
 		}

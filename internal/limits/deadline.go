@@ -74,7 +74,7 @@ func JobDeadline(now, ownerDeadline, attemptDeadline time.Time) (time.Time, erro
 	}
 	deadline := ownerDeadline
 	if !attemptDeadline.IsZero() {
-		attemptEnd := attemptDeadline.Add(JobSlack)
+		attemptEnd := attemptDeadline.Add(jobSlack)
 		if deadline.IsZero() || attemptEnd.Before(deadline) {
 			deadline = attemptEnd
 		}
@@ -90,8 +90,8 @@ func Record(text string) string { return boundText(text, int(AnnotationBytes)) }
 
 // Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes.
 func Failure(raw []byte) ([]byte, error) {
-	if int64(len(raw)) > FailureBytes {
-		return nil, fmt.Errorf("failure record exceeds %d bytes", FailureBytes)
+	if int64(len(raw)) > failureBytes {
+		return nil, fmt.Errorf("failure record exceeds %d bytes", failureBytes)
 	}
 	return raw, nil
 }

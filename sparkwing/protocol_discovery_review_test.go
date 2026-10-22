@@ -64,8 +64,8 @@ func TestProtocolDescribeRequiredInputsPreserveJobMetadata(t *testing.T) {
 	isolateProtocolDiscoveryRegistry(t)
 	Register[protocolDiscoveryInputs]("deploy", func() Pipeline[protocolDiscoveryInputs] {
 		return protocolDiscoveryPipeline[protocolDiscoveryInputs]{declare: func(p *Plan, in protocolDiscoveryInputs) error {
-			if in.Target != "production" {
-				return errors.New("discovery lost the pipeline input default")
+			if in.Target != "" {
+				return errors.New("discovery must use zero values before host preparation")
 			}
 			Job(p, "deploy", &protocolDiscoveryJob[protocolDiscoveryJobArgs]{risk: "production"}).
 				OnFailure("recover", &protocolDiscoveryJob[protocolDiscoveryRecoveryArgs]{risk: "destructive"})
@@ -119,15 +119,12 @@ func TestProtocolDescribeRequiredInputsPreserveJobMetadata(t *testing.T) {
 
 func TestProtocolDescribeReportsDiscoveryFailures(t *testing.T) {
 	cause := errors.New("declaration failed")
-	for _, kind := range []string{"error", "panic-error", "panic-string", "argument-collision"} {
+	for _, kind := range []string{"error", "panic-error", "panic-string"} {
 		t.Run(kind, func(t *testing.T) {
 			isolateProtocolDiscoveryRegistry(t)
 			Register[NoInputs]("broken", func() Pipeline[NoInputs] {
 				return protocolDiscoveryPipeline[NoInputs]{declare: func(p *Plan, _ NoInputs) error {
-					if kind == "argument-collision" {
-						Job(p, "first", &jobargsJob2{})
-						Job(p, "second", &jobargsJob2{})
-					}
+
 					if kind == "panic-error" {
 						panic(cause)
 					}
@@ -162,41 +159,8 @@ func TestProtocolDescribeReportsDiscoveryFailures(t *testing.T) {
 			if failure == nil || failure.Code != apierr.PlanFailed || !strings.Contains(failure.Message, "broken") || len(broken.Secrets) != 0 {
 				t.Fatalf("discovery published incomplete declarations or lost cause: %s", raw)
 			}
-			if kind != "argument-collision" && !strings.Contains(failure.Message, cause.Error()) {
+			if !strings.Contains(failure.Message, cause.Error()) {
 				t.Errorf("discovery lost its failure message: %v", failure)
-			}
-		})
-	}
-}
-
-func TestProtocolDiscoveryPreservesExecutionInputValidation(t *testing.T) {
-	reg := buildRegistration("deploy", func() Pipeline[protocolDiscoveryInputs] {
-		return protocolDiscoveryPipeline[protocolDiscoveryInputs]{declare: func(p *Plan, _ protocolDiscoveryInputs) error {
-			Job(p, "deploy", &protocolDiscoveryJob[protocolDiscoveryJobArgs]{}).
-				OnFailure("recover", &protocolDiscoveryJob[protocolDiscoveryRecoveryArgs]{})
-			return nil
-		}}
-	}, "test")
-	if _, err := reg.discover(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name string
-		args map[string]string
-		want string
-	}{
-		{"pipeline-required", nil, "--repository is required"},
-		{"job-required", map[string]string{"repository": "app", "webhook": "hook"}, "--count is required"},
-		{"recovery-required", map[string]string{"repository": "app", "count": "3"}, "--webhook is required"},
-		{"job-enum", map[string]string{"repository": "app", "count": "3", "webhook": "hook", "mode": "invalid"}, "--mode"},
-		{"job-type", map[string]string{"repository": "app", "count": "invalid", "webhook": "hook"}, "--count"},
-		{"unknown", map[string]string{"repository": "app", "count": "3", "webhook": "hook", "unknown": "x"}, "unknown flag --unknown"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := reg.Invoke(t.Context(), tc.args, RunContext{Pipeline: "deploy"})
-			var input *InputError
-			if !errors.As(err, &input) || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("execution input validation = %v, want %s", err, tc.want)
 			}
 		})
 	}

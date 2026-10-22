@@ -38,6 +38,10 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if err != nil {
 			return err
 		}
+		if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
+			waiting = notFound("eligible work", "")
+			return nil
+		}
 		unit, err := queuedUnitTx(ctx, tx, demand, kinds)
 		if errors.Is(err, ErrNotFound) {
 			waiting = err
@@ -72,7 +76,6 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 	return out, nil
 }
 
-// safety: a held claim commits its transaction, so the ask it recorded survives; nothing else was written by then.
 var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
 
 func lockClaimControllerTx(ctx context.Context, tx *storeTx) error {
@@ -181,7 +184,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 			placement = PlacementPreferred
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=?`, team, unit.RunID, unit.Kind, unit.NodeID); err != nil {
+	if err := consumeClaimSlotTx(ctx, tx, demand.CapabilityPrefix, p.Capability.Team); err != nil {
 		return UnitClaim{}, err
 	}
 	unitID, err := encodeAwardUnit(unit)

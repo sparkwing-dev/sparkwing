@@ -75,7 +75,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			input.GrantedRunner = runner
 			input.Execution.Retry.Value, row.Execution.Retry.Value = 0, 0
 			input.Accepted.Plan = plan
-			hash, err := expansionHash(plan)
+			hash, err := runspec.CanonicalHash(plan)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +108,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hash, err = expansionHash(job)
+			hash, err = runspec.CanonicalHash(job)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +117,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			deps.ValidatePlan = nil
+
 			deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}
 			revoked := false
 			deps.Bind = func(_ context.Context, in NodeInput) (ProcessGrant, error) {

@@ -65,23 +65,22 @@ type ExecutorActivity struct {
 // Configured storage requires this factory; failed refresh suppresses finalizer writes.
 // Log receives masked host diagnostics with their committed attempt; delivery errors stop work.
 type ExecutorDependencies struct {
-	Log           func(context.Context, NodeInput, nodeproto.FrameLog) error
-	BindStorage   func(context.Context, NodeInput) (StorageBinding, error)
-	Store         NodeTransitionStore
-	Bind          func(context.Context, NodeInput) (ProcessGrant, error)
-	Start         func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
-	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
-	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash func(any) (runspec.Hash, error)
-	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
-	Validation    nodeproto.ValidationContext
-	PrepareLayer  func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
-	PublishOutput func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
-	Annotate      func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
-	ReadFailure   func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
-	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Masker        *secrets.Masker
-	Masks         *MaskRegistry
+	Log              func(context.Context, NodeInput, nodeproto.FrameLog) error
+	BindStorage      func(context.Context, NodeInput) (StorageBinding, error)
+	Store            NodeTransitionStore
+	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
+	Start            func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
+	EnsureEngine     func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
+	Validation       nodeproto.ValidationContext
+	PrepareArtifacts func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
+	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
+	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
+	ReadFailure      func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
+	ReadOutput       func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	Masker           *secrets.Masker
+	Masks            *MaskRegistry
 }
 
 type nodeExecutor struct {
@@ -90,7 +89,7 @@ type nodeExecutor struct {
 }
 
 // NewNodeExecutor builds the common executor for local and dispatched claims.
-// Validation, hashing and deadline defaults are owned by their contract packages.
+// Validation, hashing and deadlines are owned by their contract packages.
 func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("node executor requires store, process, engine and masking adapters")
@@ -101,16 +100,10 @@ func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 	if deps.Masks.masker != deps.Masker {
 		return nil, errors.New("host requires one shared masking registry")
 	}
-	if deps.ValidatePlan == nil {
-		deps.ValidatePlan = nodeproto.ValidatePlan
-	}
-	if deps.CanonicalHash == nil {
-		deps.CanonicalHash = runspec.CanonicalHash
-	}
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
+	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, Validation: deps.Validation}}, nil
 }
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error) {
@@ -148,7 +141,42 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	if err != nil {
 		return h.report(ctx, input, h.failure(err), err)
 	}
+	decision, err := h.skipIf(ctx, input, spec, job)
+	if err != nil {
+		return h.report(ctx, input, h.failure(err), err)
+	}
+	for _, index := range decision.TimedOut {
+		if err := h.diagnostic(ctx, input, "warn", "skip_if_timeout", "", "SkipIf predicate exceeded its budget; continuing without skipping", map[string]any{"predicate": index}); err != nil {
+			return h.report(ctx, input, h.failure(err), err)
+		}
+	}
+	if decision.Skip {
+		return h.report(ctx, input, store.NodeResult{Outcome: store.NodeSkipped, Reason: "skip_if"}, nil)
+	}
+	var memoHash runspec.Hash
+	var memoResult *store.NodeResult
+	if job.Memo != nil || job.Closures.MemoKey != "" {
+		err = h.withProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
+			memoHash, memoResult, err = h.memo(ctx, session, code, job, spec)
+			return err
+		})
+		if err != nil {
+			return h.report(ctx, input, h.failure(err), err)
+		}
+		if memoResult != nil {
+			return h.report(ctx, input, *memoResult, nil)
+		}
+	}
 	result, runErr := h.layers(ctx, &input, job, func() (store.NodeResult, error) { return h.attempts(ctx, &input, spec, row, job) })
+	if runErr == nil && result.Outcome == store.NodeSuccess {
+		if err := h.saveMemo(ctx, input, memoHash, result); err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				runErr, result = errors.Join(cause, err), h.failure(errors.Join(cause, err))
+			} else if logErr := h.diagnostic(ctx, input, "warn", "memo_publish", "", "memo publication failed; a later run will execute again", map[string]any{"error": h.deps.Masker.Mask(err.Error())}); logErr != nil {
+				runErr, result = logErr, h.failure(logErr)
+			}
+		}
+	}
 	return h.report(ctx, input, result, runErr)
 }
 
@@ -171,7 +199,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if input.RouteBinding.RunID != input.Accepted.RunID || input.RouteBinding.JobID != input.NodeID {
 		return spec, row, job, executorError(apierr.SpecDrift, "process binding does not match the accepted job")
 	}
-	hash, err := h.deps.CanonicalHash(input.Accepted.Plan)
+	hash, err := runspec.CanonicalHash(input.Accepted.Plan)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -198,7 +226,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {
 		return spec, row, job, executorError(apierr.PlanDrift, "persisted job specification is invalid")
 	}
-	hash, err = h.deps.CanonicalHash(job)
+	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -222,25 +250,27 @@ func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodepro
 			}
 		}
 	}()
-	for _, layer := range LayerTable() {
-		if layer.Side != ExecutorSide || layer.Name == "retry" || layer.PerAttempt {
-			continue
-		}
-		required := layer.Name == "artifacts" && (len(job.Consumes) > 0 || len(job.Artifacts) > 0) || layer.Name == "caches" && len(job.Caches) > 0
-		if h.deps.PrepareLayer == nil {
+	prepare := func(operation func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error), required bool) error {
+		if operation == nil {
 			if required {
-				err = fmt.Errorf("executor layer %s has no storage adapter", layer.Name)
-				return h.failure(err), err
+				return errors.New("executor requires a declared storage adapter")
 			}
-			continue
+			return nil
 		}
-		finish, prepareErr := h.deps.PrepareLayer(ctx, layer, *input, job)
-		if prepareErr != nil {
-			return h.failure(prepareErr), prepareErr
+		finish, err := operation(ctx, *input, job)
+		if err != nil {
+			return err
 		}
 		if finish != nil {
 			finalizers = append(finalizers, finish)
 		}
+		return nil
+	}
+	if err := prepare(h.deps.PrepareArtifacts, len(job.Consumes) > 0 || len(job.Artifacts) > 0); err != nil {
+		return h.failure(err), err
+	}
+	if err := prepare(h.deps.PrepareCaches, len(job.Caches) > 0); err != nil {
+		return h.failure(err), err
 	}
 	return body()
 }

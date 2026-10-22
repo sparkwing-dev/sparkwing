@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -42,28 +44,28 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	var subject blob.LogSubject
 	var retired func(context.Context) (string, error)
 	var cleanupErr error
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
 		retired, principal = binding.Bearer, binding.Principal
 		private, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: transport, Bearer: binding.Bearer}, unit.RunID)
 		if err != nil {
-			return runners.NativeServices{}, err
+			return nodehost.NativeServices{}, err
 		}
 		t.Cleanup(func() { _ = private.Close() })
 		subject = blob.LogSubject{Kind: blob.LogOwnerUnit, Team: principal.Capability.Team, RunID: unit.RunID, Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: principal.Capability.Binding.Generation}}
 		uploader, err := private.LogUploader(ctx, principal, subject)
 		if err != nil {
-			return runners.NativeServices{}, err
+			return nodehost.NativeServices{}, err
 		}
 		sink, err := logseg.NewSink(ctx, uploader, logseg.Options{Subject: subject})
 		if err != nil {
-			return runners.NativeServices{}, err
+			return nodehost.NativeServices{}, err
 		}
 		t.Cleanup(func() { _, _ = sink.Close(context.WithoutCancel(ctx), logseg.End{}) })
 		if err := sink.Append([]byte("last owner line\n"), "", 0, 0); err != nil {
-			return runners.NativeServices{}, err
+			return nodehost.NativeServices{}, err
 		}
 		cancel()
-		return runners.NativeServices{Close: func() error {
+		return nodehost.NativeServices{Close: func() error {
 			_, err := sink.Close(context.WithoutCancel(ctx), logseg.End{})
 			cleanupErr = errors.Join(err, private.Close())
 			return cleanupErr

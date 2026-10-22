@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -116,11 +117,6 @@ type Daemon struct {
 	container *containerSensor
 
 	cgroup *cgroupLimiter
-
-	jevAdvisor   JevAdvisor
-	jevAttempts  uint64
-	jevAdmits    uint64
-	jevFallbacks uint64
 }
 
 type delivery struct {
@@ -153,10 +149,6 @@ func New(cfg Config) (*Daemon, error) {
 	if ownedSampler == nil {
 		ownedSampler = newOwnedCPUSampler()
 	}
-	advisor := cfg.JevAdvisor
-	if advisor == nil && cfg.admissionPolicy().Mode == admission.ModeJev {
-		advisor = newTypeSafeJevAdvisor(cfg.TypeSafeAPIKey, cfg.admissionPolicy().Jev)
-	}
 	return &Daemon{
 		cfg:                 cfg,
 		stay:                cfg.Stay,
@@ -178,7 +170,6 @@ func New(cfg Config) (*Daemon, error) {
 		cancelPending:       map[string]struct{}{},
 		cancelledRuns:       map[string]struct{}{},
 		disconnectedPending: map[string]struct{}{},
-		jevAdvisor:          advisor,
 	}, nil
 }
 
@@ -204,14 +195,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	incarnation := journal.NextIncarnation()
-	incarnation, persistErr := journal.PersistIncarnation(d.layout.dir, incarnation)
-	if incarnation == 0 {
-		return persistErr
-	}
-	if persistErr != nil {
-		d.cfg.logf("journal incarnation: %v", persistErr)
-	}
+	incarnation := uint64(rand.Int64())
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)
 	defer d.journal.Close()
@@ -831,7 +815,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	requested := chargedResources(req.Resources)
 	charged := requested
-	jevBypass := d.jevReservationBypass(req, requested)
 
 	d.mu.Lock()
 	if d.runCancelledLocked(string(req.RunID)) {
@@ -862,9 +845,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	ar := requestFromWireWithMetadata(string(req.RunID), req.OwnerRunID, ledgerCharge, req.Semaphores, req.CostSource, req.Priority, req.Class, req.ExpectedP99MS)
 	ar.BurstCores = d.cfg.admissionPolicy().interactiveBurstEligible(req, ledgerCharge)
-	if jevBypass {
-		ar.ReservationBypassBudgetMS = d.cfg.admissionPolicy().Jev.maxBackfill().Milliseconds()
-	}
 	c.runID = string(req.RunID)
 	c.journalRunID = string(req.RunID)
 	c.ownerRunID = req.OwnerRunID
@@ -1043,7 +1023,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.flush(deliveries)
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", string(req.RunID), len(dec.Evicted))
-		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
 	}
 }
 
@@ -1161,51 +1140,6 @@ func claimRequestsMatch(got, want []wingwire.SemaphoreClaim) bool {
 		}
 	}
 	return true
-}
-
-func cancelTimeoutFor(sems []wingwire.SemaphoreClaim) time.Duration {
-	var t time.Duration
-	for _, s := range sems {
-		if s.Policy != wingwire.PolicyCancelOthers || s.CancelTimeoutMS <= 0 {
-			continue
-		}
-		d := time.Duration(s.CancelTimeoutMS) * time.Millisecond
-		if t == 0 || d < t {
-			t = d
-		}
-	}
-	return t
-}
-
-func (d *Daemon) armCancelTimeout(evicted []admission.LeaseID, timeout time.Duration) {
-	if timeout <= 0 || len(evicted) == 0 {
-		return
-	}
-	leases := append([]admission.LeaseID(nil), evicted...)
-	time.AfterFunc(timeout, func() { d.forceReleaseSuperseded(leases) })
-}
-
-func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
-	d.mu.Lock()
-	if d.shuttingDown {
-		d.mu.Unlock()
-		return
-	}
-	var holders []*conn
-	for _, id := range leases {
-		rid, ok := d.leaseRun[id]
-		if !ok {
-			continue
-		}
-		if c := d.byRun[rid]; c != nil && c.leaseID == id && c.role == roleHolder {
-			holders = append(holders, c)
-		}
-	}
-	d.mu.Unlock()
-	for _, holder := range holders {
-		d.cfg.logf("cancel timeout: stopping superseded holder %s", holder.runID)
-		go d.handleDisconnect(holder)
-	}
 }
 
 // safety: an orphaned run's mark lives on its own lease, not among the tombstones, so every guard checks both.

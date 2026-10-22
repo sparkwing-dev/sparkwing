@@ -18,6 +18,8 @@ import (
 // Its head is re-evaluated by the same predicate used for named claims.
 type claimHead struct {
 	Team         Team
+	Context      string
+	Held         bool
 	Requirements string
 	Ordinal      int64
 	Arrived      int64
@@ -50,33 +52,27 @@ func compareInt64(a, b int64) int {
 
 func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 	var conditions []string
-	if q.freshOnly {
-		arrived := alias + `.ready_at`
-		if alias == "n" {
-			// SQLite needs the explicit predicate to use the partial readiness index.
-			conditions = append(conditions, `n.status<>'done'`)
-		}
-		if alias == "t" {
-			arrived = alias + `.available_at`
-		}
-		if alias == "e" {
-			arrived = `n.finished_at`
-		}
-		conditions = append(conditions, arrived+`>clock.now-`+fmt.Sprint(int64(limits.RankingWindow)))
+	if q.heads != nil {
+		conditions = append(conditions, `sh.kind=`+q.param(string(kind)))
 	}
 	if q.team != "" {
 		conditions = append(conditions, alias+`.team=`+q.param(q.team))
-		if q.freshOnly && alias == "e" {
-			conditions = append(conditions, `n.team=`+q.param(q.team))
-		}
+
 	}
 	if q.route {
 		conditions = append(conditions, alias+`.team=route.team`)
 		if kind == capability.UnitEval {
-			conditions = append(conditions, `route.requirements=''`, `n.team=route.team`)
+			conditions = append(conditions, `route.requirements=''`, `route.context=''`, `n.team=route.team`)
 		} else {
-			conditions = append(conditions, alias+`.claim_requirements=route.requirements`)
+			conditions = append(conditions, alias+`.claim_requirements=route.requirements`, alias+`.claim_context=route.context`)
 		}
+	}
+	if q.route && kind != capability.UnitEval {
+		arrived := alias + `.ready_at`
+		if alias == "t" {
+			arrived = alias + `.available_at`
+		}
+		conditions = append(conditions, arrived+`<=CASE WHEN route.held=1 THEN clock.now-`+fmt.Sprint(int64(limits.RankingWindow))+` ELSE clock.now END`)
 	}
 	if q.target != nil {
 		conditions = append(conditions, alias+`.team=(SELECT named.team FROM runs named WHERE named.id=`+q.param(string(q.target.RunID))+`)`)
@@ -99,7 +95,7 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 			arrived, run, node = alias+`.available_at`, alias+`.id`, `''`
 		}
 		if alias == "e" {
-			arrived, node, generation = `n.finished_at`, alias+`.source_node_id`, alias+`.source_generation`
+			arrived, node, generation = q.evaluationArrivalSQL(), alias+`.source_node_id`, alias+`.source_generation`
 		}
 		conditions = append(conditions, `(`+arrived+`,`+run+`,`+q.param(string(kind))+`,`+node+`,`+generation+`)>(`+q.param(a.Arrived)+`,`+q.param(string(a.Unit.RunID))+`,`+q.param(string(a.Unit.Kind))+`,`+q.param(string(a.Unit.NodeID))+`,`+q.param(a.Unit.SourceGeneration)+`)`)
 	}
@@ -158,35 +154,16 @@ func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
 	return `labels(value) AS MATERIALIZED (SELECT ` + q.text("label.value") + ` FROM ` + q.array(labels, "label") + `),matched AS MATERIALIZED (SELECT DISTINCT team,requirements FROM claim_requirement_terms WHERE label IN (SELECT value FROM labels)),routes AS MATERIALIZED (` + routes + `)`, nil
 }
 
-func (template *claimSQL) routesSQL(includeFresh bool) (string, []any, error) {
+func (template *claimSQL) routesSQL() (string, []any, error) {
 	q := claimSQL{dialect: template.dialect, route: true}
 	clock := q.param(template.now)
 	routes, err := q.requirementRoutes(template.facts[0])
 	if err != nil {
 		return "", nil, err
 	}
+	contexts := `,contexts AS MATERIALIZED (SELECT routes.*,'' AS context,0 AS held FROM routes UNION ALL SELECT routes.*,cc.id,0 FROM routes JOIN claim_contexts cc ON cc.team=routes.team AND cc.requirements=routes.requirements)`
 	head := q.headSQL(template.kinds)
-	freshHead := `NULL`
-	if includeFresh {
-		fresh := claimSQL{dialect: template.dialect, route: true, freshOnly: true}
-		freshHead = fresh.headSQL(template.kinds)
-		q.args = append(q.args, fresh.args...)
-	}
-	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + ` SELECT route.team,route.requirements,route.ordinal,` + head + `,` + freshHead + ` FROM routes route`, q.args, nil
-}
-
-func (template *claimSQL) freshTeamsSQL(demand UnitDemand) (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true, freshOnly: true, target: demand.Target}
-	if template.facts[0].Cloud == 0 {
-		q.team = template.facts[0].Team
-	}
-	clock := q.param(template.now)
-	routes, err := q.requirementRoutes(template.facts[0])
-	if err != nil {
-		return "", nil, err
-	}
-	head := q.headSQL(template.kinds)
-	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + ` SELECT DISTINCT route.team FROM routes route WHERE ` + head + ` IS NOT NULL`, q.args, nil
+	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + contexts + ` SELECT route.team,route.requirements,route.ordinal,route.context,` + head + ` FROM contexts route`, q.args, nil
 }
 
 func decodeClaimHead(head *claimHead, raw string) error {
@@ -206,11 +183,7 @@ func decodeClaimHead(head *claimHead, raw string) error {
 }
 
 func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (UnitRef, error) {
-	fresh, err := freshClaimWorkTx(ctx, tx, demand, template)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	query, args, err := template.routesSQL(fresh)
+	query, args, err := template.routesSQL()
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -219,15 +192,11 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		return UnitRef{}, err
 	}
 	var heads []claimHead
-	freshTeams := map[string]bool{}
 	for rows.Next() {
 		var head claimHead
-		var raw, fresh sql.NullString
-		if err = rows.Scan(&head.Team, &head.Requirements, &head.Ordinal, &raw, &fresh); err != nil {
+		var raw sql.NullString
+		if err = rows.Scan(&head.Team, &head.Requirements, &head.Ordinal, &head.Context, &raw); err != nil {
 			return UnitRef{}, errors.Join(err, rows.Close())
-		}
-		if fresh.Valid {
-			freshTeams[string(head.Team)] = true
 		}
 		if !raw.Valid {
 			continue
@@ -240,8 +209,50 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 		return UnitRef{}, err
 	}
-	if err := recordQueuedAsksTx(ctx, tx, demand, template, freshTeams); err != nil {
+	held, err := rankingHeldContextsTx(ctx, tx, demand, template, heads)
+	if err != nil {
 		return UnitRef{}, err
+	}
+	if len(held) > 0 {
+		q := claimSQL{dialect: template.dialect, route: true}
+		clock := q.param(template.now)
+		input, err := q.jsonParam(held)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		route := `route AS MATERIALIZED (SELECT ` + q.at("hold.value", "Team") + ` AS team,` + q.at("hold.value", "Requirements") + ` AS requirements,` + q.number(q.at("hold.value", "Ordinal")) + ` AS ordinal,` + q.at("hold.value", "Context") + ` AS context,1 AS held FROM ` + q.array(input, "hold") + `)`
+		query := `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + route + ` SELECT route.team,route.requirements,route.ordinal,route.context,` + q.headSQL(template.kinds) + ` FROM route`
+		args := q.args
+		if err != nil {
+			return UnitRef{}, err
+		}
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		heldKeys := map[[2]string]bool{}
+		for _, h := range held {
+			heldKeys[[2]string{string(h.Team), h.Context}] = true
+		}
+		heads = slices.DeleteFunc(heads, func(h claimHead) bool { return heldKeys[[2]string{string(h.Team), h.Context}] })
+		for rows.Next() {
+			var h claimHead
+			var raw sql.NullString
+			if err = rows.Scan(&h.Team, &h.Requirements, &h.Ordinal, &h.Context, &raw); err != nil {
+				return UnitRef{}, errors.Join(err, rows.Close())
+			}
+			if !raw.Valid {
+				continue
+			}
+			if err = decodeClaimHead(&h, raw.String); err != nil {
+				return UnitRef{}, errors.Join(err, rows.Close())
+			}
+			h.Held = true
+			heads = append(heads, h)
+		}
+		if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+			return UnitRef{}, err
+		}
 	}
 	for len(heads) > 0 {
 		slices.SortFunc(heads, compareClaimHeads)
@@ -272,7 +283,8 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		clock := next.param(template.now)
 		team := next.param(string(head.Team))
 		requirements := next.param(head.Requirements)
-		query = `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),route(team,requirements) AS (SELECT ` + team + `,` + requirements + `) SELECT ` + next.headSQL(template.kinds) + ` FROM route`
+		context := next.param(head.Context)
+		query = `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),route(team,requirements,context,held) AS (SELECT ` + team + `,` + requirements + `,` + context + `,` + fmt.Sprint(boolInt(head.Held)) + `) SELECT ` + next.headSQL(template.kinds) + ` FROM route`
 		var raw sql.NullString
 		if err = tx.QueryRowContext(ctx, query, next.args...).Scan(&raw); err != nil {
 			return UnitRef{}, err
@@ -305,4 +317,45 @@ func claimPlacementFreeTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	}
 	preferencesFree := unit.Kind != capability.UnitNode || sealed.Request.Burst == nil && len(settings.Prefers.Value) == 0 && len(policy.Preferences) == 0
 	return preferencesFree && !runAnywhere(sealed.Request), preferencesFree, nil
+}
+
+func rankingHeldContextsTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL, heads []claimHead) ([]claimHead, error) {
+	fresh := slices.DeleteFunc(slices.Clone(heads), func(h claimHead) bool {
+		return h.Context == "" || h.Arrived <= template.now-int64(limits.RankingWindow)
+	})
+	if len(fresh) == 0 {
+		return nil, nil
+	}
+	teams := map[string]bool{}
+	for _, h := range fresh {
+		teams[string(h.Team)] = true
+	}
+	facts := slices.DeleteFunc(claimFactsForTeams(template.facts, teams), func(f claimFacts) bool {
+		return f.Current == 0 && (f.FreeSlots <= 0 || f.Personal == 1 || f.HereRun != "" || f.BindRun != "" || f.Actions == 1)
+	})
+	funding := slices.DeleteFunc(slices.Clone(template.teams), func(t claimTeamFacts) bool { return !teams[t.Team] })
+	q := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, heads: fresh, holdProof: true, preferencesFree: true}
+	query, err := q.query(facts, funding, template.rates, template.kinds, demand, template.now)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, query, q.args...)
+	if err != nil {
+		return nil, err
+	}
+	var held []claimHead
+	for rows.Next() {
+		var team Team
+		var unit UnitRef
+		if err = rows.Scan(&team, &unit.RunID, &unit.NodeID, &unit.SourceGeneration, &unit.Kind); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		for _, h := range fresh {
+			if h.Team == team && h.Unit == unit {
+				held = append(held, h)
+				break
+			}
+		}
+	}
+	return held, errors.Join(rows.Err(), rows.Close())
 }

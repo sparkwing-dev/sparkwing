@@ -61,9 +61,9 @@ func (s *Store) TestOnlyOwnerSnapshotFunding(t *testing.T) {
 			t.Fatalf("funded=%v owner execution=%v", funded, got)
 		}
 	}
-	var after, asks int64
-	if err := s.db.QueryRow(`SELECT ordinal,(SELECT COUNT(*) FROM unit_asks) FROM claim_awards WHERE singleton=1`).Scan(&after, &asks); err != nil || after != ordinal || asks != 0 {
-		t.Fatalf("snapshot changed scheduling: ordinal=%d -> %d asks=%d error=%v", ordinal, after, asks, err)
+	var after int64
+	if err := s.db.QueryRow(`SELECT ordinal FROM claim_awards WHERE singleton=1`).Scan(&after); err != nil || after != ordinal {
+		t.Fatalf("snapshot changed scheduling: ordinal=%d -> %d error=%v", ordinal, after, err)
 	}
 	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil || node.ReadyAt != nil || node.ClaimedBy != "" || node.CapabilityPrefix != "" {

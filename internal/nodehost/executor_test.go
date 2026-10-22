@@ -2,8 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -132,26 +130,12 @@ func (p *executorProcess) Request(ctx context.Context, r nodeproto.Request) (nod
 func (p *executorProcess) Close() error                  { p.closed++; return p.closeErr }
 func (p *executorProcess) Cleanup(context.Context) error { p.cleaned++; return p.cleanupErr }
 
-func executorHash(value any) (runspec.Hash, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	var decoded any
-	if err = json.Unmarshal(raw, &decoded); err != nil {
-		return "", err
-	}
-	raw, err = json.Marshal(decoded)
-	sum := sha256.Sum256(raw)
-	return runspec.Hash(hex.EncodeToString(sum[:])), err
-}
-
 func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependencies, *[]*executorProcess) {
 	t.Helper()
 	job := nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
-	planHash, _ := executorHash(plan)
-	jobHash, _ := executorHash(job)
+	planHash, _ := runspec.CanonicalHash(plan)
+	jobHash, _ := runspec.CanonicalHash(job)
 	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	resolved := engine.Resolved{Identity: identity, Executable: "/verified/engine"}
 	execution := runspec.JobExecutionSettings{}
@@ -162,24 +146,24 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	jobJSON, _ := json.Marshal(job)
 	s := &executorStore{accepted: &input.Accepted, row: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
-	deps := ExecutorDependencies{Store: s, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
-		p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
-		processes = append(processes, p)
-		return p, nil
-	}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
-		return resolved, nil
-	}, CanonicalHash: executorHash, ValidatePlan: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-		var p nodeproto.PlanDoc
-		err := json.Unmarshal(raw, &p)
-		return p, err
-	}, ChildContext: func(ctx context.Context, want, _ time.Duration) (context.Context, context.CancelFunc, error) {
-		if want > 0 {
-			c, cancel := context.WithTimeout(ctx, want)
+	deps := ExecutorDependencies{
+		Store: s, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
+			p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
+			processes = append(processes, p)
+			return p, nil
+		}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			return resolved, nil
+		},
+
+		ChildContext: func(ctx context.Context, want, _ time.Duration) (context.Context, context.CancelFunc, error) {
+			if want > 0 {
+				c, cancel := context.WithTimeout(ctx, want)
+				return c, cancel, nil
+			}
+			c, cancel := context.WithCancel(ctx)
 			return c, cancel, nil
-		}
-		c, cancel := context.WithCancel(ctx)
-		return c, cancel, nil
-	}, Masker: testMasker("private")}
+		}, Masker: testMasker("private"),
+	}
 	return input, s, deps, &processes
 }
 
@@ -382,11 +366,11 @@ func executorRetryBudget(t *testing.T, input *NodeInput, s *executorStore, budge
 	input.Accepted.Spec, _ = json.Marshal(spec)
 }
 
-func executorChangeJob(t *testing.T, input *NodeInput, s *executorStore, job nodeproto.JobSpec) {
+func executorChangeJob(t *testing.T, input *NodeInput, s *executorStore, job nodeproto.JobSpec, others ...nodeproto.JobSpec) {
 	t.Helper()
 	s.accepted = &input.Accepted
-	input.Accepted.Plan.Jobs = []nodeproto.JobSpec{job}
-	hash, err := executorHash(input.Accepted.Plan)
+	input.Accepted.Plan.Jobs = append([]nodeproto.JobSpec{job}, others...)
+	hash, err := runspec.CanonicalHash(input.Accepted.Plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +381,7 @@ func executorChangeJob(t *testing.T, input *NodeInput, s *executorStore, job nod
 	}
 	spec.PlanHash = hash
 	input.Accepted.Spec, _ = json.Marshal(spec)
-	hash, err = executorHash(job)
+	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,13 +478,13 @@ func TestNodeExecutorStorageLayersWrapRetriesOnce(t *testing.T) {
 	input, s, deps, _ := executorFixture(t)
 	executorRetryBudget(t, &input, s, 1)
 	var events []string
-	deps.PrepareLayer = func(_ context.Context, layer LayerSpec, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		events = append(events, layer.Name+" in")
 		return func(context.Context, NodeInput, *store.NodeResult) error {
 			events = append(events, layer.Name+" out")
 			return nil
 		}, nil
-	}
+	})
 	start := deps.Start
 	attempts := 0
 	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
@@ -671,25 +655,25 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 			input, s, deps, processes := executorFixture(t)
 			generated := input.Accepted.Plan.Jobs[0]
 			generated.Groups = []string{"generator"}
-			generatedHash, _ := executorHash(generated)
+			generatedHash, _ := runspec.CanonicalHash(generated)
 			input.SpecHash = string(generatedHash)
 			s.row.SpecHash = input.SpecHash
 			s.row.Spec, _ = json.Marshal(generated)
 			source := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"generator"}}}
 			input.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}
-			planHash, _ := executorHash(input.Accepted.Plan)
+			planHash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 			input.Accepted.PlanHash = string(planHash)
 			var spec runspec.Spec
 			_ = json.Unmarshal(input.Accepted.Spec, &spec)
 			spec.PlanHash = planHash
 			input.Accepted.Spec, _ = json.Marshal(spec)
 			other := nodeproto.JobSpec{ID: "other", Groups: []string{"generator"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
-			otherHash, _ := executorHash(other)
+			otherHash, _ := runspec.CanonicalHash(other)
 			otherJSON, _ := json.Marshal(other)
 			s.nodes = map[string]store.NodeRow{"other": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "other"}, Spec: otherJSON, SpecHash: string(otherHash)}}
 			accepted := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{generated, other}}
 			body, _ := json.Marshal(accepted)
-			bodyHash, _ := executorHash(accepted)
+			bodyHash, _ := runspec.CanonicalHash(accepted)
 			s.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
 			input.Replay = []GeneratorReplay{{SourceJob: "source", SourceGeneration: 2, GeneratorID: "generator", Output: json.RawMessage(`{"seed":1}`)}}
 			s.accepted = &input.Accepted
@@ -748,11 +732,11 @@ func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDep
 	job := input.Accepted.Plan.Jobs[0]
 	job.Groups = []string{"children"}
 	executorChangeJob(t, &input, state, job)
-	root := nodeproto.JobSpec{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestors"}}}
-	parent := nodeproto.JobSpec{ID: "parent", Groups: []string{"ancestors"}, Closures: nodeproto.ClosureSpec{Generate: []string{"children"}}}
-	unrelated := nodeproto.JobSpec{ID: "unrelated", Closures: nodeproto.ClosureSpec{Generate: []string{"other"}}}
+	root := nodeproto.JobSpec{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestors"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	parent := nodeproto.JobSpec{ID: "parent", Groups: []string{"ancestors"}, Closures: nodeproto.ClosureSpec{Generate: []string{"children"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	unrelated := nodeproto.JobSpec{ID: "unrelated", Closures: nodeproto.ClosureSpec{Generate: []string{"other"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	input.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{root, unrelated}}
-	hash, _ := executorHash(input.Accepted.Plan)
+	hash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 	input.Accepted.PlanHash = string(hash)
 	var spec runspec.Spec
 	_ = json.Unmarshal(input.Accepted.Spec, &spec)
@@ -761,13 +745,13 @@ func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDep
 	state.nodes = map[string]store.NodeRow{}
 	for i, declaration := range []nodeproto.JobSpec{root, parent, unrelated} {
 		body, _ := json.Marshal(declaration)
-		hash, _ := executorHash(declaration)
+		hash, _ := runspec.CanonicalHash(declaration)
 		state.nodes[declaration.ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(declaration.ID)}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(i + 2), Spec: body, SpecHash: string(hash)}
 	}
-	for i, declaration := range []nodeproto.JobSpec{parent, job, {ID: "unused", Groups: []string{"other"}}} {
+	for i, declaration := range []nodeproto.JobSpec{parent, job, {ID: "unused", Groups: []string{"other"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}} {
 		body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{declaration}}
 		raw, _ := json.Marshal(body)
-		hash, _ := executorHash(body)
+		hash, _ := runspec.CanonicalHash(body)
 		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID([]string{"root", "parent", "unrelated"}[i])}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
 	}
 	reads := []string{}
@@ -875,14 +859,14 @@ func TestRecordedReplayRejectsCyclicAncestryBeforeOutputReads(t *testing.T) {
 	root.Groups = []string{"children"}
 	row := state.nodes[root.ID]
 	row.Spec, _ = json.Marshal(root)
-	hash, _ := executorHash(root)
+	hash, _ := runspec.CanonicalHash(root)
 	row.SpecHash = string(hash)
 	state.nodes[root.ID] = row
 	var body nodeproto.PlanDoc
 	_ = json.Unmarshal(state.expansions[1].Body, &body)
 	body.Jobs = append(body.Jobs, root)
 	state.expansions[1].Body, _ = json.Marshal(body)
-	hash, _ = executorHash(body)
+	hash, _ = runspec.CanonicalHash(body)
 	state.expansions[1].BodyHash = string(hash)
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
@@ -898,7 +882,7 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	job := input.Accepted.Plan.Jobs[0]
 	job.OnFailureOf = "source"
-	executorChangeJob(t, &input, s, job)
+	executorChangeJob(t, &input, s, job, nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}})
 	s.nodes = map[string]store.NodeRow{"source": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeFailed}}
 	failure := nodeproto.JobFailure{Job: "source", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
 	deps.ReadFailure = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
@@ -980,7 +964,7 @@ func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
 		binds = append(binds, int64(in.Attempt))
 		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "storage-claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: int64(in.Attempt), Generation: int64(in.Generation)}}}}, nil
 	}
-	deps.PrepareLayer = func(_ context.Context, _ LayerSpec, in NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(_ context.Context, _ testPolicyName, in NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		if in.Storage.Authority.Attempt.Value.Attempt != 1 {
 			t.Fatal("layer preparation did not receive first bound attempt")
 		}
@@ -988,7 +972,7 @@ func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
 			finalized = append(finalized, latest.Storage.Authority.Attempt.Value.Attempt)
 			return nil
 		}, nil
-	}
+	})
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		starts = append(starts, in.Storage.Authority.Attempt.Value.Attempt)
@@ -1022,9 +1006,9 @@ func TestNodeExecutorStorageRefreshFailureSuppressesStaleFinalizers(t *testing.T
 		}
 		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: int64(in.Attempt), Generation: int64(in.Generation)}}}}, nil
 	}
-	deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		return func(context.Context, NodeInput, *store.NodeResult) error { finalized++; return nil }, nil
-	}
+	})
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, activity)
@@ -1056,4 +1040,12 @@ func TestNodeExecutorReportsOnlyBoundedMaskedFailureText(t *testing.T) {
 	if !errors.Is(err, sentinel) || report == nil || len(report.MaskedError) > int(limits.ErrorBytes) || strings.Contains(report.MaskedError, secret) || !strings.HasSuffix(report.MaskedError, "failure-tail") || !utf8.ValidString(report.MaskedError) {
 		t.Fatalf("failure report=%+v error=%v", report, err)
 	}
+}
+
+func (*executorStore) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
+	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+}
+
+func (*executorStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
 }

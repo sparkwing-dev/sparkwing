@@ -115,10 +115,6 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 		t.Fatalf("prepared inputs did not stabilize the cache key: %+v %v", entries, err)
 	}
 	options := bincache.PruneOptions{ReclaimEntries: 100, MaxEntries: 100}
-	_, err = bincache.Prune(t.Context(), options)
-	if err != nil {
-		t.Fatal(err)
-	}
 	pruned, err := bincache.Prune(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)

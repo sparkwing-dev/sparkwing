@@ -57,7 +57,11 @@ func TestClaimSeededDisjointLabelsAndFairShare(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				_, err = tx.ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) VALUES (?,?,?,'pending',?,?,?,?)`, team, run, node, sequence, []byte(`{}`), execution, requirements)
+				claimContext, err := persistClaimContextTx(t.Context(), tx, Team(team), run, capability.UnitNode, requirements, execution)
+				if err != nil {
+					return err
+				}
+				_, err = tx.ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) VALUES (?,?,?,'pending',?,?,?,?,?)`, team, run, node, sequence, []byte(`{}`), execution, requirements, claimContext)
 				return err
 			}); err != nil {
 				t.Fatal(err)

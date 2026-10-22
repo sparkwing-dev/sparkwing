@@ -23,7 +23,7 @@ import (
 func BenchmarkClaimQuery50000(b *testing.B) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
 		b.Run(dialect.String(), func(b *testing.B) {
-			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "tied", "ranked", "metered", "fresh-ranked", "fresh-broad-ranked", "fresh-broad-asks", "fresh-broad-write-floor"} {
+			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "tied", "ranked", "metered", "fresh-ranked", "fresh-broad-ranked"} {
 				b.Run(scenario, func(b *testing.B) { benchmarkClaimQuery(b, dialect, scenario) })
 			}
 		})
@@ -110,9 +110,9 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 			b.Fatal(err)
 		}
 	}
-	request := []byte(`{"request":{"mode":"execute","dispatch":"host","options":{}},"provenance":{"trust":"asserted"}}`)
+	request := []byte(`{"request":{"mode":"execute","dispatch":"host","options":{}},"provenance":{"trust":"asserted","pipeline":"bench","writer":"benchmark"}}`)
 	if scenario == "ranked" || scenario == "metered" || freshRanked {
-		request = []byte(`{"request":{"mode":"execute","dispatch":"controller","options":{}},"provenance":{"trust":"asserted"}}`)
+		request = []byte(`{"request":{"mode":"execute","dispatch":"controller","options":{}},"provenance":{"trust":"asserted","pipeline":"bench","writer":"benchmark"}}`)
 	}
 	teams := make([]claimTeamFacts, 200)
 	for i := range teams {
@@ -128,6 +128,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	state := &Store{db: db, dialect: dialect}
 	wrapped := &storeTx{tx: tx, dialect: dialect, store: state, operator: state.AsOperator(), clock: func(context.Context) (time.Time, error) { return time.Unix(1700000000, 0), nil }}
 	keys := make(map[string]string)
+	contexts := make(map[string]string)
 	for _, team := range teams {
 		for _, label := range []string{"eligible", "unavailable"} {
 			key, err := persistClaimRequirementsTx(ctx, wrapped, Team(team.Team), []string{label})
@@ -135,9 +136,15 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 				b.Fatal(err)
 			}
 			keys[team.Team+"/"+label] = key
+			body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{label}}})
+			context, err := persistClaimContextTx(ctx, wrapped, Team(team.Team), "run-"+team.Team, capability.UnitNode, key, body)
+			if err != nil {
+				b.Fatal(err)
+			}
+			contexts[team.Team+"/"+label] = context
 		}
 	}
-	statement, err := tx.PrepareContext(ctx, rewritePh(dialect, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) VALUES (?,?,?,'pending',?, ?,?,?)`))
+	statement, err := tx.PrepareContext(ctx, rewritePh(dialect, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) VALUES (?,?,?,'pending',?, ?,?,?,?)`))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -157,7 +164,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		} else if scenario == "tied" {
 			arrived = 1
 		}
-		if _, err = statement.ExecContext(ctx, team, "run-"+team, fmt.Sprintf("job-%05d", i), arrived, []byte(`{}`), body, keys[team+"/"+required]); err != nil {
+		if _, err = statement.ExecContext(ctx, team, "run-"+team, fmt.Sprintf("job-%05d", i), arrived, []byte(`{}`), body, keys[team+"/"+required], contexts[team+"/"+required]); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -167,7 +174,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	if err = tx.Commit(); err != nil {
 		b.Fatal(err)
 	}
-	facts := []claimFacts{{Prefix: "benchmark", Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"eligible"}, Tier: TierCloud}}
+	facts := []claimFacts{{Prefix: "benchmark", FreeSlots: 1, Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"eligible"}, Tier: TierCloud}}
 	if scenario == "metered" {
 		facts[0].Metered = 1
 	}
@@ -176,7 +183,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		if strings.HasPrefix(scenario, "fresh-broad-") && i < len(teams) {
 			labels = []string{"eligible"}
 		}
-		facts = append(facts, claimFacts{Prefix: fmt.Sprintf("observer-%04d", i), Team: teams[i%len(teams)].Team, ObservedAt: 1700000000000000000, Trust: "any", Kinds: []string{"node"}, Labels: labels, Tier: TierSelfHosted})
+		facts = append(facts, claimFacts{Prefix: fmt.Sprintf("observer-%04d", i), FreeSlots: 1, Team: teams[i%len(teams)].Team, ObservedAt: 1700000000000000000, Trust: "any", Kinds: []string{"node"}, Labels: labels, Tier: TierSelfHosted})
 	}
 	template := claimSQL{dialect: dialect, facts: facts, teams: teams, rates: DefaultCreditRateTable(DefaultCreditRateMicro), kinds: []capability.UnitKind{capability.UnitNode}, now: 1700000000000000000}
 	demand := UnitDemand{CapabilityPrefix: "benchmark", Kinds: template.kinds}
@@ -189,23 +196,10 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	samples := make([]time.Duration, 0, b.N)
 	b.ResetTimer()
 	for iteration := range b.N {
-		if strings.HasPrefix(scenario, "fresh-broad-") {
-			b.StopTimer()
-			if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks`); err != nil {
-				b.Fatal(err)
-			}
-			b.StartTimer()
-		}
 		trace.enabled = dialect == DialectPostgres && iteration == b.N-1
 		start := time.Now()
 		queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if scenario == "fresh-broad-write-floor" {
-			_, err = wrapped.ExecContext(queryCtx, `INSERT INTO unit_asks(team,run_id,unit_kind,node_id,claimant,claim_rank,asked_at) SELECT n.team,n.run_id,'node',n.node_id,'benchmark',4,? FROM nodes n WHERE 1=1 ON CONFLICT(team,run_id,unit_kind,node_id,claimant) DO NOTHING`, template.now)
-		} else if scenario == "fresh-broad-asks" {
-			err = recordQueuedAsksTx(queryCtx, wrapped, demand, &template, nil)
-		} else {
-			_, err = searchClaimTx(queryCtx, wrapped, demand, &template)
-		}
+		_, err = searchClaimTx(queryCtx, wrapped, demand, &template)
 		cancel()
 		trace.enabled = false
 		samples = append(samples, time.Since(start))
@@ -226,14 +220,6 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	b.ReportMetric(50000, "ready_jobs")
 	b.ReportMetric(200, "teams")
 	b.ReportMetric(1000, "claimants")
-	var askRows int64
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM unit_asks WHERE claimant='benchmark'`).Scan(&askRows); err != nil {
-		b.Fatal(err)
-	}
-	b.ReportMetric(float64(askRows), "ask_rows")
-	if strings.HasPrefix(scenario, "fresh-broad-") && askRows != 50000 {
-		b.Fatalf("recorded %d asks; want every fresh eligible node", askRows)
-	}
 	if dialect == DialectPostgres {
 		var visits float64
 		for _, statement := range trace.statements {
@@ -252,7 +238,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 }
 
-// Count readiness predicate evaluations across asks and rejected route heads.
+// Count readiness predicate evaluations across indexed and rejected route heads.
 // These exclude placement hydration and include callback overhead in latency.
 type claimBenchmarkDriver struct {
 	driver.Driver

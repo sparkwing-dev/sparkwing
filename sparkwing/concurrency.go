@@ -14,11 +14,12 @@ type Scope string
 const (
 	// ScopeRun bounds the budget to the nodes of a single run.
 	ScopeRun Scope = "run"
-	// ScopeBox bounds the budget to one machine, even when a controller
-	// dispatches several runs to it.
+	// ScopeBox bounds a job-level budget to one machine, even when a controller
+	// dispatches several runs to it. Pipeline acceptance refuses box-scoped
+	// plan groups because a run can span machines. Use [JobNode.Concurrency].
 	ScopeBox Scope = "box"
-	// ScopeGlobal pools the budget across every run that names the
-	// group, coordinated through the shared backend. The zero value.
+	// ScopeGlobal pools the budget across runs naming the group at the same
+	// plan or job level, coordinated through the shared backend. The zero value.
 	ScopeGlobal Scope = "global"
 )
 
@@ -73,11 +74,6 @@ type ConcurrencyLimit struct {
 	// before failing with failure_reason "queue_timeout". Zero waits
 	// indefinitely. Only meaningful with OnLimit [Queue].
 	QueueTimeout time.Duration
-	// CancelTimeout bounds how long evicted holders have to cooperatively
-	// release before they are force-released, so a stuck victim can't pin
-	// the budget indefinitely. Zero uses the backend default. Only
-	// meaningful with OnLimit [CancelOthers].
-	CancelTimeout time.Duration
 }
 
 // ConcurrencyGroup is a named budget that member nodes share. Define it
@@ -99,8 +95,9 @@ type ConcurrencyGroup struct {
 }
 
 // NewConcurrencyGroup constructs a [ConcurrencyGroup] named name with
-// the given limit. The name is the coordination key the backend uses,
-// so two pipelines that pass the same name share one budget.
+// the given limit. The name and scope identify a budget within its level.
+// Plan and job groups have separate namespaces, so the same name at both
+// levels identifies independent budgets.
 //
 // An empty name or an unknown Scope / OnLimit value panics at
 // construction: a misspelled policy would otherwise fall through to
@@ -190,8 +187,11 @@ type planConcurrency struct {
 // Concurrency gates the whole run on concurrency group g: the run acquires
 // each declared plan-level budget before any node dispatches and releases
 // it when the run reaches a terminal status. Cost defaults to one. Repeated
-// calls compose independent gates, so authors can combine a deploy mutex with
-// CPU and memory budgets. Passing nil clears every plan-level gate.
+// calls compose independent gates. Passing nil clears every plan-level gate.
+// Plan groups accept [ScopeGlobal] or [ScopeRun]. Pipeline acceptance refuses
+// [ScopeBox] because a run can span machines. Use [JobNode.Concurrency] for
+// per-machine budgets. Plan and job groups have separate namespaces, so the
+// same name at both levels identifies independent budgets.
 //
 // A plan never memoizes (it has side effects not captured in one output), so a
 // plan participates in concurrency only -- there is no plan-level Cache.

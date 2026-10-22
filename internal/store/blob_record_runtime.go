@@ -244,6 +244,16 @@ func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, s
 		a := record.Source.Attempt.Value
 		sourceNode, sourceAttempt, sourceGeneration = a.NodeID, a.Attempt, a.Generation
 	}
+	if record.Key.Kind == blob.KindMemo {
+		// A pending memo belongs to its producer until successful settlement.
+		var successful int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND outcome='success'`, record.Key.Team, record.Source.RunID, sourceNode, sourceAttempt, sourceGeneration).Scan(&successful); err != nil {
+			return err
+		}
+		if successful == 0 {
+			run = record.Source.RunID
+		}
+	}
 	if record.Key.Kind == blob.KindOutput || record.Key.Kind == blob.KindManifest {
 		run = destination.RunID
 		a := destination.Attempt.Value
@@ -285,7 +295,7 @@ func readBlobRecordTx(ctx context.Context, tx *storeTx, key blob.RecordKey, scop
 	var created int64
 	var expiry sql.NullInt64
 	var source, facts []byte
-	err := tx.QueryRowContext(ctx, `SELECT digest,manifest_digest,uploader_principal,provenance,source_identity_json,ref_facts_json,created_at,expires_at,EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id) FROM blob_records b WHERE b.team=? AND b.kind=? AND b.scope=? AND b.name=?`, key.Team, key.Kind, scope, key.Name).Scan(&record.Digest, &manifest, &record.Uploader, &record.Provenance, &source, &facts, &created, &expiry, &record.Pinned)
+	err := tx.QueryRowContext(ctx, `SELECT digest,manifest_digest,uploader_principal,provenance,source_identity_json,ref_facts_json,created_at,expires_at,EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id) FROM blob_records b WHERE b.team=? AND b.kind=? AND b.scope=? AND b.name=? AND (b.kind<>'memo' OR b.run_id IS NULL)`, key.Team, key.Kind, scope, key.Name).Scan(&record.Digest, &manifest, &record.Uploader, &record.Provenance, &source, &facts, &created, &expiry, &record.Pinned)
 	if errors.Is(err, sql.ErrNoRows) {
 		return record, false, nil
 	}

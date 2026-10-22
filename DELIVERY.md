@@ -162,8 +162,11 @@ file. Other syntax and workflow checks remain active.
   which `sparkwing run <name>` runs on demand and which hosted CI runs on every
   pull request and every push to main; no git hook fires either.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
-  `sparkwing pipeline hooks status` is the proof they fire; a definition alone
-  proves nothing. A hook script names its pipeline, so a checkout whose hooks
+  `sparkwing pipeline hooks status` checks the active hook directory and compares
+  each hook's presence, content, format version, and executability. Blocking
+  gates and global forwarders are required; notifiers are optional. Status,
+  fleet status, and doctor share that verdict. Reinstall stale or missing hooks; use a throwaway commit when a manual execution check is needed.
+  A hook script names its pipeline, so a checkout whose hooks
   were installed when the pre-push hook ran `gate` keeps running `gate` until
   `sparkwing pipeline hooks install` rewrites them.
 - **The three check classes and their budgets:** `pre-commit` is the source

@@ -502,6 +502,20 @@ claim requirements. Enrollment can enable `local_admission` to share the
 machine's local admission controller with local runs; claim authority and
 placement still belong to the controller.
 
+Each claimed job holds its machine lease through source preparation, execution
+and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.
+The store commits plan capacity with permission to release work. Each executing
+host requests its complete job group set under its actual award before compute.
+Scheduling holds no compute while logical admission waits. The requester takes a
+provisional burst award, then logical admission, then tries compute without waiting.
+If compute is unavailable, it returns the award and job reservations. The original
+readiness ranking window survives, so other ranked claimants can take the job.
+Ctrl-C cancels the wait. Concurrency slots count once even when a registered runner
+shares this machine with the requesting CLI. Machine admission keeps Cloud run
+identities separate from local records. Cloud overflow captures the working tree.
+Use `pipeline trigger` for explicit committed revisions instead of `--sw-ref` or
+`--sw-pipeline-ref`.
+
 An unreachable controller before intake, including connection setup and source upload,
 produces a message and a local run.
 Authorization failures remain errors. After intake, a lost response or connection

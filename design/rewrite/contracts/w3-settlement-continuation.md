@@ -48,8 +48,8 @@ finally-chain case failed before this change because the SDK refused incomplete
 prerequisite state. It now runs cleanup and joins the process.
 
 Expansion and reconstruction pass Accepted.Plan.Concurrency as
-ValidationContext.ExistingConcurrency. Initial planning and cache reads refuse
-that expansion-only context. Generated job bytes retain unknown and duplicate
+ValidationContext.ExistingConcurrency. Initial planning refuses that
+expansion-only context. Generated job bytes retain unknown and duplicate
 fields until the real shared validator sees them.
 
 The owner applies terminal graph decisions before committing a predicted final
@@ -146,7 +146,7 @@ the final report.
   and tests/acceptance.
 - Complete source, lease and both acceptance package suites pass.
 - The current-host selection below passes, including native SDK processes.
-- Race checks pass for node executor, owner, planning/cache and fuzz seed tests.
+- Race checks pass for node executor, owner, planning and fuzz seed tests.
 - Commentcheck against main and git diff --check pass.
 - The old admission/event selection fails for the schema/socket reasons above.
 - Sleepcheck against HEAD reports the incoming W4 time.After in
@@ -155,8 +155,8 @@ the final report.
 The current-host selection is:
 
 ```text
-test -p 4 ./internal/nodehost -run '^(TestNodeExecutor|TestOwner|TestProtocolSession|TestNativeSDK|TestProcessServices|TestProcessCleanups|TestClaimedNodeHost|TestStateFollower|TestLayerOwnership|TestPlanInitial|TestValidatePlanCacheHit|Fuzz)' -count=1 -timeout 3m
-test -race -p 4 ./internal/nodehost -run '^(TestNodeExecutor|TestOwner|TestPlanInitial|TestValidatePlanCacheHit|Fuzz)' -count=1 -timeout 3m
+test -p 4 ./internal/nodehost -run '^(TestNodeExecutor|TestOwner|TestProtocolSession|TestNativeSDK|TestProcessServices|TestProcessCleanups|TestClaimedNodeHost|TestStateFollower|TestPlanInitial|Fuzz)' -count=1 -timeout 3m
+test -race -p 4 ./internal/nodehost -run '^(TestNodeExecutor|TestOwner|TestPlanInitial|Fuzz)' -count=1 -timeout 3m
 ```
 
 Shared files changed outside W3 are internal/acceptance/host_expansion.go,

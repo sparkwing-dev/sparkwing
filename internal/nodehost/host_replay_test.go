@@ -36,25 +36,25 @@ func TestGeneratorReplay(t *testing.T) {
 				job.OnFailureOf = "peer"
 			}
 			peer := nodeproto.JobSpec{ID: "peer", Groups: []string{"peers"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
-			sourceJob := nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"target", "peers", "empty"}}}
+			sourceJob := nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"target", "peers", "empty"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 			if crossSource {
 				sourceJob.Closures.Generate = []string{"target", "empty"}
 			}
 			input.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{sourceJob}}
 			if crossSource {
-				input.Accepted.Plan.Jobs = append(input.Accepted.Plan.Jobs, nodeproto.JobSpec{ID: "other-source", Closures: nodeproto.ClosureSpec{Generate: []string{"peers"}}})
+				input.Accepted.Plan.Jobs = append(input.Accepted.Plan.Jobs, nodeproto.JobSpec{ID: "other-source", Closures: nodeproto.ClosureSpec{Generate: []string{"peers"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 			}
 			if mode == "nested" {
 				sourceJob.Groups = []string{"ancestors"}
-				input.Accepted.Plan.Jobs = []nodeproto.JobSpec{{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestors"}}}}
+				input.Accepted.Plan.Jobs = []nodeproto.JobSpec{{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestors"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 			}
-			planHash, _ := expansionHash(input.Accepted.Plan)
+			planHash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 			input.Accepted.PlanHash = string(planHash)
 			persisted.snapshot.Run.Spec.PlanHash = planHash
 			input.Accepted.Spec, _ = json.Marshal(persisted.snapshot.Run.Spec)
 			persisted.snapshot.Run.Plan, _ = json.Marshal(input.Accepted.Plan)
 			persisted.snapshot.Run.PlanHash = string(planHash)
-			jobHash, _ := expansionHash(job)
+			jobHash, _ := runspec.CanonicalHash(job)
 			input.SpecHash = string(jobHash)
 			persisted.snapshot.Nodes[0].SpecHash = input.SpecHash
 			persisted.snapshot.Nodes[0].Spec, _ = json.Marshal(job)
@@ -63,9 +63,9 @@ func TestGeneratorReplay(t *testing.T) {
 				accepted.Jobs = accepted.Jobs[:1]
 			}
 			body, _ := json.Marshal(accepted)
-			bodyHash, _ := expansionHash(accepted)
+			bodyHash, _ := runspec.CanonicalHash(accepted)
 			persisted.snapshot.Expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 0, Body: body, BodyHash: string(bodyHash)}}
-			peerHash, _ := expansionHash(peer)
+			peerHash, _ := runspec.CanonicalHash(peer)
 			peerBody, _ := json.Marshal(peer)
 			s := persisted
 			s.nodes = map[string]store.NodeRow{"peer": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "peer"}, Spec: peerBody, SpecHash: string(peerHash)}}
@@ -80,7 +80,7 @@ func TestGeneratorReplay(t *testing.T) {
 			if crossSource {
 				body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{peer}}
 				raw, _ := json.Marshal(body)
-				hash, _ := expansionHash(body)
+				hash, _ := runspec.CanonicalHash(body)
 				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: "other-source"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
 				persisted.snapshot.Nodes = append(persisted.snapshot.Nodes, s.nodes["peer"])
 				input.Replay = append(input.Replay, GeneratorReplay{SourceJob: "other-source", SourceGeneration: 2, GeneratorID: "peers", Output: json.RawMessage(`{"value":7}`)})
@@ -88,10 +88,10 @@ func TestGeneratorReplay(t *testing.T) {
 			if mode == "nested" {
 				expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{sourceJob}}
 				raw, _ := json.Marshal(expansion)
-				hash, _ := expansionHash(expansion)
+				hash, _ := runspec.CanonicalHash(expansion)
 				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
 				raw, _ = json.Marshal(sourceJob)
-				hash, _ = expansionHash(sourceJob)
+				hash, _ = runspec.CanonicalHash(sourceJob)
 				s.nodes["source"] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Spec: raw, SpecHash: string(hash)}
 				persisted.snapshot.Nodes = append(persisted.snapshot.Nodes, s.nodes["source"], s.nodes["peer"])
 				input.Replay = append([]GeneratorReplay{{SourceJob: "root", SourceGeneration: 2, GeneratorID: "ancestors", Output: json.RawMessage(`{"value":7}`)}}, input.Replay...)
@@ -152,7 +152,6 @@ func TestGeneratorReplay(t *testing.T) {
 				}
 				return json.Marshal(jobs)
 			})
-			validated := 0
 			executor, err := NewNodeExecutor(ExecutorDependencies{
 				Store: s, Start: func(_ context.Context, in NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 					sdk.input = in
@@ -161,7 +160,7 @@ func TestGeneratorReplay(t *testing.T) {
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return input.Engine, nil
 				},
-				CanonicalHash: expansionHash, Masker: secrets.NewMasker(),
+				Masker: secrets.NewMasker(),
 				ReadFailure: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 					if recovery == nil || ref != s.nodes["peer"].Ref || runspec.ClaimGeneration(generation) != s.nodes["peer"].Generation {
 						return nil, errors.New("undeclared recovery read")
@@ -171,30 +170,9 @@ func TestGeneratorReplay(t *testing.T) {
 				ChildContext: func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
 					child, cancel := context.WithCancel(ctx)
 					return child, cancel, nil
-				},
-				ValidatePlan: func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					var plan nodeproto.PlanDoc
-					decoder := json.NewDecoder(bytes.NewReader(raw))
-					decoder.DisallowUnknownFields()
-					if err := decoder.Decode(&plan); err != nil {
-						return plan, err
-					}
-					if !validation.Expansion {
-						return plan, nil
-					}
-					validated++
-					known := map[string]bool{}
-					for _, job := range append(append([]nodeproto.JobSpec{}, validation.ExistingJobs...), plan.Jobs...) {
-						known[job.ID] = true
-					}
-					for _, job := range plan.Jobs {
-						for _, need := range job.Needs {
-							if !known[need] {
-								return plan, &apierr.Error{Code: apierr.PlanInvalid, Message: "dependency absent from complete expansion"}
-							}
-						}
-					}
-					return plan, nil
+				}, Validation: nodeproto.ValidationContext{
+					Placement: nodeproto.PlacementLocal,
+					Secrets:   noV2Secrets{},
 				},
 			})
 			if err != nil {
@@ -205,15 +183,15 @@ func TestGeneratorReplay(t *testing.T) {
 			err = executor.Execute(t.Context(), input)
 			ok := mode == "cross_group" || mode == "duplicate_source" || mode == "nested" || crossSource
 			if ok {
-				want, validations := []string{"target", "peers", "empty"}, 1
+				want := []string{"target", "peers", "empty"}
 				if crossSource {
-					want, validations = []string{"target", "empty", "peers"}, 2
+					want = []string{"target", "empty", "peers"}
 				}
 				if mode == "nested" {
-					want, validations = []string{"ancestors", "target", "peers", "empty"}, 2
+					want = []string{"ancestors", "target", "peers", "empty"}
 				}
-				if err != nil || validated != validations || !reflect.DeepEqual(calls, want) {
-					t.Fatalf("replay calls=%v validations=%d error=%v", calls, validated, err)
+				if err != nil || !reflect.DeepEqual(calls, want) {
+					t.Fatalf("replay calls=%v error=%v", calls, err)
 				}
 			} else if err == nil {
 				t.Fatal("changed expansion reached execution")

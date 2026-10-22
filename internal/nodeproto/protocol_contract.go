@@ -277,7 +277,8 @@ func (r Request) Validate() error {
 		return &apierr.Error{Code: apierr.UnknownOp, Message: fmt.Sprintf("unknown node operation %q; rebuild .sparkwing if the SDK is older than the engine", r.Op)}
 	}
 	if r.Op != OpHello && (r.Protocol != 0 || r.Engine != nil || r.Runner != nil || r.Binding != nil) ||
-		r.Op != OpPlan && (r.Pipeline != "" || r.Args != nil || r.Run != nil) ||
+		r.Op != OpPlan && (r.Pipeline != "" || r.Run != nil) ||
+		r.Op != OpPlan && r.Op != OpRunStep && r.Op != OpEval && r.Args != nil ||
 		r.Op != OpRunStep && r.Failure != nil ||
 		r.Op != OpRunStep && r.Op != OpEval && (r.Attempt != 0 || r.Settled != nil) ||
 		r.Op != OpRunStep && r.Op != OpCancel && (r.Job != "" || r.Step != "") ||
@@ -422,8 +423,10 @@ func requestFields(obj map[string]json.RawMessage, op Op) error {
 	case OpPlan:
 		allowed["pipeline"], allowed["args"], allowed["run"] = true, true, true
 	case OpRunStep:
+		allowed["args"] = true
 		allowed["job"], allowed["step"], allowed["attempt"], allowed["failure"], allowed["settled"] = true, true, true, true, true
 	case OpEval:
+		allowed["args"] = true
 		allowed["closure"], allowed["input"], allowed["attempt"], allowed["settled"] = true, true, true, true
 	case OpCancel:
 		allowed["job"], allowed["step"], allowed["target"] = true, true, true

@@ -485,12 +485,12 @@ func TestProtocolSessionChild(t *testing.T) {
 				send(nodeproto.FrameLog{Level: "info", Message: secret, Attrs: json.RawMessage(`{"escaped":"private-plan-def\u0061ult"}`)})
 				fmt.Fprintln(os.Stdout, secret)
 				fmt.Fprintln(os.Stderr, secret)
-				reply(request, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &secret}}}}})
+				reply(request, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}}}})
 			case nodeproto.OpPlan:
 				if request.Args["token"] != "private-plan-default" || request.Run.RunID != "run" {
 					os.Exit(9)
 				}
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 			default:
 				os.Exit(10)
 			}
@@ -523,7 +523,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				if request.Job != "" || string(request.Input) != `{"count":2}` {
 					os.Exit(6)
 				}
-				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}}})
+				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}}})
 				reply(request, nodeproto.EvalResult{Value: raw, DeclarationsKnown: true})
 			default:
 				os.Exit(7)
@@ -597,7 +597,7 @@ func TestProtocolSessionChild(t *testing.T) {
 	}
 }
 
-func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
+func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 	p, input, f, _ := sdkPlanningFixture(t)
 	exe, err := os.Executable()
 	if err != nil {
@@ -631,12 +631,12 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions)
-		if err != nil || result.CacheHit != (i == 1) {
+		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan)
+		if err != nil {
 			t.Fatalf("plan %d = %+v, %v", i, result, err)
 		}
 	}
-	if len(sessions) != 3 || cleaned != 3 {
+	if len(sessions) != 4 || cleaned != 4 {
 		t.Fatalf("processes = %d, cleanups = %d", len(sessions), cleaned)
 	}
 	for _, session := range sessions {
@@ -696,15 +696,15 @@ func ownerPolicyJob() nodeproto.JobSpec {
 	return nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"slow", "skip"}}}
 }
 
-func TestOwnerPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
+func TestExecutorPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
 	for _, mode := range []string{"continue", "revocation", "cleanup"} {
-		t.Run(mode, func(t *testing.T) { ownerPolicyNativeSkip(t, mode) })
+		t.Run(mode, func(t *testing.T) { executorPolicyNativeSkip(t, mode) })
 	}
 }
 
-func ownerPolicyNativeSkip(t *testing.T, mode string) {
+func executorPolicyNativeSkip(t *testing.T, mode string) {
 	t.Helper()
-	in, st, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
+	in, st, deps, _ := executorPolicyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -741,12 +741,9 @@ func ownerPolicyNativeSkip(t *testing.T, mode string) {
 			return nil
 		},
 	}
-	deps.Start = cfg.StartEvaluation
-	host, err := NewOwnerEvaluator(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := host.SkipIf(t.Context(), in)
+	deps.Start = cfg.Start
+	host, spec, job := executorPolicyHost(t, deps, in)
+	result, err := host.skipIf(t.Context(), in, spec, job)
 	if mode != "continue" {
 		if err == nil || result.Skip || len(result.TimedOut) != 0 || revoked != 1 || cleaned != 1 || strings.Contains(err.Error(), "private") {
 			t.Fatalf("skip = %+v, revocations = %d, cleanups = %d, error = %v", result, revoked, cleaned, err)

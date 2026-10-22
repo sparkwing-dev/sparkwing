@@ -272,9 +272,10 @@ Each repository gets one state:
 | --- | --- |
 | `armed` | git runs the repository's own gate for every hook it declares |
 | `shadowed` | gates are installed and `core.hooksPath` sends git elsewhere, so none fire |
-| `uninstalled` | a declared hook was never written |
+| `uninstalled` | an optional declared hook is missing or not current |
 | `borrowed` | git runs a gate for a declared hook out of another repository's hook directory |
 | `undeclared` | no pipeline asks for a hook, so there is nothing to arm |
+| `broken` | a required hook is missing or not current, or repository configuration cannot be read |
 
 The state answers what git does with the hooks a repository declares. Whether
 the repository runs a gate is a second question, and it is the one an operator
@@ -287,12 +288,13 @@ accepting ungated work. The pretty STATE column prints `no-gate` rather than
 The remedy there is a declared gate, not an install: an install writes the
 hooks the pipelines ask for, and that repository asks for none.
 
-Each declared hook lands in exactly one of `firing`, `borrowed`, `shadowed` and
-`missing`, so a hook is never reported as both installed and missing. The
-one-word state takes the worst of them, and `borrowed` is the worst: a shadowed
-or uninstalled repository is honest about accepting ungated commits, while a
-borrowed gate refuses them under a state word that used to read as no gate at
-all.
+`installed` records managed hooks present on disk. Each declared hook also falls
+into `firing`, `borrowed`, `shadowed` or `missing`. Here `missing` includes hooks
+whose content, version or executability differs from what is expected, so an
+installed hook can also be missing a current installation. Per-hook read errors
+stay in the observations. Optional notifier errors do not revoke gating.
+Repository configuration and path errors make the survey broken. Discovery
+ignores filenames Git does not execute as hooks, including `pre-commit.bak`.
 
 `borrowed` counts as ungated even though commits really are refused. Nothing in
 the repository declares the file that runs, so an uninstall in the repository
@@ -315,59 +317,29 @@ A survey that cannot read the registry says so and exits non-zero. It never
 answers with an empty fleet, because that is what a machine with nothing
 registered answers, and one stray character in the registry used to make an
 unread fleet look like a swept one. `sparkwing pipeline hooks install --all-repos`
-and `sparkwing pipeline hooks status --prove --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
+and `sparkwing pipeline hooks status --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
 carries
 the reason in `gates_survey_error`, since the registry says nothing about this
 home's runs, locks or daemon.
 
-### What a hook directory cannot tell you
+### Checking installed hooks
 
-Everything above reads files. That is enough to find a gate nobody installed,
-and not enough to establish one that fires: a shadowed repository inspects as
-fully installed and refuses nothing, and a borrowed one inspects as installing
-nothing and refuses everything. Only a commit settles it.
+`sparkwing pipeline hooks status` compares each managed hook with the expected
+script and format version, and checks which directory Git reads. JSON hook
+records include `current`. The summary's `gates.hooks` observations record presence,
+content, format version, executability, and whether each hook is required.
+Status, fleet status, and doctor use these same observations. Blocking gates and
+global forwarders are required. A missing or stale required hook is broken,
+including a deleted forwarder for a global hook. Notifiers are optional.
+Remove obsolete managed hooks whose triggers or global hooks are no longer declared,
+then run `sparkwing pipeline hooks install` to replace stale scripts. For a manual
+execution check, use a throwaway commit in a disposable checkout.
 
-```bash
-sparkwing pipeline hooks status --prove            # this repo: make the gate refuse a commit
-sparkwing pipeline hooks status --prove --all-repos    # every registered repo
-```
-
-`sparkwing pipeline hooks status --prove` stages a file and commits it with the
-gate told to refuse, then reports
-whether git refused it and which hook file did. Everything happens in a
-throwaway linked worktree, which shares the repository's config -- so the same
-`core.hooksPath` and the same hooks apply -- while carrying its own index and
-its own detached HEAD, so the repository's working tree, index, branches and
-HEAD are untouched whatever the gate does.
-
-`pipeline hooks status --prove` settles the pre-commit gate only. A pre-push gate needs a remote to fire
-against, so it is left to the push that exercises it, and a repository that
-declares no pre-commit trigger has nothing for `pipeline hooks status --prove` to prove -- `--all-repos`
-counts it apart from the repositories whose gate refused rather than among
-them.
-
-Every refusal is checked against a control: the same staged change is committed
-again with hooks switched off, and has to land. Without that, a commit that
-failed for an unrelated reason reads exactly like a gate doing its job.
-
-Only a hook sparkwing wrote that carries the self-test guard is ever executed.
-A hand-written hook, or a managed one installed before the guard existed, is
-reported `unprovable` and `pipeline hooks status --prove` exits non-zero -- an enforcement question that
-could not be answered is not a pass. Re-run `hooks install` to replace an older
-managed hook with one that can be asked.
-
-The guard is the `SPARKWING_HOOK_SELFTEST` environment variable, and it can only
-make a gate refuse. There is no value that lets a commit through, because a
-variable that skipped a gate would be a bypass with an environment variable for
-a key.
-
-Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
-`pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--all-repos`
-summary count: a repository whose only missing hook is `post-commit` loses a
-notification rather than a gate, and one that declares no blocking hook has no
-gate to arm -- `--all-repos` counts it apart from the repositories it armed rather
-than among them, because a sweep that reports it as armed reports a gated
-fleet while every commit in that repository still goes unchecked.
+A repository is gated when a current declared `pre-commit` or `pre-push` hook
+fires and every required hook is current and active. `--ungated`, `doctor` and
+the `--all-repos` summary share that verdict. A missing `post-commit` notifier
+loses a notification. A repository that declares no blocking hook has no gate to
+arm, and fleet installation counts it separately.
 
 The list is the machine's repo registry -- the `repos` section of
 `~/.config/sparkwing/config.yaml`, which `sparkwing repos add --checkout <dir>`
@@ -390,12 +362,8 @@ repository's pinned SDK cannot speak to -- rejects the whole installation
 before any candidate hook filename or config value is published. Existing
 hooks remain callable throughout the proof. Once every proof passes, each
 complete hook replaces its predecessor with an atomic rename and only then may
-the repository's `core.hooksPath` change. A later write or config error restores
-every managed hook, global-hook forwarder, file mode, and repository
-`core.hooksPath` value exactly. A failed reinstall therefore cannot remove a
-previously working commit or push gate, and a first install cannot leave only
-the gates whose proofs happened to pass. The failure is printed with the
-command to re-run. `--no-prove` skips the proof for an operator who has already
+the repository's `core.hooksPath` change. A write or config error is reported immediately. An interrupted install may
+leave some hooks replaced; re-run the install to finish it. `--no-prove` skips the proof for an operator who has already
 made it.
 
 The proof runs on every install that leaves a gate live, not only the one that

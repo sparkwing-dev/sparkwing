@@ -92,7 +92,7 @@ func CommonRules() map[string]string {
 		"run":        "Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune.",
 		"search":     "Match records; never scan log text.",
 		"grep":       "Match log text only.",
-		"limit":      "Pagination count at least one, continued with --cursor; zero is invalid.",
+		"limit":      "Output count at least one; paginated commands continue with --cursor.",
 		"follow":     "Stream until the observed work is done.",
 		"all":        "Include entries normally hidden.",
 		"dry-run":    "Preview with no side effects.",
@@ -155,7 +155,7 @@ func Validate(commands []Command) error {
 				}
 			}
 		}
-		if names["limit"] && !names["cursor"] {
+		if names["limit"] && !names["cursor"] && c.Path != "sparkwing daemon events" {
 			return fmt.Errorf("%s: limit needs cursor", c.Path)
 		}
 	}

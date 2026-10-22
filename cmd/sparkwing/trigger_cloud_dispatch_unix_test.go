@@ -412,6 +412,14 @@ func (l *cloudDispatchLauncher) launch(t *testing.T, kind capability.UnitKind, j
 func (l *cloudDispatchLauncher) complete(t *testing.T, unit controllerwire.ClaimedUnit) {
 	t.Helper()
 	work := l.f.open(unit.Capability, false)
+	host, err := client.NewNodeHostClient(client.EngineOptions{URL: l.f.endpoint, Bearer: func(context.Context) (string, error) { return unit.Capability, nil }}, unit.RunID, unit.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+	if result, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, store.Actor{}); err != nil || result.Kind != store.AcquireGranted {
+		t.Fatalf("Cloud %s admission: %+v: %v", unit.JobID, result, err)
+	}
 	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
 	if err != nil {
 		t.Fatalf("Cloud %s start: %v", unit.JobID, err)

@@ -109,6 +109,10 @@ func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.P
 }
 
 func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request) *storeHostFixture {
+	return newStoreHostFixtureForEngine(t, database, plan, request, engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}})
+}
+
+func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request, selected engine.Identity) *storeHostFixture {
 	t.Helper()
 	f := newStoreOwnerFixture(t, database, request)
 	ctx, tenant, actor := t.Context(), f.Tenant, f.Actor
@@ -125,7 +129,6 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	accepted, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{RunID: f.Input.RunID, Actor: actor, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: selected, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -206,11 +209,12 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
 
 	f.State = &hostState{Tenant: tenant}
-	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+	f.Host = OwnerHost{executionAdmission: ComposeStartGate(tenant, nil, false), Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
 		return database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
-	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }, Layer: func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }}
+	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
-	}}
+	})
 	follower := StateFollower{Store: f.State, Subscribe: f.State.subscribe}
 	f.Host.Wait, f.Host.WaitNode = follower.Wait, follower.WaitNode
 	f.Host.Delegator = database.AsOperator()

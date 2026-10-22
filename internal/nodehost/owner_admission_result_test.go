@@ -5,17 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -25,264 +22,7 @@ func (f admissionAcquireFunc) Acquire(ctx context.Context, request wingwire.Admi
 	return f(ctx, request, queued)
 }
 
-func TestOwnerPreservesIndependentLocalAcquisitionFailures(t *testing.T) {
-	for _, scope := range []string{"plan", "job"} {
-		for _, policy := range []string{"skip", "queue"} {
-			t.Run(scope+"/"+policy, func(t *testing.T) {
-				synctest.Test(t, func(t *testing.T) {
-					plan := capacityPlan(policy, 1, "refused")
-					plan.Jobs[0].Concurrency[0].Scope = new("box")
-					if scope == "plan" {
-						plan = planGrouped("box", policy, "refused")
-						plan.Concurrency[0].QueueTimeoutMS = new(int64(1))
-					}
-					fixture := newStoreHostFixture(t, plan)
-					independent := errors.New("admission transport cleanup failed")
-					parent := newFakeDaemon()
-					admission := &LocalAdmission{BoxID: testBox, Daemon: admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
-						if scope == "job" && !request.SubLease {
-							return parent.Acquire(ctx, request, queued)
-						}
-						if policy == "queue" {
-							queued(wingwire.Queued{RunID: string(request.RunID), Key: request.Semaphores[0].Name})
-							<-ctx.Done()
-							return nil, independent
-						}
-						return nil, errors.Join(&wingdclient.AdmissionError{Policy: wingwire.PolicySkip, Key: "db"}, independent)
-					})}
-					fixture.Host.Around, fixture.Host.Admit = admission.Run, admission.Node
-					completion, err := fixture.Host.Run(t.Context(), fixture.Input)
-					if !errors.Is(err, independent) || completion.Outcome != "" {
-						t.Errorf("independent failure consumed: completion=%+v error=%v", completion, err)
-					}
-					row := capacityRow(t, fixture, "refused")
-					if row.Status != store.StatusPending || row.Outcome != "" || row.ReadyAt != nil {
-						t.Errorf("independent failure recorded policy result: status=%s outcome=%s ready=%v", row.Status, row.Outcome, row.ReadyAt)
-					}
-					run, err := fixture.Tenant.ReadRun(t.Context(), fixture.Input.RunID)
-					if err != nil || run.FinishedAt != nil {
-						t.Errorf("independent failure finished run: state=%s finished=%v error=%v", run.State, run.FinishedAt, err)
-					}
-				})
-			})
-		}
-	}
-}
-
-func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
-	for _, generator := range []bool{false, true} {
-		for _, policy := range []string{"fail", "skip"} {
-			t.Run(fmt.Sprintf("generator=%t/policy=%s", generator, policy), func(t *testing.T) {
-				plan := planGrouped("global", policy, "finished", "pending")
-				if generator {
-					plan.Jobs[0].Closures.Generate = []string{"children"}
-					plan.Jobs[1].NeedsGenerated = []string{"children"}
-				}
-				fixture := newStoreHostFixture(t, plan)
-				admission := &StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
-				if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
-					t.Fatal(err)
-				}
-				entry, err := fixture.Host.Acquire(t.Context(), fixture.Input)
-				if err != nil {
-					t.Fatal(err)
-				}
-				finishedOutcome, pendingOutcome := store.NodeSuccess, store.NodeFailed
-				if policy == "skip" {
-					finishedOutcome, pendingOutcome = store.NodeFailed, store.NodeSkipped
-				}
-				fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return fixture.report(ctx, input, finishedOutcome) })
-				err = fixture.Host.release(t.Context(), fixture.Input, fixture.Accepted, entry, capacityRow(t, fixture, "finished"), store.DecisionReady, func(ctx context.Context, request store.ReconcileRequest) error {
-					return fixture.Host.execute(ctx, fixture.Input, fixture.Accepted, entry, request)
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				before := capacityRow(t, fixture, "finished")
-				expired := teststore.Now(fixture.Store).UnixNano()
-				if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id=?`, expired, fixture.Input.RunID); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE concurrency_holders SET lease_expires_at=? WHERE run_id=?`, expired, fixture.Input.RunID); err != nil {
-					t.Fatal(err)
-				}
-				if reaped, err := teststore.ReapUnits(t.Context(), fixture.Store); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
-					t.Fatalf("recovery=%+v error=%v", reaped, err)
-				}
-				competitor := newStoreHostFixtureOn(t, fixture.Store, plan, runspec.Options{})
-				competing := &StoreAdmission{Store: competitor.Tenant, Owner: competitor.Actor}
-				if _, err := competing.Run(t.Context(), competitor.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
-					t.Fatal(err)
-				}
-				claim, err := fixture.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: fixture.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(fixture.Input.RunID)}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				fixture.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-				fixture.Input.Owner = fixture.Actor
-				fixture.Host.Around = (&StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}).Run
-				completion, err := fixture.Host.Run(t.Context(), fixture.Input)
-				if err != nil || completion.Outcome != "failed" {
-					t.Errorf("resumed refusal=%+v error=%v", completion, err)
-				}
-				finished, pending := capacityRow(t, fixture, "finished"), capacityRow(t, fixture, "pending")
-				if finished.Outcome != before.Outcome || finished.Attempt != before.Attempt || finished.Generation != before.Generation || !finished.FinishedAt.Equal(*before.FinishedAt) {
-					t.Errorf("completed result changed: before=%s/%d/%d after=%s/%d/%d", before.Outcome, before.Attempt, before.Generation, finished.Outcome, finished.Attempt, finished.Generation)
-				}
-				if generator && finished.Expansion == store.ExpansionExpected {
-					t.Error("refused plan retained expected generator expansion")
-				}
-				if pending.Outcome != pendingOutcome || pending.Attempt != 0 {
-					t.Errorf("pending result=%s attempt=%d", pending.Outcome, pending.Attempt)
-				}
-				run, err := fixture.Tenant.ReadRun(t.Context(), fixture.Input.RunID)
-				if err != nil || run.State != store.RunFailed || run.FinishedAt == nil {
-					t.Errorf("run remains active: state=%s finished=%v error=%v", run.State, run.FinishedAt, err)
-				}
-				snapshot, err := fixture.Tenant.ReadSnapshot(t.Context(), fixture.Input.RunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := snapshot.Scheduling(); err != nil {
-					t.Errorf("refused plan has invalid scheduling projection: %v", err)
-				}
-			})
-		}
-	}
-}
-
-func TestOwnerPersistsStoreAdmissionRefusals(t *testing.T) {
-	for _, policy := range []string{"skip", "fail", "queue"} {
-		t.Run(policy, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				f := newStoreHostFixture(t, capacityPlan(policy, 1, "held", "refused"), teststore.WithClock(time.Now))
-				admission := &StoreAdmission{Store: f.Tenant, Owner: f.Actor}
-				if err := admission.Node(t.Context(), f.Accepted, capacityRow(t, f, "held"), func(context.Context) error { return nil }); err != nil {
-					t.Fatal(err)
-				}
-				f.Host.Admit = admission.Node
-				assertOwnerRefusal(t, f, "refused", policy)
-			})
-		})
-	}
-}
-
-func assertOwnerRefusal(t *testing.T, f *storeHostFixture, id, policy string) {
-	t.Helper()
-	entry, err := f.Host.Acquire(t.Context(), f.Input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	err = f.Host.release(ctx, f.Input, f.Accepted, entry, capacityRow(t, f, id), store.DecisionReady, func(context.Context, store.ReconcileRequest) error {
-		t.Error("refused job executed")
-		return nil
-	})
-	if err != nil {
-		t.Errorf("policy escaped scheduling: %v", err)
-	}
-	row := capacityRow(t, f, id)
-	want := store.NodeFailed
-	if policy == "skip" {
-		want = store.NodeSkipped
-	}
-	if row.Status != store.StatusDone || row.Outcome != want || row.ReadyAt != nil || row.Attempt != 0 {
-		t.Errorf("refusal not persisted: status=%s outcome=%s attempt=%d, want %s", row.Status, row.Outcome, row.Attempt, want)
-	}
-	if policy == "queue" {
-		var reason string
-		if err := teststore.SQL(t, f.Store).QueryRowContext(t.Context(), `SELECT failure_reason FROM nodes WHERE run_id=? AND node_id=?`, f.Input.RunID, id).Scan(&reason); err != nil || reason != store.FailureQueueTimeout {
-			t.Errorf("queue reason=%q err=%v", reason, err)
-		}
-	}
-}
-
-func TestOwnerPersistsLocalAdmissionRefusals(t *testing.T) {
-	for _, policy := range []string{"skip", "fail", "queue"} {
-		t.Run(policy, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				plan := capacityPlan(policy, 1, "refused")
-				plan.Jobs[0].Concurrency[0].Scope = new("box")
-				f := newStoreHostFixture(t, plan)
-				daemon := newFakeDaemon()
-				daemon.used[scopedConcurrencyKey("db", "box", f.Input.RunID, testBox)] = 1
-				admission := &LocalAdmission{Daemon: daemon, BoxID: testBox}
-				f.Host.Admit = admission.Node
-				_, err := admission.Run(t.Context(), f.Accepted, func(ctx context.Context) (RunCompletion, error) {
-					entry, err := f.Host.Acquire(ctx, f.Input)
-					if err != nil {
-						return RunCompletion{}, err
-					}
-					err = f.Host.release(ctx, f.Input, f.Accepted, entry, capacityRow(t, f, "refused"), store.DecisionReady, func(context.Context, store.ReconcileRequest) error { t.Error("refused local body ran"); return nil })
-					if err != nil {
-						t.Errorf("local policy escaped scheduling: %v", err)
-					}
-					row := capacityRow(t, f, "refused")
-					want := store.NodeFailed
-					if policy == "skip" {
-						want = store.NodeSkipped
-					}
-					if row.Status != store.StatusDone || row.Outcome != want || row.Attempt != 0 {
-						t.Errorf("local refusal not persisted: status=%s outcome=%s attempt=%d", row.Status, row.Outcome, row.Attempt)
-					}
-					return RunCompletion{}, nil
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-			})
-		})
-	}
-}
-
-func TestOwnerPersistsPlanAdmissionRefusalAndEndsUnit(t *testing.T) {
-	for _, policy := range []string{"skip", "fail", "queue"} {
-		for _, optional := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/optional=%t", policy, optional), func(t *testing.T) {
-				synctest.Test(t, func(t *testing.T) {
-					plan := planGrouped("global", policy, "body")
-					plan.Concurrency[0].QueueTimeoutMS = new(int64(1))
-					plan.Jobs[0].ContinueOnError = true
-					plan.Jobs[0].Optional = optional
-					first := newStoreHostFixture(t, plan, teststore.WithClock(time.Now))
-					admission := &StoreAdmission{Store: first.Tenant, Owner: first.Actor}
-					if _, err := admission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
-						t.Fatal(err)
-					}
-					second := newStoreHostFixtureOn(t, first.Store, plan, runspec.Options{})
-					admission = &StoreAdmission{Store: second.Tenant, Owner: second.Actor}
-					second.Host.Around = admission.Run
-					completion, err := second.Host.Run(t.Context(), second.Input)
-					want := "failed"
-					if policy == "skip" || optional {
-						want = "success"
-					}
-					if err != nil || completion.Outcome != want {
-						t.Errorf("plan refusal escaped: %+v %v", completion, err)
-					}
-					row, err := second.Tenant.ReadRun(t.Context(), second.Input.RunID)
-					if err != nil || string(row.State) != want || row.FinishedAt == nil {
-						t.Errorf("plan remains active: state=%s finished=%v %v", row.State, row.FinishedAt, err)
-					}
-					if _, err := second.Store.AsOperator().RenewUnit(t.Context(), second.Actor.CapabilityPrefix, false); err == nil {
-						t.Error("refused plan left live unit")
-					}
-				})
-			})
-		}
-	}
-}
-
-func TestOwnerRecognizesWrappedAdmissionFailure(t *testing.T) {
-	f := newStoreHostFixture(t, capacityPlan("skip", 0, "refused"))
-	f.Host.Admit = func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error {
-		return fmt.Errorf("admission transport: %w", &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("full")})
-	}
-	assertOwnerRefusal(t, f, "refused", "skip")
-}
-
-func TestApprovalSkipPolicyProducesSuccess(t *testing.T) {
+func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
 	in, _, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
 		job.Approval = &nodeproto.ApprovalSpec{}
 		job.Steps = nil
@@ -319,7 +59,7 @@ func TestApprovalSkipPolicyProducesSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	row = capacityRow(t, f, in.NodeID)
-	if row.Outcome != store.NodeSuccess || row.Attempt != 0 {
+	if row.Outcome != store.NodeSkipped || row.Attempt != 0 {
 		t.Fatalf("approval bypass=%+v", row)
 	}
 	snapshot, err := f.Tenant.ReadSnapshot(t.Context(), f.Input.RunID)
@@ -426,7 +166,7 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 		if kind == string(store.PolicyQueueTimeout) {
 			reason = store.FailureQueueTimeout
 		}
-		_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: actor, Outcome: outcome, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.OwnerPolicyKind(kind), Generation: runspec.ClaimGeneration(generation)}, Result: &store.NodeResult{Outcome: outcome, Reason: reason}})
+		_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: actor, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.OwnerPolicyKind(kind), Generation: runspec.ClaimGeneration(generation)}, Result: &store.NodeResult{Outcome: outcome, Reason: reason}, Outcome: outcome})
 		valid := ownerDelta == 0 && runspec.ClaimGeneration(generation) == row.Generation && !released && (kind == string(store.PolicyAdmissionFail) || kind == string(store.PolicyAdmissionSkip) || kind == string(store.PolicyQueueTimeout))
 		if (err == nil) != valid {
 			t.Fatalf("owner delta=%d generation=%d kind=%q released=%v error=%v", ownerDelta, generation, kind, released, err)

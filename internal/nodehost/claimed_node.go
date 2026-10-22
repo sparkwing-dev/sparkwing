@@ -38,7 +38,7 @@ type ClaimedNodeHost struct {
 	Executor  NodeHost
 	Masker    *secrets.Masker
 	Masks     *MaskRegistry
-	Admission *LocalAdmission
+	Admission StartGate
 }
 
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
@@ -67,19 +67,15 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if err := h.Masks.initializeAccepted(parent, h.Store, input.Accepted); err != nil {
 		return err
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+	actor := executorActor(input)
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
 	ctx, stop := keepNode(parent, h.Lease, h.Store, ref, actor)
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return h.setupFailure(ctx, input, err)
 	}
-	if h.Admission == nil {
-		return h.execute(ctx, input, spec)
-	}
-	row := store.NodeRow{Ref: ref, Execution: input.Execution}
 	admitted := false
-	err = h.Admission.ClaimedNode(ctx, input.Accepted, row, func(ctx context.Context) error {
+	err = h.Admission.claimedNode(ctx, input, func(ctx context.Context) error {
 		admitted = true
 		return h.execute(ctx, input, spec)
 	})
@@ -172,6 +168,14 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 }
 
 func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (store.Applied, error)) error {
+	var decision *AdmissionFailure
+	if errors.As(failure, &decision) && decision.committed {
+		if decision.Outcome == store.NodeSkipped {
+			return nil
+		}
+		return failure
+	}
+
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
@@ -185,8 +189,8 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	}
 	result := store.NodeResult{Outcome: store.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
 	var refused *AdmissionFailure
-	if errors.As(failure, &refused) {
-		result.Outcome, result.Reason = refused.Outcome, refused.Reason
+	if errors.As(failure, &refused) && waitFailure(failure, refused) == nil {
+		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
 	}
 	if ctx.Err() != nil {
 		result.Outcome, result.Reason = store.NodeCancelled, string(apierr.ReasonCancelled)
@@ -194,7 +198,13 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	result = recordNodeFailure(input.NodeID, result, mask)
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := transition(reportCtx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
+	_, err := transition(reportCtx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Result: &result, Outcome: result.Outcome})
+	if refused != nil && waitFailure(failure, refused) == nil && ctx.Err() == nil {
+		if result.Outcome == store.NodeSkipped {
+			return err
+		}
+		return errors.Join(failure, err)
+	}
 	return errors.Join(context.Cause(ctx), &apierr.Error{Code: code, Message: result.MaskedError}, err)
 }
 

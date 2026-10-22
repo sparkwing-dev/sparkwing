@@ -134,7 +134,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 		if err != nil {
 			return err
 		}
-		digest, err := intakeDigest(tx, IntakeRequest{Request: intent}, admittedSnapshot{})
+		digest, err := intakeDigest(IntakeRequest{Request: intent}, admittedSnapshot{})
 		if err != nil {
 			return err
 		}

@@ -267,7 +267,6 @@ export interface NodeModifiers {
   conc_scope?: string;
   conc_on_limit?: string;
   conc_queue_timeout_ms?: number;
-  conc_cancel_timeout_ms?: number;
   inline?: boolean;
   optional?: boolean;
   continue_on_error?: boolean;

@@ -54,7 +54,8 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 		Children: slices.Clone(parent.Capability.Children), Data: spec.Data, RootMetered: parent.Capability.RootMetered,
 		Unit: parent.Capability.Unit, UnitID: parent.Capability.UnitID,
 		Purpose: parent.Capability.Purpose, Delivery: parent.Capability.Delivery,
-		Billing: parent.Capability.Billing,
+		Billing:       parent.Capability.Billing,
+		ExecutionHost: parent.Capability.ExecutionHost,
 	}, nil
 }
 

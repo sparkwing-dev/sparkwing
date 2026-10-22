@@ -1,7 +1,11 @@
 package githooks
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -10,7 +14,7 @@ import (
 type GateState string
 
 const (
-	GateUndeclared GateState = "undeclared"
+	gateUndeclared GateState = "undeclared"
 
 	GateArmed GateState = "armed"
 
@@ -18,12 +22,45 @@ const (
 
 	GateUninstalled GateState = "uninstalled"
 
-	GateBorrowed GateState = "borrowed"
+	gateBorrowed GateState = "borrowed"
 
 	GateBroken GateState = "broken"
 )
 
+const Format = "(format 1)"
+
+type ExpectedHook struct {
+	Content  string
+	Declared bool
+	Forward  bool
+}
+
+type Expectations func(Git, string, string) (map[string]ExpectedHook, error)
+
+type HookObservation struct {
+	Name           string `json:"name"`
+	Present        bool   `json:"present"`
+	Managed        bool   `json:"managed"`
+	ContentMatches bool   `json:"content_matches"`
+	VersionMatches bool   `json:"version_matches"`
+	Executable     bool   `json:"executable"`
+	Required       bool   `json:"required"`
+	Declared       bool   `json:"declared"`
+	Forward        bool   `json:"forward"`
+	Active         bool   `json:"active"`
+	Borrowed       bool   `json:"borrowed"`
+	Error          string `json:"error,omitempty"`
+	Body           string `json:"-"`
+}
+
+func (h HookObservation) Current() bool {
+	return h.Present && h.Managed && h.ContentMatches && h.VersionMatches && h.Executable && h.Error == ""
+}
+
 type RepoGates struct {
+	Err   error             `json:"-"`
+	Hooks []HookObservation `json:"hooks,omitempty"`
+
 	Repo string `json:"repo"`
 
 	HooksDir string `json:"hooks_dir,omitempty"`
@@ -50,62 +87,77 @@ type RepoGates struct {
 }
 
 func (r RepoGates) NotFiring() []string {
-	return sortedCopy(slices.Concat(r.Shadowed, r.Missing))
+	var names []string
+	for _, h := range r.Hooks {
+		if !h.Borrowed && (!h.Current() || !h.Active) {
+			names = append(names, h.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 var BlockingHooks = []string{"pre-commit", "pre-push"}
 
-// Fires names the declared hooks git runs out of this repository's own hook
-// directory. It is narrower than the Firing field, which counts every managed
-// gate in whichever directory git reads, declared here or not.
+// Fires names current declared hooks in the directory Git reads for this repo.
 func (r RepoGates) Fires() []string {
-	elsewhere := setOf(slices.Concat(r.Borrowed, r.Shadowed, r.Missing))
 	var out []string
-	for _, name := range r.Declared {
-		if !elsewhere[name] {
-			out = append(out, name)
+	for _, h := range r.Hooks {
+		if h.Declared && h.Active && h.Current() {
+			out = append(out, h.Name)
 		}
 	}
 	return out
 }
 
-// DeclaresBlocking reports whether any pipeline here asks for a hook that can
-// refuse work.
-func (r RepoGates) DeclaresBlocking() bool {
+func (r RepoGates) declaresBlocking() bool {
 	return slices.ContainsFunc(r.Declared, func(n string) bool {
 		return slices.Contains(BlockingHooks, n)
 	})
 }
 
-// RunsBlockingGate reports whether a declared blocking hook fires out of this
-// repository's own hook directory.
-func (r RepoGates) RunsBlockingGate() bool {
+func (r RepoGates) runsBlockingGate() bool {
 	return slices.ContainsFunc(r.Fires(), func(n string) bool {
 		return slices.Contains(BlockingHooks, n)
 	})
 }
 
-// Gated reports whether this repository runs a gate of its own: a blocking hook
-// is declared, git runs it from here, and no declared blocking hook is missing,
-// shadowed or borrowed.
+// Gated requires a current local blocking gate and every required hook to fire.
 func (r RepoGates) Gated() bool {
-	if r.State == GateBroken {
+	if r.ConfigError != "" {
 		return false
 	}
-	for _, name := range slices.Concat(r.NotFiring(), r.Borrowed) {
-		if slices.Contains(BlockingHooks, name) {
+	for _, h := range r.Hooks {
+		if h.Required && (!h.Current() || !h.Active) {
 			return false
 		}
 	}
-	return r.RunsBlockingGate()
+	return r.runsBlockingGate()
+}
+
+func (r RepoGates) SilencedGlobal() []string {
+	var names []string
+	for _, h := range r.Hooks {
+		if h.Forward && h.Active && !h.Current() {
+			names = append(names, h.Name)
+		}
+	}
+	return names
 }
 
 func (r RepoGates) Summary() string {
-	if r.State == GateBroken {
-		return fmt.Sprintf("%s: %s", r.Repo, r.ConfigError)
-	}
 	var parts []string
-	if !r.DeclaresBlocking() {
+	if r.ConfigError != "" {
+		parts = append(parts, r.ConfigError)
+	}
+	for _, h := range r.Hooks {
+		if h.Error != "" {
+			parts = append(parts, h.Error)
+		} else if h.Required && !h.Current() && !h.Borrowed {
+			parts = append(parts, h.Name+" is missing or differs from expected content/format")
+		}
+	}
+	if !r.declaresBlocking() {
 		parts = append(parts, undeclaredGateSummary(r.Fires()))
 	}
 	if len(r.Borrowed) > 0 {
@@ -117,7 +169,7 @@ func (r RepoGates) Summary() string {
 			strings.Join(r.Shadowed, ", "), r.ActiveDir, r.Scope))
 	}
 	if len(r.Missing) > 0 {
-		parts = append(parts, fmt.Sprintf("pipelines declare %s but no gate is installed", strings.Join(r.Missing, ", ")))
+		parts = append(parts, fmt.Sprintf("pipelines declare %s but the hooks are missing or not current", strings.Join(r.Missing, ", ")))
 	}
 	if len(parts) == 0 {
 		return fmt.Sprintf("%s: %s", r.Repo, r.State)
@@ -135,84 +187,134 @@ func undeclaredGateSummary(fires []string) string {
 }
 
 func (r RepoGates) Remedy() string {
-	if r.State == GateBroken {
+	if r.Err != nil {
 		return fmt.Sprintf("fix the config, then sparkwing -C %s pipeline hooks install", r.Repo)
 	}
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
-	if !r.DeclaresBlocking() {
+	if r.State == GateBroken {
+		return fmt.Sprintf("remove obsolete managed hooks or repair the reported hooks, then sparkwing -C %s pipeline hooks install", r.Repo)
+	}
+	if !r.declaresBlocking() {
 		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
 	return fmt.Sprintf("sparkwing -C %s pipeline hooks install", r.Repo)
 }
 
-func Survey(git Git, repoRoot string, declared []string) RepoGates {
-	row := RepoGates{Repo: repoRoot, Declared: sortedCopy(declared), State: GateUndeclared}
+func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
+	row := RepoGates{Repo: repoRoot, State: gateUndeclared}
 	hooksDir, err := Dir(repoRoot)
 	if err != nil {
-		return Broken(repoRoot, err)
+		return broken(repoRoot, err)
 	}
 	row.HooksDir = hooksDir
-	row.Installed = Gates(hooksDir)
-
+	specs, err := expected(git, repoRoot, hooksDir)
+	if err != nil {
+		row.Err, row.ConfigError = err, err.Error()
+	}
 	active, scope := ActivePath(git, repoRoot)
-	readDir, foreign := hooksDir, false
-	if active != "" && !SameDir(active, hooksDir) {
+	foreign := active != "" && !SameDir(active, hooksDir)
+	var borrowed []string
+	if foreign {
 		row.ActiveDir, row.Scope = active, scope
-		readDir, foreign = active, true
+		borrowed = gates(active)
 	}
-	row.Firing = Gates(readDir)
-
-	if len(row.Declared) == 0 {
-		return row
+	names := make([]string, 0, len(specs))
+	for name := range specs {
+		names = append(names, name)
 	}
-	firing := setOf(row.Firing)
-	installed := setOf(row.Installed)
-	for _, n := range row.Declared {
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return broken(repoRoot, err)
+	}
+	for _, e := range entries {
+		if IsHookName(e.Name()) {
+			names = append(names, e.Name())
+		}
+	}
+	slices.Sort(names)
+	failed := false
+	for _, name := range slices.Compact(names) {
+		spec, wanted := specs[name]
+		h := HookObservation{
+			Name: name, Declared: spec.Declared, Forward: spec.Forward, Active: !foreign,
+			Required: spec.Forward || (spec.Declared && slices.Contains(BlockingHooks, name)),
+			Borrowed: foreign && slices.Contains(borrowed, name),
+		}
+		path := filepath.Join(hooksDir, name)
+		body, readErr := os.ReadFile(path)
 		switch {
-		case firing[n] && foreign:
-			row.Borrowed = append(row.Borrowed, n)
-		case firing[n]:
-		case installed[n]:
-			row.Shadowed = append(row.Shadowed, n)
+		case errors.Is(readErr, os.ErrNotExist):
+		case readErr != nil:
+			h.Present = true
+			h.Error = fmt.Sprintf("read %s: %v", path, readErr)
 		default:
-			row.Missing = append(row.Missing, n)
+			h.Present, h.Body = true, string(body)
+			h.Managed = strings.Contains(h.Body, Marker)
+			h.ContentMatches = wanted && h.Body == spec.Content
+			h.VersionMatches = strings.Contains(h.Body, "# "+Marker+" "+Format)
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				h.Error = statErr.Error()
+			} else {
+				h.Executable = info.Mode().IsRegular() && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0)
+			}
+		}
+		if !wanted && !h.Managed && h.Error == "" {
+			continue
+		}
+		h.Required = h.Required || (h.Managed && !wanted)
+		row.Hooks = append(row.Hooks, h)
+		if h.Declared {
+			row.Declared = append(row.Declared, name)
+		}
+		if h.Managed {
+			row.Installed = append(row.Installed, name)
+		}
+		if h.Borrowed || (h.Active && h.Current()) {
+			row.Firing = append(row.Firing, name)
+		}
+		if h.Declared {
+			switch {
+			case h.Borrowed:
+				row.Borrowed = append(row.Borrowed, name)
+			case !h.Present || !h.Managed || !h.Executable:
+				row.Missing = append(row.Missing, name)
+			case !h.Active:
+				row.Shadowed = append(row.Shadowed, name)
+			case !h.Current():
+				row.Missing = append(row.Missing, name)
+			}
+		}
+		if h.Required && !h.Current() && !h.Borrowed {
+			failed = true
 		}
 	}
 	switch {
+	case row.ConfigError != "" || failed:
+		row.State = GateBroken
 	case len(row.Borrowed) > 0:
-		row.State = GateBorrowed
-	case len(row.Shadowed) == 0 && len(row.Missing) == 0:
-		row.State = GateArmed
-	case len(row.Missing) == 0:
-		row.State = GateShadowed
-	default:
+		row.State = gateBorrowed
+	case len(row.Missing) > 0:
 		row.State = GateUninstalled
+	case len(row.Shadowed) > 0:
+		row.State = GateShadowed
+	case len(row.Declared) > 0:
+		row.State = GateArmed
 	}
 	return row
 }
 
-// Broken reports a repository whose project config does not load, so its
-// declared gates cannot be known.
-func Broken(repoRoot string, err error) RepoGates {
-	return RepoGates{Repo: repoRoot, State: GateBroken, ConfigError: err.Error()}
+func broken(repoRoot string, err error) RepoGates {
+	return RepoGates{Repo: repoRoot, State: GateBroken, ConfigError: err.Error(), Err: err}
 }
 
-func SurveyFleet(git Git, repoRoots []string, declared func(repoRoot string) ([]string, error)) []RepoGates {
+func SurveyFleet(git Git, repoRoots []string, expected Expectations) []RepoGates {
 	git = cacheMachineWideConfig(git)
 	rows := make([]RepoGates, 0, len(repoRoots))
 	for _, root := range repoRoots {
-		var names []string
-		if declared != nil {
-			got, err := declared(root)
-			if err != nil {
-				rows = append(rows, Broken(root, err))
-				continue
-			}
-			names = got
-		}
-		rows = append(rows, Survey(git, root, names))
+		rows = append(rows, Survey(git, root, expected))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Repo < rows[j].Repo })
 	return rows
@@ -246,21 +348,4 @@ func cacheMachineWideConfig(git Git) Git {
 		cache[key] = answer{out, err}
 		return out, err
 	}
-}
-
-func setOf(names []string) map[string]bool {
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
-	}
-	return set
-}
-
-func sortedCopy(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := append([]string(nil), in...)
-	sort.Strings(out)
-	return out
 }

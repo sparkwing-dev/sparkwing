@@ -22,13 +22,13 @@ func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	f.snapshot.Run.State = store.RunRunning
 	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Spec: json.RawMessage(`{"id":"gate"}`), Status: store.StatusPending}}
 	var layers []string
-	host.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&host, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
-		if layer.Name == "memo" || layer.Name == "admission" {
+		if layer.Name == "admission" {
 			return OwnerLayerResult{}, errors.New("approval entered compute policy")
 		}
 		return OwnerLayerResult{}, nil
-	}
+	})
 	host.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Status == string(store.StatusPending) {
 			return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "gate", Kind: store.DecisionApproval}}}
@@ -47,7 +47,7 @@ func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	if !errors.Is(err, waiting) {
 		t.Fatalf("approval did not reach human wait: %v", err)
 	}
-	if !reflect.DeepEqual(layers, []string{"debug", "skip_if", "approval"}) {
+	if !reflect.DeepEqual(layers, []string{"debug", "skip_if"}) {
 		t.Fatalf("approval layers = %v", layers)
 	}
 }
@@ -97,7 +97,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 		}
 		return d
 	}
-	h.Layer = func(ctx context.Context, layer LayerSpec, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(ctx context.Context, layer testPolicyName, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name != "debug" {
 			t.Fatalf("unexpected layer after terminal transition: %s", layer.Name)
 		}
@@ -113,7 +113,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 			close(released)
 		}
 		return OwnerLayerResult{Transition: store.DependencyNode{Outcome: store.NodeSkipped}}, nil
-	}
+	})
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
@@ -141,9 +141,9 @@ func TestOwnerHostRemoteDispatchNeverSelfClaims(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}
 	f.snapshot.Nodes = []store.NodeRow{row}
-	h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
-	}
+	})
 	request, err := releasedRequest(&h, t.Context(), in, *in.Accepted, &source.Entry{}, row, store.DecisionReady)
 	if err != nil || request != nil {
 		t.Fatalf("request=%+v error=%v", request, err)
@@ -169,7 +169,7 @@ func FuzzOwnerHostSelfClaimPreservesExecutionIdentity(f *testing.F) {
 		}
 		probe := &ownerReconcileProbe{OwnerStore: &ownerFixture{}, result: store.ReconciledNode{Kind: store.Execute, Node: state.row, Claim: claim, Bearer: []byte("private-award")}}
 		adopted, executed := false, false
-		h := OwnerHost{Store: probe, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
+		h := OwnerHost{executionAdmission: ComposeStartGate(probe.OwnerStore.(*ownerFixture), nil, false), Masker: testMasker(), Store: probe, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
 			adopted = true
 			if string(award.Bearer) != "private-award" {
 				t.Fatal("private award lost before adoption")
@@ -248,41 +248,6 @@ func (s *ownerReconcileProbe) ReconcileNode(_ context.Context, request store.Rec
 	return s.result, nil
 }
 
-func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
-	for _, kind := range []store.ReconcileKind{store.Dispatch, store.Materialize, store.KeepTerminal} {
-		t.Run(string(kind), func(t *testing.T) {
-			f, h, input := newOwnerFixture(t, true)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}
-			returned := row
-			if kind != store.Dispatch {
-				returned.Status, returned.Outcome = store.StatusDone, store.NodeMemoized
-			}
-			probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
-			h.Store = probe
-			h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
-				if layer.Name == "admission" && kind != store.Dispatch {
-					t.Fatal("materialized hit took compute admission")
-				}
-				if layer.Name == "memo" {
-					return OwnerLayerResult{Source: &store.MaterializeSource{Kind: store.SourceMemo}}, nil
-				}
-				return OwnerLayerResult{}, nil
-			}
-			request, err := releasedRequest(&h, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
-			if err != nil || request != nil || !probe.request.MaterializeOnly || probe.request.Policy != store.SourceMemo {
-				t.Fatalf("probe=%+v returned=%+v error=%v", probe.request, request, err)
-			}
-			want := []string(nil)
-			if kind == store.Dispatch {
-				want = []string{"ready"}
-			}
-			if !reflect.DeepEqual(f.trace, want) {
-				t.Fatalf("release after %s: %v", kind, f.trace)
-			}
-		})
-	}
-}
-
 func TestOwnerHostRequestsHolderCancellationThroughTransition(t *testing.T) {
 	f, h, input := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4, Status: store.StatusRunning, ClaimedBy: "remote"}
@@ -301,7 +266,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	entry := &source.Entry{Engine: engine.Resolved{Identity: engine.Identity{Version: "selected"}}}
 	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, Generation: 7, SpecHash: "job-seal"}
 	policies := 0
-	host.Layer = func(_ context.Context, _ LayerSpec, evaluation EvaluationInput, persisted store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&host, func(_ context.Context, _ testPolicyName, evaluation EvaluationInput, persisted store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if !reflect.DeepEqual(binding, input.Storage) {
 			t.Fatal("owner policy lost its bound storage clients")
 		}
@@ -310,11 +275,11 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 		}
 		policies++
 		return OwnerLayerResult{}, nil
-	}
+	})
 	if _, err := releasedRequest(&host, t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 5 {
+	if policies != 2 {
 		t.Fatalf("owner policies=%d", policies)
 	}
 }
@@ -326,36 +291,4 @@ func releasedRequest(h *OwnerHost, ctx context.Context, input RunInput, accepted
 		return nil
 	})
 	return result, err
-}
-
-func TestOwnerHostAdmissionSkipDoesNotHideIndependentFailure(t *testing.T) {
-	for _, joined := range []bool{false, true} {
-		t.Run(map[bool]string{false: "skip", true: "independent_error"}[joined], func(t *testing.T) {
-			fixture, host, input := newOwnerFixture(t, true)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}
-			fixture.snapshot.Nodes = []store.NodeRow{row}
-			host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
-				return OwnerLayerResult{}, nil
-			}
-			independent := errors.New("admission cleanup refused")
-			host.Admit = func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error {
-				failure := &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("full group")}
-				if joined {
-					return errors.Join(failure, independent)
-				}
-				return failure
-			}
-			request, err := releasedRequest(&host, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
-			if request != nil {
-				t.Fatal("refused admission reached execution")
-			}
-			if joined {
-				if !errors.Is(err, independent) || len(fixture.trace) != 0 {
-					t.Fatalf("lost independent failure: trace=%v error=%v", fixture.trace, err)
-				}
-			} else if err != nil || !reflect.DeepEqual(fixture.trace, []string{"skipped"}) {
-				t.Fatalf("skip did not commit before readiness: trace=%v error=%v", fixture.trace, err)
-			}
-		})
-	}
 }

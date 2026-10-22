@@ -56,7 +56,6 @@ func TestRunSettingSourcePairs(t *testing.T) {
 		{"admission_class", "AdmissionClass", []Source{Run, Code}, "interactive", "batch", probe(AdmissionClass)},
 		{"priority", "Priority", []Source{Flag, Run, Code}, 0, 9, probe(Priority)},
 		{"debug.pause_timeout", "PauseTimeout", []Source{Run, Machine}, time.Minute, 2 * time.Minute, probe(PauseTimeout)},
-		{"schedule.catch_up", "CatchUp", []Source{Flag, Run, ProjectPipeline}, 2 * time.Hour, 3 * time.Hour, probe(CatchUp)},
 		{"runner", "RunnerSelection", []Source{Flag, Run}, runspec.RunnerSelection{Kind: runspec.RunnerHere}, runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "worker"}, probe(RunnerSelection)},
 		{"start_at", "StartAt", []Source{Flag, Run}, "near", "far", probe(StartAt)},
 		{"stop_at", "StopAt", []Source{Flag, Run}, "near", "far", probe(StopAt)},
@@ -71,11 +70,9 @@ func TestRunSettingSourcePairs(t *testing.T) {
 		{"job.retry", "Retry", []Source{Run, Code}, 0, 4, probe(Retry)},
 		{"job.memo_ttl", "MemoTTL", []Source{Run, Code}, time.Hour, 2 * time.Hour, probe(MemoTTL)},
 		{"claim_wait", "ClaimWait", []Source{Run, Code}, time.Hour, 2 * time.Hour, probe(ClaimWait)},
-		{"idle_poll", "IdlePoll", []Source{Flag, Machine}, time.Second, 2 * time.Second, probe(IdlePoll)},
 		{"debug", "Debug", []Source{Env, Run}, false, true, probe(Debug)},
 		{"publish", "Publish", []Source{Flag, Run}, "near", "far", probe(Publish)},
 		{"cache_from", "CacheFrom", []Source{Flag, Run, Machine}, "near", "far", probe(CacheFrom)},
-		{"source", "Checkout", []Source{Run, ProjectPipeline, Code}, nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(2), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(3), Tags: ptr(true), Submodules: ptr(true), LFS: ptr(true)}, probe(Checkout)},
 		{"run.submit_env_allow", "SubmitEnvAllow", []Source{Run, Machine}, []string{}, []string{"APP_*"}, probe(SubmitEnvAllow)},
 	}
 	for _, row := range rows {

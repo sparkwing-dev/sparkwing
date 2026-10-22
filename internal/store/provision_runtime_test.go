@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -70,7 +69,7 @@ func TestProvisionedMemberTokenOutlivesSessionTimeoutAndDiesOnLogout(t *testing.
 				t.Fatal(err)
 			}
 			s.csrfCipher = cipher
-			raw, _, session, err := s.AsOperator().CreateAccountSession(t.Context(), account, "a", limits.SessionIdleTTL)
+			raw, _, session, err := s.AsOperator().CreateAccountSession(t.Context(), account, "a", 7*24*time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,12 +95,12 @@ func TestProvisionedMemberTokenOutlivesSessionTimeoutAndDiesOnLogout(t *testing.
 				created := session.CreatedAt
 				for days := 6; days < 30; days += 6 {
 					*now = created.Add(time.Duration(days) * 24 * time.Hour)
-					session, err = s.AsOperator().LookupSessionAndRenew(t.Context(), raw, limits.SessionIdleTTL, limits.SessionMaxTTL)
+					session, err = s.AsOperator().LookupSessionAndRenew(t.Context(), raw, 7*24*time.Hour, 30*24*time.Hour)
 					if err != nil {
 						t.Fatal(err)
 					}
 				}
-				if !session.ExpiresAt.Equal(created.Add(limits.SessionMaxTTL)) {
+				if !session.ExpiresAt.Equal(created.Add(30 * 24 * time.Hour)) {
 					t.Fatal("session never reached its absolute timeout")
 				}
 			}

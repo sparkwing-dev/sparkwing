@@ -55,9 +55,14 @@ flags use `sw.NoInputs`.
 Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
 tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
 map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
-share the pipeline's flag namespace. The SDK checks required values, types,
-enums and name collisions before execution. Generated jobs bind their arguments
-from the original run snapshot.
+share the pipeline's flag namespace. The host checks required values, types,
+enums and name collisions before execution. Generated jobs carry declarations
+with their job specification. The host prepares their values from the accepted
+run snapshot after generation and sends them for typed decoding before execution.
+Use the pipeline extra-flag map for supplied flags that only a generator declares.
+Initial jobs must use argument declarations discovered by zero-input describe,
+even when invocation inputs change job IDs. New declarations belong in generated
+jobs, whose secrets the host registers before execution.
 
 Secret flag values are masked in logs and diagnostics. Input masking does not
 remove those values from stored invocation arguments, so use declared secrets
@@ -66,8 +71,21 @@ for credentials.
 The SDK describes registered inputs, defaults, help, risks and secret names to
 the host. A discovery error refuses only that pipeline and reports its sanitized
 cause when invoked. Other pipelines retain their own complete secret declarations.
-A pipeline cannot run when its declarations are incomplete. Describe uses defaults
-without requiring execution-only arguments and does not execute generators.
+A pipeline cannot run when its declarations are incomplete. Help and describe
+validate declarations and defaults without requiring invocation values. Describe
+uses zero values and does not execute generators.
+
+The host validates arguments after describe and before planning. Empty defaults mean
+no default; a required argument cannot also have a non-empty default. Numeric and
+duration values use Go parsing rules, and floating-point NaN and infinity are
+refused. Lists split on commas, trim Unicode whitespace from each item and drop empty items; both the raw
+argument map and typed list receive that normalized value. The host trims enum
+choices and checks each list item. Scalar string values keep their whitespace.
+Invalid arguments and declarations fail during host preparation
+with `invalid_args`. SDKs project declarations and decode the host's prepared
+values. Plan graph and secret declaration validation also belong to the host.
+Annotation locations, including an end line preceding the start, are checked by
+the host service when the annotation is written.
 
 ## Plan() must be pure
 
@@ -269,7 +287,10 @@ The gate itself only declares a decision.
 `Memo` reuses a successful job result. Its callback returns `sw.MemoValue` and an
 error. Build keys with `sw.MemoKey(parts...)`, set retention with
 `sw.MemoTTL(duration)`, and return `sw.NoMemo` to bypass reuse. Empty keys fail.
-The maximum memo TTL is 30 days. Missing or corrupt objects produce a miss.
+The key callback runs after SkipIf on the executing host under the job's actual
+award, inside its concurrency slot. A memo hit releases the job's groups without
+running its body. The maximum memo TTL is 30 days. Missing or corrupt objects
+produce a miss.
 
 ```go
 sw.Job(plan, "build", Build{}).
@@ -354,13 +375,24 @@ Scopes are `sw.ScopeGlobal`, `sw.ScopeRun` and `sw.ScopeBox`. Policies are
 in every Go `ConcurrencyLimit`. Its zero value is an explicit zero and fails
 validation. Omitted scope, membership cost and policy resolve to global scope,
 cost one and queueing. An explicit zero cost also fails validation.
-Reused group definitions must agree on scope, capacity and
-policy. The host computes the scoped key. `QueueTimeout` bounds waiting and
-`CancelTimeout` bounds cancellation of existing holders.
+Reused group definitions at the same level must agree on scope, capacity and
+policy. Plan and job groups have separate namespaces. The same name at both
+levels identifies two budgets. The store derives keys from accepted declarations
+and the actual execution award. Each complete group set grants atomically. A
+queued job holds none of its groups. `QueueTimeout` bounds initial waiting.
+Replaying an already granted admission after that timeout retains its groups.
 
-`plan.Concurrency(group, cost...)` holds a budget for the whole run. Job
-memberships consume capacity around the job. Resource admission remains a
-separate host responsibility.
+After released work loses plan capacity, it keeps running. New releases queue
+without a timeout until the plan reacquires capacity. `CancelOthers` replaces
+logical capacity immediately and requests cooperative cancellation. Disconnected
+work can overlap until cleanup or the five-minute drain deadline.
+
+`plan.Concurrency(group, cost...)` holds a budget for the whole run. Plan groups
+accept global or run scope. Pipeline acceptance refuses a box-scoped plan group
+with an error naming the group and pointing at job-level box scope, because a
+run can execute across several machines. Attach a box-scoped group to jobs to
+limit work on each machine. Job memberships consume capacity around the job.
+Resource admission remains a separate host responsibility.
 
 ## Secrets and masking
 

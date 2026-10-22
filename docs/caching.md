@@ -7,8 +7,10 @@ content. The host authorizes the storage namespace independently.
 ## The model
 
 `Memo` reuses a successful job's recorded output and artifacts. The key callback
-runs after dependencies settle. Return `MemoKey(parts...)` with every input that
-affects the result, or `NoMemo` to execute without publishing a memo record.
+runs on the executing host after dependencies settle and SkipIf permits the job,
+inside the job's acquired concurrency slot under its actual execution award.
+Return `MemoKey(parts...)` with every input that affects the result, or `NoMemo`
+to execute without publishing a memo record.
 Errors and empty keys fail rather than becoming a cache hit.
 
 ```go
@@ -41,7 +43,9 @@ needs its own key when its inputs differ.
 ## What a cache hit skips
 
 A hit restores the recorded output and artifact references. The host skips the
-job's execution callbacks. Declare file results with
+job's body and execution hooks, then settles it as memoized and releases its
+job groups. A hit still waits for its concurrency slot and briefly occupies a
+machine. Declare file results with
 [`Artifacts`](artifacts.md); `Consumes` stages those files for a dependent job.
 
 ## Opting out per invocation
@@ -193,17 +197,13 @@ ceiling and an entry count.
 `sparkwing cache prune --max-bytes` and `--max-entries` override them for
 one prune.
 
-Pruning advances through a bounded second-chance queue. An entry used
-since it entered the queue moves behind the other candidates, so use
-rather than build age drives retention without an unbounded directory
-scan. A kernel-backed lease spans lookup through process exit; prune
-skips active executions and writers rather than relying on a timing
-window.
+Pruning scans a bounded set of entries and deletes the oldest candidates first.
+A kernel-backed lease spans lookup through process exit; prune skips active
+executions and writers.
 
-Prune bounds entry discovery and deletion. It reports logical cache bytes
-removed separately from observed filesystem capacity gained. The latter is
-evidence, not an admission decision: callers remeasure the filesystem after
-pruning because concurrent activity can change free space.
+Prune reports logical bytes removed, measured by file length. It does not
+estimate physical space reclaimed. Callers must remeasure filesystem capacity
+before admitting more work because concurrent activity can change free space.
 
 Inspect and reclaim on demand:
 

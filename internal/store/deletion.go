@@ -495,7 +495,9 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	tables := append([]string{"capabilities", "sessions", "payment_events"}, tenantTables...)
 	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
-	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" || t == "claim_requirements" }), "quota_admission", "runs", "claim_requirements") {
+	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool {
+		return t == "runs" || t == "quota_admission" || t == "claim_requirements" || t == "claim_contexts"
+	}), "quota_admission", "runs", "claim_contexts", "claim_requirements") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}

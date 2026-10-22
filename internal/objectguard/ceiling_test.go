@@ -47,7 +47,7 @@ func TestCeilingFreezesWritesOnBytesAndNamesTheLimit(t *testing.T) {
 	if ce.Reason != objectguard.CeilingBytes || ce.Limit != 1000 || ce.Observed != 1200 {
 		t.Errorf("refusal reports %s %d/%d, want bytes 1000 measured at 1200", ce.Reason, ce.Observed, ce.Limit)
 	}
-	for _, want := range []string{"1000", "1200", "--max-bucket-bytes", "reset-breaker"} {
+	for _, want := range []string{"1000", "1200", "--max-bucket-bytes"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal message %q does not name %q", err, want)
 		}
@@ -101,27 +101,6 @@ func TestCeilingThawsWhenAMeasurementFallsBackUnder(t *testing.T) {
 	}
 	if got := c.State().Freezes; got != 2 {
 		t.Errorf("freezes_total = %d after a freeze, a thaw and a refreeze, want 2", got)
-	}
-}
-
-func TestCeilingThawIsManualAndRefreezesOnTheNextMeasurement(t *testing.T) {
-	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxObjects: 2})
-	c := l.Ceiling()
-	c.Observe(objectguard.Usage{Bytes: 1, Objects: 5})
-
-	if thawed, err := c.Thaw(); err != nil || !thawed {
-		t.Fatalf("Thaw on a frozen bucket: thawed=%t err=%v", thawed, err)
-	}
-	if err := l.Allow(objectguard.ClassPut); err != nil {
-		t.Fatalf("a manually thawed bucket still refuses writes: %v", err)
-	}
-	if thawed, err := c.Thaw(); err != nil || thawed {
-		t.Errorf("Thaw on an already thawed bucket: thawed=%t err=%v", thawed, err)
-	}
-
-	c.Observe(objectguard.Usage{Bytes: 1, Objects: 5})
-	if !c.Frozen() {
-		t.Fatal("the measurement after a manual thaw left a bucket over its ceiling writable")
 	}
 }
 
@@ -204,33 +183,6 @@ func TestAbortedMultipartUploadIsAllowedWhileFrozenAndCountsNothing(t *testing.T
 	}
 }
 
-func TestThawHoldsUntilTheNextMeasurement(t *testing.T) {
-	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxBytes: 1000})
-	c := l.Ceiling()
-	c.Observe(objectguard.Usage{Bytes: 4096, Objects: 2})
-	if thawed, err := c.Thaw(); err != nil || !thawed {
-		t.Fatalf("Thaw on a frozen bucket: thawed=%t err=%v", thawed, err)
-	}
-
-	for range 5 {
-		if err := l.Allow(objectguard.ClassPut); err != nil {
-			t.Fatalf("a thawed bucket refused a write: %v", err)
-		}
-		l.RecordWrite("PutObject", 4096)
-	}
-	if !c.State().Thawed {
-		t.Error("the ceiling stopped reporting the thaw while it was still holding")
-	}
-
-	c.Observe(objectguard.Usage{Bytes: 24576, Objects: 7})
-	if !c.Frozen() {
-		t.Fatal("the measurement after a thaw left a bucket over its ceiling writable")
-	}
-	if c.State().Thawed {
-		t.Error("the ceiling still reports a thaw after the measurement that ended it")
-	}
-}
-
 func TestReconcileWithSkipsMeasuringAnUnlimitedBucket(t *testing.T) {
 	c := objectguard.NewCeiling(objectguard.CeilingConfig{})
 	calls := 0
@@ -283,35 +235,6 @@ func TestReconcileWithReportsAFailedMeasurement(t *testing.T) {
 func TestCeilingReconcileZeroMeansMeasureOnce(t *testing.T) {
 	if got := objectguard.NewCeiling(objectguard.CeilingConfig{Reconcile: 0}).Reconcile(); got != 0 {
 		t.Errorf("the ceiling reports %s, want the 0 it was configured with", got)
-	}
-}
-
-func TestThawIsRefusedWhenNoMeasurementIsScheduled(t *testing.T) {
-	c := objectguard.NewCeiling(objectguard.CeilingConfig{
-		Limit:     objectguard.CeilingLimit{MaxBytes: 100},
-		Reconcile: 0,
-	})
-	c.Observe(objectguard.Usage{Bytes: 4096, Objects: 2})
-
-	thawed, err := c.Thaw()
-	if err == nil {
-		t.Fatal("a thaw was accepted with no measurement to end it")
-	}
-	if !errors.Is(err, objectguard.ErrNoMeasurementScheduled) {
-		t.Errorf("refusal %v does not match ErrNoMeasurementScheduled", err)
-	}
-	if thawed {
-		t.Error("the refused thaw still reported clearing the freeze")
-	}
-	if !c.Frozen() {
-		t.Error("the refused thaw cleared the freeze anyway")
-	}
-}
-
-func TestThawIsAllowedOnAnUnlimitedCeilingWithNoSchedule(t *testing.T) {
-	c := objectguard.NewCeiling(objectguard.CeilingConfig{Reconcile: 0})
-	if _, err := c.Thaw(); err != nil {
-		t.Errorf("a thaw on an unlimited store was refused: %v", err)
 	}
 }
 

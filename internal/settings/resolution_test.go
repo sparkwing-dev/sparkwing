@@ -185,7 +185,7 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 	if v, _, err := AdmissionClass(in); err != nil || v != "batch" {
 		t.Fatalf("class %q: %v", v, err)
 	}
-	if _, _, err := Checkout(in); err != nil {
+	if _, err := checkoutSetting(in); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -96,13 +96,8 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 		if ownerName != "controller.owner" || until <= now || status != "pending" || holder != "" || prefix != "" {
 			return holderRefusal()
 		}
-		var generation int64
-		var outcome, expansion string
-		if err = tx.QueryRowContext(ctx, `SELECT generation,outcome,expansion FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&generation, &outcome, &expansion); err != nil {
+		if err := evaluationSourceTx(ctx, tx, team, unit); err != nil {
 			return err
-		}
-		if generation != unit.SourceGeneration || (outcome != "success" && outcome != "memoized") || expansion != "expected" {
-			return holderRefusal()
 		}
 	} else {
 		var available int64

@@ -2,18 +2,12 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"slices"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -36,12 +30,6 @@ type FloodPolicy struct {
 	// ShedQueueDepth is the pending-trigger depth of one team past which that
 	// team's new submissions are shed rather than queued. Zero never sheds.
 	ShedQueueDepth int
-
-	// DedupeWindow is how long a content-identical submission answers with the
-	// run the first one started instead of starting a second. Zero dedupes
-	// nothing. GitHub deliveries carry a delivery id and a body digest and are
-	// deduped by the store regardless of this window.
-	DedupeWindow time.Duration
 }
 
 // WithFloodPolicy installs p as this controller's trigger flood control.
@@ -60,12 +48,9 @@ const (
 	depthWarnInterval  = time.Minute
 )
 
-const maxDedupeEntries = 20000
-
 type floodControl struct {
 	policy    FloodPolicy
 	runs      *ratelimit.Limiter
-	dedupe    *dedupeWindow
 	depthWarn *warnEvery
 }
 
@@ -73,9 +58,6 @@ func newFloodControl(p FloodPolicy) *floodControl {
 	f := &floodControl{policy: p, depthWarn: &warnEvery{every: depthWarnInterval}}
 	if p.RunsPerPrincipalHour > 0 {
 		f.runs = ratelimit.New(p.RunsPerPrincipalHour, time.Hour)
-	}
-	if p.DedupeWindow > 0 {
-		f.dedupe = &dedupeWindow{window: p.DedupeWindow, seen: make(map[string]dedupeEntry)}
 	}
 	return f
 }
@@ -122,59 +104,6 @@ func (s *Server) runCapRefusal(key, source string) error {
 		}
 	}
 	return nil
-}
-
-type dedupeEntry struct {
-	key string
-	at  time.Time
-}
-
-// safety: the answer expires rather than persisting, because two identical
-// submissions an hour apart are two runs and only a redelivery is one.
-type dedupeWindow struct {
-	mu     sync.Mutex
-	window time.Duration
-	seen   map[string]dedupeEntry
-}
-
-// safety: looking up and recording under one lock is what stops two simultaneous
-// identical submissions from both starting a run.
-func (d *dedupeWindow) claim(digest, key string, now time.Time) (string, bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if e, ok := d.seen[digest]; ok && now.Sub(e.at) < d.window {
-		return e.key, true
-	}
-	d.evictLocked(now)
-	d.seen[digest] = dedupeEntry{key: key, at: now}
-	return "", false
-}
-
-// safety: the window bounds this map in time but not under a flood, so a full
-// map drops its expired entries first and its coldest half only if that left it full.
-func (d *dedupeWindow) evictLocked(now time.Time) {
-	if len(d.seen) < maxDedupeEntries {
-		return
-	}
-	for k, e := range d.seen {
-		if now.Sub(e.at) >= d.window {
-			delete(d.seen, k)
-		}
-	}
-	if len(d.seen) < maxDedupeEntries {
-		return
-	}
-	ages := make([]time.Time, 0, len(d.seen))
-	for _, e := range d.seen {
-		ages = append(ages, e.at)
-	}
-	slices.SortFunc(ages, func(a, b time.Time) int { return a.Compare(b) })
-	cutoff := ages[len(ages)/2]
-	for k, e := range d.seen {
-		if !e.at.After(cutoff) {
-			delete(d.seen, k)
-		}
-	}
 }
 
 // safety: a depth that cannot be read fails on every submission of a flood,
@@ -248,29 +177,4 @@ func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.
 		return key, &intakeRunToken{key: key}
 	}
 	return key, nil
-}
-
-func (s *Server) dedupeIntake(a capability.Authorized, body *controllerwire.CreateRunRequest) error {
-	if s.flood == nil || s.flood.dedupe == nil || body.IdempotencyKey != "" {
-		return nil
-	}
-	intake, err := IntakeForStore(a, *body)
-	if err != nil {
-		return err
-	}
-	canonical, err := json.Marshal(intake.Request)
-	if err != nil {
-		return err
-	}
-	digest := sha256.Sum256(canonical)
-	var nonce [32]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
-	}
-	key := hex.EncodeToString(nonce[:])
-	if existing, found := s.flood.dedupe.claim(hex.EncodeToString(digest[:]), key, time.Now()); found {
-		key = existing
-	}
-	body.IdempotencyKey = key
-	return nil
 }

@@ -68,7 +68,7 @@ func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]strin
  AND t.capability_prefix=c.prefix AND t.generation=c.bind_generation AND t.claimed_by=c.bind_holder AND t.status='claimed' AND t.finished_at IS NULL AND t.lease_expires_at>?)
 	OR EXISTS (SELECT 1 FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name
 	JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id AND n.generation=e.source_generation
-	WHERE c.unit_kind='eval' AND e.team=c.team AND e.run_id=c.bind_run AND n.status='done' AND n.outcome IN ('success','memoized') AND n.expansion='expected'
+	WHERE c.unit_kind='eval' AND e.team=c.team AND e.run_id=c.bind_run AND `+evaluationSourceSQL(&claimSQL{dialect: tx.dialect}, "n")+`
  AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.generation=c.eval_unit_generation
  AND e.claimed_by=c.bind_holder AND e.status IN ('claimed','running') AND e.lease_expires_at>? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?))
  ORDER BY c.prefix`, team, now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano())

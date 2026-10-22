@@ -20,8 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
-
 // ProcessServices supplies one live process's accepted declaration and record writers.
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {
@@ -139,6 +137,9 @@ func processServiceTarget(_ context.Context, principal capability.Principal, tar
 	if target.Team == "" {
 		target.Team = principal.Capability.Team
 	}
+	if target.Reference != nil {
+		return target, nil
+	}
 	if target.RunID == "" {
 		target.RunID = bound.RunID
 	}
@@ -157,9 +158,9 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 	case "/node/v1/secrets/{name}":
 		evidence.Target.SecretName = request.PathValue("name")
 	case "/node/v1/pipelines/{name}/latest":
-		evidence.Target.Pipeline = request.PathValue("name")
+		evidence.Target = capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: request.PathValue("name"), JobID: request.URL.Query().Get("job")}}
 	}
-	if evidence.Target.NodeID == "" {
+	if evidence.Target.Reference == nil && evidence.Target.NodeID == "" {
 		evidence.Target.NodeID = request.URL.Query().Get("job")
 	}
 	if request.Method == http.MethodGet || request.Method == http.MethodDelete {
@@ -222,8 +223,8 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		if body.Level == "" {
 			body.Level = "info"
 		}
-		if !logLevels[body.Level] || body.Line < 0 || body.EndLine < 0 || body.Column < 0 {
-			return executorError(apierr.BadRequest, "invalid annotation level or location")
+		if err := nodeproto.ValidateAnnotation(body.Level, body.Line, body.EndLine, body.Column); err != nil {
+			return executorError(apierr.BadRequest, err.Error())
 		}
 		if err := s.step(body.Step); err != nil {
 			return err

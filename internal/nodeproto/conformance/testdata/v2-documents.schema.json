@@ -153,9 +153,6 @@
     "ConcurrencySpec": {
       "additionalProperties": false,
       "properties": {
-        "cancel_timeout_ms": {
-          "type": "integer"
-        },
         "capacity": {
           "type": "integer"
         },
@@ -256,6 +253,12 @@
       "properties": {
         "approval": {
           "$ref": "#/$defs/ApprovalSpec"
+        },
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/ArgumentDescription"
+          },
+          "type": "array"
         },
         "artifacts": {
           "items": {

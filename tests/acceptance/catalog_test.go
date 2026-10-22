@@ -201,7 +201,7 @@ func TestPortDestinations(t *testing.T) {
 			t.Errorf("credential route %q has unknown disposition %q", match[1], match[2])
 		}
 	}
-	if len(routes) != 229 {
-		t.Errorf("credential port covers %d distinct source routes, want 229", len(routes))
+	if len(routes) != 221 {
+		t.Errorf("credential port covers %d distinct source routes, want 221", len(routes))
 	}
 }

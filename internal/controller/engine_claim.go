@@ -91,11 +91,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
-		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch}); err != nil {
+		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch})
+	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil

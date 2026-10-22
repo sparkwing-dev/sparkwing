@@ -141,7 +141,7 @@ test("duration arguments preserve signed zero in defaults and explicit inputs", 
             .withArgs({ name: "jobWait", type: "duration", default: value });
         },
       });
-      for (const args of [{}, { wait: value, jobWait: value }]) {
+      for (const args of [{ wait: value, jobWait: value }]) {
         const host = await setup();
         try {
           const described = await host.send({ id: "describe", op: "describe" });
@@ -186,7 +186,7 @@ test("hello facts remain sealed, plans stay flat, body env starts only after pla
   });
   const host = await setup();
   try {
-    const result = await host.send(planRequest);
+    const result = await host.send({ ...planRequest, args: { count: "9223372036854775807" } });
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(duringPlan, undefined);
     assert.deepEqual(Object.keys(result.result), ["jobs"]);
@@ -657,7 +657,7 @@ test("cancelled generation leaves no reconstructed child code behind", async () 
   }
 });
 
-test("execution cannot mutate topology and per-operation argument injection is refused", async () => {
+test("execution cannot mutate topology and malformed host arguments are refused", async () => {
   resetPipelines();
   definePipeline({
     name: "fixture",
@@ -683,7 +683,7 @@ test("execution cannot mutate topology and per-operation argument injection is r
       job: "build",
       step: plan.result.jobs[0].steps[0].id,
       attempt: 1,
-      args: { mode: "invalid" },
+      args: { mode: 1 },
     });
     assert.equal(invalid.error.code, "bad_request");
   } finally {
@@ -743,7 +743,7 @@ test("generator source body env does not leak into the reconstructed child", asy
   }
 });
 
-test("unknown execution args and malformed after-run outcomes are refused", async () => {
+test("malformed host arguments and after-run outcomes are refused", async () => {
   resetPipelines();
   let observed: unknown;
   definePipeline({
@@ -767,7 +767,7 @@ test("unknown execution args and malformed after-run outcomes are refused", asyn
       job: "build",
       step: job.steps[0].id,
       attempt: 1,
-      args: { undeclared: "value" },
+      args: { undeclared: null },
     });
     assert.equal(invalid.error.code, "bad_request");
     const wrong = await host.send({ id: "outcome", op: "eval", closure: job.closures.after_run[0], input: { outcome: ["success"] } });
@@ -849,7 +849,7 @@ test("independent steps run concurrently and EOF aborts them without late frames
   assert.equal(host.frames.length, before);
 });
 
-test("generated argument binding fails before child code is registered", async () => {
+test("generated argument declarations rely on host preparation", async () => {
   resetPipelines();
   definePipeline({
     name: "fixture",
@@ -863,9 +863,11 @@ test("generated argument binding fails before child code is registered", async (
   try {
     const planned = await host.send(planRequest);
     const expanded = await host.send({ id: "expand", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
-    assert.equal(expanded.result.error?.code, "invalid_args");
-    const child = await host.send({ id: "child", op: "run_step", job: "child", step: "run", attempt: 1, settled: [] });
-    assert.equal(child.error?.code, "unknown_job");
+    assert.equal(expanded.result.error, undefined);
+    assert.deepEqual(expanded.result.value[0].arguments, [{ name: "required", type: "string", required: true, job_id: "child" }]);
+    const child = await host.send({ id: "child", op: "run_step", args: { required: "prepared-by-host" }, job: "child", step: "run", attempt: 1, settled: [] });
+    assert.equal(child.result.outcome, "success");
+    assert.equal(child.result.output, "prepared-by-host");
   } finally {
     await host.close();
   }

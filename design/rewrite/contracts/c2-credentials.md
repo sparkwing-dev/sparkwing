@@ -948,10 +948,10 @@ The heartbeat's claim ID stays caller-selected and must match the unit ID.
 
 LauncherSyncReader is a local C2 adapter contract for a transactional launcher
 snapshot. It receives the authenticated authority reference and observations.
-The adapter must recheck ancestry and current award ownership. Sync copies the
-response and clears every Capability before returning it. Missing wiring returns
-policy_missing. C1 still needs the final snapshot operation. Its old
-SyncLaunchJobs accepts retired claim identities and cannot serve this adapter.
+The adapter rechecks ancestry and current award ownership through
+`Operator.ReconcileLauncherAwards`. Authenticated observations seal the reserved
+node identity on the award before pod activation. Sync copies the response and
+clears every Capability before returning it. Missing wiring returns policy_missing.
 
 Storage settings and reports use Operator. Quota and allowance writes resolve a
 Tenant for the policy-authorized team. They retain the operator.object_store
@@ -1127,7 +1127,6 @@ All capability names below are in `internal/capability`.
 | `BillingStart`, `BillingUnit` | Separate charging start from compute kind. |
 | `BillingProvenance` | Freeze payer, metering, executor class, reservation, start and unit at award. |
 | `UnitBilling`, `UnitBillingMappings` | Map trigger to host, node to job, plan to plan and eval to eval billing. |
-| `BillingRule` | Define unit minimums and nonbillable intervals. |
 | `BillableInterval` | Record actual compute under an award. |
 | `BillingSettlement` | Return billable seconds and unstarted-refund status for the ledger owner. |
 | `SettleBilling` | Calculate settlement from immutable provenance and persisted intervals. |
@@ -1211,6 +1210,11 @@ clients, SDKs or documentation generators.
   never skips the here Award to reach the requester's token or session.
   A session parent is checked in the sessions table, including membership
   and current `runs.write`; it is not converted to a new bearer root.
+- `Capability.ExecutionHost` seals execution placement separately from the
+  accountable subject. The award owner derives it from the machine or local peer,
+  the authenticated here origin, or the launcher's reserved node. Delegation and
+  exchange preserve it. Box concurrency reads only this persisted value and
+  refuses an award without one. Capacity requests cannot select the identity.
 - Here is an Award during intake. It reserves `here:<run>`, allows the
   first claim within ten minutes, and expires at the owner deadline plus
   the claim window, capped by the parent. Reclaim after a first claim uses
@@ -1314,8 +1318,14 @@ subject into `Target` unit fields because capability cannot import blob
 without cycling through runspec. Plan claims use `log.tail` on
 `/claims/{claim}/logs`, `log-segments` and `log-manifest`. Eval uses a separate
 `CredentialEval` alternative requiring `expansion.submit`, `ownEval` and
-`LiveExpansion` on those same routes and heartbeat. Eval keeps exactly
-`expansion.submit` and `data.read`. Neither a sibling eval nor a run owner's
+`LiveExpansion` on those same routes and heartbeat. Eval carries
+`expansion.submit`, `data.read`, `secrets.release` and `refs.read`.
+The latter two require a pending approval predicate under the exact live
+evaluation fence. Generator expansion cannot read approval secrets or pipeline
+references. Approval dependency outputs use the same accepted `Needs` rule as
+run-host evaluation. Authentication accepts a pending approval source only from
+the store-derived eligibility fact, under the exact source, evaluation and
+controller fences. Neither a sibling eval nor a run owner's
 expansion delegate can use this log alternative. Log submission precedes
 lease-ending completion. A structured eval failure goes through the single
 `AcceptExpansion` transaction and `/jobs/{job}/expansion`, like success.
@@ -1439,7 +1449,7 @@ Exchange preserves provenance; settlement never looks at the current token.
 
 Exclude customer-owned runner wait intervals, including a metered run host
 waiting for a customer pool. Plan and eval compute bill per second with no
-minimum. A plan-cache hit is free. Executing jobs keep their sixty-second
+minimum. Accepted resumes retain their plan; new runs plan afresh. Executing jobs keep their sixty-second
 minimum. An unstarted award refunds in full. Intervals must not overlap or
 charge the same compute as both host and job. C4 owns
 `limits.WorkBillingMinimum` and the separate
@@ -1565,9 +1575,9 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Cache and publish | Manual refs cannot poison verified refs; default-only local reads remain read-only; publication remains local provenance and does not fail the local run. |
 | Source release | Same-team Cloud or shared runner only, never a personal machine (decision 6c); repo allow-list and SSH confirmation apply; audit failure releases no secret. |
 | Operator split | Deployment tokens cannot trust, grant, freeze, refund or delete accounts, including by delegating or using a local peer. |
-| Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, free plan-cache hits, customer wait exclusion and no double charge. |
+| Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, accepted-plan resume, customer wait exclusion and no double charge. |
 | Payment callback | Signed test/live events use one verifier, bind to the committed checkout, derive team and grant once across retries and distinct duplicate events. Invalid proof, wrong mode/amount/currency, unknown checkout and human console powers remain refused. |
-| Auth cache | Both TTL and fresh full-generation equality are required. Ancestor/session revocation, cross-team launcher revocation and membership loss invalidate reuse. |
+| Current authority | Authentication reads current ancestry and membership state. Ancestor/session revocation, cross-team launcher revocation and membership loss refuse further use. |
 | Windows | SID-verified local subjects, private-file ACLs and equivalent refusal semantics. |
 
 `TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads` exercises thirteen actual Server
@@ -1610,7 +1620,7 @@ path-derived team selection and authenticated signup attribution. Invalid bodies
 leave the fixture unchanged. Store failures remain private; a typed transaction
 refusal reaches HTTP unchanged. These fakes do not establish transaction safety.
 Seven breaker tests and two request-budget projection tests now exercise the
-policy router without sockets, preserving budget, ceiling, reset and thaw
+policy router without sockets, preserving request-budget reset and ceiling enforcement
 behavior. No additional full T1 port or
 cross-placement scenario is claimed complete.
 
@@ -2521,74 +2531,38 @@ properties exercise real SQLite authentication and CSRF with fake transactions.
 They prove transport behavior and private errors, not atomic persistence or
 native credential matrix cells. Closed invitations use canonical conflict.
 
-### Concurrency route cutover
+### Concurrency admission and queue views
 
-The eight `/api/v1/concurrency/{key}` registrations are removed. Their C2
-replacements are `/api/v1/queue/groups/{group}` and its `acquire`, `heartbeat`,
-`release`, `cancel-waiter`, `holder`, `resolve` and `force-release` operations.
-They use PolicyRouter and the existing access alternatives. Acquire and resolve
-use sensitive liveness. Heartbeat, release, cancellation and holder reads use
-reporting liveness. Group reads allow members or a claim bound to its declared
-group. Force release requires member `runs.control`. Local and deployment
-administrators cannot bypass a claim's binding.
+`Tenant.MayStart` owns logical job admission for all execution placements.
+Store release transitions own plan admission. Every executable award requires a
+committed permit, even without groups. Start and process delegation enforce it. The private awarded-unit capacity endpoint names only the
+unit through its authenticated award. The store derives every group, scope,
+capacity, cost, policy and lease bound from sealed acceptance. Box keys use only
+the award's sealed `ExecutionHost`. Launcher awards wait for authenticated
+activation to seal that identity.
 
-The wire uses `job_id`, `leader_job_id` and `origin_job_id`. Group reads use
-controllerwire.QueueGroup, including one-based waiter positions and numeric
-cancel_timeout_ns. The existing Go client sends the final paths and shapes. Its duplicate
-ConcurrencyState and StateWaiter wire types and duration parser are removed.
-The group read returns the validated shared QueueGroup.
-The orchestrator converts group positions to its store's zero-based form.
-The legacy runner, here and Actions slot-route permissions are removed. Hosted
-transport retries use the final paths and refuse automatic acquire replay.
-Client domain errors retain the canonical apierr.Error alongside the existing
-store sentinel. A canonical rate-limit error is never an admission result.
+The public queue API exposes group reads at `GET /api/v1/queue/groups/{group}`
+and member priority changes at `PUT /api/v1/queue/groups/{group}/priority`.
+The single-group acquire, heartbeat, release, waiter cancellation, holder
+observation, resolve and force-release endpoints are deleted. Their request and
+response types and authority-bearing mutation methods are deleted with them.
 
-C2 adds Target.SlotKey and Target.SlotHolderID. The decoder preserves the exact
-selected group, holder and body/query run and job. ResolveTarget supplies the
-authenticated generation. Holder-only calls and group reads use the bound run
-and job as the proposed identity. This does not establish that a stored holder
-belongs to that identity. BindingChecker must resolve the selected holder and
-declared group from persistence before granting access. Duplicate query values,
-retired node_id selectors, unknown JSON fields, trailing JSON and invalid or
-overflowing durations are refused. The existing one-MiB request budget remains.
+Group reads use `controllerwire.QueueGroup`, with one-based waiter positions. Members need `runs.read`. Claims need
+`node.report` or `runs.state` and a binding to the accepted group and current
+work generation. The decoder supplies the selected group. The resolver supplies
+the authenticated run, job and generation. There are no caller-selected holder
+or leader selectors.
 
-C2 declares controller.ConcurrencyStore and Server.WithConcurrencyStore. Each
-resolved adapter must report the authorized team. Its methods are:
+`controller.ConcurrencyStore` is a tenant read port. Its group read rechecks
+current authority and accepted declarations in one snapshot. Claim views
+preserve contention accounting while removing memo keys and leader references
+outside the declared read set. Admission and renewal use the private unit owner,
+which preserves generation, lease and adoption fencing.
 
-- AcquireAuthorizedSlot(ctx, Authorized, store.AcquireSlotRequest)
-  (store.AcquireSlotResponse, error).
-- HeartbeatAuthorizedSlot(ctx, Authorized, group, holder, lease)
-  (time.Time, superseded bool, error).
-- ReadAuthorizedHolder(ctx, Authorized, group, holder)
-  (store.ConcurrencyHolder, error).
-- ReleaseAuthorizedSlot(ctx, Authorized, group, holder, outcome, outputRef,
-  cacheKeyHash, cacheTTL) error.
-- ReadAuthorizedGroup(ctx, Authorized, group) (*store.ConcurrencyState, error).
-- ResolveAuthorizedWaiter(ctx, Authorized, group, run, job, cacheKeyHash,
-  leaderRun, leaderJob, bypassRead) (store.WaiterResolution, error).
-- CancelAuthorizedWaiter(ctx, Authorized, group, store.NodeRef) (bool, error).
-- ForceReleaseAuthorizedSlots(ctx, Authorized, group)
-  ([]store.ConcurrencyHolder, error).
-
-These transactions own the store clock and must recheck full live authority,
-tenancy, holder and generation, the sealed group or memo namespace and policy,
-and every referenced output or leader edge. Inheritance cannot join another
-job's holder. Supplied capacity and cost cannot replace the accepted declaration.
-Leases cannot exceed effective authority or work deadlines. Release and force
-release include notification and waiter promotion in their committing transaction.
-A cancelled claim keeps reporting rights without reacquiring capacity. Holder
-continuity and capacity accounting follow C1's existing frozen contract.
-The default uses Tenant only if it implements this interface. There is no call
-to the old unfenced methods when it does not.
-
-C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
-Tenant consumes SlotKey/SlotHolderID through the concrete transaction interface.
-See C1's scheduled intake and concurrency section for coverage and remaining
-HTTP box and memo declaration gaps.
-The HTTP properties use committed-fact and transaction fakes. They prove target
-transport, policy selection, cancellation classes and safe failure. They do not
-close native group/memo declaration, cross-team leader, lease-continuity or
-transaction-race acceptance cells. Those integration obligations remain open.
+The independent credential-route expectations and generated API reference check
+the route inventory. Real controller/store regressions acquire through shared
+admission, read the resulting group and assert that retired endpoints return
+404 without changing its holder.
 
 ### Typed step handoff integration
 
@@ -3472,14 +3446,13 @@ team bucket. Queue shedding reads only that tenant's pending units through the
 admission transaction. Both paths return canonical rate_limited/unavailable
 errors with retry_after_ms. No new cap or default is introduced.
 
-Optional content deduplication gives normalized API requests a stable random
-intake key for the configured window, scoped by the server-derived team and
-subject. It stores no bearer or response. C1 AdmitRun owns atomic commit, replay
-and current authority checks, including concurrent first requests. Explicit
-idempotency keys win. HTTP uses the current 201/200 CreateRunResponse contract;
+Explicit idempotency keys and verified webhook delivery IDs provide replay
+identity. Equal content with distinct keys creates distinct runs. C1 AdmitRun
+owns atomic commit, replay and current authority checks, including concurrent
+first requests. HTTP uses the current 201/200 CreateRunResponse contract;
 replay carries no here bearer. Store replay lookup precedes flood charging,
-so replays spend no flood budget. Failed store transactions create no replay
-result and remain retryable inside the content window.
+so replays spend no flood budget. Failed transactions create no replay result.
+
 
 
 ## W1b run-intake validation reconciliation
@@ -3523,7 +3496,7 @@ trust or pool access. Return the first committed result for a repeated instant.
 Tenant implements both interfaces with persisted arming consent and sealed
 intake. The concrete controller proofs cover local registration, Cloud firing,
 replay and current authority. The real api.sock proof remains assigned to the
-lead harness. App and API/local schedules now share W1's sealed intake. C1 records the remaining private-follow, HTTP box and memo integration points.
+lead harness. App and API/local schedules now share W1's sealed intake. C1 records private-follow and memo integration points, plus award-bound box admission through the private owner transport.
 
 
 ## W1b review integration, 2026-10-17

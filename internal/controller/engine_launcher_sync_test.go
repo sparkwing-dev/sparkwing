@@ -18,8 +18,8 @@ import (
 
 type launcherSyncFunc func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 
-func (f launcherSyncFunc) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, _ []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
-	return f(ctx, ref, observed)
+func (f launcherSyncFunc) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	return f(ctx, ref, body.Observed)
 }
 
 func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
@@ -131,7 +131,7 @@ func FuzzEngineLauncherSyncOmitsBearer(f *testing.F) {
 
 type launcherAwardSnapshot []store.LauncherAward
 
-func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef) ([]store.LauncherAward, []store.LauncherPreparation, error) {
+func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []controllerwire.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error) {
 	return s, nil, nil
 }
 
@@ -143,7 +143,7 @@ func TestLauncherCleanupRequiresPositiveAbsence(t *testing.T) {
 			snapshot = append(snapshot, store.LauncherAward{Fence: observed.Award, Gone: true})
 		}
 		reader := storeLauncherSync{store: snapshot}
-		response, err := reader.ReadLauncherSync(t.Context(), capability.AuthorityRef{}, []controllerwire.LauncherObservation{observed}, nil)
+		response, err := reader.ReadLauncherSync(t.Context(), capability.AuthorityRef{}, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observed}})
 		if err != nil || len(response.Awards) != 0 || len(response.Retired) != btoi(gone) || len(response.Deferred) != btoi(!gone) {
 			t.Fatalf("gone=%v: %+v, %v", gone, response, err)
 		}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -42,7 +43,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 				}
 				job.ResultStep = "result"
 				state.row.Spec, _ = json.Marshal(job)
-				hash, _ := executorHash(job)
+				hash, _ := runspec.CanonicalHash(job)
 				state.row.SpecHash, input.SpecHash = string(hash), string(hash)
 			}
 			records := &selectedOutputRecords{t: t, key: key, authority: blob.Authority{CapabilityRef: "owner"}}

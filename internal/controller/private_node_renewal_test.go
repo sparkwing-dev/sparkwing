@@ -25,6 +25,10 @@ func TestPrivateNodeRenewalAndStartRetainExactClaimFence(t *testing.T) {
 	if _, err := host.RenewNode(t.Context(), award.Node.Ref, actor, false); err != nil {
 		t.Fatal(err)
 	}
+	engineAcceptedFixturePlan(t, server.engine, "a", "run", "build")
+	if result, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+		t.Fatalf("execution admission: %+v, %v", result, err)
+	}
 	started, err := host.TransitionNode(t.Context(), store.StartNode{Ref: award.Node.Ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("source acquisition renewal invalidated the unstarted node claim: %+v %#v", started, err)

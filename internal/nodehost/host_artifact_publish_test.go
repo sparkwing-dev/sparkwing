@@ -39,7 +39,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 					backend.upload.Key = blob.ResultRecordKey(backend.upload.Identity.Attempt.Value, backend.upload.Authority.Repo, backend.upload.Authority.Ref.Scope, "build", blob.KindManifest)
 					return StorageBinding{Bytes: backend, Records: backend, Authority: backend.upload.Authority}, nil
 				}
-				deps.PrepareLayer = adapter.Prepare
+				deps.PrepareArtifacts = adapter.Prepare
 			})
 			acquire := host.Acquire
 			host.Acquire = func(ctx context.Context, spec source.Spec, opts source.Options) (*source.Entry, error) {
@@ -93,7 +93,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 	t.Run("validates_before_body", func(t *testing.T) {
 		_, a, _ := artifactPublicationFixture(t)
 		input := NodeInput{Entry: &source.Entry{Directory: t.TempDir()}}
-		if _, err := a.Prepare(t.Context(), LayerSpec{Name: "artifacts"}, input, nodeproto.JobSpec{Artifacts: []string{"../outside"}}); err == nil {
+		if _, err := a.Prepare(t.Context(), input, nodeproto.JobSpec{Artifacts: []string{"../outside"}}); err == nil {
 			t.Fatal("accepted invalid capture path before execution")
 		}
 	})

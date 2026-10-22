@@ -699,13 +699,6 @@
               {
                 "not": {
                   "required": [
-                    "args"
-                  ]
-                }
-              },
-              {
-                "not": {
-                  "required": [
                     "run"
                   ]
                 }
@@ -784,13 +777,6 @@
                 "not": {
                   "required": [
                     "pipeline"
-                  ]
-                }
-              },
-              {
-                "not": {
-                  "required": [
-                    "args"
                   ]
                 }
               },

@@ -25,7 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 )
 
 // ProductionRuntime composes installed commands with authenticated controller and native host services.
@@ -79,7 +78,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 
 // safety: a Cloud Job serves one claim and is then discarded, and a requester's own machine is its operator, so both accept every submittable name.
 func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool, accept procenv.SubmitAccept, actions *githubActionsSource) runners.Hosting {
-	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
+	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services nodehost.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
 		var private *client.LocalHostClient
@@ -140,9 +139,15 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		if unit.OwnerMachine {
 			submitted = procenv.SubmitAcceptAll()
 		}
-		services, err = localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
+		var machineAdmission *nodehost.LocalAdmission
+		if admission {
+			machineAdmission = nodehost.MachineAdmission(home, version)
+			machineAdmission.Controller = connection.URL
+		}
+		services, err = nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
+			Admission:    nodehost.ComposeStartGate(state, machineAdmission, false),
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
-			Home: home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
+			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
 			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
 			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 				return state.RenewOwner(ctx, store.Actor{}, computing)
@@ -150,10 +155,6 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		}, private))
 		if err != nil {
 			return services, principal, err
-		}
-		if admission {
-			services.Config.Admission.Controller = connection.URL
-			services.Config.ClaimAdmission = services.Config.Admission
 		}
 
 		processes = services.Config.Processes

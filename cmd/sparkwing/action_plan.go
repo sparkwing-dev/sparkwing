@@ -210,7 +210,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 }
 
 func (p pipelineInspection) presentation(ctx context.Context) (runspec.PipelinePresentation, error) {
-	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
+	prepared, err := p.planner.Inspect(ctx, p.input)
 	if err != nil {
 		return runspec.PipelinePresentation{}, err
 	}
@@ -238,7 +238,7 @@ type planned struct {
 
 func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline string, args []string) (planned, error) {
 	out := planned{pipeline: pipeline}
-	prepared, err := entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
+	prepared, err := entry.planner.Inspect(ctx, entry.input)
 	if err != nil {
 		return out, planError(pipeline, err)
 	}
@@ -259,9 +259,9 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 			out.args[name] = "***"
 		}
 	}
-	raw, err := prepared.Functions.Plan(ctx)
+	raw, err := prepared.Plan(ctx)
 	if err == nil {
-		out.doc, err = prepared.Functions.Validate(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
+		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
 	}
 	if err != nil {
 		err = &maskedCLIError{err: planError(pipeline, err), masker: entry.planner.Masker}

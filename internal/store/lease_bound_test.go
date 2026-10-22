@@ -29,6 +29,7 @@ func TestUnmeteredNodeRenewalKeepsCapabilityExpiry(t *testing.T) {
 				t.Fatalf("claim expiry = %v, want capability expiry %v", claim.Award.LeaseExpiresAt, expiry)
 			}
 			tenant := &Tenant{s: s, team: "a"}
+			admitExecution(t, tenant, actor)
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
@@ -133,6 +134,7 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitExecution(t, tenant, holder)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +174,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitExecution(t, tenant, holder)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}

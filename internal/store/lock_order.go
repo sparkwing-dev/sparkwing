@@ -51,7 +51,7 @@ func compareLockTiers(a, b storeLockTier) int {
 }
 
 // Claims take the controller lease, queue arbitration, authority and unit rows,
-// then the ledger. Arbitration serializes asks and awards without unit ranking locks.
+// then the ledger. Arbitration serializes awards without unit ranking locks.
 func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 	if tx.claimQueueLocked {
 		return nil
@@ -397,28 +397,6 @@ func (t *storeTx) forNoKeyUpdate() string {
 		return " FOR NO KEY UPDATE"
 	}
 	return ""
-}
-
-// tryLockEntryTx takes a concurrency entry for update unless another
-// transaction holds it, and reports that it is busy instead of waiting.
-// SQLite serializes writers, so there it never reports busy.
-func tryLockEntryTx(ctx context.Context, tx *storeTx, team Team, key string) (busy bool, err error) {
-	if tx.dialect != DialectPostgres || tx.snapshotRead {
-		return false, nil
-	}
-	var one int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ? FOR UPDATE SKIP LOCKED`, string(team), key).Scan(&one)
-	if err == nil {
-		return false, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`, string(team), key).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
 }
 
 // controllerEpochLockSQL is the first lock every PostgreSQL write transaction takes: a share lock on the

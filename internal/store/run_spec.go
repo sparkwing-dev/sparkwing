@@ -315,6 +315,13 @@ func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUn
 }
 
 func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, now time.Time) error {
+	source, err := readNodeTx(ctx, tx, target.team, target.ref)
+	if err != nil {
+		return err
+	}
+	if pendingApprovalPredicate(source) {
+		return settleControllerTx(ctx, tx, target.team, string(target.ref.RunID), now)
+	}
 	state := ExpansionFailed
 	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
 	if status == "cancelled" {
@@ -394,7 +401,11 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key,claim_requirements) VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey, requirements)
+	claimContext, err := persistClaimContextTx(ctx, tx, team, result.RunID, kind, requirements, nil)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key,claim_requirements,claim_context) VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey, requirements, claimContext)
 	return err
 }
 
@@ -422,9 +433,21 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE triggers SET claim_requirements=? WHERE team=? AND id=?`, requirements, team, id); err != nil {
+	var kind capability.UnitKind
+	err = tx.QueryRowContext(ctx, `SELECT unit_kind FROM triggers WHERE team=? AND id=?`, team, id).Scan(&kind)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	if err == nil {
+		claimContext, err := persistClaimContextTx(ctx, tx, team, id, kind, requirements, nil)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, id); err != nil {
+			return err
+		}
+	}
+
 	for _, job := range plan.Jobs {
 		execution, ok := spec.Resolved.Settings.Jobs[job.ID]
 		if !ok {
@@ -434,7 +457,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		if err != nil {
 			return err
 		}
-		hash, err := tx.store.planServices().CanonicalHash(job)
+		hash, err := runspec.CanonicalHash(job)
 		if err != nil {
 			return err
 		}

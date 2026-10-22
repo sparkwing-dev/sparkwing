@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
@@ -29,8 +28,6 @@ type ObjectStoreBreakerResponse struct {
 	Ceiling objectguard.CeilingState `json:"ceiling"`
 	// Cleared lists the classes an operator reset in this call.
 	Cleared []string `json:"cleared,omitempty"`
-	// Thawed is true when this call cleared a bucket-ceiling freeze.
-	Thawed bool `json:"thawed,omitempty"`
 }
 
 func objectStoreBreakerState(l *objectguard.Limiter) ObjectStoreBreakerResponse {
@@ -56,12 +53,6 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 	for _, c := range limiter.Reset() {
 		resp.Cleared = append(resp.Cleared, string(c))
 	}
-	thawed, err := limiter.Ceiling().Thaw()
-	if err != nil {
-		return &apierr.Error{Code: apierr.Conflict, Message: "object-store ceiling still refuses writes"}
-	}
-	resp.Thawed = thawed
-	resp.Ceiling = limiter.Ceiling().State()
 	writeJSON(w, http.StatusOK, resp)
 	return nil
 }
@@ -135,28 +126,13 @@ func (s *Server) bucketUsage(ctx context.Context) (objectguard.Usage, error) {
 	}, nil
 }
 
-// perf: one replica per window pays for the listing, because a bucket total is
-// the same answer whoever asks and each pass is billed per thousand keys.
-func (s *Server) measureBucketLeased(ctx context.Context, ceiling *objectguard.Ceiling, window time.Duration) (bool, error) {
-	measure := func(ctx context.Context) error {
-		// safety: the measurement gets less than the window it runs on, so a bucket
-		// that cannot be walked in time reports itself partial instead of overlapping
-		// the next one.
-		if window > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, window/2)
-			defer cancel()
-		}
-		return ceiling.Measure(ctx, s.bucketUsage)
+func (s *Server) measureBucket(ctx context.Context, ceiling *objectguard.Ceiling, window time.Duration) error {
+	if window > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, window/2)
+		defer cancel()
 	}
-	if s.operator == nil || window <= 0 {
-		return true, measure(ctx)
-	}
-	return s.operator.RunBucketMeasureLeased(ctx, s.measureHolder(), window, window, measure)
-}
-
-func (s *Server) measureHolder() string {
-	return s.leaseHolder
+	return ceiling.Measure(ctx, s.bucketUsage)
 }
 
 func (s *Server) bucketMeasured() bool {
@@ -173,12 +149,8 @@ func (s *Server) runBucketCeiling(ctx context.Context) {
 	}
 	interval := ceiling.Reconcile()
 	measure := func() {
-		ran, err := s.measureBucketLeased(ctx, ceiling, interval)
-		if err != nil {
+		if err := s.measureBucket(ctx, ceiling, interval); err != nil {
 			s.logger.Error("object-store bucket ceiling", "op", "measure bucket", "err", err)
-			return
-		}
-		if !ran {
 			return
 		}
 		state := ceiling.State()

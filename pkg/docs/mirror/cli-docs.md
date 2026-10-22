@@ -39,7 +39,7 @@ Enumerate every doc topic
 | `--guides` | guides |
 | `--versions` | versions |
 | `--search TEXT` | Match records; never scan log text. |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--web` | web |
 | `--version vX.Y.Z` | version |
@@ -95,7 +95,7 @@ Find the section that answers a question
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--search TEXT` | Match records; never scan log text. |
 | `--body` | Include document bodies in search results. |
