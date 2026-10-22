@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -15,32 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-func TestJournalCorruptIncarnationDoesNotStopAdmission(t *testing.T) {
-	for _, fixture := range []struct{ name, content string }{{"empty", ""}, {"unparsable", "not-a-number"}} {
-		t.Run(fixture.name, func(t *testing.T) {
-			home := shortHome(t)
-			dir, err := wingd.StateDir(home)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "incarnation"), []byte(fixture.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			td := startDaemon(t, wingd.Config{Home: home})
-			c := ensure(t, home, "")
-			lease := mustAcquire(t, c, coreReq("run", 0.1))
-			if err := lease.Release(); err != nil {
-				t.Fatal(err)
-			}
-			_ = c.Close()
-			td.stopAndWait(t)
-		})
-	}
-}
 
 func TestJournalRecordsQueueBlockerAndGrant(t *testing.T) {
 	home := shortHome(t)

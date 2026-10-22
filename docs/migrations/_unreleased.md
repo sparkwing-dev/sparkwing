@@ -808,19 +808,16 @@ beside the runner `--image`. Remove `--deadline`. The Job deadline derives from
 the awarded execution inputs. Plan awards omit `--job` in `fetch-source` and
 `run-node`; work and eval retain the job from their private award metadata.
 
-## Daemon event cursors
+## Bounded daemon events
 
-Before: `daemon events --offset N`. Use `sparkwing daemon events` with the returned
-`--cursor` value. Repeat the same
-run, kind, incarnation and since filters on continuation. `--limit` must be
-positive. The default remains 50. Follow cursors until the final page to read
-all matching retained events. Newer arrivals do not shift older pages. Removed or
-edited unread history fails with a hint to restart without the cursor.
+`daemon events` shows the newest 50 matching retained records by default, in
+chronological order. `--limit` must be positive; increase it to include older
+records. Offset and cursor continuation are removed.
 
-JSON emits event rows followed by a `kind: page` object containing `next_cursor`
-and `truncated`, including on empty and final pages. Consumers must distinguish
-that object from event rows. `--explain --run ID` still returns the complete
-related timeline without pagination or page metadata.
+JSON emits event rows followed by a `kind: page` object whose `truncated` field
+reports whether older matching records were omitted. Consumers must distinguish
+that object from event rows. `--explain --run ID` returns the complete related
+timeline without a limit or page metadata.
 
 ## Daemon lifecycle reports
 

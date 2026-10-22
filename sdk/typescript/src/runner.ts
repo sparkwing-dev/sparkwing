@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import type { Readable } from "node:stream";
 import type { Args, Context, Failure, JobResult, PipelineDef, RunContext, RunnerInfo, Trigger } from "../index.d.ts";
 import { describe } from "./describe.ts";
-import { resolveArgs } from "./args.ts";
 import { Generated, lookupPipeline, Plan, type Closure } from "./plan.ts";
 import type { JobSpec } from "./plan-wire.ts";
 import { Git } from "./helpers/git.ts";
@@ -192,13 +191,11 @@ class Session {
     const rawArgs = stringMap(req.args, "args");
     const plan = new Plan(new PlanningDiagnostics(definition.args, rawArgs));
     return plan.diagnostics.run(async () => {
-      const args = resolvedArgs(definition.args ?? [], rawArgs, true);
+      const args = { ...rawArgs };
       const run = this.#run(object(req.run, "run"), args);
       if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
       await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
       const doc = plan.toDoc();
-      const allSpecs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
-      resolvedArgs(allSpecs, rawArgs, definition.extra === true);
       plan.seal();
       this.#planned = { plan, run, definition, rawArgs };
       return doc;
@@ -231,17 +228,7 @@ class Session {
       failureInfo = { job: String(f.job), stage: String(f.stage), message: decodeError(f.error).message };
     }
     const inputs = { ...run.args, ...rawArgs };
-    const pipelineArgs = resolvedArgs(
-      [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())],
-      inputs,
-      definition.extra === true,
-    );
-    let args: Args;
-    try {
-      args = plan.findJob(spec.id)!.resolveArgs(pipelineArgs);
-    } catch (error) {
-      throw failure("invalid_args", messageOf(error));
-    }
+    const args = plan.findJob(spec.id)!.resolveArgs(inputs);
     const outputs = this.#state(spec.id).outputs;
     return makeContext({
       run,
@@ -332,12 +319,7 @@ class Session {
       await closure.fn(generated, req.input ?? null, ctx);
       ctx.signal.throwIfAborted();
       const jobs = generated.toDoc().jobs;
-      const { definition, plan, rawArgs } = this.#current();
-      resolvedArgs(
-        [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
-        rawArgs,
-        definition.extra === true,
-      );
+      const { plan } = this.#current();
       plan.insert(generated);
       this.#generated.set(closure.id, jobs);
       return jobs;
@@ -389,13 +371,5 @@ async function evalTurn(previous: Promise<void>, signal: AbortSignal): Promise<v
     signal.throwIfAborted();
   } finally {
     signal.removeEventListener("abort", abort);
-  }
-}
-
-function resolvedArgs(specs: readonly import("../index.d.ts").ArgSpec[], raw: Args, allowUnknown: boolean): Record<string, string> {
-  try {
-    return resolveArgs(specs, raw, { allowUnknown });
-  } catch (error) {
-    throw failure("invalid_args", messageOf(error));
   }
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -93,25 +92,12 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 			i++
 			value = args[i]
 		}
-		if found && len(arg.Enum) > 0 {
-			values := []string{value}
-			if arg.Type == "[]string" {
-				values = nil
-				for _, item := range strings.Split(value, ",") {
-					if item = strings.TrimSpace(item); item != "" {
-						values = append(values, item)
-					}
-				}
+		if found {
+			normalized, err := nodeproto.ValidateArgument(arg, value)
+			if err != nil {
+				return nil, err
 			}
-			for _, item := range values {
-				if slices.Contains(arg.Enum, item) {
-					continue
-				}
-				if arg.Secret {
-					return nil, fmt.Errorf("flag --%s: invalid secret value", name)
-				}
-				return nil, fmt.Errorf("flag --%s: %q is not one of %s", name, item, strings.Join(arg.Enum, ", "))
-			}
+			value = normalized
 		}
 		out[name] = value
 	}

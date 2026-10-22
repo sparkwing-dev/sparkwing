@@ -1,0 +1,159 @@
+package nodehost
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+)
+
+func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "argumentsfixture")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./testdata/argumentsfixture")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build Go declarations: %v\n%s", err, output)
+	}
+	goDoc, err := exec.CommandContext(t.Context(), binary).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("TypeScript argument conformance requires node")
+	}
+	tsDoc, err := exec.CommandContext(t.Context(), node, "../../sdk/typescript/test/fixtures/arguments-describe.mjs").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documents := map[string][]byte{"go": goDoc, "typescript": tsDoc}
+	for sdk, raw := range documents {
+		var doc nodeproto.DescribeDoc
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for _, description := range doc.Pipelines {
+			if description.Error != nil {
+				t.Fatalf("%s SDK rejected declarations before host: %s: %v", sdk, description.Name, description.Error)
+			}
+		}
+	}
+	for _, pipeline := range []string{"secret-empty", "secret-duplicate"} {
+		_, _, err := (SDKPlanner{}).describe(tsDoc, PlanningProcessInput{Entrypoint: pipeline})
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError || failure.Message != "SDK describe has invalid secret declarations" {
+			t.Fatalf("TypeScript host secret error = %v", err)
+		}
+	}
+	for _, test := range []struct {
+		name, pipeline string
+		args           map[string]string
+		message        string
+	}{
+		{"required", "args", nil, "argument --text is required"},
+		{"unknown", "args", map[string]string{"text": "yes", "unknown": "bad"}, "no flag --unknown is declared"},
+		{"bool", "args", map[string]string{"text": "yes", "bool": "yes"}, "argument --bool must be bool"},
+		{"int", "args", map[string]string{"text": "yes", "int": "1.2"}, "argument --int must be int"},
+		{"int64", "args", map[string]string{"text": "yes", "int64": "9223372036854775808"}, "argument --int64 must be int64"},
+		{"float", "args", map[string]string{"text": "yes", "float": "bad"}, "argument --float must be float64"},
+		{"nan", "args", map[string]string{"text": "yes", "float": "NaN"}, "argument --float must be float64"},
+		{"infinity", "args", map[string]string{"text": "yes", "float": "+Inf"}, "argument --float must be float64"},
+		{"duration", "args", map[string]string{"text": "yes", "duration": "later"}, "argument --duration must be duration"},
+		{"enum", "args", map[string]string{"text": "yes", "list": "dev,other"}, "argument --list is not an allowed value"},
+		{"duplicate-name", "duplicate-name", nil, "SDK describe has ambiguous arguments"},
+		{"duplicate-short", "duplicate-short", nil, "argument --two has an invalid or duplicate short name"},
+		{"invalid-short", "invalid-short", nil, "argument --one has an invalid or duplicate short name"},
+		{"required-empty", "required-empty", nil, "argument --value is required"},
+		{"required-default", "required-default", nil, "argument --value cannot be required and have a default"},
+		{"enum-type", "enum-type", nil, "argument --value: enum requires string or []string"},
+		{"enum-anchor", "enum-anchor", nil, "argument --value: enum requires a default or required argument"},
+		{"enum-default", "enum-default", nil, "argument --value is not an allowed value"},
+		{"float-default", "float-default", nil, "argument --value must be float64"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for sdk, raw := range documents {
+				planner := SDKPlanner{Masks: NewMaskRegistry(secrets.NewMasker())}
+				_, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: test.pipeline, Args: test.args})
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != test.message {
+					t.Fatalf("%s host error = %v; want invalid_args: %s", sdk, err, test.message)
+				}
+			}
+		})
+	}
+	for sdk, raw := range documents {
+		planner := SDKPlanner{Masks: NewMaskRegistry(secrets.NewMasker())}
+		for _, test := range []struct{ args, want map[string]string }{
+			{map[string]string{"text": "yes"}, map[string]string{"text": "yes", "list": "dev,prod"}},
+			{map[string]string{"text": "yes", "list": " prod, , dev ", "float": "1.5", "duration": "-0", "empty": ""}, map[string]string{"text": "yes", "list": "prod,dev", "float": "1.5", "duration": "-0", "empty": ""}},
+		} {
+			prepared, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "args", Args: test.args})
+			if err != nil || !reflect.DeepEqual(prepared.Args, test.want) {
+				t.Fatalf("%s host arguments = %v, %v; want %v", sdk, prepared.Args, err, test.want)
+			}
+		}
+	}
+}
+
+func TestHostRefusesInvalidSecretDeclarationsAfterDescribe(t *testing.T) {
+	for _, declarations := range [][]nodeproto.SecretDeclaration{{{Name: ""}}, {{Name: "TOKEN"}, {Name: "TOKEN"}}} {
+		raw, err := json.Marshal(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "pipeline", Args: []nodeproto.ArgumentDescription{}, Secrets: declarations}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = (SDKPlanner{}).describe(raw, PlanningProcessInput{Entrypoint: "pipeline"})
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
+			t.Fatalf("secret declarations accepted: %v", err)
+		}
+	}
+}
+
+func TestHostAnnotationRulesAgreeForBothSDKs(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("TypeScript annotation conformance requires node")
+	}
+	raw, err := exec.CommandContext(t.Context(), node, "../../sdk/typescript/test/fixtures/annotation-requests.mjs").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tsBodies []json.RawMessage
+	if err := json.Unmarshal(raw, &tsBodies); err != nil {
+		t.Fatal(err)
+	}
+	annotations := []nodeproto.AnnotationRequest{{Message: "range", Line: 5, EndLine: 4}, {Message: "level", Level: "warning"}, {Message: "negative", Line: -1}}
+	if len(tsBodies) != len(annotations) {
+		t.Fatalf("TypeScript rejected invalid annotations before host: %s", raw)
+	}
+	routes, service, auth := serviceFixture(t)
+	calls := 0
+	service.Annotation = func(_ context.Context, _ capability.Authorized, _ nodeproto.AnnotationRequest) error {
+		calls++
+		return nil
+	}
+	for index, annotation := range annotations {
+		goBody, err := sdkserve.EncodeServiceRequest(annotation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for sdk, body := range map[string][]byte{"go": goBody, "typescript": tsBodies[index]} {
+			_, err := callService(t, routes, auth, "/node/v1/annotations", string(body))
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || failure.Message != "invalid annotation level or location" {
+				t.Fatalf("%s host annotation error = %v", sdk, err)
+			}
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid annotations reached persistence %d times", calls)
+	}
+}

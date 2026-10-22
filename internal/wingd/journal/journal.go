@@ -8,10 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -22,8 +19,6 @@ const (
 	maxRecordBytes = 1 << 20
 	closeDeadline  = 100 * time.Millisecond
 )
-
-var lastIncarnation atomic.Uint64
 
 // Record describes one decision or observation made by the daemon.
 type Record struct {
@@ -307,69 +302,4 @@ func ReadWithStats(dir string) ([]Record, int, error) {
 		return a.Seq < b.Seq
 	})
 	return records, skipped, nil
-}
-
-// NextIncarnation chooses a daemon identity without waiting for journal storage.
-func NextIncarnation() uint64 {
-	for {
-		n := uint64(time.Now().UnixNano())
-		previous := lastIncarnation.Load()
-		if n <= previous {
-			n = previous + 1
-		}
-		if lastIncarnation.CompareAndSwap(previous, n) {
-			return n
-		}
-	}
-}
-
-// PersistIncarnation records the next identity and returns the value written.
-func PersistIncarnation(dir string, n uint64) (selected uint64, result error) {
-	path := filepath.Join(dir, "incarnation")
-	var readErr error
-	if b, err := os.ReadFile(path); err == nil {
-		if previous, err := parseIncarnation(b); err == nil {
-			if previous == ^uint64(0) {
-				return 0, fmt.Errorf("incarnation counter exhausted")
-			}
-			n = previous + 1
-		} else {
-			readErr = fmt.Errorf("invalid incarnation %q", strings.TrimSpace(string(b)))
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		readErr = fmt.Errorf("read incarnation: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, "incarnation-*.tmp")
-	if err != nil {
-		return n, errors.Join(readErr, fmt.Errorf("create incarnation temp: %w", err))
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		if err := os.Remove(tmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			result = errors.Join(result, fmt.Errorf("remove incarnation temp: %w", err))
-		}
-	}()
-	_, writeErr := tmp.Write([]byte(fmt.Sprint(n)))
-	if err := errors.Join(writeErr, tmp.Close()); err != nil {
-		return n, errors.Join(readErr, fmt.Errorf("write incarnation: %w", err))
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return n, errors.Join(readErr, fmt.Errorf("replace incarnation: %w", err))
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return n, errors.Join(readErr, fmt.Errorf("list incarnation temps: %w", err))
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "incarnation-") && strings.HasSuffix(entry.Name(), ".tmp") {
-			if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
-				result = errors.Join(result, fmt.Errorf("remove incarnation temp: %w", err))
-			}
-		}
-	}
-	return n, errors.Join(readErr, result)
-}
-
-func parseIncarnation(b []byte) (uint64, error) {
-	return strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
 }

@@ -104,38 +104,10 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 	if err != nil {
 		panic(fmt.Sprintf("%s(%q): invalid Inputs schema on %s: %v", callerLabel, name, t, err))
 	}
-	defaults := inputSchema{Extra: schema.Extra}
-	for _, field := range schema.Fields {
-		if field.Default != "" || field.isExtraBag {
-			defaults.Fields = append(defaults.Fields, field)
-		}
-	}
 	invoke := func(ctx context.Context, args map[string]string, rc RunContext, discovery bool) (*Plan, error) {
-		pipeKnown := map[string]bool{}
-		for _, f := range schema.Fields {
-			pipeKnown[f.Name] = true
-		}
-		var pipeArgs, extraArgs map[string]string
-		if schema.Extra {
-			pipeArgs = args
-		} else {
-			pipeArgs = make(map[string]string, len(args))
-			extraArgs = make(map[string]string)
-			for k, v := range args {
-				if pipeKnown[k] {
-					pipeArgs[k] = v
-				} else {
-					extraArgs[k] = v
-				}
-			}
-		}
 		var in T
 		if t != nil && t.Kind() == reflect.Struct {
-			inputs := schema
-			if discovery {
-				inputs = defaults
-			}
-			if err := populateInputs(inputs, reflect.ValueOf(&in).Elem(), pipeArgs); err != nil {
+			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), args); err != nil {
 				return nil, &InputError{Err: fmt.Errorf("inputs for pipeline %q: %w", name, err)}
 			}
 		}
@@ -150,14 +122,6 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 			return nil, err
 		}
 		registerRecoveryArgs(plan)
-		if err := assertJobArgsDisjoint(plan, schema); err != nil {
-			return nil, fmt.Errorf("pipeline %q: %w", name, err)
-		}
-		if len(extraArgs) > 0 {
-			if err := assertJobArgsCoverage(plan, extraArgs); err != nil {
-				return nil, &InputError{Err: fmt.Errorf("inputs for pipeline %q: %w", name, err)}
-			}
-		}
 		if !discovery {
 			if err := resolveAndBindJobArgs(plan, args); err != nil {
 				return nil, &InputError{Err: fmt.Errorf("pipeline %q: %w", name, err)}

@@ -256,13 +256,10 @@ scope.
 with current authority, declared names, pipeline/shared precedence and pool
 restrictions. Trusted exact-row inspection still uses `GetSecretRow`.
 
-## Measurement leases and executable activity
+## Bucket measurement and executable activity
 
-`Operator.RunBucketMeasureLeased` uses the `bucket.measure` singleton and a
-store-clock success stamp in `settings`. Cron and measurement callbacks share
-one fenced window owner. A failed callback releases its captured lease without
-stamping success. A stale callback cannot stamp or release a successor. The
-Store method and the `sparkwing_meta` sweep-window implementation are removed.
+Bucket measurement runs on the controller's ordinary timer. The cross-controller
+`bucket.measure` lease and success stamp are removed (decision 50).
 
 `Tenant.ExecutionActivity` reads executable run, pending owner and live holder
 counts in one tenant-scoped snapshot. Lease expiration uses the store clock.

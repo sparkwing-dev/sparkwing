@@ -4,9 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
-	"sort"
-	"strings"
 )
 
 type jobArgsDecl struct {
@@ -38,20 +35,7 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 		if f.isExtraBag {
 			panic(fmt.Sprintf("sparkwing: Job(%q): WithArgs[%s] field %s: flag:\",extra\" is only supported on pipeline Inputs", id, argsType, f.GoName))
 		}
-		for _, prior := range p.jobArgs {
-			for _, pf := range prior.schema.Fields {
-				if pf.Name == f.Name {
-					panic(fmt.Sprintf(
-						"sparkwing: Job(%q): flag --%s declared by both job %q and job %q; "+
-							"rename one with a `flag:\"...\"` tag",
-						id, f.Name, prior.jobID, id,
-					))
-				}
-				if f.Short != "" && pf.Short == f.Short {
-					panic(fmt.Sprintf("sparkwing: Job(%q): short -%s declared by both job %q and job %q", id, f.Short, prior.jobID, id))
-				}
-			}
-		}
+
 	}
 	p.jobArgs = append(p.jobArgs, jobArgsDecl{jobID: id, schema: schema, goType: argsType, holder: holder})
 }
@@ -81,63 +65,6 @@ func (p *Plan) declaredArguments() []describeArg {
 		}
 	}
 	return out
-}
-
-// safety: the CLI maps every flag and alias of the pipeline and its jobs
-// into one table, so a shared name would silently route a value to one owner.
-func assertJobArgsDisjoint(p *Plan, pipe inputSchema, existing ...jobArgsDecl) error {
-	names := map[string]string{}
-	shorts := map[string]string{}
-	for _, f := range pipe.Fields {
-		if f.isExtraBag {
-			continue
-		}
-		names[f.Name] = "pipeline Inputs"
-		if f.Short != "" {
-			shorts[f.Short] = f.Name
-		}
-	}
-	for _, d := range slices.Concat(existing, p.jobArgs) {
-		for _, f := range d.schema.Fields {
-			if prior, exists := names[f.Name]; exists {
-				return fmt.Errorf("job %q declares --%s, already declared by %s", d.jobID, f.Name, prior)
-			}
-			if prior, dup := shorts[f.Short]; f.Short != "" && dup {
-				return fmt.Errorf("job %q declares -%s for --%s, already used for --%s", d.jobID, f.Short, f.Name, prior)
-			}
-			names[f.Name] = fmt.Sprintf("job %q", d.jobID)
-			if f.Short != "" {
-				shorts[f.Short] = f.Name
-			}
-		}
-	}
-	return nil
-}
-
-func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
-	if p == nil || len(extra) == 0 {
-		return nil
-	}
-	known := map[string]bool{}
-	for _, d := range p.jobArgs {
-		for _, f := range d.schema.Fields {
-			known[f.Name] = true
-		}
-	}
-	var unknown []string
-	for k := range extra {
-		if !known[k] {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	sort.Strings(unknown)
-	if len(unknown) == 1 {
-		return fmt.Errorf("unknown flag --%s", unknown[0])
-	}
-	return fmt.Errorf("unknown flags: --%s", strings.Join(unknown, ", --"))
 }
 
 func resolveAndBindJobArgs(p *Plan, args map[string]string) error {

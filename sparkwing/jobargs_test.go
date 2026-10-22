@@ -136,14 +136,6 @@ func TestJobArgs_NoneForJobsWithoutWithArgs(t *testing.T) {
 	}
 }
 
-func TestJobArgs_FlagCollisionPanics(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1{})
-	mustPanic(t, []string{"deploy", "colliding", "--replicas"}, func() {
-		Job(p, "colliding", &jobargsJobColliding{})
-	})
-}
-
 func TestJobArgs_SecretsRetainClassification(t *testing.T) {
 	isolateProtocolDiscoveryRegistry(t)
 	Register[NoInputs]("job-secrets", func() Pipeline[NoInputs] {
@@ -174,7 +166,7 @@ func TestResolveAndBindJobArgs_AppliesTagsAndBinds(t *testing.T) {
 	Job(p, "deploy", deploy)
 	Job(p, "notify", notify)
 
-	err := resolveAndBindJobArgs(p, map[string]string{"replicas": "5", "webhook": "https://hook", "pipeline-flag": "x"})
+	err := resolveAndBindJobArgs(p, map[string]string{"replicas": "5", "image": "nginx:latest", "mode": "rolling", "webhook": "https://hook", "pipeline-flag": "x"})
 	if err != nil {
 		t.Fatalf("resolveAndBindJobArgs: %v", err)
 	}
@@ -184,39 +176,6 @@ func TestResolveAndBindJobArgs_AppliesTagsAndBinds(t *testing.T) {
 	}
 	if got := notify.Args(context.Background()).Webhook; got != "https://hook" {
 		t.Errorf("notify webhook = %q", got)
-	}
-}
-
-func TestResolveAndBindJobArgs_RequiredAndEnumFailNamingTheJob(t *testing.T) {
-	cases := map[string]map[string]string{
-		"missing required": {},
-		"outside enum":     {"replicas": "1", "mode": "blue-green"},
-	}
-	for name, args := range cases {
-		t.Run(name, func(t *testing.T) {
-			p := NewPlan()
-			Job(p, "deploy", &jobargsJob1{})
-			err := resolveAndBindJobArgs(p, args)
-			if err == nil || !strings.Contains(err.Error(), `job "deploy"`) {
-				t.Fatalf("err = %v, want one naming job deploy", err)
-			}
-		})
-	}
-}
-
-func TestAssertJobArgsCoverage(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1{})
-
-	if err := assertJobArgsCoverage(p, map[string]string{"replicas": "3", "image": "nginx"}); err != nil {
-		t.Errorf("flags declared by the job should pass; got %v", err)
-	}
-	err := assertJobArgsCoverage(p, map[string]string{"scratch": "3"})
-	if err == nil || !strings.Contains(err.Error(), "--scratch") {
-		t.Errorf("an untagged field is not a flag; got %v", err)
-	}
-	if err := assertJobArgsCoverage(nil, map[string]string{"anything": "x"}); err != nil {
-		t.Errorf("nil plan should be a no-op; got %v", err)
 	}
 }
 
@@ -250,79 +209,5 @@ func TestWithArgs_BindFromAny(t *testing.T) {
 	}
 	if err := j.bindFromAny("wrong"); err == nil || !strings.Contains(err.Error(), "type mismatch") {
 		t.Errorf("BindFromAny(wrong type) = %v, want a type mismatch", err)
-	}
-}
-
-type jobargsPipeInputs struct {
-	Target string `flag:"target" short:"t" desc:"deploy target"`
-}
-
-type jobargsTagArgs struct {
-	Tag string `flag:"tag" short:"t" desc:"image tag"`
-}
-
-type jobargsTagJob struct {
-	Base
-	WithArgs[jobargsTagArgs]
-}
-
-func (j *jobargsTagJob) Work(w *Work) (*WorkStep, error) {
-	return Step(w, "run", func(_ context.Context) error { return nil }), nil
-}
-
-type jobargsTargetArgs struct {
-	Target string `flag:"target" desc:"job's own target"`
-}
-
-type jobargsTargetJob struct {
-	Base
-	WithArgs[jobargsTargetArgs]
-}
-
-func (j *jobargsTargetJob) Work(w *Work) (*WorkStep, error) {
-	return Step(w, "run", func(_ context.Context) error { return nil }), nil
-}
-
-type jobargsCollidePipe struct {
-	job      Workable
-	recovery bool
-	nested   bool
-}
-
-func (c jobargsCollidePipe) Plan(_ context.Context, plan *Plan, _ jobargsPipeInputs, _ RunContext) error {
-	if c.nested {
-		recovery := plan.Approval("gate", ApprovalConfig{}).
-			OnFailure("source", func(context.Context) error { return nil })
-		recovery.OnFailure("recover", c.job)
-	} else if c.recovery {
-		Job(plan, "source", func(context.Context) error { return nil }).OnFailure("recover", c.job)
-	} else {
-		Job(plan, "deploy", c.job)
-	}
-	return nil
-}
-
-func TestInvoke_RefusesJobFlagsThatShadowPipelineInputs(t *testing.T) {
-	for name, tc := range map[string]struct {
-		job  Workable
-		want string
-	}{
-		"short": {&jobargsTagJob{}, "-t for --tag"},
-		"long":  {&jobargsTargetJob{}, "declares --target"},
-	} {
-		for _, kind := range []string{"job", "recovery", "nested-recovery"} {
-			t.Run(name+"/"+kind, func(t *testing.T) {
-				pipe := "jobargs-collide-" + name + "-" + kind
-				job := tc.job
-				Register[jobargsPipeInputs](pipe, func() Pipeline[jobargsPipeInputs] {
-					return jobargsCollidePipe{job: job, recovery: kind == "recovery", nested: kind == "nested-recovery"}
-				})
-				reg, _ := lookup(pipe)
-				_, err := reg.Invoke(t.Context(), map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("Invoke = %v, want an error containing %q", err, tc.want)
-				}
-			})
-		}
 	}
 }

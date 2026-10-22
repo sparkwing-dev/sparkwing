@@ -377,13 +377,6 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			return nil, err
 		}
 		registerRecoveryArgs(expansion)
-		var schema inputSchema
-		if p.registration != nil {
-			schema = p.registration.Schema
-		}
-		if err := assertJobArgsDisjoint(expansion, schema, p.jobArgs...); err != nil {
-			return nil, sdkError(apierr.PlanInvalid, err.Error())
-		}
 		if err := resolveAndBindJobArgs(expansion, p.args); err != nil {
 			return nil, sdkError(apierr.InvalidArgs, err.Error())
 		}

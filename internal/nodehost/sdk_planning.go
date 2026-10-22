@@ -63,8 +63,8 @@ type SDKPlanner struct {
 	Warn           func(string)
 }
 
-// Prepare describes the selected entry, registers defaults from every pipeline
-// and resolves requested arguments. It starts no plan process on a cache hit.
+// Prepare describes the selected entry and resolves its requested arguments
+// and defaults. It starts no plan process on a cache hit.
 func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput) (PreparedPlanning, error) {
 	if p.Start == nil || p.EnsureEngine == nil || p.Masker == nil || p.Log == nil {
 		return PreparedPlanning{}, errors.New("SDK planning requires process, engine, masking and run-log adapters")

@@ -71,7 +71,7 @@ func TestHolderLockDiesWithProcess(t *testing.T) {
 	}
 	_ = stdin.Close()
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatalf("Prune after holder death: %v", err)
 	}

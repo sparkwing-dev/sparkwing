@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,10 +177,6 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		return false, err
 	}
 	globalHooks := chainableGlobalHooks(git, hooksDir)
-	globalState, err := captureGlobalHookState(git, hooksDir, globalHooks)
-	if err != nil {
-		return false, err
-	}
 	plan, proceed := prepareHookInstall(git, repoRoot, hooksDir,
 		prospectiveUnforwardedGlobalHooks(globalHooks, hooksDir), hooksToRun, opts.prove)
 	if !proceed {
@@ -191,24 +186,8 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		}
 		return githooks.Survey(git, repoRoot, declared).Gated(), errors.New("installation rejected; prior hooks and core.hooksPath remain unchanged")
 	}
-	currentGlobalHooks := chainableGlobalHooks(git, hooksDir)
-	currentGlobalState, err := captureGlobalHookState(git, hooksDir, currentGlobalHooks)
-	if err != nil {
-		return false, err
-	}
-	if !sameGlobalHookState(globalState, currentGlobalState) {
-		return false, errors.New("global hooks changed while hook gates were proving; re-run the install")
-	}
-	if active, scope := githooks.ActivePath(git, repoRoot); active != plan.active || scope != plan.scope {
-		return false, errors.New("core.hooksPath changed while hook gates were proving; re-run the install")
-	}
-	snapshot, err := captureHookInstallSnapshot(git, repoRoot, hooksDir,
-		slices.Concat(slices.Sorted(maps.Keys(hooksToRun)), slices.Sorted(maps.Keys(globalHooks))))
-	if err != nil {
-		return false, err
-	}
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
+		return false, err
 	}
 
 	installed, skipped := 0, 0
@@ -216,7 +195,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		pipes := hooksToRun[hookName]
 		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, pipes, globalHooks[hookName]))
 		if err != nil {
-			return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
+			return false, err
 		}
 		if !wrote {
 			skipped++
@@ -232,7 +211,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		}
 		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, nil, true))
 		if err != nil {
-			return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
+			return false, err
 		}
 		if !wrote {
 			skipped++
@@ -242,26 +221,23 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		installed++
 	}
 	fmt.Fprintf(os.Stderr, "\n%d hook(s) installed, %d skipped\n", installed, skipped)
-	gated, err := armHooks(git, repoRoot, hooksDir, unforwardedGlobalHooks(globalHooks, hooksDir), hooksToRun, plan)
+	gated, err := armHooks(git, repoRoot, hooksDir, hooksToRun, plan)
 	if err != nil {
-		return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
+		return false, err
 	}
 	reportSilencedGlobalHooks(git, repoRoot, hooksDir)
 	return gated, nil
 }
 
 type hookInstallPlan struct {
-	active      string
-	scope       string
-	reads       bool
-	unforwarded []string
+	active string
+	reads  bool
 }
 
 func prepareHookInstall(git githooks.Git, repoRoot, hooksDir string, unforwarded []string, hooksToRun map[string][]string, prove Prover) (hookInstallPlan, bool) {
 	active, scope := githooks.ActivePath(git, repoRoot)
 	plan := hookInstallPlan{
-		active: active, scope: scope, reads: active == "" || githooks.SameDir(active, hooksDir),
-		unforwarded: append([]string(nil), unforwarded...),
+		active: active, reads: active == "" || githooks.SameDir(active, hooksDir),
 	}
 	if !plan.reads {
 		if scope == "local" {
@@ -289,90 +265,6 @@ func prepareHookInstall(git githooks.Git, repoRoot, hooksDir string, unforwarded
 	fmt.Fprintln(os.Stderr, "  prior hooks and core.hooksPath remain unchanged")
 	fmt.Fprintln(os.Stderr, "  fix the gate(s), then re-run `sparkwing pipeline hooks install`; `--no-prove` arms them without the proof")
 	return plan, false
-}
-
-type hookFileSnapshot struct {
-	body   []byte
-	mode   os.FileMode
-	exists bool
-}
-
-type hookInstallSnapshot struct {
-	files        map[string]hookFileSnapshot
-	hooksPath    string
-	hooksPathSet bool
-	dirExisted   bool
-}
-
-func captureHookInstallSnapshot(git githooks.Git, repoRoot, hooksDir string, names []string) (hookInstallSnapshot, error) {
-	s := hookInstallSnapshot{files: map[string]hookFileSnapshot{}}
-	if info, err := os.Stat(hooksDir); err == nil && info.IsDir() {
-		s.dirExisted = true
-	} else if err != nil && !os.IsNotExist(err) {
-		return s, err
-	}
-	for _, name := range names {
-		if _, ok := s.files[name]; ok {
-			continue
-		}
-		path := filepath.Join(hooksDir, name)
-		body, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			s.files[name] = hookFileSnapshot{}
-			continue
-		}
-		if err != nil {
-			return s, err
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return s, err
-		}
-		s.files[name] = hookFileSnapshot{body: body, mode: info.Mode(), exists: true}
-	}
-	s.hooksPath, s.hooksPathSet = localHooksPathValue(git, repoRoot)
-	return s, nil
-}
-
-func (s hookInstallSnapshot) restore(git githooks.Git, repoRoot, hooksDir string) error {
-	var errs []error
-	for name, prior := range s.files {
-		path := filepath.Join(hooksDir, name)
-		if !prior.exists {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				errs = append(errs, err)
-			}
-			continue
-		}
-		if err := replaceHookFile(path, prior.body, prior.mode.Perm()); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	current, set := localHooksPathValue(git, repoRoot)
-	switch {
-	case s.hooksPathSet && (!set || current != s.hooksPath):
-		if _, err := git(repoRoot, "config", "core.hooksPath", s.hooksPath); err != nil {
-			errs = append(errs, err)
-		}
-	case !s.hooksPathSet && set:
-		if _, err := git(repoRoot, "config", "--unset", "core.hooksPath"); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if !s.dirExisted {
-		if err := os.Remove(hooksDir); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func localHooksPathValue(git githooks.Git, repoRoot string) (string, bool) {
-	out, err := git(repoRoot, "config", "--local", "core.hooksPath")
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSuffix(out, "\n"), true
 }
 
 func unforwardedGlobalHooks(globalHooks map[string]bool, hooksDir string) []string {
@@ -436,7 +328,11 @@ func chainSuffix(chained bool) string {
 
 func writeManagedHook(hooksDir, name, content string) (bool, error) {
 	path := filepath.Join(hooksDir, name)
-	if existing, err := os.ReadFile(path); err == nil && !strings.Contains(string(existing), sparkwingHookMarker) {
+	existing, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("read %s: %w", path, err)
+	}
+	if err == nil && !strings.Contains(string(existing), sparkwingHookMarker) {
 		fmt.Fprintf(os.Stderr, "skipped %s: existing hook is not managed by sparkwing (remove it first)\n", name)
 		return false, nil
 	}
@@ -478,85 +374,7 @@ func prospectiveUnforwardedGlobalHooks(globalHooks map[string]bool, hooksDir str
 	return names
 }
 
-type globalHookFileState struct {
-	fileType   os.FileMode
-	linkTarget string
-	stat       os.FileInfo
-	body       [sha256.Size]byte
-	mode       os.FileMode
-}
-
-type globalHookState struct {
-	path  string
-	files map[string]globalHookFileState
-}
-
-func captureGlobalHookState(git githooks.Git, hooksDir string, hooks map[string]bool) (globalHookState, error) {
-	dir := githooks.GlobalPath(git)
-	state := globalHookState{path: canonicalHookPath(dir), files: make(map[string]globalHookFileState, len(hooks))}
-	if dir == "" || githooks.SameDir(dir, hooksDir) {
-		return state, nil
-	}
-	for _, name := range slices.Sorted(maps.Keys(hooks)) {
-		path := filepath.Join(dir, name)
-		linfo, err := os.Lstat(path)
-		if err != nil {
-			return globalHookState{}, err
-		}
-		var linkTarget string
-		if linfo.Mode()&os.ModeSymlink != 0 {
-			linkTarget, err = os.Readlink(path)
-			if err != nil {
-				return globalHookState{}, err
-			}
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return globalHookState{}, err
-		}
-		info, statErr := file.Stat()
-		body, readErr := io.ReadAll(file)
-		closeErr := file.Close()
-		if err := errors.Join(statErr, readErr, closeErr); err != nil {
-			return globalHookState{}, err
-		}
-		state.files[name] = globalHookFileState{
-			fileType: linfo.Mode() & os.ModeType, linkTarget: linkTarget,
-			stat: info, body: sha256.Sum256(body), mode: info.Mode(),
-		}
-	}
-	return state, nil
-}
-
-func canonicalHookPath(path string) string {
-	if path == "" {
-		return ""
-	}
-	path = filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
-	}
-	return path
-}
-
-func sameGlobalHookState(before, after globalHookState) bool {
-	if before.path != after.path || len(before.files) != len(after.files) {
-		return false
-	}
-	for name, first := range before.files {
-		second, ok := after.files[name]
-		if !ok || first.fileType != second.fileType || first.linkTarget != second.linkTarget ||
-			!os.SameFile(first.stat, second.stat) || first.body != second.body || first.mode != second.mode {
-			return false
-		}
-	}
-	return true
-}
-
-func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string, hooksToRun map[string][]string, plan hookInstallPlan) (bool, error) {
-	if !slices.Equal(unforwarded, plan.unforwarded) {
-		return false, fmt.Errorf("global hook forwarding changed while hooks were being installed: %s", strings.Join(unforwarded, ", "))
-	}
+func armHooks(git githooks.Git, repoRoot, hooksDir string, hooksToRun map[string][]string, plan hookInstallPlan) (bool, error) {
 	gates := declaredGates(slices.Sorted(maps.Keys(hooksToRun)))
 	if len(githooks.Gates(hooksDir)) == 0 {
 		if len(gates) > 0 {
@@ -686,7 +504,7 @@ func uninstallHooks(git githooks.Git, repoRoot string) error {
 		p := filepath.Join(hooksDir, e.Name())
 		data, err := os.ReadFile(p)
 		if err != nil {
-			continue
+			return fmt.Errorf("read hook %s: %w", e.Name(), err)
 		}
 		if !strings.Contains(string(data), sparkwingHookMarker) {
 			continue
@@ -722,9 +540,6 @@ func releaseHooksPath(git githooks.Git, repoRoot, hooksDir string) {
 
 func runHooksStatus(inv clisurface.Invocation) error {
 	mode := inv.Output(color.IsInteractiveStdout())
-	if inv.Bool("prove") {
-		return proveHooks(inv.Bool("all-repos"), mode)
-	}
 	if inv.Bool("all-repos") {
 		return surveyHooks(inv.Bool("ungated"), mode)
 	}
@@ -740,6 +555,7 @@ type managedHookStatus struct {
 	Name         string   `json:"name"`
 	Pipelines    []string `json:"pipelines"`
 	ChainsGlobal bool     `json:"chains_global"`
+	Current      bool     `json:"current"`
 }
 
 type hooksStatusSummary struct {
@@ -755,9 +571,10 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 	if err != nil {
 		return err
 	}
+	expected, _ := expectedHooks(git, repoRoot, hooksDir)
 	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		entries = nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	var hooks []managedHookStatus
 	for _, e := range entries {
@@ -766,7 +583,7 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		}
 		data, err := os.ReadFile(filepath.Join(hooksDir, e.Name()))
 		if err != nil {
-			continue
+			return fmt.Errorf("read hook %s: %w", e.Name(), err)
 		}
 		if !strings.Contains(string(data), sparkwingHookMarker) {
 			continue
@@ -775,9 +592,12 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		if pipes == nil {
 			pipes = []string{}
 		}
-		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: e.Name(), Pipelines: pipes, ChainsGlobal: chained})
+		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: e.Name(), Pipelines: pipes, ChainsGlobal: chained, Current: string(data) == expected[e.Name()] && hookExecutable(filepath.Join(hooksDir, e.Name()))})
 	}
 	for _, hook := range hooks {
+		if !hook.Current {
+			fmt.Fprintf(os.Stderr, "warning: %s differs from the expected hook content or format version; run sparkwing pipeline hooks install\n", hook.Name)
+		}
 		if mode == "json" {
 			if err := json.NewEncoder(os.Stdout).Encode(hook); err != nil {
 				return err
@@ -807,10 +627,14 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 	if err != nil {
 		return err
 	}
+	survey := githooks.Survey(git, repoRoot, declared)
+	checkExpectedHooks(git, &survey)
 	if mode == "plain" {
+		if survey.ConfigError != "" {
+			fmt.Fprintln(os.Stderr, "warning: "+survey.ConfigError)
+		}
 		return nil
 	}
-	survey := githooks.Survey(git, repoRoot, declared)
 	if mode == "json" {
 		silenced := []string{}
 		active, _ := githooks.ActivePath(git, repoRoot)
@@ -819,11 +643,60 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		}
 		return json.NewEncoder(os.Stdout).Encode(hooksStatusSummary{Kind: "summary", Repo: repoRoot, Installed: len(hooks), Gates: survey, SilencedGlobal: silenced})
 	}
-	if len(survey.NotFiring()) > 0 || len(survey.Borrowed) > 0 {
+	if survey.ConfigError != "" || len(survey.NotFiring()) > 0 || len(survey.Borrowed) > 0 {
 		fmt.Fprintf(os.Stdout, "\nwarning: %s\n  %s\n", survey.Summary(), survey.Remedy())
 	}
 	reportSilencedGlobalHooks(git, repoRoot, hooksDir)
 	return nil
+}
+
+func expectedHooks(git githooks.Git, repoRoot, hooksDir string) (map[string]string, error) {
+	declared, err := declaredHooks(filepath.Join(repoRoot, ".sparkwing"))
+	if err != nil {
+		return nil, err
+	}
+	global := chainableGlobalHooks(git, hooksDir)
+	expected := map[string]string{}
+	for name, pipes := range declared {
+		expected[name] = renderHookScript(name, pipes, global[name])
+	}
+	for name := range global {
+		if _, ok := expected[name]; !ok {
+			expected[name] = renderHookScript(name, nil, true)
+		}
+	}
+	return expected, nil
+}
+
+func hookExecutable(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+}
+
+func checkExpectedHooks(git githooks.Git, survey *githooks.RepoGates) {
+	if survey.State != githooks.GateArmed {
+		return
+	}
+	expected, err := expectedHooks(git, survey.Repo, survey.HooksDir)
+	if err != nil {
+		survey.State, survey.ConfigError = githooks.GateBroken, err.Error()
+		return
+	}
+	var stale []string
+	for _, name := range slices.Sorted(maps.Keys(expected)) {
+		path := filepath.Join(survey.HooksDir, name)
+		body, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			survey.State, survey.ConfigError = githooks.GateBroken, fmt.Sprintf("read %s: %v", path, err)
+			return
+		}
+		if err != nil || string(body) != expected[name] || !hookExecutable(path) {
+			stale = append(stale, name)
+		}
+	}
+	if len(stale) > 0 {
+		survey.State, survey.ConfigError = githooks.GateBroken, "hooks missing, not executable, or different from expected content/format: "+strings.Join(stale, ", ")+"; run sparkwing pipeline hooks install"
+	}
 }
 
 func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
@@ -856,7 +729,11 @@ func surveyFleet(git githooks.Git) ([]githooks.RepoGates, error) {
 	if err != nil {
 		return nil, err
 	}
-	return githooks.SurveyFleet(git, roots, declaredHookNames), nil
+	rows := githooks.SurveyFleet(git, roots, declaredHookNames)
+	for i := range rows {
+		checkExpectedHooks(git, &rows[i])
+	}
+	return rows, nil
 }
 
 func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) error {
@@ -891,7 +768,6 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 	_ = tw.Flush()
 	if len(ungated) == 0 && len(lapsed) == 0 {
 		fmt.Fprintf(w, "\n%d repo(s), every declared gate fires\n", len(rows))
-		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks status --prove --all-repos` is what a commit says")
 		return nil
 	}
 	if len(ungated) > 0 {
@@ -1040,10 +916,7 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 	blocking := hookName != "post-commit"
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	b.WriteString("# " + sparkwingHookMarker + " -- do not edit; use `sparkwing pipeline hooks (un)install`\n")
-	if blocking && len(pipes) > 0 {
-		b.WriteString(githooks.SelfTestScript())
-	}
+	b.WriteString("# " + sparkwingHookMarker + " (format 1) -- do not edit; use `sparkwing pipeline hooks (un)install`\n")
 	if len(pipes) > 0 {
 		b.WriteString("export SPARKWING_LOG_FORMAT=\"${SPARKWING_LOG_FORMAT:-plain}\"\n")
 	}

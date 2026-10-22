@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -204,14 +205,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	incarnation := journal.NextIncarnation()
-	incarnation, persistErr := journal.PersistIncarnation(d.layout.dir, incarnation)
-	if incarnation == 0 {
-		return persistErr
-	}
-	if persistErr != nil {
-		d.cfg.logf("journal incarnation: %v", persistErr)
-	}
+	incarnation := rand.Uint64()
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)
 	defer d.journal.Close()

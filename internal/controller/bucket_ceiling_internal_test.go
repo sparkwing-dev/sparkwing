@@ -76,8 +76,8 @@ func TestTheBucketIsMeasuredWithNoCeilingSet(t *testing.T) {
 	ceiling := objectguard.NewCeiling(objectguard.CeilingConfig{})
 	store := &measuredStore{usage: storage.StoreUsage{Bytes: 69 << 20, Objects: 412, ObservedAt: time.Now()}}
 	s := New(nil, nil).WithBucketUsage(store)
-	if ran, err := s.measureBucketLeased(context.Background(), ceiling, 0); err != nil || !ran {
-		t.Fatalf("measure = %t, %v", ran, err)
+	if err := s.measureBucket(context.Background(), ceiling, 0); err != nil {
+		t.Fatalf("measure: %v", err)
 	}
 	state := ceiling.State()
 	if state.Bytes != 69<<20 || state.Objects != 412 || state.ReconciledAt.IsZero() || state.Incomplete {

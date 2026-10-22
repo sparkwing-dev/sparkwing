@@ -74,7 +74,7 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 		return runDaemonEventsArgs([]string{"--run", "run-1", "--kind", "queued", "-o", "json"})
 	})
 	page := decodeDaemonEventPage(t, json)
-	if len(page.Records) != 1 || page.Records[0].Kind != "queued" || page.Cursor != "" || page.Truncated {
+	if len(page.Records) != 1 || page.Records[0].Kind != "queued" || page.Truncated {
 		t.Fatalf("events: %s", json)
 	}
 }
@@ -89,7 +89,7 @@ func TestDaemonEventsReportsEmptyJournalLocation(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	json := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"-o", "json"}) })
 	page := decodeDaemonEventPage(t, json)
-	if len(page.Records) != 0 || page.Cursor != "" || page.Truncated {
+	if len(page.Records) != 0 || page.Truncated {
 		t.Fatalf("empty JSON journal: %q", json)
 	}
 	t.Setenv("SPARKWING_HOME", home)
@@ -220,7 +220,7 @@ func TestExplainReattachOmitsTimeDerivedIncarnation(t *testing.T) {
 	}
 }
 
-func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
+func TestDaemonEventsBoundsFilteredOutput(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	dir := filepath.Join(home, "wingd")
@@ -235,15 +235,11 @@ func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
 		}
 	}
 	first := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--run", "run-1"}) }))
-	if len(first.Records) != 50 || first.Records[0].Data["index"] != float64(5) || first.Records[49].Data["index"] != float64(54) || first.Cursor == "" || !first.Truncated {
+	if len(first.Records) != 50 || first.Records[0].Data["index"] != float64(5) || first.Records[49].Data["index"] != float64(54) || !first.Truncated {
 		t.Fatalf("first page: %+v", first)
 	}
-	older := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--run", "run-1", "--cursor", first.Cursor}) }))
-	if len(older.Records) != 5 || older.Records[0].Data["index"] != float64(0) || older.Records[4].Data["index"] != float64(4) || older.Cursor != "" || older.Truncated {
-		t.Fatalf("older page: %+v", older)
-	}
 	all := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--run", "run-1", "--limit", "55"}) }))
-	if len(all.Records) != 55 || all.Cursor != "" || all.Truncated {
+	if len(all.Records) != 55 || all.Truncated {
 		t.Fatalf("all records: %+v", all)
 	}
 }

@@ -56,35 +56,20 @@ test("describe carries metadata, per-job arguments, secrets and risk attribution
   });
 });
 
-test("registration rejects duplicate pipelines and argument declarations", () => {
+test("registration rejects duplicate pipelines", () => {
   definePipeline({ name: "p", plan() {} });
   assert.throws(() => definePipeline({ name: "p", plan() {} }), /already defined/);
-  assert.throws(
-    () =>
-      definePipeline({
-        name: "bad",
-        args: [
-          { name: "x", type: "string" },
-          { name: "x", type: "string" },
-        ],
-        plan() {},
-      }),
-    /duplicate argument/,
-  );
-  assert.throws(() => definePipeline({ name: "bad-default", args: [{ name: "x", type: "int", default: "no" }], plan() {} }), /argument/);
 });
 
-test("describe rejects shared argument names before publishing ambiguous flags", async () => {
+test("describe forwards shared argument names for host validation", async () => {
   definePipeline({
     name: "collision",
     args: [{ name: "arg", type: "string" }],
-    plan(p) {
-      p.job("build", () => undefined).withArgs({ name: "arg", type: "string" });
-    },
+    plan(p) { p.job("build", () => undefined).withArgs({ name: "arg", type: "string" }); },
   });
   const doc = await describe(run);
-  assert.match(doc.pipelines[0]!.error?.message ?? "", /duplicate argument/);
-  assert.deepEqual(doc.pipelines[0]!.args, []);
+  assert.equal(doc.pipelines[0]!.error, undefined);
+  assert.equal(doc.pipelines[0]!.args.length, 2);
 });
 
 test("describe failures are pipeline-attributed and cannot expose secret defaults", async () => {

@@ -55,7 +55,7 @@ flags use `sw.NoInputs`.
 Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
 tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
 map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
-share the pipeline's flag namespace. The SDK checks required values, types,
+share the pipeline's flag namespace. The host checks required values, types,
 enums and name collisions before execution. Generated jobs bind their arguments
 from the original run snapshot.
 
@@ -66,8 +66,19 @@ for credentials.
 The SDK describes registered inputs, defaults, help, risks and secret names to
 the host. A discovery error refuses only that pipeline and reports its sanitized
 cause when invoked. Other pipelines retain their own complete secret declarations.
-A pipeline cannot run when its declarations are incomplete. Describe uses defaults
+A pipeline cannot run when its declarations are incomplete. Describe uses zero values
 without requiring execution-only arguments and does not execute generators.
+
+The host validates arguments after describe and before planning. Empty defaults mean
+no default; a required argument cannot also have a non-empty default. Numeric and
+duration values use Go parsing rules, and floating-point NaN and infinity are
+refused. Lists split on commas, trim each item and drop empty items; both the raw
+argument map and typed list receive that normalized value. Enum checks apply to
+each list item. Invalid arguments and declarations fail during host preparation
+with `invalid_args`. SDKs project declarations and decode the host's prepared
+values. Plan graph and secret declaration validation also belong to the host.
+Annotation locations, including an end line preceding the start, are checked by
+the host service when the annotation is written.
 
 ## Plan() must be pure
 

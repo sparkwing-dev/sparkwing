@@ -100,7 +100,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 
 func (s *Server) maintainRetainedData(ctx context.Context) {
 	operator := s.operator
-	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", s.measureHolder(), StorageMaintenanceInterval)
+	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", s.leaseHolder, StorageMaintenanceInterval)
 	if errors.Is(err, store.ErrLockHeld) {
 		return
 	}

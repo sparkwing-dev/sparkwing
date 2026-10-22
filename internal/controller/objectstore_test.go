@@ -169,50 +169,21 @@ func TestObjectStoreBreaker_ReportsAFrozenCeilingWithItsTotals(t *testing.T) {
 	}
 }
 
-func TestObjectStoreResetBreaker_ThawsAFrozenCeiling(t *testing.T) {
-	ceiling := freezeBucket(t, objectguard.CeilingLimit{MaxObjects: 2}, 10, 9)
-
+func TestObjectStoreResetBreaker_KeepsStorageCeilingEnforced(t *testing.T) {
+	ceiling := freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 4096, 12)
 	resp := breakerRequest(t, http.MethodPost, true)
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reset-breaker status=%d want 200", resp.StatusCode)
+	}
 	var body struct {
-		Thawed  bool `json:"thawed"`
-		Ceiling struct {
-			Frozen bool `json:"frozen"`
-		} `json:"ceiling"`
+		Ceiling objectguard.CeilingState `json:"ceiling"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatal(err)
 	}
-	if !body.Thawed {
-		t.Error("resetting a frozen bucket does not report the thaw")
-	}
-	if body.Ceiling.Frozen {
-		t.Error("the response to a reset still reports the bucket as frozen")
-	}
-	if ceiling.Frozen() {
-		t.Error("the reset left the bucket frozen")
-	}
-
-	ceiling.Observe(objectguard.Usage{Bytes: 10, Objects: 9})
-	if !ceiling.Frozen() {
-		t.Error("the measurement after a thaw left a bucket over its ceiling writable")
-	}
-}
-
-func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
-	limiter := objectguard.Shared()
-	ceiling := limiter.Ceiling()
-	t.Cleanup(func() { ceiling.Configure(objectguard.CeilingConfig{}) })
-	ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 1000}})
-	ceiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
-
-	resp := breakerRequest(t, http.MethodPost, true)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("reset with no measurement scheduled got %d, want 409", resp.StatusCode)
-	}
-	if !ceiling.Frozen() {
-		t.Error("the refused thaw cleared the freeze anyway")
+	if !body.Ceiling.Frozen || ceiling.Allow() == nil {
+		t.Fatal("request-budget reset disabled the storage ceiling")
 	}
 }
 

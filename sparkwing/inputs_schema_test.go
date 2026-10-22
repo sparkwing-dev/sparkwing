@@ -63,44 +63,16 @@ type requiredWithDefault struct {
 	X string `flag:"x" required:"true" default:"foo"`
 }
 
-func TestParseInputsSchema_RequiredAndDefaultMutex(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(requiredWithDefault{}))
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("expected required+default mutex error, got %v", err)
-	}
-}
-
 type enumWithoutDefaultOrRequired struct {
 	X string `flag:"x" enum:"a,b,c"`
-}
-
-func TestParseInputsSchema_EnumNeedsDefaultOrRequired(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(enumWithoutDefaultOrRequired{}))
-	if err == nil || !strings.Contains(err.Error(), "enum requires") {
-		t.Fatalf("expected enum-without-anchor error, got %v", err)
-	}
 }
 
 type enumOnInt struct {
 	X int `flag:"x" enum:"1,2,3" required:"true"`
 }
 
-func TestParseInputsSchema_EnumOnNonStringErrors(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(enumOnInt{}))
-	if err == nil || !strings.Contains(err.Error(), "enum requires a string") {
-		t.Fatalf("expected enum-on-non-string error, got %v", err)
-	}
-}
-
 type enumDefaultOutOfSet struct {
 	X string `flag:"x" enum:"a,b,c" default:"d"`
-}
-
-func TestParseInputsSchema_EnumDefaultMustBeInSet(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(enumDefaultOutOfSet{}))
-	if err == nil || !strings.Contains(err.Error(), "not in enum") {
-		t.Fatalf("expected default-not-in-enum error, got %v", err)
-	}
 }
 
 type shortCollision struct {
@@ -108,22 +80,8 @@ type shortCollision struct {
 	Y string `flag:"yankee" short:"x"`
 }
 
-func TestParseInputsSchema_ShortCollisionErrors(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(shortCollision{}))
-	if err == nil || !strings.Contains(err.Error(), "short") {
-		t.Fatalf("expected short-collision error, got %v", err)
-	}
-}
-
 type shortMultiChar struct {
 	X string `flag:"x" short:"xx"`
-}
-
-func TestParseInputsSchema_ShortMustBeOneChar(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(shortMultiChar{}))
-	if err == nil || !strings.Contains(err.Error(), "single ASCII") {
-		t.Fatalf("expected short-multi-char error, got %v", err)
-	}
 }
 
 type extraWithOtherTags struct {
@@ -163,13 +121,6 @@ func TestParseInputsSchema_AtMostOneExtra(t *testing.T) {
 type duplicateName struct {
 	A string `flag:"x"`
 	B string `flag:"x"`
-}
-
-func TestParseInputsSchema_DuplicateFlagName(t *testing.T) {
-	_, err := parseInputsSchema(reflect.TypeOf(duplicateName{}))
-	if err == nil || !strings.Contains(err.Error(), "already declared") {
-		t.Fatalf("expected duplicate-name error, got %v", err)
-	}
 }
 
 type unsupportedFieldType struct {
@@ -269,47 +220,6 @@ func TestPopulateInputs_AllTypes(t *testing.T) {
 	}
 }
 
-func TestPopulateInputs_DefaultsApplied(t *testing.T) {
-	type withDefaults struct {
-		Target string `flag:"target" default:"local"`
-	}
-	schema, _ := parseInputsSchema(reflect.TypeOf(withDefaults{}))
-	var in withDefaults
-	if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), nil); err != nil {
-		t.Fatalf("populate: %v", err)
-	}
-	if in.Target != "local" {
-		t.Errorf("Target=%q, want local", in.Target)
-	}
-}
-
-func TestPopulateInputs_RequiredMissingErrors(t *testing.T) {
-	type req struct {
-		Repo string `flag:"repo" required:"true"`
-	}
-	schema, _ := parseInputsSchema(reflect.TypeOf(req{}))
-	var in req
-	err := populateInputs(schema, reflect.ValueOf(&in).Elem(), map[string]string{})
-	if err == nil || !strings.Contains(err.Error(), "is required") {
-		t.Fatalf("expected required-missing error, got %v", err)
-	}
-}
-
-func TestPopulateInputs_UnknownFlagErrorsByDefault(t *testing.T) {
-	type plain struct {
-		X string `flag:"x"`
-	}
-	schema, _ := parseInputsSchema(reflect.TypeOf(plain{}))
-	var in plain
-	err := populateInputs(schema, reflect.ValueOf(&in).Elem(), map[string]string{
-		"x":       "set",
-		"strange": "denied",
-	})
-	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
-		t.Fatalf("expected unknown-flag error, got %v", err)
-	}
-}
-
 func TestPopulateInputs_BagFieldAcceptsUnknown(t *testing.T) {
 	type bagged struct {
 		X     string            `flag:"x"`
@@ -333,27 +243,6 @@ func TestPopulateInputs_BagFieldAcceptsUnknown(t *testing.T) {
 	}
 	if _, present := in.Extra["x"]; present {
 		t.Errorf("declared flag %q should not appear in the bag: %v", "x", in.Extra)
-	}
-}
-
-func TestPopulateInputs_EnumValidationAtParseTime(t *testing.T) {
-	type enumed struct {
-		Target string `flag:"target" enum:"local,staging,prod" default:"local"`
-	}
-	schema, _ := parseInputsSchema(reflect.TypeOf(enumed{}))
-	var in enumed
-	err := populateInputs(schema, reflect.ValueOf(&in).Elem(), map[string]string{
-		"target": "banana",
-	})
-	if err == nil || !strings.Contains(err.Error(), "must be one of") {
-		t.Fatalf("expected enum violation error, got %v", err)
-	}
-	in = enumed{}
-	if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), map[string]string{"target": "prod"}); err != nil {
-		t.Fatalf("expected prod to be accepted, got %v", err)
-	}
-	if in.Target != "prod" {
-		t.Errorf("Target=%q", in.Target)
 	}
 }
 

@@ -1,0 +1,45 @@
+CU decision 50 - focused verification (2026-10-21)
+
+Base: HEAD and bw-3095-rewrite both 0934024760782a06bf2bd42087c4e98307b104fc.
+The requested merge failed because worktree Git metadata is read-only; no prerequisite commits were missing.
+No git commit/add/reset/rebase/stash/checkout commands were run.
+
+Go command environment:
+GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache
+TMPDIR=/tmp/sw-astra-CU/root for root checks.
+Run from this worktree using go -C with its absolute path.
+
+PASS:
+- go test ./internal/wingd/journal
+- go test ./internal/objectguard -run 'TestCeiling|TestRecordWrite|TestAborted|TestReconcileWith|TestPartialMeasurement|TestFailedMeasurement'
+- go test ./internal/controller -run 'TestObjectStore|TestBucketUsage|TestTheBucket|TestAFailedBucket'
+- Both selections above also passed with -tags rewrite_integration; the latter journal selection used -run TestJournal.
+- go test ./internal/store -run 'TestSingleton|TestRunWindow'
+- go test ./internal/wingd -run '^$' (compile only; socket tests deferred).
+- go test ./internal/doccheck ./internal/nodeproto
+- go build -o /dev/null ./cmd/...
+- Generated CLI/SDK references, protocol schemas, OpenAPI/API reference and .apidiff snapshots.
+- bin/sync-docs.sh --check
+- git diff --check
+
+Worker evidence:
+- Normal and rewrite_integration: internal/bincache and pkg/cachecontrol.
+- Full internal/githooks, internal/clisurface and internal/procenv packages.
+- Focused hooks/events command tests and acceptance grammar, normal and rewrite_integration.
+- Full sparkwing and sparkwing/sparkwingtest packages; tagged sparkwingtest and nodeproto.
+- Focused nodehost/cmd argument, SDK preparation and ProcessServices checks, normal and rewrite_integration.
+- Actual Go and TypeScript Describe output reaches the same host validator for 19 invalid argument cases.
+- Actual TypeScript annotation requests and Go transport payloads receive the same host bad_request errors without persistence.
+- TypeScript build/typecheck and focused describe/example/plan/runner tests.
+- npm test: 20/21 files pass. The sole failure is the excluded diagnostics.test.ts:98 test (assertion at line 112), which expects removed SDK invalid_args validation.
+
+Could not run / deferred:
+- Full objectguard attempt reached a socket: operation not permitted. Its socket-free ceiling tests pass above.
+- Full suites, native socket suites, PostgreSQL and heavy checks belong to the lead per the session rules.
+- TypeScript diagnostics.test.ts still expects the removed SDK argument validator; this test belongs to the excluded masking/SDK-diagnostics lane.
+
+Integration handoffs:
+- Masking registration should use nodeproto.NormalizeArgument and project list items; CU did not edit the masking lane.
+- Generated-only argument declarations are absent from PlanDoc/JobSpec. Completing host defaults/required/enum handling for them requires a protocol decision; the user question is pending.
+
+Independent correctness review covered the cleanup cuts and SDK changes. Review fixes added shared argument and annotation validation to sparkwingtest, moved secret declarations to shared host preparation, and made stale hook content/version/executability fail status.

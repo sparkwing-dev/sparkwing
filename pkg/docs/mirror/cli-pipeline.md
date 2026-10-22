@@ -89,7 +89,6 @@ Report declared, installed, and missing sparkwing hooks
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--prove` | prove |
 | `--all-repos` | all repos |
 | `--ungated` | ungated |
 

@@ -19,7 +19,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 		for _, selected := range []string{"build", "broken"} {
 			p, input, fixture, processes := sdkPlanningFixture(t)
 			input.Run.Pipeline = selected
-			healthy := nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &secret}}, Secrets: []nodeproto.SecretDeclaration{{Name: "HEALTHY_TOKEN"}}}
+			healthy := nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}, Secrets: []nodeproto.SecretDeclaration{{Name: "HEALTHY_TOKEN"}}}
 			broken := nodeproto.PipelineDescription{Name: "broken", Args: []nodeproto.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.PlanFailed, Message: "describe pipeline broken: missing deployment setting"}}
 			entries := []nodeproto.PipelineDescription{healthy, broken}
 			if reversed {

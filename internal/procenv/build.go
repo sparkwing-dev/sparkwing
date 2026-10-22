@@ -167,7 +167,7 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 		return false
 	}
 	if row.Owner == "engine" {
-		return k == CLI && (row.Name == "SPARKWING_TOOLCHAIN_ACTIVE" || row.Name == "SPARKWING_HOOK_SELFTEST" || row.Name == "SPARKWING_TESTLEAK_HOST" || row.Name == "SPARKWING_TEST_")
+		return k == CLI && (row.Name == "SPARKWING_TOOLCHAIN_ACTIVE" || row.Name == "SPARKWING_TESTLEAK_HOST" || row.Name == "SPARKWING_TEST_")
 	}
 	if k == Git {
 		key := strings.ToUpper(name)

@@ -2183,8 +2183,6 @@ components:
           type: boolean
         reset:
           type: string
-        thawed:
-          type: boolean
         tripped:
           type: boolean
       required:
@@ -2231,8 +2229,6 @@ components:
           type: string
         refused_total:
           type: integer
-        thawed:
-          type: boolean
         warn_bytes:
           type: integer
         warn_objects:
@@ -2249,7 +2245,6 @@ components:
         - objects
         - warning
         - frozen
-        - thawed
         - freezes_total
         - refused_total
         - measurement_incomplete

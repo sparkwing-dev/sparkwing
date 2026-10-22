@@ -313,19 +313,11 @@ type Annotation struct {
 	EndLine int
 }
 
-// Annotate emits a located annotation during execution and panics on invalid input or host write failure.
+// Annotate emits a located annotation during execution. The host validates its severity and location.
 func Annotate(ctx context.Context, annotation Annotation) {
 	sdkserve.RequireExecution(ctx, "sparkwing.Annotate")
 	if annotation.Level == "" {
 		annotation.Level = "info"
-	}
-	switch annotation.Level {
-	case "debug", "info", "warn", "error":
-	default:
-		panic("sparkwing: invalid annotation level")
-	}
-	if annotation.Line < 0 || annotation.Column < 0 || annotation.EndLine < 0 || (annotation.EndLine > 0 && annotation.EndLine < annotation.Line) {
-		panic("sparkwing: invalid annotation location")
 	}
 	attrs := map[string]any{}
 	if annotation.File != "" {

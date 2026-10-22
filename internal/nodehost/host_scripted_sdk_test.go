@@ -156,7 +156,7 @@ func newPlanningSDK(plan nodeproto.PlanDoc, secret string) *scriptedSDK {
 			return nodeproto.Reply{}, errors.New("planner received job route authority")
 		}
 		if request.Op == nodeproto.OpDescribe {
-			raw, err := json.Marshal(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &secret}}}}})
+			raw, err := json.Marshal(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}}}})
 			return nodeproto.Reply{ID: request.ID, OK: true, Result: raw}, err
 		}
 		if request.Op == nodeproto.OpPlan && request.Args["token"] != secret {

@@ -315,51 +315,18 @@ A survey that cannot read the registry says so and exits non-zero. It never
 answers with an empty fleet, because that is what a machine with nothing
 registered answers, and one stray character in the registry used to make an
 unread fleet look like a swept one. `sparkwing pipeline hooks install --all-repos`
-and `sparkwing pipeline hooks status --prove --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
+and `sparkwing pipeline hooks status --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
 carries
 the reason in `gates_survey_error`, since the registry says nothing about this
 home's runs, locks or daemon.
 
-### What a hook directory cannot tell you
+### Checking installed hooks
 
-Everything above reads files. That is enough to find a gate nobody installed,
-and not enough to establish one that fires: a shadowed repository inspects as
-fully installed and refuses nothing, and a borrowed one inspects as installing
-nothing and refuses everything. Only a commit settles it.
-
-```bash
-sparkwing pipeline hooks status --prove            # this repo: make the gate refuse a commit
-sparkwing pipeline hooks status --prove --all-repos    # every registered repo
-```
-
-`sparkwing pipeline hooks status --prove` stages a file and commits it with the
-gate told to refuse, then reports
-whether git refused it and which hook file did. Everything happens in a
-throwaway linked worktree, which shares the repository's config -- so the same
-`core.hooksPath` and the same hooks apply -- while carrying its own index and
-its own detached HEAD, so the repository's working tree, index, branches and
-HEAD are untouched whatever the gate does.
-
-`pipeline hooks status --prove` settles the pre-commit gate only. A pre-push gate needs a remote to fire
-against, so it is left to the push that exercises it, and a repository that
-declares no pre-commit trigger has nothing for `pipeline hooks status --prove` to prove -- `--all-repos`
-counts it apart from the repositories whose gate refused rather than among
-them.
-
-Every refusal is checked against a control: the same staged change is committed
-again with hooks switched off, and has to land. Without that, a commit that
-failed for an unrelated reason reads exactly like a gate doing its job.
-
-Only a hook sparkwing wrote that carries the self-test guard is ever executed.
-A hand-written hook, or a managed one installed before the guard existed, is
-reported `unprovable` and `pipeline hooks status --prove` exits non-zero -- an enforcement question that
-could not be answered is not a pass. Re-run `hooks install` to replace an older
-managed hook with one that can be asked.
-
-The guard is the `SPARKWING_HOOK_SELFTEST` environment variable, and it can only
-make a gate refuse. There is no value that lets a commit through, because a
-variable that skipped a gate would be a bypass with an environment variable for
-a key.
+`sparkwing pipeline hooks status` compares each managed hook with the expected
+script and format version, and checks which directory Git reads. JSON hook
+records include `current`; a stale or edited script prints a warning to reinstall.
+Run `sparkwing pipeline hooks install` to replace stale scripts. For a manual
+execution check, use a throwaway commit in a disposable checkout.
 
 Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
 `pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--all-repos`
@@ -390,12 +357,8 @@ repository's pinned SDK cannot speak to -- rejects the whole installation
 before any candidate hook filename or config value is published. Existing
 hooks remain callable throughout the proof. Once every proof passes, each
 complete hook replaces its predecessor with an atomic rename and only then may
-the repository's `core.hooksPath` change. A later write or config error restores
-every managed hook, global-hook forwarder, file mode, and repository
-`core.hooksPath` value exactly. A failed reinstall therefore cannot remove a
-previously working commit or push gate, and a first install cannot leave only
-the gates whose proofs happened to pass. The failure is printed with the
-command to re-run. `--no-prove` skips the proof for an operator who has already
+the repository's `core.hooksPath` change. A write or config error is reported immediately. An interrupted install may
+leave some hooks replaced; re-run the install to finish it. `--no-prove` skips the proof for an operator who has already
 made it.
 
 The proof runs on every install that leaves a gate live, not only the one that

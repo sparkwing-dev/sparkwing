@@ -129,8 +129,8 @@ controller:
 
   # Ceilings on the whole object store. Above either maximum the
   # controller freezes object writes: reads and deletes keep working,
-  # health reports the freeze, and `sparkwing cluster object-store
-  # reset-breaker` thaws it until the next measurement. Empty leaves the
+  # and health reports the freeze. Raise the ceiling or delete objects
+  # until measurement brings the total under it. Empty leaves the
   # bucket unlimited, which is the shipped behavior. See
   # docs/observability.md.
   bucketCeiling:

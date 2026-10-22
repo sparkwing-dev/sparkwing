@@ -17,7 +17,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ## Functions
 
-- `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution and panics on invalid input or host write failure.
+- `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution.
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug record; the host decides whether to retain it.
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.

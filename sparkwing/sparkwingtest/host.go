@@ -70,6 +70,27 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 		return nodeproto.PlanDoc{}, err
 	}
 	defer h.work.Done()
+	declarations, err := sdkserve.DefaultOperations.Describe(ctx)
+	if err != nil {
+		return nodeproto.PlanDoc{}, err
+	}
+	description, found := declarations.Pipeline(name)
+	if !found {
+		return nodeproto.PlanDoc{}, fmt.Errorf("unknown pipeline %q", name)
+	}
+	if description.Error != nil {
+		return nodeproto.PlanDoc{}, description.Error
+	}
+	if err := nodeproto.ValidateArgumentDeclarations(description.Args); err != nil {
+		return nodeproto.PlanDoc{}, err
+	}
+	if err := nodeproto.ValidateSecretDeclarations(description.Secrets); err != nil {
+		return nodeproto.PlanDoc{}, err
+	}
+	args, err = nodeproto.ResolveArguments(description, args)
+	if err != nil {
+		return nodeproto.PlanDoc{}, err
+	}
 	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, args, h.runContext(name))
 	if err != nil {
 		return doc, err
@@ -390,6 +411,20 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 			s = strings.ReplaceAll(s, v, "***")
 		}
 		return s
+	}
+	if frame.Event == "annotation" {
+		var location nodeproto.AnnotationRequest
+		if len(frame.Attrs) > 0 {
+			if err := json.Unmarshal(frame.Attrs, &location); err != nil {
+				panic(err)
+			}
+		}
+		if err := nodeproto.ValidateAnnotation(frame.Level, location.Line, location.EndLine, location.Column); err != nil {
+			panic(err)
+		}
+		if frame.Level == "" {
+			frame.Level = "info"
+		}
 	}
 	ts, _ := time.Parse(time.RFC3339Nano, frame.TS)
 	attrs := map[string]any{}

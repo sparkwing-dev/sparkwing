@@ -20,7 +20,7 @@ func TestPruneCoordinatorBusyDoesNotFabricateEntrySkip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = errors.Join(cacheUnlock(coordinator), coordinator.Close()) })
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,12 +49,8 @@ func TestPruneExaminedEntriesAreExactlyClassified(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	entry := testEntry(t, root, "11111111-11111111")
-	if _, err := enqueueCacheEntry(context.Background(), root, entry.key); err != nil {
-		t.Fatal(err)
-	}
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

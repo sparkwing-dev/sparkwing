@@ -57,7 +57,7 @@ func renderObjectStoreBreaker(out io.Writer, state controllerwire.ObjectStoreBre
 	if len(state.Cleared) > 0 {
 		fmt.Fprintf(&buffer, "cleared: %v\n", state.Cleared)
 	}
-	renderObjectStoreCeiling(&buffer, state.Ceiling, state.Thawed)
+	renderObjectStoreCeiling(&buffer, state.Ceiling)
 	var rows io.Writer = &buffer
 	var tw *tabwriter.Writer
 	if format == "pretty" {
@@ -77,7 +77,7 @@ func renderObjectStoreBreaker(out io.Writer, state controllerwire.ObjectStoreBre
 	return err
 }
 
-func renderObjectStoreCeiling(out io.Writer, c controllerwire.ObjectStoreCeiling, thawed bool) {
+func renderObjectStoreCeiling(out io.Writer, c controllerwire.ObjectStoreCeiling) {
 	if c.Enforced {
 		fmt.Fprintf(out, "ceiling: frozen=%t warning=%t bytes=%d/%d objects=%d/%d\n", c.Frozen, c.Warning, c.Bytes, c.MaxBytes, c.Objects, c.MaxObjects)
 	} else {
@@ -89,13 +89,7 @@ func renderObjectStoreCeiling(out io.Writer, c controllerwire.ObjectStoreCeiling
 	if c.Frozen {
 		fmt.Fprintf(out, "ceiling frozen on %s since %s\n", c.FrozenReason, c.FrozenAt.Format(time.RFC3339))
 	}
-	if c.Thawed {
-		fmt.Fprintln(out, "ceiling thawed: the freeze is held off until the next measurement")
-	}
 	if !c.ReconciledAt.IsZero() {
 		fmt.Fprintf(out, "ceiling measured at %s every %s\n", c.ReconciledAt.Format(time.RFC3339), c.Reconcile)
-	}
-	if thawed {
-		fmt.Fprintln(out, "thawed: the bucket ceiling freeze was cleared")
 	}
 }

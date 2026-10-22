@@ -59,8 +59,8 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 					t.Fatal("describe output escaped before secret classification")
 				}
 				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-					{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "other-secret", Secret: true, Default: &defaultValue}}},
-					{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true}, {Name: "empty", Default: &empty}, {Name: "label", Default: &fallback}}},
+					{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "other-secret", Type: "string", Secret: true, Default: &defaultValue}}},
+					{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "empty", Type: "string", Default: &empty}, {Name: "label", Type: "string", Default: &fallback}}},
 				}}, nil
 			case nodeproto.OpPlan:
 				if request.Args["token"] != supplied || request.Args["empty"] != "" || request.Args["label"] != "explicit" || request.Run.RunID != "run" {
@@ -78,10 +78,10 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || prepared.Args["empty"] != "" || len(prepared.Args) != 3 {
+	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || prepared.Args["empty"] != "" || len(prepared.Args) != 2 {
 		t.Fatalf("description = %+v", prepared)
 	}
-	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {
+	if len(logs) != 1 || strings.Contains(logs[0].Message, supplied) || strings.Contains(string(logs[0].Attrs), supplied) {
 		t.Fatalf("logs = %+v", logs)
 	}
 	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions); err != nil {

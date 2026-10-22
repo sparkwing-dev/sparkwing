@@ -1,5 +1,4 @@
 import type { ArgSpec, RunContext } from "../index.d.ts";
-import { resolveArgs, validateArgSpecs } from "./args.ts";
 import { Plan, pipelines } from "./plan.ts";
 import { PlanningDiagnostics } from "./diagnostics.ts";
 import { errorFields, type ErrorFields } from "./errors.ts";
@@ -36,7 +35,7 @@ function argument(spec: ArgSpec, jobID?: string): DescribeArg {
   const arg: DescribeArg = { name: spec.name, type: spec.type, required: spec.required ?? false };
   if (spec.short !== undefined) arg.short = spec.short;
   if (spec.description !== undefined) arg.desc = spec.description;
-  if (spec.default !== undefined) arg.default = spec.default;
+  if (spec.default !== undefined && spec.default !== "") arg.default = spec.default;
   if (spec.enum !== undefined) arg.enum = [...spec.enum];
   if (spec.secret !== undefined) arg.secret = spec.secret;
   if (jobID !== undefined) arg.job_id = jobID;
@@ -65,9 +64,8 @@ export async function describe(run: RunContext): Promise<DescribeDoc> {
               name: secret.name,
               ...(secret.optional === undefined ? {} : { optional: secret.optional }),
             }));
-          const args = resolveArgs(definition.args ?? [], {}, { allowMissing: true });
+          const args = {};
           await definition.plan(plan, { ...run, pipeline: definition.name, args });
-          validateArgSpecs([...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())]);
           const risks = new Set<string>();
           const byStep: NonNullable<DescribePipeline["risks_by_step"]> = [];
           for (const job of plan.jobs()) {

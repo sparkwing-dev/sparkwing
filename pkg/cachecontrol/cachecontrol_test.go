@@ -46,7 +46,7 @@ func TestPruneReclaimsWithinCallerBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Prune(context.Background(), PruneOptions{ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,6 @@ func TestPruneResultJSONNamesAccountingAndSkips(t *testing.T) {
 	}
 	for _, name := range []string{
 		"logical_removed_bytes",
-		"observed_capacity_gained_bytes",
 		"active_skipped_entries",
 		"busy_skipped_entries",
 		"work_bound_exhausted",
@@ -91,7 +90,6 @@ func TestPruneResultGoNamesAccountingAndWork(t *testing.T) {
 	for _, name := range []string{
 		"ObservedBytes",
 		"LogicalRemovedBytes",
-		"ObservedCapacityGainedBytes",
 		"ExaminedEntries",
 		"ReclaimedEntries",
 		"ActiveSkippedEntries",

@@ -19,8 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
-
 // ProcessServices supplies one live process's accepted declaration and record writers.
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {
@@ -221,8 +219,8 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		if body.Level == "" {
 			body.Level = "info"
 		}
-		if !logLevels[body.Level] || body.Line < 0 || body.EndLine < 0 || body.Column < 0 {
-			return executorError(apierr.BadRequest, "invalid annotation level or location")
+		if err := nodeproto.ValidateAnnotation(body.Level, body.Line, body.EndLine, body.Column); err != nil {
+			return executorError(apierr.BadRequest, err.Error())
 		}
 		if err := s.step(body.Step); err != nil {
 			return err

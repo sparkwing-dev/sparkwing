@@ -190,31 +190,6 @@ func TestRenderHookScript_ForwarderOnlyChains(t *testing.T) {
 	}
 }
 
-func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
-	for _, hook := range []string{"pre-commit", "pre-push"} {
-		script := renderHookScript(hook, []string{"gate"}, false)
-		if !githooks.CarriesSelfTest(script) {
-			t.Errorf("%s hook cannot be asked to refuse:\n%s", hook, script)
-		}
-		guard := strings.Index(script, githooks.SelfTestEnv)
-		run := strings.Index(script, "sparkwing run 'gate'")
-		if guard > run {
-			t.Errorf("the guard must exit before the gate runs, or the check costs a full gate:\n%s", script)
-		}
-	}
-}
-
-func TestRenderHookScript_NothingButABlockingGateCarriesTheGuard(t *testing.T) {
-	for name, script := range map[string]string{
-		"post-commit": renderHookScript("post-commit", []string{"notify"}, false),
-		"forwarder":   renderHookScript("prepare-commit-msg", nil, true),
-	} {
-		if githooks.CarriesSelfTest(script) {
-			t.Errorf("%s carries a guard it has no gate to prove:\n%s", name, script)
-		}
-	}
-}
-
 func TestHooksInstall_WritesPostCommitHook(t *testing.T) {
 	repo := gateRepo(t)
 	installInto(t, (&fakeGit{}).run, repo)
@@ -786,5 +761,66 @@ func TestDiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected(t *testing.T)
 	}
 	if want, _ := filepath.EvalSymlinks(checkout); root != want && root != checkout {
 		t.Fatalf("cleanup discovery = %s, want the checkout %s, not the home holding the default state dir", root, checkout)
+	}
+}
+
+func TestHooksStatus_ComparesExpectedContentAndFormat(t *testing.T) {
+	repo := gateRepo(t)
+	git := &fakeGit{}
+	installInto(t, git.run, repo)
+	for _, changed := range []bool{false, true} {
+		if changed {
+			path := filepath.Join(repo, ".git", "hooks", "pre-commit")
+			body := readRepoFile(t, path)
+			writeRepoFile(t, path, strings.Replace(body, "(format 1)", "(format 0)", 1))
+		}
+		output := captureStdout(t, func() {
+			if err := statusHooks(git.run, repo, "json"); err != nil {
+				t.Fatal(err)
+			}
+		})
+		want := `"current":true`
+		if changed {
+			want = `"current":false`
+		}
+		if !strings.Contains(output, want) {
+			t.Fatalf("wanted %s in %s", want, output)
+		}
+	}
+}
+
+func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
+	for _, mode := range []string{"missing", "unmanaged", "not-executable", "content", "version"} {
+		t.Run(mode, func(t *testing.T) {
+			repo := gateRepo(t)
+			git := &fakeGit{}
+			installInto(t, git.run, repo)
+			path := filepath.Join(repo, ".git", "hooks", "pre-commit")
+			body := readRepoFile(t, path)
+			switch mode {
+			case "missing":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			case "unmanaged":
+				writeRepoFile(t, path, "#!/bin/sh\nexit 0\n")
+			case "not-executable":
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "content":
+				writeRepoFile(t, path, body+"exit 0\n")
+			case "version":
+				writeRepoFile(t, path, strings.Replace(body, "(format 1)", "(format 0)", 1))
+			}
+			output := captureStdout(t, func() {
+				if err := statusHooks(git.run, repo, "json"); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if strings.Contains(output, `"state":"armed"`) {
+				t.Fatalf("stale gate reported as armed: %s", output)
+			}
+		})
 	}
 }

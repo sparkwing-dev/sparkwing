@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"encoding/json"
-	"maps"
 	"slices"
 	"strings"
 
@@ -32,21 +31,6 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 		if pipeline.Args == nil {
 			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
 		}
-		args := map[string]bool{}
-		defaults := runspec.Resolved{Args: map[string]string{}}
-		for _, arg := range pipeline.Args {
-			if arg.Name == "" || args[arg.Name] {
-				return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has ambiguous arguments")
-			}
-			args[arg.Name] = true
-			if arg.Secret && arg.Default != nil {
-				defaults.Args[arg.Name] = *arg.Default
-				defaults.SecretArgs = append(defaults.SecretArgs, arg.Name)
-			}
-		}
-		if err := p.Masks.initialize(runspec.SealedRequest{}, &defaults, nil, nil); err != nil {
-			return PreparedPlanning{}, false, err
-		}
 	}
 	selected, found := (nodeproto.DescribeDoc{Pipelines: doc.Pipelines}).Pipeline(input.Entrypoint)
 	if !found {
@@ -55,18 +39,21 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 	if selected.Error != nil {
 		return PreparedPlanning{Description: nodeproto.PipelineDescription{Name: selected.Name, Error: selected.Error}}, false, nil
 	}
-	prepared := PreparedPlanning{Description: selected, Args: maps.Clone(input.Args), SecretArgs: append([]string{}, input.SecretArgs...)}
-	if prepared.Args == nil {
-		prepared.Args = map[string]string{}
+	if err := nodeproto.ValidateArgumentDeclarations(selected.Args); err != nil {
+		return PreparedPlanning{}, false, executorError(apierr.InvalidArgs, err.Error())
 	}
+	if err := nodeproto.ValidateSecretDeclarations(selected.Secrets); err != nil {
+		return PreparedPlanning{}, false, executorError(apierr.ProtocolError, err.Error())
+	}
+
+	args, err := nodeproto.ResolveArguments(selected, input.Args)
+	if err != nil {
+		return PreparedPlanning{}, false, executorError(apierr.InvalidArgs, err.Error())
+	}
+	prepared := PreparedPlanning{Description: selected, Args: args, SecretArgs: append([]string{}, input.SecretArgs...)}
 	for _, arg := range selected.Args {
-		if _, present := prepared.Args[arg.Name]; !present && arg.Default != nil {
-			prepared.Args[arg.Name] = *arg.Default
-		}
-		if arg.Secret {
-			if !slices.Contains(prepared.SecretArgs, arg.Name) {
-				prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
-			}
+		if arg.Secret && !slices.Contains(prepared.SecretArgs, arg.Name) {
+			prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
 		}
 	}
 	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, &runspec.Resolved{Args: prepared.Args, SecretArgs: prepared.SecretArgs}, nil, nil); err != nil {

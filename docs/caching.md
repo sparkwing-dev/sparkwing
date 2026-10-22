@@ -193,17 +193,13 @@ ceiling and an entry count.
 `sparkwing cache prune --max-bytes` and `--max-entries` override them for
 one prune.
 
-Pruning advances through a bounded second-chance queue. An entry used
-since it entered the queue moves behind the other candidates, so use
-rather than build age drives retention without an unbounded directory
-scan. A kernel-backed lease spans lookup through process exit; prune
-skips active executions and writers rather than relying on a timing
-window.
+Pruning scans a bounded set of entries and deletes the oldest candidates first.
+A kernel-backed lease spans lookup through process exit; prune skips active
+executions and writers.
 
-Prune bounds entry discovery and deletion. It reports logical cache bytes
-removed separately from observed filesystem capacity gained. The latter is
-evidence, not an admission decision: callers remeasure the filesystem after
-pruning because concurrent activity can change free space.
+Prune reports logical bytes removed, measured by file length. It does not
+estimate physical space reclaimed. Callers must remeasure filesystem capacity
+before admitting more work because concurrent activity can change free space.
 
 Inspect and reclaim on demand:
 

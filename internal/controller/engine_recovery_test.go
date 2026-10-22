@@ -131,7 +131,7 @@ func TestEngineRecoveryLoopSettlesPersistedControllerRuns(t *testing.T) {
 	if err != nil || run.State != store.RunRunning || run.StateSeq != 0 {
 		t.Fatalf("foreign controller changed state=%s sequence=%d err=%v", run.State, run.StateSeq, err)
 	}
-	engineSQL(t, s, `UPDATE leases SET holder=? WHERE name='controller.owner' AND generation=?`, server.measureHolder(), foreign.Generation)
+	engineSQL(t, s, `UPDATE leases SET holder=? WHERE name='controller.owner' AND generation=?`, server.leaseHolder, foreign.Generation)
 	for range 2 {
 		server.reconcileOwnedRuns(t.Context())
 	}
@@ -150,7 +150,7 @@ func TestEngineRecoverySeparatesControllerInstancesOnOneMachine(t *testing.T) {
 	s := engineServer.Store
 	engineSQL(t, s, `UPDATE runs SET dispatch='controller',sealed_at=1,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan',plan_accepted_generation=1 WHERE id='run'`, []byte(`{}`), []byte(`{"jobs":[]}`))
 	first, second := New(s, nil), New(s, nil)
-	if _, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", first.measureHolder(), time.Minute); err != nil {
+	if _, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", first.leaseHolder, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	second.reconcileOwnedRuns(t.Context())
@@ -170,7 +170,7 @@ func TestEngineRecoveryControllerIdentityIsInstanceScoped(t *testing.T) {
 		holders := map[string]bool{}
 		for range int(size)%16 + 2 {
 			server := New(nil, nil)
-			holder := server.measureHolder()
+			holder := server.leaseHolder
 			if holder == "" || holders[holder] {
 				return false
 			}

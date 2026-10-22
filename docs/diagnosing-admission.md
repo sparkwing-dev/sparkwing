@@ -5,10 +5,8 @@ The daemon keeps a bounded JSON Lines journal in `<SPARKWING_HOME>/wingd/`, besi
 `sparkwing daemon status`. The journal survives daemon exit and needs no runs
 store. `events.jsonl` and its two numbered rotations retain at most 48 MiB.
 On Unix, SIGUSR1 captures diagnostic stacks in `d.log.stacks`, capped at 2 MiB.
-An `incarnation` file stores the daemon identity. Each replacement advances a readable stored value
-by one; a missing or unreadable file uses a time-derived identity. File errors
-are logged, and admission continues. `seq` increases within a source and
-incarnation.
+Each daemon start generates a fresh random diagnostic `incarnation`. `seq`
+increases within a source and incarnation. Journal read errors are reported.
 
 ```sh
 sparkwing daemon events --run RUN_ID -o json
@@ -20,24 +18,21 @@ sparkwing daemon events --run RUN_ID --explain -o json
 The command reads files directly, even when the daemon is down. `events` can
 filter by run, elapsed duration, repeated or comma-separated kind, or incarnation.
 It shows the newest 50 matching records by default. `--limit` accepts a positive
-page size. Repeat the same filters with the returned `--cursor` to read older
-records. Each page keeps chronological order. Newer events leave the unread
-history in place, and `--since` keeps the first page's cutoff. If retention or an
-edit changes unread records, continuation fails and asks for a fresh query.
-A late event inserted into the unread history also requires a fresh query.
+output count; increase it to include older matching records. Output keeps
+chronological order.
 
-JSON output is one event per line followed by a `kind: page` record with
-`next_cursor` and `truncated`. The last page has an empty cursor and
-`truncated: false`. JSON is the default when piped. Plain and pretty output send
-continuation instructions to stderr. With no retained journal, human output
-prints the directory it checked and JSON emits an empty final page. Unreadable
-records are skipped, and their count is printed on stderr. Records are ordered
+JSON output is one event per line followed by a `kind: page` record whose
+`truncated` field says whether older matching records were omitted. JSON is the
+default when piped. Plain and pretty output warn on stderr when records are
+omitted. With no retained journal, human output prints the directory it checked
+and JSON emits an empty final page. Unreadable records are skipped, and their
+count is printed on stderr. Records are ordered
 by timestamp, incarnation, then sequence.
 
 `--explain` renders a run's admission timeline in sentences, including descendant
 job slot requests and attached children owned by that run. Its JSON output
 preserves all structured records without page metadata. It requires `--run` and
-cannot be combined with list filters, limits or cursors.
+cannot be combined with list filters, or limits.
 
 A retained record carries a timestamp, source,
 incarnation, sequence, kind, run identity where known, and decision inputs in

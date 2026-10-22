@@ -43,7 +43,7 @@ func checkIntakeSecretDefault(t *testing.T, value string) {
 		answer := scripted.answer
 		scripted.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
 			if request.Op == nodeproto.OpDescribe {
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Default: &value}}}}}, nil
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Default: &value}}}}}, nil
 			}
 			return answer(ctx, request)
 		}

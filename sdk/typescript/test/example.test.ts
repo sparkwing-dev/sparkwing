@@ -56,7 +56,7 @@ test(
       assert.equal(reply.result.protocol, 2);
       const described = await send({ id: "describe", op: "describe" });
       assert.equal(described.result.pipelines[0].name, "conformance");
-      const plan = await send({ id: "plan", op: "plan", pipeline: "conformance", args: {}, run: { run_id: "r", pipeline: "alias" } });
+      const plan = await send({ id: "plan", op: "plan", pipeline: "conformance", args: { message: "hello" }, run: { run_id: "r", pipeline: "alias" } });
       assert.equal(plan.result.jobs.length, 2);
       assert.equal("protocol" in plan.result, false);
       const run = await send({ id: "run", op: "run_step", settled: [], job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
