@@ -76,6 +76,9 @@ func TestClaimIndexedRequirementsPreserveLabelSemantics(t *testing.T) {
 		labels    []string
 		want      bool
 	}{
+		{name: "quoted alternative", selectors: []string{`gpu, a"b`}, labels: []string{`a"b`}, want: true},
+		{name: "escaped alternative", selectors: []string{`a\,gpu`}, labels: []string{`a\`}, want: true},
+		{name: "json punctuation", selectors: []string{`a"],gpu`}, labels: []string{`a"]`}, want: true},
 		{name: "alternatives", selectors: []string{" gpu, cpu , gpu ", "linux"}, labels: []string{"cpu", "linux"}, want: true},
 		{name: "missing term", selectors: []string{"gpu,cpu", "linux"}, labels: []string{"cpu"}},
 		{name: "unsatisfiable", selectors: []string{","}},

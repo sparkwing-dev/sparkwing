@@ -829,18 +829,26 @@ repository access, trust, all selector terms, exclusions, placement and funding.
 Selector terms and alternatives are normalized once when work is sealed. Ready
 source indexes are keyed by team, requirement set, arrival and identity. Label
 lookups select matching requirement sets, and a transaction-local merge checks
-each route's head with the shared predicate. Rejected heads advance only that
-transaction's route. Named rechecks seek the complete team and unit key.
+each route's head with the shared predicate. Each route selects one head per
+unit kind through its source index, then compares those heads in the same order.
+Rejected heads advance only that transaction's route. Named rechecks seek the complete team and unit key.
 There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
 ordinal. Queue arbitration serializes asks and awards. Claims take the controller
 lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration after a ledger lock poisons the transaction before acquiring the queue
 lock. Award rechecks SQL eligibility and reserves the unit and funding atomically.
-A committed ask can still hold the award for its preferred claimant.
+A committed ask can still hold the award for its preferred claimant. Broad
+requests record asks for every eligible requested unit in its ranking window
+before selecting an award. Readiness range indexes bound the ask pass to fresh
+work. Ask collection uses the same label routes and narrows observers to the
+source teams before checking eligibility. Awarding another unit cannot discard
+those asks. The number of ask writes
+still depends on the number of fresh eligible units.
 Requirement references prevent retention from removing a set still used by work.
 Run retention removes unreferenced sets and their terms. Work without ranking,
-burst placement or preferences omits those relations from its SQL plan.
+burst placement or preferences omits those relations from its SQL plan. Ranked
+work without preferences keeps ranking and omits preference relations.
 Private owner placement projections use that same SQL predicate before readiness.
 They write no asks, awards, reservations or fair-share ordinals. Readiness is
 rechecked when the owner asks to execute.
@@ -2056,8 +2064,8 @@ fail projection. Both owners pass this result to the same pure `Decide`.
 C1 owns placement input construction. `matchingInputsTx` derives `match.Profile`
 identity and `ReservedPools` from the live capability and its enrollment facts.
 It derives `match.Demand.Selector` and `Prefers` from resolved execution
-settings and `AllowedPools` from intake. Every named, queued and self claim calls
-`match.Evaluate` with those inputs. `UnitDemand.Target` selects a named unit;
+settings and `AllowedPools` from intake. Every named, queued and self claim
+checks the shared SQL predicate with those inputs. `UnitDemand.Target` selects a named unit;
 absence selects the ordered eligible queue. Reservations require an explicitly
 required granted pool that intake allowed. A self-asserted `pool=` label grants
 nothing. Preference holds apply only between eligible claimants. The shared SQL

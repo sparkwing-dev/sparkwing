@@ -1,5 +1,4 @@
-// Package match decides whether an agent may run a piece of work. Every claim
-// route asks [Evaluate] whether the agent satisfies the work requirements.
+// Package match evaluates runner label and repository requirements.
 //
 // A selector is a list of terms. Terms are ANDed; the comma-separated
 // alternatives inside a term are ORed. Each alternative is a bare label

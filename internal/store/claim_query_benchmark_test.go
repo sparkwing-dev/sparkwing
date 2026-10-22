@@ -23,7 +23,7 @@ import (
 func BenchmarkClaimQuery50000(b *testing.B) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
 		b.Run(dialect.String(), func(b *testing.B) {
-			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "ranked", "metered"} {
+			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "tied", "ranked", "metered", "fresh-ranked"} {
 				b.Run(scenario, func(b *testing.B) { benchmarkClaimQuery(b, dialect, scenario) })
 			}
 		})
@@ -43,7 +43,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		db, err = sql.Open("sqlite", filepath.Join(b.TempDir(), "claims.db"))
+		db, err = sql.Open("sqlite", sqliteDSN(filepath.Join(b.TempDir(), "claims.db")))
 	} else {
 		dsn := os.Getenv("SPARKWING_TEST_PG_URL")
 		if dsn == "" {
@@ -93,7 +93,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		}
 	}
 	request := []byte(`{"request":{"mode":"execute","dispatch":"host","options":{}},"provenance":{"trust":"asserted"}}`)
-	if scenario == "ranked" || scenario == "metered" {
+	if scenario == "ranked" || scenario == "metered" || scenario == "fresh-ranked" {
 		request = []byte(`{"request":{"mode":"execute","dispatch":"controller","options":{}},"provenance":{"trust":"asserted"}}`)
 	}
 	teams := make([]claimTeamFacts, 200)
@@ -129,11 +129,17 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 			team = teams[0].Team
 		}
 		required := "unavailable"
-		if scenario == "broad" || scenario != "no-match" && i == 49999 {
+		if scenario == "broad" || scenario == "tied" || scenario != "no-match" && i == 49999 {
 			required = "eligible"
 		}
 		body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{required}}})
-		if _, err = statement.ExecContext(ctx, team, "run-"+team, fmt.Sprintf("job-%05d", i), i+1, []byte(`{}`), body, keys[team+"/"+required]); err != nil {
+		arrived := int64(i + 1)
+		if scenario == "fresh-ranked" {
+			arrived += 1700000000000000000 - int64(time.Second)
+		} else if scenario == "tied" {
+			arrived = 1
+		}
+		if _, err = statement.ExecContext(ctx, team, "run-"+team, fmt.Sprintf("job-%05d", i), arrived, []byte(`{}`), body, keys[team+"/"+required]); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -175,78 +181,78 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 	b.StopTimer()
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
-	b.ReportMetric(float64(samples[(len(samples)-1)*95/100].Nanoseconds()), "p95-ns/op")
+	b.ReportMetric(float64(samples[(len(samples)*95+99)/100-1].Nanoseconds()), "p95-ns/op")
 	b.ReportMetric(50000, "ready_jobs")
 	b.ReportMetric(200, "teams")
 	b.ReportMetric(1000, "claimants")
-	routeQuery, routeArgs, err := template.routesSQL()
+	routeQuery, routeArgs, err := template.routesSQL(scenario == "fresh-ranked")
 	if err != nil {
 		b.Fatal(err)
 	}
-	if dialect == DialectSQLite {
-		probeQuery := strings.ReplaceAll(routeQuery, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
-		rows, err := tx.QueryContext(ctx, rewritePh(dialect, probeQuery), routeArgs...)
-		if err != nil {
-			b.Fatal(err)
-		}
-		for rows.Next() {
-			var a, c string
-			var o int64
-			var head sql.NullString
-			if err = rows.Scan(&a, &c, &o, &head); err != nil {
-				b.Fatal(err)
-			}
-		}
-		if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-			b.Fatal(err)
-		}
-		// Selection rechecks the chosen row in the complete predicate.
-		if result.RunID != "" {
-			q := claimSQL{dialect: dialect}
-			named := demand
-			named.Target = &result
-			query, err := q.query(facts, teams, template.rates, []capability.UnitKind{result.Kind}, named, template.now)
+	var visits float64
+	diagnose := func(name, query string, args []any) {
+		b.Helper()
+		if dialect == DialectSQLite {
+			query = strings.ReplaceAll(query, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
+			rows, err := tx.QueryContext(ctx, query, args...)
 			if err != nil {
 				b.Fatal(err)
 			}
-			query = strings.ReplaceAll(query, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
-			var team, run, node, kind string
-			var gen int64
-			if err = tx.QueryRowContext(ctx, query, q.args...).Scan(&team, &run, &node, &gen, &kind); err != nil {
+			columns, err := rows.Columns()
+			if err != nil {
+				b.Fatal(errors.Join(err, rows.Close()))
+			}
+			dest := make([]any, len(columns))
+			for i := range dest {
+				dest[i] = new(any)
+			}
+			for rows.Next() {
+				if err = rows.Scan(dest...); err != nil {
+					b.Fatal(errors.Join(err, rows.Close()))
+				}
+			}
+			if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 				b.Fatal(err)
 			}
+			return
 		}
-		b.ReportMetric(float64(examined.Load()), "candidate_visits/op")
-	} else {
 		var raw []byte
-		if err = tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+rewritePh(dialect, routeQuery), routeArgs...).Scan(&raw); err != nil {
+		if err = tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+rewritePh(dialect, query), args...).Scan(&raw); err != nil {
 			b.Fatal(err)
 		}
 		var plans []map[string]any
 		if err = json.Unmarshal(raw, &plans); err != nil {
 			b.Fatal(err)
 		}
-		visits := claimPlanVisits(plans[0]["Plan"].(map[string]any))
-		b.Logf("route EXPLAIN ANALYZE: %s", raw)
-		if result.RunID != "" {
-			q := claimSQL{dialect: dialect}
-			named := demand
-			named.Target = &result
-			query, err := q.query(facts, teams, template.rates, []capability.UnitKind{result.Kind}, named, template.now)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if err = tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+rewritePh(dialect, query), q.args...).Scan(&raw); err != nil {
-				b.Fatal(err)
-			}
-			if err = json.Unmarshal(raw, &plans); err != nil {
-				b.Fatal(err)
-			}
-			visits += claimPlanVisits(plans[0]["Plan"].(map[string]any))
-			b.Logf("predicate EXPLAIN ANALYZE: %s", raw)
-		}
-		b.ReportMetric(visits, "candidate_visits/op")
+		visits += claimPlanVisits(plans[0]["Plan"].(map[string]any))
+		b.Logf("%s EXPLAIN ANALYZE: %s", name, raw)
 	}
+	fresh := claimSQL{dialect: dialect, freshOnly: true}
+	clock := fresh.param(template.now)
+	source := fresh.source(template.kinds)
+	diagnose("ask preflight", `WITH clock(now) AS (SELECT CAST(`+clock+` AS BIGINT)) SELECT EXISTS (SELECT 1 FROM (`+source+`) ready LIMIT 1)`, fresh.args)
+	if scenario == "fresh-ranked" {
+		fresh := claimSQL{dialect: dialect, freshOnly: true, preferencesFree: true}
+		if _, err := fresh.query(facts, teams, template.rates, template.kinds, demand, template.now); err != nil {
+			b.Fatal(err)
+		}
+		diagnose("asks", fresh.askSQL, fresh.askArgs)
+	}
+	diagnose("routes", routeQuery, routeArgs)
+	if result.RunID != "" {
+		q := claimSQL{dialect: dialect}
+		named := demand
+		named.Target = &result
+		query, err := q.query(facts, teams, template.rates, []capability.UnitKind{result.Kind}, named, template.now)
+		if err != nil {
+			b.Fatal(err)
+		}
+		diagnose("predicate", query, q.args)
+	}
+	if dialect == DialectSQLite {
+		visits = float64(examined.Load())
+	}
+	b.ReportMetric(visits, "candidate_visits/op")
 }
 
 func claimPlanVisits(plan map[string]any) float64 {

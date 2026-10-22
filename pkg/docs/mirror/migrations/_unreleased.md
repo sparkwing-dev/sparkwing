@@ -42,6 +42,10 @@ leaves readiness, asks, reservations and fair-share accounting unchanged.
 Requirements are indexed when work is accepted, so unrelated label backlogs do
 not delay matching jobs. Existing stores must be recreated because the baseline
 adds normalized requirement sets and indexed references on queued work.
+Broad polls retain ranking asks for every eligible requested unit inside its
+window, even when the poll receives another unit. Readiness and label indexes
+restrict ask collection to matching fresh work. Aged queues skip that pass. Work without
+preferences avoids preference processing while retaining its ranking rules.
 Metered claim leases account for billable time that begins during issuance.
 
 The store baseline is 22. Earlier stores are refused and must be recreated under

@@ -89,12 +89,14 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // Fragments correlate team keys with the final authenticated work/claimant pair.
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
-	"(*claimSQL).sourceScope":   "the globally unique run ID supplies the team index key; the shared predicate still authorizes its claimant",
-	"(*claimSQL).routesSQL":     "only requirement routes matching authenticated current labels are merged; each head is checked by shared SQL eligibility",
-	"(*claimSQL).predicate":     "eligibility correlates every tenant row with the work team's authenticated claimant facts",
-	"(*claimSQL).source":        "the final predicate restricts the union of ready work to authorized teams",
-	"(*claimSQL).query":         "the generated query joins tenant-keyed source rows and applies authenticated scope before selection or asks",
-	"(*claimSQL).placementCTEs": "ranking asks correlate with the already eligible tenant/work pair",
+	"(*claimSQL).requirementRoutes": "shared authenticated label routes restrict both asks and indexed selection before the final eligibility predicate",
+	"(*claimSQL).freshTeamsSQL":     "matching fresh routes scope observer serialization before the shared ask predicate",
+	"(*claimSQL).sourceScope":       "the globally unique run ID supplies the team index key; the shared predicate still authorizes its claimant",
+	"(*claimSQL).routesSQL":         "only requirement routes matching authenticated current labels are merged; each head is checked by shared SQL eligibility",
+	"(*claimSQL).predicate":         "eligibility correlates every tenant row with the work team's authenticated claimant facts",
+	"(*claimSQL).source":            "the final predicate restricts the union of ready work to authorized teams",
+	"(*claimSQL).query":             "the generated query joins tenant-keyed source rows and applies authenticated scope before selection or asks",
+	"(*claimSQL).placementCTEs":     "ranking asks correlate with the already eligible tenant/work pair",
 }
 
 func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {

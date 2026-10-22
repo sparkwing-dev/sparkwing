@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -48,13 +50,30 @@ func compareInt64(a, b int64) int {
 
 func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 	var conditions []string
+	if q.freshOnly {
+		arrived := alias + `.ready_at`
+		if alias == "n" {
+			// SQLite needs the explicit predicate to use the partial readiness index.
+			conditions = append(conditions, `n.status<>'done'`)
+		}
+		if alias == "t" {
+			arrived = alias + `.available_at`
+		}
+		if alias == "e" {
+			arrived = `n.finished_at`
+		}
+		conditions = append(conditions, arrived+`>clock.now-`+fmt.Sprint(int64(limits.RankingWindow)))
+	}
 	if q.team != "" {
 		conditions = append(conditions, alias+`.team=`+q.param(q.team))
+		if q.freshOnly && alias == "e" {
+			conditions = append(conditions, `n.team=`+q.param(q.team))
+		}
 	}
 	if q.route {
 		conditions = append(conditions, alias+`.team=route.team`)
 		if kind == capability.UnitEval {
-			conditions = append(conditions, `route.requirements=''`)
+			conditions = append(conditions, `route.requirements=''`, `n.team=route.team`)
 		} else {
 			conditions = append(conditions, alias+`.claim_requirements=route.requirements`)
 		}
@@ -91,28 +110,44 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 }
 
 func (q *claimSQL) headSQL(kinds []capability.UnitKind) string {
-	source := q.source(kinds)
 	function, suffix := `json_array`, ``
 	if q.dialect == DialectPostgres {
 		function, suffix = `jsonb_build_array`, `::text`
 	}
-	return `(SELECT ` + function + `(team,run_id,node_id,source_generation,kind,arrived)` + suffix + ` FROM (` + source + `) head ORDER BY arrived,team,run_id,kind,node_id,source_generation LIMIT 1)`
+	result := function + `(team,run_id,node_id,source_generation,kind,arrived)` + suffix
+	var heads []string
+	for _, kind := range kinds {
+		source := q.source([]capability.UnitKind{kind})
+		order := `arrived,run_id`
+		if kind == capability.UnitNode || kind == capability.UnitEval {
+			order += `,node_id`
+		}
+		if kind == capability.UnitEval {
+			order += `,source_generation`
+		}
+		if len(kinds) == 1 {
+			return `(SELECT ` + result + ` FROM (` + source + `) head ORDER BY ` + order + ` LIMIT 1)`
+		}
+		// Constant identity fields must not turn simultaneous arrivals into a sort.
+		heads = append(heads, `SELECT * FROM (SELECT * FROM (`+source+`) indexed_head ORDER BY `+order+` LIMIT 1) kind_head`)
+	}
+	return `(SELECT ` + result + ` FROM (` + strings.Join(heads, ` UNION ALL `) + `) head ORDER BY arrived,team,run_id,kind,node_id,source_generation LIMIT 1)`
 }
 
-func (template *claimSQL) routesSQL() (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true}
-	clock := q.param(template.now)
-	labels, err := q.jsonParam(template.facts[0].Labels)
+func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
+	labels, err := q.jsonParam(current.Labels)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	teamScope := func() string {
 		clause := `1=1`
-		if template.facts[0].Cloud == 0 {
-			clause = `tm.name=` + q.param(template.facts[0].Team)
+		if q.team != "" {
+			clause = `tm.name=` + q.param(q.team)
+		} else if current.Cloud == 0 {
+			clause = `tm.name=` + q.param(current.Team)
 		}
-		if len(template.facts[0].Excluded) > 0 {
-			raw, _ := json.Marshal(template.facts[0].Excluded)
+		if len(current.Excluded) > 0 {
+			raw, _ := json.Marshal(current.Excluded)
 			clause += ` AND tm.name NOT IN (SELECT ` + q.text("excluded.value") + ` FROM ` + q.array(q.param(string(raw)), "excluded") + `)`
 		}
 		return clause
@@ -120,8 +155,38 @@ func (template *claimSQL) routesSQL() (string, []any, error) {
 	routes := `SELECT tm.name AS team,'' AS requirements,tm.claim_award_ordinal AS ordinal FROM teams tm WHERE tm.name IN (` + liveTeamsSQL + `) AND ` + teamScope() + ` UNION ALL SELECT tm.name,matched.requirements,tm.claim_award_ordinal FROM matched JOIN teams tm ON tm.name=matched.team WHERE tm.name IN (` + liveTeamsSQL + `) AND ` + teamScope()
 	// Every term must have an alternative in the current claimant's labels.
 	routes += ` AND NOT EXISTS (SELECT 1 FROM claim_requirement_terms term WHERE term.team=matched.team AND term.requirements=matched.requirements AND NOT EXISTS (SELECT 1 FROM claim_requirement_terms alt WHERE alt.team=term.team AND alt.requirements=term.requirements AND alt.term=term.term AND alt.label IN (SELECT value FROM labels)))`
+	return `labels(value) AS MATERIALIZED (SELECT ` + q.text("label.value") + ` FROM ` + q.array(labels, "label") + `),matched AS MATERIALIZED (SELECT DISTINCT team,requirements FROM claim_requirement_terms WHERE label IN (SELECT value FROM labels)),routes AS MATERIALIZED (` + routes + `)`, nil
+}
+
+func (template *claimSQL) routesSQL(includeFresh bool) (string, []any, error) {
+	q := claimSQL{dialect: template.dialect, route: true}
+	clock := q.param(template.now)
+	routes, err := q.requirementRoutes(template.facts[0])
+	if err != nil {
+		return "", nil, err
+	}
 	head := q.headSQL(template.kinds)
-	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),labels(value) AS MATERIALIZED (SELECT ` + q.text("label.value") + ` FROM ` + q.array(labels, "label") + `),matched AS MATERIALIZED (SELECT DISTINCT team,requirements FROM claim_requirement_terms WHERE label IN (SELECT value FROM labels)),routes AS MATERIALIZED (` + routes + `) SELECT route.team,route.requirements,route.ordinal,` + head + ` FROM routes route`, q.args, nil
+	freshHead := `NULL`
+	if includeFresh {
+		fresh := claimSQL{dialect: template.dialect, route: true, freshOnly: true}
+		freshHead = fresh.headSQL(template.kinds)
+		q.args = append(q.args, fresh.args...)
+	}
+	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + ` SELECT route.team,route.requirements,route.ordinal,` + head + `,` + freshHead + ` FROM routes route`, q.args, nil
+}
+
+func (template *claimSQL) freshTeamsSQL(demand UnitDemand) (string, []any, error) {
+	q := claimSQL{dialect: template.dialect, route: true, routeJoin: true, freshOnly: true, target: demand.Target}
+	if template.facts[0].Cloud == 0 {
+		q.team = template.facts[0].Team
+	}
+	clock := q.param(template.now)
+	routes, err := q.requirementRoutes(template.facts[0])
+	if err != nil {
+		return "", nil, err
+	}
+	source := q.source(template.kinds)
+	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + ` SELECT DISTINCT team FROM (` + source + `) fresh`, q.args, nil
 }
 
 func decodeClaimHead(head *claimHead, raw string) error {
@@ -141,7 +206,11 @@ func decodeClaimHead(head *claimHead, raw string) error {
 }
 
 func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (UnitRef, error) {
-	query, args, err := template.routesSQL()
+	fresh, err := freshClaimWorkTx(ctx, tx, demand, template)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	query, args, err := template.routesSQL(fresh)
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -150,11 +219,15 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		return UnitRef{}, err
 	}
 	var heads []claimHead
+	freshTeams := map[string]bool{}
 	for rows.Next() {
 		var head claimHead
-		var raw sql.NullString
-		if err = rows.Scan(&head.Team, &head.Requirements, &head.Ordinal, &raw); err != nil {
+		var raw, fresh sql.NullString
+		if err = rows.Scan(&head.Team, &head.Requirements, &head.Ordinal, &raw, &fresh); err != nil {
 			return UnitRef{}, errors.Join(err, rows.Close())
+		}
+		if fresh.Valid {
+			freshTeams[string(head.Team)] = true
 		}
 		if !raw.Valid {
 			continue
@@ -167,6 +240,9 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 		return UnitRef{}, err
 	}
+	if err := recordQueuedAsksTx(ctx, tx, demand, template, freshTeams); err != nil {
+		return UnitRef{}, err
+	}
 	for len(heads) > 0 {
 		slices.SortFunc(heads, compareClaimHeads)
 		head := heads[0]
@@ -174,8 +250,8 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		named := demand
 		named.Target = &head.Unit
 		q := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow}
-		facts := slices.DeleteFunc(slices.Clone(template.facts), func(f claimFacts) bool { return f.Current == 0 && f.Cloud == 0 && f.Team != string(head.Team) })
-		q.placementFree, err = claimPlacementFreeTx(ctx, tx, head.Team, head.Unit, template.policy)
+		facts := claimFactsForTeams(template.facts, map[string]bool{string(head.Team): true})
+		q.placementFree, q.preferencesFree, err = claimPlacementFreeTx(ctx, tx, head.Team, head.Unit, template.policy)
 		if err != nil {
 			return UnitRef{}, err
 		}
@@ -184,7 +260,7 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		if err != nil {
 			return UnitRef{}, err
 		}
-		unit, err := queryClaimTx(ctx, tx, named, &q, query)
+		unit, err := queryClaimTx(ctx, tx, &q, query)
 		if err == nil {
 			return unit, nil
 		}
@@ -212,23 +288,21 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 }
 
 // Placement-free work needs no ranking or preference relation in the SQL plan.
-func claimPlacementFreeTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, policy ClaimPlacement) (bool, error) {
-	if unit.Kind != capability.UnitNode || len(policy.Preferences) > 0 {
-		return false, nil
-	}
+func claimPlacementFreeTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, policy ClaimPlacement) (bool, bool, error) {
 	var request, execution []byte
-	if err := tx.QueryRowContext(ctx, `SELECT r.request_json,n.execution_json FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE r.team=? AND r.id=? AND n.node_id=?`, team, unit.RunID, unit.NodeID).Scan(&request, &execution); err != nil {
-		return false, err
+	if err := tx.QueryRowContext(ctx, `SELECT r.request_json,COALESCE(n.execution_json,r.request_json) FROM runs r LEFT JOIN nodes n ON n.team=r.team AND n.run_id=r.id AND n.node_id=? WHERE r.team=? AND r.id=?`, unit.NodeID, team, unit.RunID).Scan(&request, &execution); err != nil {
+		return false, false, err
 	}
 	var sealed struct {
 		Request runspec.Request `json:"request"`
 	}
 	var settings runspec.JobExecutionSettings
 	if err := json.Unmarshal(request, &sealed); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := json.Unmarshal(execution, &settings); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return sealed.Request.Burst == nil && !runAnywhere(sealed.Request) && len(settings.Prefers.Value) == 0, nil
+	preferencesFree := unit.Kind != capability.UnitNode || sealed.Request.Burst == nil && len(settings.Prefers.Value) == 0 && len(policy.Preferences) == 0
+	return preferencesFree && !runAnywhere(sealed.Request), preferencesFree, nil
 }

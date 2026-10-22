@@ -104,6 +104,25 @@ func TestRankingAskSurvivesTheAwardOfAnotherUnit(t *testing.T) {
 	wantAward(t, f, f.Self, capability.UnitPlan, "")
 }
 
+func TestRankingAClaimAsksForEveryEligibleJobBehindTheAward(t *testing.T) {
+	f := rankingFixture(t, true)
+	f.AddJob(t, "second", f.ReadyAt.Add(100*time.Millisecond))
+	f.AddJob(t, "third", f.ReadyAt.Add(200*time.Millisecond))
+	f.At(-time.Second)
+	f.Poll(t, f.Actions, capability.UnitNode)
+	f.At(time.Second)
+	claim, err := f.ClaimKinds(t, f.Self, capability.UnitPlan, capability.UnitNode)
+	if err != nil || claim.Kind != capability.UnitPlan {
+		t.Fatalf("self-hosted scan: %+v %v", claim, err)
+	}
+	f.At(limits.RankingWindow + time.Second)
+	wantNone(t, f, f.Launcher, capability.UnitNode)
+	for _, job := range []string{"job", "second", "third"} {
+		wantAward(t, f, f.Self, capability.UnitNode, job)
+		wantNone(t, f, f.Launcher, capability.UnitNode)
+	}
+}
+
 func TestRankingSeesTheLocalQueue(t *testing.T) {
 	f := rankingFixture(t, true)
 	local := f.LocalQueue(t)

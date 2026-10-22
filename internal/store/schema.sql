@@ -1600,6 +1600,14 @@ CREATE INDEX idx_nodes_claim_requirements ON nodes(team,claim_requirements,ready
 
 CREATE INDEX idx_triggers_claim_requirements ON triggers(team,claim_requirements,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
 
+CREATE INDEX idx_nodes_claim_window ON nodes(ready_at,team) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_triggers_claim_window ON triggers(available_at,team) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_nodes_eval_window ON nodes(finished_at,team,run_id,node_id) WHERE finished_at IS NOT NULL AND outcome IN ('success','memoized') AND expansion='expected';
+
+CREATE INDEX idx_nodes_team_eval_window ON nodes(team,finished_at,run_id,node_id) WHERE finished_at IS NOT NULL AND outcome IN ('success','memoized') AND expansion='expected';
+
 CREATE INDEX idx_nodes_claimable ON nodes(team,ready_at) WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done';
 
 CREATE INDEX idx_nodes_queued ON nodes(team,queue_started_at) WHERE queue_started_at IS NOT NULL AND claimed_by IS NULL AND status = 'pending';
