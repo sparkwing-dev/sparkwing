@@ -100,7 +100,7 @@ func poolControllerStore(t *testing.T) (*store.Store, string) {
 	})
 	exec := func(query string, args ...any) {
 		t.Helper()
-		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), query, args...); err != nil {
+		if _, err := teststore.Exec(t.Context(), st, query, args...); err != nil {
 			t.Fatal(err)
 		}
 	}

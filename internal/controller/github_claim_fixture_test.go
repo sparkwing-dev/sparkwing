@@ -62,7 +62,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 		seal.Provenance = controller.AssertedProvenance(t, "build", ref, commit)
 	}
 	body := controller.SealWith(t, seal, seal.Provenance)
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {
+	if _, err := teststore.Exec(t.Context(), st, `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {
 		t.Fatal(err)
 	}
 	controller.EngineAcceptedFixturePlan(t, st, store.Team(team), run, "compile")
@@ -70,7 +70,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 	if dispatch == runspec.DispatchController {
 		kind = capability.UnitPlan
 	}
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO triggers(team,id,unit_kind,status,created_at,available_at,expires_at,needs_labels,prefers_labels) VALUES (?,?,?,'pending',?,?,?,?,?)`, team, run, kind, now.UnixNano(), now.UnixNano(), now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)); err != nil {
+	if _, err := teststore.Exec(t.Context(), st, `INSERT INTO triggers(team,id,unit_kind,status,created_at,available_at,expires_at,needs_labels,prefers_labels) VALUES (?,?,?,'pending',?,?,?,?,?)`, team, run, kind, now.UnixNano(), now.UnixNano(), now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)); err != nil {
 		t.Fatal(err)
 	}
 }

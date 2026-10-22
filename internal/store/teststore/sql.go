@@ -130,7 +130,8 @@ func open(st *store.Store) (*sql.DB, error) {
 }
 
 // Exec runs one statement through a short-lived fixture connection, for
-// seeders that have no test to own a pool.
+// seeders that have no test to own a pool. It projects repository routing and
+// claim indexes when declarations change. Use SQL for intentional corruption.
 func Exec(ctx context.Context, st *store.Store, query string, args ...any) (_ sql.Result, err error) {
 	db, err := open(st)
 	if err != nil {
@@ -143,6 +144,15 @@ func Exec(ctx context.Context, st *store.Store, query string, args ...any) (_ sq
 	}
 	if err := projectClaimRunIdentities(ctx, db, st, query); err != nil {
 		return nil, err
+	}
+	upper := strings.ToUpper(strings.TrimSpace(query))
+	if strings.HasPrefix(upper, "INSERT INTO NODES") || strings.HasPrefix(upper, "INSERT INTO TRIGGERS") ||
+		strings.HasPrefix(upper, "UPDATE NODES SET") && strings.Contains(upper, "EXECUTION_JSON") ||
+		strings.HasPrefix(upper, "UPDATE TRIGGERS SET") && (strings.Contains(upper, "NEEDS_LABELS") || strings.Contains(upper, "UNIT_KIND")) ||
+		strings.HasPrefix(upper, "UPDATE RUNS SET") && (strings.Contains(upper, "REQUEST_JSON") || strings.Contains(upper, "SPEC_JSON") || strings.Contains(upper, "REPO_")) {
+		if err := projectClaimIndexes(ctx, db, st); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }

@@ -74,9 +74,9 @@ internal/secrets	1
 internal/secretsource	2
 internal/sessionledger	8
 internal/settings	42
-internal/sourceurl	7
+internal/sourceurl	6
 internal/sparks	5
-internal/sparkwingruntime	4
+internal/sparkwingruntime	3
 internal/storage/logseg	24
 internal/storage/s3	1
 internal/store	251

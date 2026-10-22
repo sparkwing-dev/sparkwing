@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -72,98 +71,15 @@ func engineSQL(t *testing.T, s *store.Store, query string, args ...any) {
 	if _, err := teststore.Exec(t.Context(), s, query, args...); err != nil {
 		t.Fatal(err)
 	}
-	upper := strings.ToUpper(strings.TrimSpace(query))
-	if strings.HasPrefix(upper, "INSERT INTO NODES") || strings.HasPrefix(upper, "INSERT INTO TRIGGERS") ||
-		strings.HasPrefix(upper, "UPDATE NODES SET") && strings.Contains(upper, "EXECUTION_JSON") ||
-		strings.HasPrefix(upper, "UPDATE TRIGGERS SET") && (strings.Contains(upper, "NEEDS_LABELS") || strings.Contains(upper, "UNIT_KIND")) {
-		engineIndexClaimFixtures(t, s)
-	}
 }
 
-// Fixtures rewrite immutable declarations, so each unit owns a private index key.
-// Content interning and shared placement holds are exercised through store intake tests.
-func engineIndexClaimFixtures(t *testing.T, s *store.Store) {
-	t.Helper()
-	db := teststore.SQL(t, s)
-	rows, err := db.QueryContext(t.Context(), `SELECT team,run_id,node_id,'node',execution_json,NULL FROM nodes UNION ALL SELECT t.team,t.id,'',t.unit_kind,r.spec_json,r.request_json FROM triggers t JOIN runs r ON r.team=t.team AND r.id=t.id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	type unit struct {
-		team, run, node, kind string
-		terms                 []string
-	}
-	var units []unit
-	for rows.Next() {
-		var u unit
-		var raw, request []byte
-		if err := rows.Scan(&u.team, &u.run, &u.node, &u.kind, &raw, &request); err != nil {
-			t.Fatal(err)
-		}
-		if u.kind == "node" {
-			var execution runspec.JobExecutionSettings
-			if err := json.Unmarshal(raw, &execution); err != nil {
-				t.Fatal(err)
-			}
-			u.terms = execution.Requires.Value
-		} else {
-			var sealed runspec.SealedRequest
-			if err := json.Unmarshal(request, &sealed); err != nil {
-				t.Fatal(err)
-			}
-			u.terms = sealed.Request.Options.Requires.Value
-			var policy struct {
-				Resolved struct {
-					Settings struct {
-						Options *runspec.Options `json:"options"`
-					} `json:"settings"`
-				} `json:"resolved"`
-			}
-			if len(raw) > 0 {
-				if err := json.Unmarshal(raw, &policy); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if policy.Resolved.Settings.Options != nil {
-				u.terms = policy.Resolved.Settings.Options.Requires.Value
-			}
-		}
-		units = append(units, u)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		t.Fatal(err)
-	}
-	for _, u := range units {
-		identity, err := json.Marshal([]string{u.kind, u.run, u.node})
-		if err != nil {
-			t.Fatal(err)
-		}
-		key, requirements := string(identity), ""
-		exec := func(query string, args ...any) {
-			t.Helper()
-			if _, err := teststore.Exec(t.Context(), s, query, args...); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if len(u.terms) > 0 {
-			requirements = key
-			exec(`INSERT INTO claim_requirements(team,id) VALUES (?,?) ON CONFLICT(team,id) DO NOTHING`, u.team, key)
-			exec(`DELETE FROM claim_requirement_terms WHERE team=? AND requirements=?`, u.team, key)
-			for term, selector := range u.terms {
-				if strings.TrimSpace(selector) == "" {
-					continue
-				}
-				for _, alternative := range strings.Split(selector, ",") {
-					exec(`INSERT INTO claim_requirement_terms(team,requirements,term,label) VALUES (?,?,?,?) ON CONFLICT DO NOTHING`, u.team, key, term, strings.TrimSpace(alternative))
-				}
-			}
-		}
-		exec(`INSERT INTO claim_contexts(team,id,requirements,unit_kind) VALUES (?,?,?,?) ON CONFLICT(team,id) DO UPDATE SET requirements=excluded.requirements`, u.team, key, requirements, u.kind)
-		if u.kind == "node" {
-			exec(`UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team=? AND run_id=? AND node_id=?`, requirements, key, u.team, u.run, u.node)
-		} else {
-			exec(`UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, key, u.team, u.run)
-		}
+func TestEngineSeededQueueIgnoresBlankSelectors(t *testing.T) {
+	e, _ := engineRuntimeStore(t)
+	engineHTTPRoot(t, e, "a", "runner", []capability.Grant{capability.NodesClaim})
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"requires":{"set":true,"value":[" ",""]}}`))
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Kinds: []capability.UnitKind{capability.UnitNode}})
+	if err != nil || claim.RunID != "run" || claim.NodeID != "job" {
+		t.Fatalf("queued claim with blank selectors: %+v %v", claim, err)
 	}
 }
 

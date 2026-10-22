@@ -431,7 +431,9 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			wantStatus, wantCause := 500, "invalid character"
 			switch stage {
 			case "store":
-				engineSQL(t, engine.Store, `UPDATE nodes SET execution_json=?`, []byte(`!`))
+				if _, err := teststore.SQL(t, engine.Store).ExecContext(t.Context(), `UPDATE nodes SET execution_json=?`, []byte(`!`)); err != nil {
+					t.Fatal(err)
+				}
 			case "handler_cancel":
 				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
 				wantCause = "context canceled"

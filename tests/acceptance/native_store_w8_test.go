@@ -57,7 +57,7 @@ func prepareNativeStoreW8(t *testing.T, s *store.Store, kind capability.UnitKind
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
+	if _, err := teststore.Exec(t.Context(), s, `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
 		t.Fatal(err)
 	}
 	if kind == capability.UnitNode {

@@ -359,7 +359,7 @@ func (q *claimSQL) predicate() string {
 		excluded = "1=1"
 	}
 	return strings.Join([]string{
-		labels, live, `(` + n("cloud") + `=1 OR w.team=` + f("team") + `)`, q.contains(f("kinds"), "w.kind"), excluded, bind, pushes, scopes, accepted, trust, personal, runner, burst, guards, reservation, `(` + foreground + `)`,
+		labels, live, q.contains(f("kinds"), "w.kind"), excluded, bind, pushes, scopes, accepted, trust, personal, runner, burst, guards, reservation, `(` + foreground + `)`,
 	}, " AND ")
 }
 
@@ -647,7 +647,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	ctes += placement
 	if q.holdProof {
 		currentRank := q.claimRankSQL("w", "current.facts")
-		return ctes + ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM pairs w CROSS JOIN current_claimant current,clock WHERE w.ranked=1 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND w.claim_rank>=0 GROUP BY w.team,w.run_id,w.node_id,w.source_generation,w.kind HAVING MIN(w.claim_rank)<MAX(` + currentRank + `)`, nil
+		return ctes + ` SELECT DISTINCT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM pairs w CROSS JOIN current_claimant current,clock WHERE w.ranked=1 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND w.claim_rank>=0 AND w.claim_rank<` + currentRank, nil
 	}
 	final := ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM available w WHERE ` + q.at("w.facts", "prefix") + `=` + q.param(demand.CapabilityPrefix)
 	if demand.Target != nil {

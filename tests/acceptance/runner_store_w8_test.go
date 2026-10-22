@@ -145,7 +145,7 @@ VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/t
 		}
 	}
 	if kind == capability.UnitNode {
-		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,'run','job','pending',?,?,?)`, store.DefaultTeam, now.UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {
+		if _, err := teststore.Exec(t.Context(), s, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,'run','job','pending',?,?,?)`, store.DefaultTeam, now.UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}

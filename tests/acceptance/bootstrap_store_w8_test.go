@@ -57,7 +57,7 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*storedEngine
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
+	if _, err := teststore.Exec(t.Context(), server.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
 		t.Fatal(err)
 	}
 	return server, root
