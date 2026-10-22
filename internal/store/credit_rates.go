@@ -54,7 +54,8 @@ type CreditRateTable []CreditRate
 // ErrUnpricedCPUClass reports a size label whose class is not priced.
 var ErrUnpricedCPUClass = errors.New("credits: runner size class is not priced")
 
-// UnpricedCPUClassError refuses a claim for a node asking for more cores than the rate table prices, and names the request and the largest class, so the operator knows which class to add.
+// UnpricedCPUClassError refuses a claim whose exact Cloud size class has no
+// price. MaxCores names the largest priced class for the operator's diagnosis.
 type UnpricedCPUClassError struct {
 	RunID    string
 	NodeID   string

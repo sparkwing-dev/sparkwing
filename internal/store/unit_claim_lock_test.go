@@ -54,6 +54,7 @@ func TestClaimQueueLedgerLockOrder(t *testing.T) {
 	for _, inverse := range []bool{false, true} {
 		t.Run(map[bool]string{false: "queue then ledger", true: "ledger then queue"}[inverse], func(t *testing.T) {
 			s, recorder := newRecordingStore(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 			recorder.reset()
 			err := s.inTx(t.Context(), func(tx *storeTx) error {
 				if !inverse {
@@ -87,6 +88,40 @@ func TestClaimQueueLedgerLockOrder(t *testing.T) {
 			}
 			if locks != want {
 				t.Fatalf("queue acquisitions = %d, want %d", locks, want)
+			}
+		})
+	}
+}
+
+func TestTeamLedgerLockOrder(t *testing.T) {
+	for _, inverse := range []bool{false, true} {
+		t.Run(map[bool]string{false: "team then ledger", true: "ledger then team"}[inverse], func(t *testing.T) {
+			s, _ := newRecordingStore(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				acquireTeam := func() error {
+					return acquireLockSet(t.Context(), tx, func() lockSet {
+						var set lockSet
+						set.add(lockTeam, true, "a")
+						return set
+					})
+				}
+				if !inverse {
+					if err := acquireTeam(); err != nil {
+						return err
+					}
+				}
+				if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+					return err
+				}
+				_ = acquireTeam()
+				return nil
+			})
+			if inverse && (err == nil || !strings.Contains(err.Error(), "teams must precede the ledger")) {
+				t.Fatalf("inverse team/ledger order committed: %v", err)
+			}
+			if !inverse && err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

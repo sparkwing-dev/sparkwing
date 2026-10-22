@@ -25,16 +25,3 @@ func TestEvaluateReservationsAndGrantedIdentity(t *testing.T) {
 		})
 	}
 }
-
-func TestEvaluatePreferencesCannotRelaxRequirements(t *testing.T) {
-	p := Profile{Labels: []string{"gpu"}}
-	d := Demand{Selector: []string{"arm64"}, Prefers: []string{"gpu"}}
-	if got := Evaluate(p, d); got.OK() || got.PreferenceScore != 0 {
-		t.Fatalf("ineligible preference = %+v", got)
-	}
-	d.Selector = []string{"gpu"}
-	d.Prefers = []string{"gpu", "arm64"}
-	if got := Evaluate(p, d); !got.OK() || got.PreferenceScore != 1 {
-		t.Fatalf("preference = %+v", got)
-	}
-}

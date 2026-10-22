@@ -18,7 +18,7 @@ import (
 var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowFactsTx":           "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
-	"(*Operator).claimRefusalTx":                 "a globally unique named run resolves its tenant before the authenticated claimant receives scoped eligibility diagnostics",
+	"(*Operator).claimTargetTeamTx":              "only the Cloud launcher resolves a globally named run; other claimants query their authenticated team before kind or trust diagnostics",
 	"(*Operator).cancelRestoredSchedulesTx":      "offline restore cancels every tenant scheduled run through its scoped lifecycle owner before the rotated epoch is recorded",
 	"(*Operator).AcknowledgeRestore":             "offline restore acknowledgement advances every tenant schedule past the recovery window before schedules resume",
 	"(*Operator).installAuditProtection":         "baseline audit collision protection checks globally unique event IDs across teams",
@@ -81,7 +81,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).authenticationAuthorityTx": "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"(*Operator).revokeAuthorityTx":         "the authorized revocation path names its exact capability or session by global identity",
 	"(*Operator).lockUnitsTx":               "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
-	"(*Operator).claimUnitTx":               "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"(*Operator).loadMatchingRunTx":         "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"(*Operator).loadAwardRowTx":            "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
 	"(*Operator).deleteRetentionMetricsTx":  "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
@@ -97,7 +96,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).applyCheckoutPaymentTx":    "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
 	"(*Operator).DueCardRefunds":            "the payment worker lists every team's queued refunds in one pass",
-	"(*Operator).globalHourlySnapshot":      "the global hourly cap counts runs and ready teams across the deployment before applying each team's share",
+	"(*Operator).globalRunsPerHourRefusal":  "the committed-admission ceiling counts runs across every team in the deployment",
 	"(*Operator).runOwnerTx":                "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Operator).SampleSealedSecrets":       "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Operator).unlinkAccountIdentityTx":   "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",

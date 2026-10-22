@@ -86,8 +86,6 @@ type Demand struct {
 	Selector []string
 	// AllowedPools is the intake snapshot of team-admin access, never caller input.
 	AllowedPools []string
-	// Prefers is the resolved row preference list. Preferences never relax eligibility.
-	Prefers []string
 	// Repo is the run's repository, or nil when the caller did not resolve it
 	// because no filter could turn on it.
 	Repo *Repository
@@ -99,8 +97,6 @@ type Demand struct {
 // Verdict is the outcome of a check. The zero Verdict admits.
 type Verdict struct {
 	Reason Reason
-	// PreferenceScore counts satisfied preferences only for an eligible profile.
-	PreferenceScore int
 	// Term is the selector term that failed, when Reason is a selector reason.
 	Term string
 }
@@ -131,8 +127,7 @@ func evaluateRequirements(p Profile, d Demand) Verdict {
 	return Verdict{}
 }
 
-// TermSatisfied reports whether p satisfies one selector term. Soft
-// preferences rank agents with it; a hard selector goes through [Evaluate].
+// TermSatisfied reports whether p satisfies one selector or preference term.
 func TermSatisfied(p Profile, term string) bool {
 	return strings.TrimSpace(term) == "" || termSatisfied(p, term)
 }

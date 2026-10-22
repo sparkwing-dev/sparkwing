@@ -165,6 +165,10 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				if !errors.As(err, &refused) || refused.Reason != ReasonHolderRights {
 					t.Fatalf("claim refusal = %v", err)
 				}
+			} else if test == "foreign" {
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("foreign claim = %v", err)
+				}
 			} else {
 				var refused *apierr.Error
 				if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
@@ -622,19 +626,26 @@ func fundUnitClaim(t *testing.T, s *Store) {
 }
 
 func TestNamedClaimReadinessDoesNotRevealForeignWork(t *testing.T) {
-	for _, cancelled := range []bool{false, true} {
-		t.Run(map[bool]string{false: "pending", true: "cancelled"}[cancelled], func(t *testing.T) {
+	for _, scenario := range []string{"pending", "cancelled", "untrusted", "ungranted", "missing"} {
+		t.Run(scenario, func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
 			foreign := authorityRoot("foreign-runner", "b")
+			if scenario == "untrusted" {
+				foreign.Trust = capability.TrustVerifiedDefault
+			}
+			if scenario == "ungranted" {
+				foreign.Grants = []capability.Grant{capability.TriggersClaim}
+			}
 			authorityPersist(t, s, foreign)
 			demand.CapabilityPrefix = foreign.Prefix
-			if cancelled {
+			if scenario == "cancelled" {
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1`)
 			}
-			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-			var refused *apierr.Error
-			if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
-				t.Fatalf("foreign refusal: %v", err)
+			if scenario == "missing" {
+				demand.Target.RunID = "absent"
+			}
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("foreign or missing refusal: %v", err)
 			}
 		})
 	}

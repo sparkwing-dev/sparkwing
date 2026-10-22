@@ -227,6 +227,31 @@ func TestRankingPreservesPreferenceHolds(t *testing.T) {
 	}
 }
 
+func TestPreferenceHoldRequiresAnAdmissibleClaimant(t *testing.T) {
+	for _, scenario := range []string{"ranking forbids preferred runner", "preferred runner has no free slot"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := rankingFixture(t, true)
+			if scenario == "ranking forbids preferred runner" {
+				if err := f.Rank(t, f.Admin, store.TierCloud); err != nil {
+					t.Fatal(err)
+				}
+				f.Poll(t, f.Self, capability.UnitNode)
+			} else {
+				if err := f.Rank(t, f.Admin); err != nil {
+					t.Fatal(err)
+				}
+				f.PollWithSlots(t, f.Self, 0)
+			}
+			f.At(time.Second)
+			ctx := store.WithClaimPlacement(t.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: []string{"name=runner"}, Hold: time.Hour}, {}}, Liveness: time.Hour})
+			claim, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}})
+			if err != nil || claim.NodeID != "job" {
+				t.Fatalf("inadmissible preferred runner held fallback: %+v %v", claim, err)
+			}
+		})
+	}
+}
+
 func TestRankingWindowIsPerJob(t *testing.T) {
 	f := rankingFixture(t, true)
 	f.AddJob(t, "later", f.ReadyAt.Add(4*time.Second))

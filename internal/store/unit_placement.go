@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -11,10 +13,17 @@ import (
 )
 
 func placementRank(profile match.Profile, demand match.Demand, preferences []PlacementPreference) int {
+	if !match.Evaluate(profile, demand).OK() {
+		return len(preferences)
+	}
+	profile.Labels = match.SelfAsserted(profile.Labels)
+	for _, pool := range profile.ReservedPools {
+		profile.Labels = append(profile.Labels, "pool="+pool)
+	}
 	for i, preference := range preferences {
-		demand.Prefers = preference.Prefers
-		verdict := match.Evaluate(profile, demand)
-		if verdict.OK() && (len(preference.Prefers) == 0 || verdict.PreferenceScore > 0) {
+		if len(preference.Prefers) == 0 || slices.ContainsFunc(preference.Prefers, func(term string) bool {
+			return strings.TrimSpace(term) != "" && match.TermSatisfied(profile, term)
+		}) {
 			return i
 		}
 	}

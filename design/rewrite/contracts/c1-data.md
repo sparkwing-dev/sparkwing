@@ -858,14 +858,19 @@ There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
 ordinal. Queue arbitration serializes holds and awards. Claims take the controller
 lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
-arbitration after a ledger lock poisons the transaction before acquiring the queue
-lock. Award rechecks SQL eligibility and reserves the unit and funding atomically.
+arbitration or a new team lock after a ledger lock poisons the transaction before
+acquisition. Team and account deletion take team rows and authority before ledger
+locks. Team rows use no-key-update strength because their names never change;
+ledger writes can take foreign-key key-share locks without waiting for deletion. Award rechecks SQL eligibility and reserves the unit and funding atomically.
 For a ready job naming no runner, the existing placement-hold predicate holds
 work for the best-ranked tier with a live claimant on the same team, matching
 labels and a free slot in its latest poll. The hold ends when that claimant takes
 the job or the 5-second `RankingWindow` expires. Busy or offline higher tiers
 cause no wait. Any eligible claimant may take the job after the window; there is
-no post-window grace. `Prefers` holds remain. Preference scoring and durable asks
+no post-window grace. Both ranking and `Prefers` holds use one admissible
+claimant/work relation: complete eligibility, ranking permission and a free slot.
+Owner self-execution offers its own slot instead of reusing the last poll.
+Preference scoring and durable asks
 are removed. Polls carry optional `free_slots`: absent means one available slot;
 zero means busy. Each award consumes one advertised slot. Each loop reports
 its configured concurrency minus active awards.
@@ -878,7 +883,9 @@ Named work without placement relations hydrates only its current claimant.
 Scoped polls hydrate machines from their source team and keep service observers.
 The predicate joins work to claimant scope by team before evaluating pairs.
 Cancelled, finished or expired named work reports its state refusal before
-funding diagnostics.
+funding diagnostics. Named claims resolve the run within the claimant's team
+before kind or trust diagnostics. Only the Cloud launcher may resolve across teams.
+Repository routing identities are lowercased by `sourceurl.RoutingIdentity` at intake.
 Private owner placement projections use that same SQL predicate before readiness.
 They write no awards, reservations or fair-share ordinals. Readiness is
 rechecked when the owner asks to execute.
@@ -915,6 +922,12 @@ The unused `Tenant.SetRepoDispatch`, `Store.SeedToken`,
 The capability issuer, binding transactions, sealed intake and source release
 own their retained responsibilities. Seeded startup bootstrap uses the gated
 `Store.Issue` transaction described above.
+
+Installation withdrawal and listing reconciliation share one targeted receipt.
+It commits the complete original repository set and aggregate result with the
+withdrawals, before a replay can enumerate current repositories. Individual
+repository effects retain their own receipts. A changed listing or processing
+branch cannot expand an already applied installation effect.
 
 ## Launcher award snapshots
 
@@ -3479,7 +3492,8 @@ selection, before inserting either the run or its owner. The single per-principa
 guard uses the authenticated subject kind and ID within its tenant, including
 unmetered members. Retry admissions use the committed retrier lineage for the
 subject kind because the source request retains its original actor. An account
-and machine sharing an ID have separate budgets. The global guard covers every team. Both read committed run admissions
+and machine sharing an ID have separate budgets. The global guard covers every team and uses only the configured cap. Pending
+execution backlog never derives a per-team hourly share. Both read committed run admissions
 under the shared store serialization, never summed usage counters. Refusals preserve ErrComputeLimit and expose canonical rate_limited with the
 existing five-second retry delay. Replay spends no second slot. Raw pending-run attribution and token metering are not intake
 inputs. The unused OldestWaitingReadyNodeForPrincipal diagnostic is removed.
@@ -4458,6 +4472,10 @@ labels. Every contained teardown, release or quarantine fault enters that
 ledger once per node. More than three distinct faults block that team's next
 claim. Quarantine permission is tracked separately and permits at most three
 distinct nodes per team per pass; counting a fault grants no write permission.
+Reservation evidence on protected team nodes is classified before namespace
+filtering. Erased identity annotations still consume the protected label's budget
+when a reservation taint or quarantine remains. Only a recorded team matching the
+protected label in the launcher's namespace permits a quarantine or release write.
 
 ## Sealed masking projection (decision 43)
 

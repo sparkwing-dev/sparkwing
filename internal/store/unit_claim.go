@@ -34,6 +34,11 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if err != nil {
 			return err
 		}
+		if demand.Target != nil {
+			if _, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, *demand.Target); err != nil {
+				return err
+			}
+		}
 		kinds, err := claimKinds(p.Capability, demand)
 		if err != nil {
 			return err
@@ -146,11 +151,11 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if _, err = claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
+	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
+	if err != nil {
 		return UnitClaim{}, err
 	}
-	var team Team
-	if err = tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
+	if _, err = claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
 		return UnitClaim{}, err
 	}
 	named := demand
@@ -176,12 +181,22 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		return UnitClaim{}, err
 	}
 	policy, _ := ClaimPlacementFromContext(ctx)
-	preferences := policy.preferencesFor(requirements.Prefers)
 	placement := PlacementNone
-	if unit.Kind == capability.UnitNode && len(preferences) > 0 && len(preferences[0].Prefers) > 0 {
-		placement = PlacementFallback
-		if placementRank(profile, requirements, preferences) == 0 {
-			placement = PlacementPreferred
+	if unit.Kind == capability.UnitNode {
+		var body []byte
+		if err := tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&body); err != nil {
+			return UnitClaim{}, err
+		}
+		var execution runspec.JobExecutionSettings
+		if err := json.Unmarshal(body, &execution); err != nil {
+			return UnitClaim{}, err
+		}
+		preferences := policy.preferencesFor(execution.Prefers.Value)
+		if len(preferences) > 0 && len(preferences[0].Prefers) > 0 {
+			placement = PlacementFallback
+			if placementRank(profile, requirements, preferences) == 0 {
+				placement = PlacementPreferred
+			}
 		}
 	}
 	if err := consumeClaimSlotTx(ctx, tx, demand.CapabilityPrefix, p.Capability.Team); err != nil {
@@ -322,8 +337,12 @@ func claimPurpose(kind capability.UnitKind) capability.AwardPurpose {
 }
 
 func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) error {
-	var team Team
-	if err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
+	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	if err != nil {
+		return err
+	}
+	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
+	if err != nil {
 		return err
 	}
 	diagnostic, err := explainUnitPlacementTx(ctx, tx, team, unit, demand)
@@ -344,4 +363,17 @@ func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitD
 		return diagnostic.refused
 	}
 	return errRankingHold
+}
+
+func (o *Operator) claimTargetTeamTx(ctx context.Context, tx *storeTx, claimant capability.Capability, unit UnitRef) (Team, error) {
+	query, args := `SELECT team FROM runs WHERE id=? AND team=?`, []any{unit.RunID, claimant.Team}
+	if capability.CloudLauncher(claimant) {
+		query, args = `SELECT team FROM runs WHERE id=?`, []any{unit.RunID}
+	}
+	var team Team
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", notFound("run", string(unit.RunID))
+	}
+	return team, err
 }

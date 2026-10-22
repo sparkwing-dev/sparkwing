@@ -113,13 +113,20 @@ func (t *Tenant) GitHubAppAutomations(ctx context.Context) (_ []GitHubAppAutomat
 
 // WithdrawGitHubAppAutomation removes consent only through its bound installation.
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error {
-	return t.s.githubDeliveryEffect(ctx, fmt.Sprintf("withdraw-automation:%s:%d:%d", t.team, installation, repository), func(tx *storeTx) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return t.withdrawGitHubAppAutomationTx(ctx, tx, installation, repository)
+	})
+}
+
+func (t *Tenant) withdrawGitHubAppAutomationTx(ctx context.Context, tx *storeTx, installation, repository int64) error {
+	_, err := githubDeliveryResultTx(ctx, tx, fmt.Sprintf("lifecycle:withdraw-automation:%s:%d:%d", t.team, installation, repository), func() (struct{}, error) {
 		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repository); err != nil {
-			return err
+			return struct{}{}, err
 		}
 		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installation, repository)
-		return err
+		return struct{}{}, err
 	})
+	return err
 }
 
 // RenameGitHubAppAutomation follows a repository's numeric identity after a rename.

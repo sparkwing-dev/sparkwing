@@ -57,7 +57,9 @@ Metered claim leases account for billable time that begins during issuance.
 The store baseline is 22. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted
 admission, publication, withdrawal and lifecycle result. Reprocessing preserves
-committed effects. Historical deliveries without complete receipts cannot be
+committed effects. Installation withdrawals keep their original repository targets
+and result, so processing an old delivery cannot withdraw later schedules or consent.
+Historical deliveries without complete receipts cannot be
 reconstructed safely. Reconcile their outcomes before replaying them after a
 cutover. Failed deliveries still require an admin's Process again action.
 

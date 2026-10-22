@@ -172,7 +172,10 @@ consent before fetching source. Its transaction checks both, then replaces the
 schedule set, advances the generation and records the result together.
 Withdrawals and consent changes advance the generation too. A worker holding an
 older source snapshot cannot restore declarations after a newer publication or
-withdrawal. These checks live in the store and apply across workers.
+withdrawal. Installation-wide withdrawal records its original repository targets
+and aggregate result in the same transaction. Reprocessing that delivery cannot
+withdraw schedules or consent added later, even if the installation listing
+changes between attempts. These checks live in the store and apply across workers.
 Disconnecting the installation during source preparation revokes the pending
 admission and publication. It cannot start a run or change schedules.
 

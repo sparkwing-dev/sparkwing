@@ -111,6 +111,49 @@ func TestPostgresClaimLocksDelegatedClaimantRootBeforeRun(t *testing.T) {
 	b.release(1)
 }
 
+func TestPostgresTeamDeletionWaitsForClaimBeforeLedger(t *testing.T) {
+	st := storetest.NewPostgres(t).Open(t)
+	st.DB().SetMaxOpenConns(8)
+	f := st.TestOnlyRankingFixture(t, true)
+	if err := f.Rank(t, f.Admin); err != nil {
+		t.Fatal(err)
+	}
+	f.At(time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	if _, err := st.DB().ExecContext(ctx, `UPDATE capabilities SET authority_json=convert_to(jsonb_set(convert_from(authority_json,'UTF8')::jsonb,'{root_metered}','true')::text,'UTF8') WHERE prefix=$1`, f.Self); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','owner','owner',1)`); err != nil {
+		t.Fatal(err)
+	}
+	principal, err := st.AsOperator().ResolveAuthority(ctx, f.Owner.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	tenant, err := st.ForTeam(ctx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := blockRun(t, ctx, st)
+	b.start(func() error {
+		_, err := st.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Self, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}})
+		return err
+	})
+	b.waitBlocked(1)
+	b.start(func() error { _, err := tenant.DeleteAuthorizedTeam(ctx, a); return err })
+	b.waitBlocked(2)
+	var free bool
+	if err := b.tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtext('sparkwing/ledger/a'))`).Scan(&free); err != nil {
+		t.Fatal(err)
+	}
+	if !free {
+		t.Fatal("deletion holds the ledger while waiting for the claim's team lock")
+	}
+	b.release(2)
+}
+
 func TestPostgresRenewalLocksObservedAuthorityBeforeRun(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
 	claim, err := st.AsOperator().ClaimUnit(ctx, demand)

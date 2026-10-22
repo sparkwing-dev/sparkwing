@@ -139,7 +139,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		}
 		options = sealed.Resolved.Settings.Options
 	}
-	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Prefers: slices.Clone(options.Prefers.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}}
+	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}}
 	if demand.Repo.URL == "" {
 		demand.Repo.URL = requestSeal.Request.Git.Repository.Display
 	}
@@ -155,7 +155,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		if err = json.Unmarshal(body, &execution); err != nil {
 			return profile, demand, err
 		}
-		demand.Selector, demand.Prefers = slices.Clone(execution.Requires.Value), slices.Clone(execution.Prefers.Value)
+		demand.Selector = slices.Clone(execution.Requires.Value)
 	}
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:

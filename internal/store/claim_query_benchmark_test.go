@@ -180,6 +180,11 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	if err = tx.Commit(); err != nil {
 		b.Fatal(err)
 	}
+	if dialect == DialectPostgres {
+		for _, table := range []string{"teams", "runs", "nodes", "claim_contexts", "claim_requirements", "claim_requirement_terms", "triggers", "eval_units", "leases", "team_deletions", "capabilities"} {
+			exec(`ANALYZE ` + table)
+		}
+	}
 	facts := []claimFacts{{Prefix: "benchmark", FreeSlots: 1, Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"eligible"}, Tier: TierCloud}}
 	if scenario == "metered" || scenario == "fresh-broad-metered" {
 		facts[0].Metered = 1
@@ -202,20 +207,23 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	wrapped.tx = tx
+	for range 5 {
+		_, err = searchClaimTx(ctx, wrapped, demand, &template)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			b.Fatal(err)
+		}
+	}
+	examined.Store(0)
 	samples := make([]time.Duration, 0, b.N)
 	b.ResetTimer()
 	for iteration := range b.N {
 		trace.enabled = dialect == DialectPostgres && iteration == b.N-1
-		before := examined.Load()
 		start := time.Now()
 		queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		_, err = searchClaimTx(queryCtx, wrapped, demand, &template)
 		cancel()
 		trace.enabled = false
 		samples = append(samples, time.Since(start))
-		if dialect == DialectSQLite && strings.HasPrefix(scenario, "fresh-broad-") && examined.Load()-before > int64(2*len(teams)) {
-			b.Fatalf("held queue examined %d ready candidates; want at most two indexed heads per team", examined.Load()-before)
-		}
 		if scenario == "no-match" || strings.HasPrefix(scenario, "fresh-broad-") {
 			if !errors.Is(err, ErrNotFound) {
 				b.Fatalf("%s: %v", scenario, err)
@@ -226,7 +234,16 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 	b.StopTimer()
 	if dialect == DialectSQLite {
-		b.ReportMetric(float64(examined.Load())/float64(b.N), "pending_predicate_evals/op")
+		trace.examine = true
+		_, err := searchClaimTx(ctx, wrapped, demand, &template)
+		trace.examine = false
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			b.Fatal(err)
+		}
+		if strings.HasPrefix(scenario, "fresh-broad-") && examined.Load() > int64(2*len(teams)) {
+			b.Fatalf("held queue examined %d ready candidates; want at most two indexed heads per team", examined.Load())
+		}
+		b.ReportMetric(float64(examined.Load()), "replayed_pending_predicate_evals/op")
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 	b.ReportMetric(float64(samples[(len(samples)*95+99)/100-1].Nanoseconds()), "p95-ns/op")
@@ -252,7 +269,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 }
 
 // Count readiness predicate evaluations across indexed and rejected route heads.
-// These exclude placement hydration and include callback overhead in latency.
+// Latency excludes placement hydration and the post-timing instrumentation replay.
 type claimBenchmarkDriver struct {
 	driver.Driver
 	probe string
@@ -274,7 +291,7 @@ type claimBenchmarkConn struct {
 }
 
 func (c *claimBenchmarkConn) instrument(query string) string {
-	if c.probe == "" {
+	if c.probe == "" || !c.trace.examine {
 		return query
 	}
 	return strings.ReplaceAll(query, `n.status='pending'`, c.probe+`(n.node_id)=1 AND n.status='pending'`)
@@ -300,6 +317,7 @@ type claimBenchmarkStatement struct {
 }
 
 type claimBenchmarkTrace struct {
+	examine    bool
 	enabled    bool
 	statements []claimBenchmarkStatement
 }

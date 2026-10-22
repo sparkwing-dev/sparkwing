@@ -66,7 +66,7 @@ func (b Budget) CapMemory(machine uint64) uint64 {
 	return limit
 }
 
-// ParseBudget parses admission capacity, runner contribution and reserved resources.
+// ParseBudget parses a runner's local admission capacity.
 func ParseBudget(s string) (Budget, error) {
 	b := Budget{Raw: strings.TrimSpace(s)}
 	if b.Raw == "" {

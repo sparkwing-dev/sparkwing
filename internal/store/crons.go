@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -442,36 +443,58 @@ func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationI
 		`github_installation_id=? AND github_repository_id=?`, installationID, repositoryID)
 }
 
+type githubInstallationWithdrawal struct {
+	Repositories []int64
+	Count        int64
+}
+
 // WithdrawGitHubCronInstallation stops App schedules without touching manual rows.
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64) (int64, error) {
-	return inTxResult(ctx, t.s, func(tx *storeTx) (int64, error) {
-		if _, err := githubDeliveryFenceTx(ctx, tx); err != nil {
-			return 0, err
-		}
-		rows, err := tx.QueryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
-		if err != nil {
-			return 0, err
-		}
-		var repositories []int64
-		for rows.Next() {
-			var repository int64
-			if err := rows.Scan(&repository); err != nil {
-				return 0, errors.Join(err, rows.Close())
-			}
-			repositories = append(repositories, repository)
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return 0, err
-		}
-		var count int64
-		for _, repository := range repositories {
-			n, err := t.withdrawGitHubCronsTx(ctx, tx, fmt.Sprintf("withdraw:%d:%d", installationID, repository), repository, `github_installation_id=? AND github_repository_id=?`, installationID, repository)
+	result, err := t.withdrawGitHubInstallation(ctx, installationID, nil, false)
+	return result.Count, err
+}
+
+// ReconcileGitHubInstallationRepositories withdraws consent and schedules for
+// repositories absent from the listing. A delivery replay keeps its original targets.
+func (t *Tenant) ReconcileGitHubInstallationRepositories(ctx context.Context, installationID int64, covered []int64) error {
+	_, err := t.withdrawGitHubInstallation(ctx, installationID, covered, true)
+	return err
+}
+
+func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID int64, covered []int64, consent bool) (githubInstallationWithdrawal, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (githubInstallationWithdrawal, error) {
+		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("withdraw-installation:%s:%d", t.team, installationID), func() (githubInstallationWithdrawal, error) {
+			var result githubInstallationWithdrawal
+			rows, err := tx.QueryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
 			if err != nil {
-				return 0, err
+				return result, err
 			}
-			count += n
-		}
-		return count, nil
+			for rows.Next() {
+				var repository int64
+				if err := rows.Scan(&repository); err != nil {
+					return result, errors.Join(err, rows.Close())
+				}
+				if repository > 0 && !slices.Contains(covered, repository) {
+					result.Repositories = append(result.Repositories, repository)
+				}
+			}
+			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+				return result, err
+			}
+			for _, repository := range result.Repositories {
+				if consent {
+					if err := t.withdrawGitHubAppAutomationTx(ctx, tx, installationID, repository); err != nil {
+						return result, err
+					}
+				}
+				n, err := t.withdrawGitHubCronsTx(ctx, tx, fmt.Sprintf("withdraw:%d:%d", installationID, repository), repository, `github_installation_id=? AND github_repository_id=?`, installationID, repository)
+				if err != nil {
+					return result, err
+				}
+				result.Count += n
+			}
+			return result, nil
+		})
 	})
 }
 

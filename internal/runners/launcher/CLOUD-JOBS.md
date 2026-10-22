@@ -344,7 +344,7 @@ the bootstrap or installs an SDK.
 
 `NewControllerControl` binds the launcher's claim and sync operations to the
 shared controller wire interface. Its client must use `EngineOptions.Launcher`.
-It captures observed labels/capacity and requests the configured Cloud unit
+It sends the launcher's labels and requests the configured Cloud unit
 kinds in one call. The server supplies team, holder, generation, resources and
 the one-time bootstrap. The launcher has no caller-selected holder override.
 Transport failures never trigger a second claim in the adapter.
@@ -361,7 +361,8 @@ through `source.ForExecution` using the accepted spec and matching engine.
 Claim publication, source initialization and bootstrap exchange capture private
 award values before calling service bindings. The claim adapter uses the shared
 source projections directly.
-Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.
+Each award carries its committed CPU and memory allocation in
+`ClaimedUnit.CloudResources`.
 For eval, `Binding.Generation` fences the terminal source and
 `Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
 

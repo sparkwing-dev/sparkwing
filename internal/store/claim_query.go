@@ -637,7 +637,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
  claimant_scopes(team,facts) AS MATERIALIZED (SELECT tf.team,c.facts FROM team_facts tf JOIN claimants c ON c.is_cloud=1 UNION ALL SELECT c.team,c.facts FROM claimants c WHERE c.is_cloud=0),
  overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflowParam, "of") + `),
  rates AS MATERIALIZED (SELECT ` + q.number(q.at("rate.value", "cores")) + ` AS cpu_class,` + q.number(q.at("rate.value", "micro_per_second")) + ` AS price FROM ` + q.array(rateParam, "rate") + `),
- ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
+ ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
  ancestors(team,child,id,origin,parent) AS (SELECT ar.team,ar.id,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM runs ar JOIN work aw ON aw.team=ar.team AND aw.run_id=ar.id UNION SELECT a.team,a.child,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM ancestors a JOIN runs ar ON ar.team=a.team AND ar.id=a.parent),
  unfunded AS MATERIALIZED (SELECT ` + workProjection + `,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `)` + fundingCTEs
 	placement, err := q.placementCTEs(q.policy)
@@ -647,7 +647,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	ctes += placement
 	if q.holdProof {
 		currentRank := q.claimRankSQL("w", "current.facts")
-		return ctes + ` SELECT DISTINCT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM pairs w CROSS JOIN current_claimant current,clock WHERE w.ranked=1 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND w.claim_rank>=0 AND w.claim_rank<` + currentRank, nil
+		return ctes + ` SELECT DISTINCT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM admissible w CROSS JOIN current_claimant current,clock WHERE w.ranked=1 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND w.claim_rank>=0 AND w.claim_rank<` + currentRank, nil
 	}
 	final := ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM available w WHERE ` + q.at("w.facts", "prefix") + `=` + q.param(demand.CapabilityPrefix)
 	if demand.Target != nil {
@@ -773,8 +773,10 @@ func (q *claimSQL) claimRankSQL(alias, facts string) string {
 }
 
 func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
+	// Owner self-execution offers its own slot through claimFactsTx, independent of its last poll.
+	admissible := `admissible AS NOT MATERIALIZED (SELECT * FROM pairs e WHERE ` + q.number(q.at("e.facts", "free_slots")) + `>0 AND (e.ranked=0 OR e.claim_rank>=0 OR e.claim_ranking='[]'))`
 	if q.placementFree {
-		return `,pairs AS MATERIALIZED (SELECT e.*,0 AS ranked,0 AS claim_rank FROM eligible e),available AS MATERIALIZED (SELECT * FROM pairs)`, nil
+		return `,pairs AS MATERIALIZED (SELECT e.*,0 AS ranked,0 AS claim_rank FROM eligible e),` + admissible + `,available AS MATERIALIZED (SELECT * FROM admissible)`, nil
 	}
 	var param string
 	if !q.preferencesFree {
@@ -790,8 +792,8 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 	rankHold := q.rankingHold()
 	if q.preferencesFree {
 		pairs := `pairs AS MATERIALIZED (SELECT e.*,` + ranked + ` AS ranked,` + ranking + ` AS claim_rank FROM eligible e)`
-		available := `available AS MATERIALIZED (SELECT w.* FROM pairs w,clock WHERE w.ranked=0 OR (w.claim_rank>=0 OR w.claim_ranking='[]') AND NOT (` + rankHold + `))`
-		return `,` + pairs + `,` + available, nil
+		available := `available AS MATERIALIZED (SELECT w.* FROM admissible w,clock WHERE w.ranked=0 OR NOT (` + rankHold + `))`
+		return `,` + pairs + `,` + admissible + `,` + available, nil
 	}
 	burst := q.at("w.request", "request", "burst")
 	burstPrefs := q.at("w.request", "request", "burst", "preferences")
@@ -804,9 +806,9 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 	stepLabels := q.anyAlternative("s.selectors", func(alt string) string { return q.contains(q.at("e.facts", "labels"), alt) })
 	stepMatch := `(s.target='' AND (s.selectors='[]' OR ` + stepLabels + `)) OR (s.target='cloud' AND ` + q.number(q.at("e.facts", "cloud")) + `=1) OR (s.target='here' AND ` + q.at("e.facts", "here_run") + `=e.run_id) OR (s.target='machines' AND ` + q.number(q.at("e.facts", "personal")) + `=1) OR ` + q.contains(q.at("e.facts", "labels"), "s.target")
 	pairs := `pairs AS MATERIALIZED (SELECT e.*,` + ranked + ` AS ranked,` + ranking + ` AS claim_rank,COALESCE((SELECT MIN(s.step) FROM steps s WHERE ` + same("s", "e") + ` AND (` + stepMatch + `)),(SELECT COUNT(*) FROM steps s WHERE ` + same("s", "e") + `)) AS preference_rank FROM eligible e)`
-	prefHold := `EXISTS (SELECT 1 FROM pairs b JOIN steps s ON ` + same("s", "b") + ` AND s.step=b.preference_rank WHERE ` + same("b", "w") + ` AND b.preference_rank<w.preference_rank AND clock.now<w.arrived+(SELECT SUM(s2.hold) FROM steps s2 WHERE ` + same("s2", "w") + ` AND s2.step<=s.step))`
-	available := `available AS MATERIALIZED (SELECT w.* FROM pairs w,clock WHERE (w.ranked=0 OR (w.claim_rank>=0 OR w.claim_ranking='[]') AND NOT (` + rankHold + `)) AND (w.kind<>'node' OR NOT (` + prefHold + `)))`
-	return `,` + steps + `,` + pairs + `,` + available, nil
+	prefHold := `EXISTS (SELECT 1 FROM admissible b JOIN steps s ON ` + same("s", "b") + ` AND s.step=b.preference_rank WHERE ` + same("b", "w") + ` AND b.preference_rank<w.preference_rank AND clock.now<w.arrived+(SELECT SUM(s2.hold) FROM steps s2 WHERE ` + same("s2", "w") + ` AND s2.step<=s.step))`
+	available := `available AS MATERIALIZED (SELECT w.* FROM admissible w,clock WHERE (w.ranked=0 OR NOT (` + rankHold + `)) AND (w.kind<>'node' OR NOT (` + prefHold + `)))`
+	return `,` + steps + `,` + pairs + `,` + admissible + `,` + available, nil
 }
 
 func firstPreferenceHold(policy ClaimPlacement) int64 {
@@ -817,6 +819,6 @@ func firstPreferenceHold(policy ClaimPlacement) int64 {
 }
 
 func (q *claimSQL) rankingHold() string {
-	better := `EXISTS (SELECT 1 FROM pairs b WHERE ` + unitIdentitySQL("b", "w") + ` AND b.claim_rank>=0 AND b.claim_rank<w.claim_rank AND ` + q.number(q.at("b.facts", "free_slots")) + `>0)`
+	better := `EXISTS (SELECT 1 FROM admissible b WHERE ` + unitIdentitySQL("b", "w") + ` AND b.claim_rank>=0 AND b.claim_rank<w.claim_rank)`
 	return `w.claim_rank>0 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND ` + better
 }

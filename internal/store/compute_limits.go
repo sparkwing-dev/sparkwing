@@ -367,77 +367,20 @@ func runsPerHourRefusal(
 	}
 
 	if limits.GlobalRunsPerHour > 0 {
-		return q.operator.globalRunsPerHourRefusal(ctx, q, team, limits.GlobalRunsPerHour, since)
+		return q.operator.globalRunsPerHourRefusal(ctx, q, limits.GlobalRunsPerHour, since)
 	}
 	return nil
 }
 
-func (o *Operator) globalRunsPerHourRefusal(ctx context.Context, q *storeTx, team Team, limit, since int64) error {
-	runs, readyTeams, err := o.globalHourlySnapshot(ctx, q, since)
-	if err != nil {
+func (o *Operator) globalRunsPerHourRefusal(ctx context.Context, q *storeTx, limit, since int64) error {
+	var runs int64
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE created_at>=?`, since).Scan(&runs); err != nil {
 		return err
 	}
 	if runs >= limit {
-		return &ComputeLimitError{
-			Limit: ComputeLimitGlobalRunsPerHour, Cap: limit,
-			Observed: runs, Scope: "controller",
-		}
-	}
-	var competitors int64
-	for _, ready := range readyTeams {
-		if ready != team {
-			competitors++
-		}
-	}
-	if competitors == 0 {
-		return nil
-	}
-	participants := competitors + 1
-	share := limit / participants
-	if limit%participants != 0 {
-		share++
-	}
-	share = max(int64(1), share)
-	var teamRuns int64
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=?`, team, since).Scan(&teamRuns); err != nil {
-		return err
-	}
-	if teamRuns >= share {
-		return &ComputeLimitError{Limit: ComputeLimitGlobalRunsPerHour, Cap: share, Observed: teamRuns, Scope: "team " + string(team)}
+		return &ComputeLimitError{Limit: ComputeLimitGlobalRunsPerHour, Cap: limit, Observed: runs, Scope: "controller"}
 	}
 	return nil
-}
-
-func (o *Operator) globalHourlySnapshot(ctx context.Context, q *storeTx, since int64) (int64, []Team, error) {
-	var runs int64
-	if err := q.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM runs WHERE created_at >= ?`, since).Scan(&runs); err != nil {
-		return 0, nil, err
-	}
-	now := since + int64(time.Hour)
-	rows, err := q.QueryContext(ctx, `
-		SELECT r.team FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id
-		WHERE r.intake_mode='execute' AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND n.status='pending' AND n.cancel_requested_at IS NULL AND n.ready_at<=?
-		UNION
-		SELECT r.team FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id
-		WHERE r.intake_mode='execute' AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND t.status='pending' AND t.cancel_requested_at IS NULL AND t.available_at<=?
-		UNION
-		SELECT r.team FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id
-		WHERE r.intake_mode='execute' AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND e.status='pending' AND (e.expires_at IS NULL OR e.expires_at>?)
-`, now, now, now)
-	if err != nil {
-		return 0, nil, err
-	}
-	var teams []Team
-	for rows.Next() {
-		var team Team
-		if err := rows.Scan(&team); err != nil {
-			_ = rows.Close()
-			return 0, nil, err
-		}
-		teams = append(teams, team)
-	}
-	return runs, teams, errors.Join(rows.Err(), rows.Close())
 }
 
 // enforceChildLimitsTx bounds a child's depth and its root's descendants.

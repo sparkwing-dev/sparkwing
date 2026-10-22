@@ -208,13 +208,23 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 		binding := boundaryBinding("team")
 		binding.UnitID = "unit-" + string(rune('a'+i))
 		node := reservedNode(t, "node-"+string(rune('a'+i)), binding, "garbage")
-		delete(node.Annotations, bindingAnnotation)
+		if i%2 == 0 {
+			delete(node.Annotations, reservationNamespaceAnnotation)
+		} else {
+			node.Annotations[reservationNamespaceAnnotation] = "elsewhere"
+		}
 		if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	other := boundaryBinding("other")
 	if _, err := kube.CoreV1().Nodes().Create(t.Context(), reservedNode(t, "other-node", other, "garbage"), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := reservedNode(t, "foreign-node", other, "garbage")
+	foreign.Labels[TeamNodeLabel] = TeamNodeValue("elsewhere", other.Team)
+	foreign.Annotations[reservationNamespaceAnnotation] = "cloud"
+	if _, err := kube.CoreV1().Nodes().Create(t.Context(), foreign, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	err := l.Sync(t.Context())
@@ -249,6 +259,49 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 	}
 	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
 		t.Fatalf("team stayed blocked after returning within its budget: excluded=%v err=%v", control.excluded, err)
+	}
+}
+
+func TestErasedReservationIdentityStillBlocksProtectedTeam(t *testing.T) {
+	l, kube, _, control := fixture()
+	for i := range maxQuarantinesPerSync + 1 {
+		binding := boundaryBinding("team")
+		name := fmt.Sprintf("erased-%d", i)
+		node := reservedNode(t, name, binding, "")
+		node.Annotations = nil
+		node.Spec.Taints = []corev1.Taint{{Key: reservationTaint, Value: "r-" + name, Effect: corev1.TaintEffectNoSchedule}}
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreign := reservedNode(t, "foreign", boundaryBinding("team"), "")
+	foreign.Labels[TeamNodeLabel] = TeamNodeValue("elsewhere", "team")
+	foreign.Annotations = nil
+	foreign.Spec.Taints = []corev1.Taint{{Key: reservationTaint, Effect: corev1.TaintEffectNoSchedule}}
+	if _, err := kube.CoreV1().Nodes().Create(t.Context(), foreign, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxQuarantinesPerSync + 1 {
+		free := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("free-%d", i), Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "free")}}}
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), free, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.Sync(t.Context()); blocking(err) != nil {
+		t.Fatal(err)
+	}
+	control.award = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
+		t.Fatalf("erased reservations did not block their protected team: excluded=%v err=%v", control.excluded, err)
+	}
+	nodes, err := kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range nodes.Items {
+		if quarantined(node) {
+			t.Fatalf("unattributed node %s was quarantined", node.Name)
+		}
 	}
 }
 
@@ -298,7 +351,7 @@ func TestPreviouslyCountedFaultsDoNotAuthorizeExtraQuarantines(t *testing.T) {
 	for i := range maxQuarantinesPerSync + 4 {
 		binding := boundaryBinding("team")
 		binding.UnitID = fmt.Sprintf("unit-%d", i)
-		node := reservedNode(t, fmt.Sprintf("node-%d", i), binding, "garbage")
+		node := reservedNode(t, fmt.Sprintf("node-%d", i), binding, "")
 		delete(node.Annotations, bindingAnnotation)
 		if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)

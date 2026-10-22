@@ -161,43 +161,6 @@ func TestConcurrentSealedIntakeNeverPassesTheHourlyGuard(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 3)
 }
 
-func TestGlobalHourlyRateSharesRemainingCapacityWithWaitingTeam(t *testing.T) {
-	a, request, _ := intakeFixture(t)
-	if _, err := a.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalRunsPerHour: 4}); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"a1", "a2"} {
-		request.IdempotencyKey = key
-		if _, err := a.AdmitRun(t.Context(), request); err != nil {
-			t.Fatal(err)
-		}
-	}
-	b := &Tenant{s: a.s, team: "b"}
-	root := authorityRoot("writer-b", "b")
-	root.Grants = []capability.Grant{capability.RunsWrite}
-	authorityPersist(t, a.s, root)
-	request.Authority.ID = root.Prefix
-	request.Request.Team = "b"
-	request.IdempotencyKey = "b1"
-	if _, err := b.AdmitRun(t.Context(), request); err != nil {
-		t.Fatal(err)
-	}
-	request.Authority.ID = "member"
-	request.Request.Team = "a"
-	request.IdempotencyKey = "a3"
-	_, err := a.AdmitRun(t.Context(), request)
-	var refusal *ComputeLimitError
-	if !errors.As(err, &refusal) || refusal.Limit != ComputeLimitGlobalRunsPerHour || refusal.Scope != "team a" || refusal.Cap != 2 {
-		t.Fatalf("busy team consumed another waiting team's share: %v", err)
-	}
-	request.Authority.ID = root.Prefix
-	request.Request.Team = "b"
-	request.IdempotencyKey = "b2"
-	if _, err := b.AdmitRun(t.Context(), request); err != nil {
-		t.Fatalf("waiting team could not use its share: %v", err)
-	}
-}
-
 func TestSealedIntakeRateKeepsPrincipalKindsSeparateProperty(t *testing.T) {
 	property := func(seed uint64) bool {
 		tenant, request, _ := intakeFixture(t)

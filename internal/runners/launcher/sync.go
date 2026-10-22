@@ -154,13 +154,20 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 	ledger.record(prior)
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
-		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
-			if namespace != "" {
-				l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
-			}
+		namespace := node.Annotations[reservationNamespaceAnnotation]
+		if namespace != "" && namespace != l.Config.Namespace && !ownsNodeReservation(node, l.Config.Namespace) {
+			l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
+		}
+		if node.Labels[TeamNodeLabel] == "" || !reservationEvidence(node) {
 			continue
 		}
 		held, binding, ok := nodeReservation(node)
+		if !ok {
+			ledger.record(&nodeFault{node: node.Name, cause: "reservation is malformed or does not match its award"})
+		}
+		if !ownsNodeReservation(node, l.Config.Namespace) {
+			continue
+		}
 		if !ok {
 			err := ledger.quarantine(ctx, l.Kube, node, "reservation is malformed or does not match its award")
 			ledger.record(err)
@@ -178,6 +185,22 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 	l.blockedTeamLabels = ledger.blockedLabels()
 	l.mu.Unlock()
 	return errors.Join(errs...)
+}
+
+func reservationEvidence(node *corev1.Node) bool {
+	if node.Annotations[reservationAnnotation] != "" || node.Annotations[bindingAnnotation] != "" || quarantined(*node) {
+		return true
+	}
+	return slices.ContainsFunc(node.Spec.Taints, func(taint corev1.Taint) bool { return taint.Key == reservationTaint })
+}
+
+func ownsNodeReservation(node *corev1.Node, namespace string) bool {
+	var held CloudNodeReservation
+	var binding CloudJobBinding
+	_ = json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held)
+	_ = json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding)
+	return held.Team != "" && node.Labels[TeamNodeLabel] == TeamNodeValue(namespace, held.Team) ||
+		binding.Team != "" && node.Labels[TeamNodeLabel] == TeamNodeValue(namespace, binding.Team)
 }
 
 func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, bool) {

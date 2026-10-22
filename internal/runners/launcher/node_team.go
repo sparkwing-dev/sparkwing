@@ -14,8 +14,10 @@ import (
 
 const usedTeamLabel = "node-restriction.kubernetes.io/sparkwing-used-team"
 
-var nodeClaims = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
-var nodePools = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
+var (
+	nodeClaims = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
+	nodePools  = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
+)
 
 func (b *KubernetesBoundary) nodeClaim(ctx context.Context, node *corev1.Node) (*unstructured.Unstructured, error) {
 	if b.Karpenter == nil {
@@ -88,8 +90,7 @@ func (b *KubernetesBoundary) Retire(ctx context.Context, r CloudNodeReservation)
 	if string(node.UID) != r.NodeUID {
 		return &nodeFault{node: r.NodeName, cause: "replaced before retirement"}
 	}
-	// safety: the node may now hold another award, so it is left untouched; sync
-	// quarantines it if what it records is not a valid reservation.
+	// safety: the node may now hold another award, so it is left untouched.
 	var held CloudNodeReservation
 	if json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held) != nil || held != r || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return &nodeFault{node: r.NodeName, cause: "reservation changed before retirement"}

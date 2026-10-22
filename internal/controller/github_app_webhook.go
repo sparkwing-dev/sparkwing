@@ -238,36 +238,13 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 		writeError(w, http.StatusBadGateway, fmt.Errorf("read installation repositories: %w", err))
 		return
 	}
-	covered := make(map[int64]bool, len(current))
+	covered := make([]int64, 0, len(current))
 	for _, repo := range current {
-		covered[repo.ID] = true
+		covered = append(covered, repo.ID)
 	}
-	grants, err := tenant.GitHubAppAutomations(ctx)
-	if err != nil {
-		s.writeInternalError(w, r, "github app automation grants", err)
+	if err := tenant.ReconcileGitHubInstallationRepositories(ctx, env.Installation.ID, covered); err != nil {
+		s.writeInternalError(w, r, "withdraw removed GitHub repository automation and schedules", err)
 		return
-	}
-	for _, grant := range grants {
-		if grant.InstallationID == env.Installation.ID && !covered[grant.RepositoryID] {
-			if err := tenant.WithdrawGitHubAppAutomation(ctx, env.Installation.ID, grant.RepositoryID); err != nil {
-				s.writeInternalError(w, r, "revoke removed repository automation", err)
-				return
-			}
-		}
-	}
-	rows, err := tenant.ListCronSchedules(ctx)
-	if err != nil {
-		s.writeInternalError(w, r, "github app schedules", err)
-		return
-	}
-	for _, row := range rows {
-		if row.GitHubInstallationID != env.Installation.ID || row.GitHubRepositoryID == 0 || covered[row.GitHubRepositoryID] {
-			continue
-		}
-		if _, err := tenant.WithdrawGitHubCronRepository(ctx, env.Installation.ID, row.GitHubRepositoryID); err != nil {
-			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 }

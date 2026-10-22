@@ -17,7 +17,7 @@ import (
 type storeLockTier string
 
 const (
-	lockGlobal       storeLockTier = "global advisories"
+	lockLedger       storeLockTier = "credit ledgers"
 	lockLease        storeLockTier = "singleton leases"
 	lockSettings     storeLockTier = "settings and signup gates"
 	lockTeam         storeLockTier = "teams"
@@ -40,10 +40,10 @@ const (
 )
 
 var storeLockOrder = [...]storeLockTier{
-	lockGlobal, lockLease, lockSettings, lockTeam, lockAccount, lockMembership,
+	lockLease, lockSettings, lockTeam, lockAccount, lockMembership,
 	lockAuthority, lockInstallation, lockCredential, lockSchedule, lockTrigger,
 	lockEval, lockRun, lockNode, lockConcurrency, lockUpload, lockDigest,
-	lockQuota, lockBilling, lockRecord,
+	lockQuota, lockLedger, lockBilling, lockRecord,
 }
 
 func compareLockTiers(a, b storeLockTier) int {
@@ -204,10 +204,14 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	var query string
 	args := []any{k.keys[0]}
 	switch k.tier {
-	case lockGlobal:
+	case lockLedger:
 		_, err := lockLedgerTx(ctx, tx, Team(k.keys[0]))
 		return err
 	case lockTeam:
+		if tx.ledgerLocked {
+			tx.err = errors.New("claim lock order: teams must precede the ledger")
+			return tx.err
+		}
 		query = "SELECT name FROM teams WHERE name=?"
 	case lockAccount:
 		query = "SELECT id FROM accounts WHERE id=?"
@@ -228,7 +232,9 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	mode := tx.forShare()
 	if row.write {
 		mode = tx.forUpdate()
-		if k.tier == lockAuthority {
+		// Team names and authority identities never change. Ledger writes may
+		// acquire their foreign-key key-share locks after the ledger advisory.
+		if k.tier == lockAuthority || k.tier == lockTeam {
 			mode = tx.forNoKeyUpdate()
 		}
 	}

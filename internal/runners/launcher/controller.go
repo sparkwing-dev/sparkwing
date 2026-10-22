@@ -11,11 +11,10 @@ import (
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // LauncherController is the shared wire client's claim and reconciliation boundary.
-// Its transport must select EngineOptions.Launcher and retain the service credential.
+// Its transport selects EngineOptions.Launcher and retains the launcher's credential.
 type LauncherController interface {
 	Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 	SyncLauncher(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
@@ -64,7 +63,7 @@ func (c *ControllerControl) Claim(ctx context.Context, namespace string, exclude
 	if !slices.Contains(c.demand.Kinds, unit.Unit) || unit.Capability == "" {
 		return nil, errors.New("controller returned an unexpected launcher award")
 	}
-	resources := c.resources(unit)
+	resources := unit.CloudResources
 	if resources == nil {
 		return nil, errors.New("Cloud award is missing its committed allocation")
 	}
@@ -81,10 +80,6 @@ func (c *ControllerControl) Claim(ctx context.Context, namespace string, exclude
 		return nil, err
 	}
 	return &captured, nil
-}
-
-func (c *ControllerControl) resources(unit controllerwire.ClaimedUnit) *match.Resources {
-	return unit.CloudResources
 }
 
 func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
@@ -191,7 +186,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errAwardMismatch
 		}
-		states[i].Binding, states[i].Resources, states[i].LeaseExpiresAt = observations[i].Binding, c.resources(unit), unit.LeaseExpiresAt
+		states[i].Binding, states[i].Resources, states[i].LeaseExpiresAt = observations[i].Binding, unit.CloudResources, unit.LeaseExpiresAt
 	}
 	for _, fence := range response.Deferred {
 		i, ok := byAward[fence]

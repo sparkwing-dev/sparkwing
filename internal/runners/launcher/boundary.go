@@ -158,8 +158,7 @@ func (b *KubernetesBoundary) release(ctx context.Context, reservation CloudNodeR
 	if raw == "" {
 		return nil
 	}
-	// safety: the node may now hold another award, so it is left untouched; sync
-	// quarantines it if what it records is not a valid reservation.
+	// safety: the node may now hold another award, so it is left untouched.
 	var held CloudNodeReservation
 	if json.Unmarshal([]byte(raw), &held) != nil || held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return &nodeFault{node: reservation.NodeName, cause: "reservation changed before teardown"}

@@ -144,7 +144,7 @@ func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, te
 	if set.err != nil {
 		return set
 	}
-	set.add(lockGlobal, true, string(team))
+	set.add(lockLedger, true, string(team))
 	set.add(lockTeam, true, string(team))
 	ids, err := (&Tenant{s: tx.store, team: team}).memberIDsTx(ctx, tx)
 	if err != nil {
@@ -216,7 +216,7 @@ func (op *Operator) discoverAccountDeletionLocks(ctx context.Context, tx *storeT
 			return set
 		}
 		for _, team := range teams {
-			set.add(lockGlobal, true, team)
+			set.add(lockLedger, true, team)
 			set.add(lockTeam, true, team)
 		}
 	}
