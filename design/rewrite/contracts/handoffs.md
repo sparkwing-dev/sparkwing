@@ -1006,3 +1006,9 @@ separate operations; no database transaction stays open across a provider call.
 
 - After a point-in-time restore, usage and credit holds recorded after the restore point are not recovered; that credit stays with the customer (no usage journal). Customers are never overcharged by a restore.
 - Guarantee: no Stripe payment is ever lost. Restore reconciliation pulls every provider payment, refund and dispute since the backup through the idempotent settlement path. Any provider object that cannot be matched to a team's records blocks the operator's restore acknowledgment until it is resolved by hand, and stays listed until then.
+
+## 2026-10-21 Korey decision 47: restore payment recovery is a manual runbook
+
+- Amends decision 46. Automated restore reconciliation is removed: no pull-based settlement path, card-order recovery, purge closure evidence or periodic Stripe sweep (Stripe retries webhooks for 3 days and the durable inbox catches them). After a restore an operator compares Stripe with the ledger and applies any missing payment, refund or dispute with the existing operator tools, following a runbook kept outside the repository. A small read-only "provider objects since <time> and whether the ledger has them" report may stay if it is small.
+- Kept automatic: the credential epoch (revoked credentials stay revoked) and the post-restore schedule hold.
+- Principle: a rare, low-severity failure that is easy to recover by hand gets a runbook, not a system. Code volume must match the problem's frequency and severity.
