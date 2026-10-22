@@ -826,7 +826,9 @@ The native scenario catalog is unchanged.
 Every named, queued, personal, burst, self-hosted, pool and Cloud claim uses one
 SQL eligibility predicate. It includes readiness, current grants and bindings,
 repository access, trust, all selector terms, exclusions, placement and funding.
-Selector terms and alternatives are normalized once when work is sealed. Ready
+Host plan acceptance and settings resolution share one label normalizer: trim
+outer whitespace, remove empty labels and keep the first occurrence. SDKs carry
+raw declarations. Selector terms and alternatives are indexed when work is sealed. Ready
 source indexes are keyed by team, requirement set, arrival and identity. Label
 lookups select matching requirement sets, and a transaction-local merge checks
 each route's head with the shared predicate. Each route selects one head per

@@ -145,6 +145,7 @@ these file names, mounted whole.
 |---|---|---|
 | `pg-url` | PostgreSQL connection string for the state store | `--store=postgres` refuses to start |
 | `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
+| `credential-epoch` | Live bearer and session epoch, when kept beside `secrets-key` | created on startup; preserve the latest value through a restore |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
 | `license` | Signed multi-team license | `--deployment=team` and `cloud` refuse to start |
@@ -165,6 +166,22 @@ Windows, targets must belong to the process user, LocalSystem or local
 administrators, and their ACL must grant no write access to other principals.
 Use `0700` directories and `0600` files for private local storage. Kubernetes
 projected volumes can use `defaultMode: 0400`.
+
+The controller writes `credential-epoch` beside `secrets-key`, or beside
+`state.db` when no credentials directory is configured. If credentials are
+read-only, set `--credential-epoch-dir` to a separate persistent writable
+directory. Use the same flag for startup and every restore command. The
+controller restricts that directory to its owner and applies the credential
+file checks above to the epoch. The Helm chart always mounts a dedicated,
+retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
+flag, including when `/data` uses `emptyDir`. Preserve the latest epoch when
+restoring a database. Retain its volume independently of database backups.
+Declared restore preparation rotates the epoch and holds schedules until
+operator acknowledgment. All earlier bearer
+tokens and dashboard sessions are invalidated. Supply a fresh
+`bootstrap-admin-token` seed before restarting, then reissue runner and user
+credentials. Payment recovery is manual; follow the operator runbook kept
+outside this repository.
 
 ### Client addresses behind proxies
 
@@ -289,10 +306,8 @@ can seed acquisition, which still verifies the sealed commit.
 
 ### Backups and upgrades
 
-[Backup, restore, and upgrade](backup-restore.md) covers both database
-shapes: what a restore needs beside the database, how to prove a backup
-is good before relying on it, and what rollback means at each stage of a
-controller upgrade.
+[Backup, restore, and upgrade](backup-restore.md) records schema compatibility.
+Recovery is manual; follow the operator runbook kept outside this repository.
 
 ## Add workstation capacity
 

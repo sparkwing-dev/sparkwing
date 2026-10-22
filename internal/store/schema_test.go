@@ -110,13 +110,14 @@ func TestOpenRefusesAStoreFromAnotherBaseline(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open accepted a store recording schema version 100")
 	}
-	remedy := "drop the database"
-	if st.Dialect() == store.DialectSQLite {
-		remedy = "delete "
-	}
-	for _, want := range []string{"predates the baseline", remedy} {
+	for _, want := range []string{"newer than this binary", "start a binary matching the store", "restore a backup matching this binary"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Open error %q does not say %q", err, want)
+		}
+	}
+	for _, unsafe := range []string{"delete ", "drop the database", "predates"} {
+		if strings.Contains(err.Error(), unsafe) {
+			t.Errorf("rollback error gives destructive guidance: %v", err)
 		}
 	}
 }
@@ -394,6 +395,30 @@ func seedForeignTable(t *testing.T, db *sql.DB) {
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
+	target := storetest.New(t)
+	st, err := target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE sparkwing_schema_version SET version = ?`), store.ExpectedSchemaVersion()-1); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = target.TryOpen()
+	if err == nil {
+		t.Fatal("accepted an older schema")
+	}
+	for _, want := range []string{"older than this binary", "back up the store", "only for a disposable store"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
 		}
 	}
 }

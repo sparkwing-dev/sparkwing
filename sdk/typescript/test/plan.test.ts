@@ -414,3 +414,12 @@ test("child targets compose parent and explicit repositories", () => {
     { pipeline: "deploy" }, { pipeline: "publish", repository: "gh:123" }, { pipeline: "smoke" },
   ]);
 });
+
+
+test("runner label declarations leave normalization to the host", () => {
+  const plan = new Plan();
+  plan.job("build", () => {}).requires("", " gpu ", "gpu", "gpu").prefers("", " fast ", "fast");
+  const job = plan.toDoc().jobs[0];
+  assert.deepEqual(job?.requires, ["", " gpu ", "gpu", "gpu"]);
+  assert.deepEqual(job?.prefers, ["", " fast ", "fast"]);
+});

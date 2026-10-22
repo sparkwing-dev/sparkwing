@@ -20,6 +20,7 @@ import (
 
 type scheduleAdmission struct {
 	schedule CronSchedule
+	due      time.Time
 	consent  string
 	caller   *capability.Authorized
 }
@@ -81,7 +82,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	if schedule.Team != t.team || schedule.Where != CronWhereController && schedule.Where != CronWhereLocal {
 		return AdmissionResult{}, ErrInvalidInput
 	}
-	in := scheduleAdmission{schedule: schedule, caller: caller}
+	in := scheduleAdmission{schedule: schedule, due: due, caller: caller}
 	var saved scheduleConsent
 	if err := t.s.queryRow(ctx, `SELECT consent_json FROM cron_schedules WHERE team=? AND id=?`, t.team, schedule.ID).Scan(&in.consent); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -209,6 +210,9 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 }
 
 func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capability.Principal, error) {
+	if err := checkRestoreScheduleTx(ctx, tx, in.due); err != nil {
+		return capability.Principal{}, err
+	}
 	s := in.schedule
 	if in.consent == "" && s.GitHubInstallationID <= 0 {
 		return capability.Principal{}, bindingRefusal()

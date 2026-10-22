@@ -648,4 +648,10 @@ Each row names one exported type or function. Retain means its declared signatur
 
 `CheckoutOld` and `Plan.CheckoutOld` retain only the old runtime and fixtures. Both are deleted during implementation.
 
+Runner label declarations pass through both SDKs unchanged. Host plan acceptance
+and settings resolution share one normalizer that trims outer whitespace, removes
+empty labels and keeps the first occurrence in declaration order. Selector
+alternatives retain their OR semantics. The SDKs neither normalize nor reject
+empty runner labels.
+
 Runner sizing uses the existing `Requires` declarations. The SDK exposes no CPU or memory request API. Size labels use the normal selector term semantics and Cloud maps its fixed catalog labels to physical allocations and exact credit classes.

@@ -36,3 +36,13 @@ func TestGroupPrefersAppliesToEveryMember(t *testing.T) {
 		t.Fatalf("group preferences = %+v", jobs)
 	}
 }
+
+func TestRunnerLabelDeclarationsLeaveNormalizationToTheHost(t *testing.T) {
+	plan := NewPlan()
+	Job(plan, "build", func(context.Context) error { return nil }).
+		Requires("", " gpu ", "gpu", "gpu").Prefers("", " cloud-linux ", "cloud-linux")
+	job := planDocument(plan).Jobs[0]
+	if !slices.Equal(job.Requires, []string{"", " gpu ", "gpu", "gpu"}) || !slices.Equal(job.Prefers, []string{"", " cloud-linux ", "cloud-linux"}) {
+		t.Fatalf("SDK changed runner declarations: requires %v, prefers %v", job.Requires, job.Prefers)
+	}
+}

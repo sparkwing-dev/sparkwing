@@ -603,19 +603,18 @@ func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []c
 	return q.query(q.facts, q.teams, q.rates, kinds, demand, q.now)
 }
 
-func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+func queuedUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
 	q := claimSQL{}
 	err := claimInputsTx(ctx, tx, demand, kinds, &q)
 	if err != nil {
 		return UnitRef{}, err
 	}
 	if demand.Target != nil {
-		var team Team
-		err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, demand.Target.RunID).Scan(&team)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		team, found, err := tx.operator.runOwnerTx(ctx, tx, string(demand.Target.RunID))
+		if err != nil {
 			return UnitRef{}, err
 		}
-		if err == nil {
+		if found {
 			q.placementFree, q.preferencesFree, err = claimPlacementFreeTx(ctx, tx, team, *demand.Target, q.policy)
 			if err != nil {
 				return UnitRef{}, err

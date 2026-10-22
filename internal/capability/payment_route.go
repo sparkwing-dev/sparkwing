@@ -40,7 +40,6 @@ type PaymentScope struct {
 // settled.
 const PaymentOwnershipReason = "payment_ownership_conflict"
 
-
 type paymentMetadata map[string]any
 
 func (m paymentMetadata) get(key string) string {
@@ -84,8 +83,10 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 	case err != nil:
 		return route, false, err
 	case stamp != "" && stamp != scope.Deployment && recorded:
-		return route, false, &apierr.Error{Code: apierr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
-			Details: map[string]any{"reason": PaymentOwnershipReason, "object": head.ID, "stamp": stamp}}
+		return route, false, &apierr.Error{
+			Code: apierr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
+			Details: map[string]any{"reason": PaymentOwnershipReason, "object": head.ID, "stamp": stamp},
+		}
 	case stamp != "" && stamp != scope.Deployment:
 		return route, false, nil
 	}

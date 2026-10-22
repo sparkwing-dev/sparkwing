@@ -73,7 +73,7 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
 
 `Requires` filters eligibility. `NeedsTools` adds `tool:NAME` requirements.
 `Prefers` ranks eligible candidates and never relaxes a requirement, repository
-restriction, reservation or resource bound. A preference cannot authorize work
+restriction, reservation or placement policy. A preference cannot authorize work
 on a runner that fails a hard filter.
 
 `Inline` keeps a job with its run host. Use it for a local preflight or other work

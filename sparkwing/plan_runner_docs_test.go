@@ -97,7 +97,7 @@ func methodDoc(t *testing.T, path, receiver, method string) string {
 func assertPreferenceContract(t *testing.T, doc string) {
 	t.Helper()
 	doc = strings.Join(strings.Fields(doc), " ")
-	for _, want := range []string{"ranks eligible", "requirement", "reservation", "resource bound"} {
+	for _, want := range []string{"ranks eligible", "requirement", "reservation", "placement policy"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("preference documentation does not contain %q", want)
 		}

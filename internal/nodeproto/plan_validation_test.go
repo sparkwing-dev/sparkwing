@@ -300,3 +300,13 @@ func TestValidatePlanChildTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePlanNormalizesRunnerLabels(t *testing.T) {
+	plan := checkPlan(t, `{"jobs":[{"id":"build","requires":["", " gpu ", "gpu", "os=linux, os=macos", " "],"prefers":["", " fast ", "fast"],"steps":[{"id":"body"}]}]}`, planContext(), "")
+	if got := strings.Join(plan.Jobs[0].Requires, ";"); got != "gpu;os=linux, os=macos" {
+		t.Fatalf("normalized requirements = %q", got)
+	}
+	if got := strings.Join(plan.Jobs[0].Prefers, ";"); got != "fast" {
+		t.Fatalf("normalized preferences = %q", got)
+	}
+}

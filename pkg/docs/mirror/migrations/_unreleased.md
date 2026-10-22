@@ -30,6 +30,12 @@ removed. Update SDK dependencies and author code together. Remove CPU and memory
 availability fields from claim requests. Runner capacity no longer participates
 in claim matching.
 
+Go and TypeScript SDKs pass runner label declarations to the host. The host
+trims outer whitespace, removes empty labels and deduplicates in declaration
+order for both languages. Alternatives within a term keep their OR semantics.
+TypeScript declarations containing empty labels now reach host normalization
+instead of throwing during plan construction.
+
 All claimants now share eligibility and fair-share ordering. An eligible team's
 last successful award determines its next turn, followed by job arrival and
 identity. Queue preference scores are removed. Explicit preference holds and
@@ -54,6 +60,16 @@ admission, publication, withdrawal and lifecycle result. Reprocessing preserves
 committed effects. Historical deliveries without complete receipts cannot be
 reconstructed safely. Reconcile their outcomes before replaying them after a
 cutover. Failed deliveries still require an admin's Process again action.
+
+## Declared restore and credential epochs
+
+The external `credential-epoch` fences bearer tokens and dashboard sessions.
+Restore preparation rotates it and holds schedules until operator acknowledgment,
+which discards catch-up through its timestamp. The epoch directory must be
+writable and persistent; `--credential-epoch-dir` selects it when credentials
+are read-only. Helm uses a dedicated retained PVC independent of database storage.
+
+Recovery is manual; follow the operator runbook kept outside this repository.
 
 ## Cloud billing is prepaid
 

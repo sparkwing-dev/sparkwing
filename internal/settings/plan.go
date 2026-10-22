@@ -138,12 +138,7 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 		}
 	}
 	out.Requires = run.Requires
-	out.Requires.Value = slices.Clone(run.Requires.Value)
-	for _, requirement := range job.Requires {
-		if !slices.Contains(out.Requires.Value, requirement) {
-			out.Requires.Value = append(out.Requires.Value, requirement)
-		}
-	}
+	out.Requires.Value = nodeproto.NormalizeLabels(append(slices.Clone(run.Requires.Value), job.Requires...))
 	if out.Requires.Value == nil {
 		out.Requires.Value = []string{}
 	}

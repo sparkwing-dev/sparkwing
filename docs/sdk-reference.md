@@ -536,7 +536,7 @@ type JobGroup struct {
 - `func (g *JobGroup) NeedsTools(names ...string) *JobGroup` -- NeedsTools restricts every member to agents that have the named tools.
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
-- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers ranks eligible runners for every member without relaxing requirements, reservations or resource bounds.
+- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers ranks eligible runners for every member without relaxing requirements, reservations or placement policy.
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires constrains runner claims for every non-inline dispatched member.
 - `func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup` -- Retry configures every member to be re-attempted up to attempts additional times on failure.
 - `func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup` -- SkipIf registers a predicate on every member.
@@ -573,7 +573,7 @@ type JobNode struct {
 - `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
 - `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure declares and returns a recovery job that runs when this job fails.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
-- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers ranks eligible runners without relaxing requirements, reservations or resource bounds.
+- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers ranks eligible runners without relaxing requirements, reservations or placement policy.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.

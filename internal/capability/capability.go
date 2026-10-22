@@ -100,29 +100,30 @@ type AuthorityRef struct {
 
 // Capability contains no reusable secret. Digest is SHA-256 of a generated reference token.
 type Capability struct {
-	Digest        [32]byte                  `json:"-"`
-	Prefix        string                    `json:"prefix"`
-	Team          string                    `json:"team"`
-	Subject       Subject                   `json:"subject"`
-	Audience      Audience                  `json:"audience"`
-	Grants        []Grant                   `json:"grants"`
-	Binding       Binding                   `json:"binding"`
-	Issuance      IssuanceKind              `json:"issuance"`
-	Unit          UnitKind                  `json:"unit,omitempty"`
-	UnitID        string                    `json:"unit_id,omitempty"`
-	Purpose       AwardPurpose              `json:"purpose,omitempty"`
-	Delivery      DeliveryPurpose           `json:"delivery,omitempty"`
-	Parent        *AuthorityRef             `json:"parent,omitempty"`
-	ReservedPools []string                  `json:"reserved_pools"`
-	Trust         Trust                     `json:"trust,omitempty"`
-	Repositories  []string                  `json:"repositories"`
-	Children      []nodeproto.ChildPipeline `json:"children,omitempty"`
-	Data          *DataScope                `json:"data,omitempty"`
-	Billing       *BillingProvenance        `json:"billing,omitempty"`
-	RootMetered   bool                      `json:"root_metered"`
-	IssuedAt      time.Time                 `json:"issued_at"`
-	ExpiresAt     *time.Time                `json:"expires_at,omitempty"`
-	RevokedAt     *time.Time                `json:"revoked_at,omitempty"`
+	CredentialEpoch string                    `json:"credential_epoch,omitempty"`
+	Digest          [32]byte                  `json:"-"`
+	Prefix          string                    `json:"prefix"`
+	Team            string                    `json:"team"`
+	Subject         Subject                   `json:"subject"`
+	Audience        Audience                  `json:"audience"`
+	Grants          []Grant                   `json:"grants"`
+	Binding         Binding                   `json:"binding"`
+	Issuance        IssuanceKind              `json:"issuance"`
+	Unit            UnitKind                  `json:"unit,omitempty"`
+	UnitID          string                    `json:"unit_id,omitempty"`
+	Purpose         AwardPurpose              `json:"purpose,omitempty"`
+	Delivery        DeliveryPurpose           `json:"delivery,omitempty"`
+	Parent          *AuthorityRef             `json:"parent,omitempty"`
+	ReservedPools   []string                  `json:"reserved_pools"`
+	Trust           Trust                     `json:"trust,omitempty"`
+	Repositories    []string                  `json:"repositories"`
+	Children        []nodeproto.ChildPipeline `json:"children,omitempty"`
+	Data            *DataScope                `json:"data,omitempty"`
+	Billing         *BillingProvenance        `json:"billing,omitempty"`
+	RootMetered     bool                      `json:"root_metered"`
+	IssuedAt        time.Time                 `json:"issued_at"`
+	ExpiresAt       *time.Time                `json:"expires_at,omitempty"`
+	RevokedAt       *time.Time                `json:"revoked_at,omitempty"`
 }
 
 // CredentialClass prevents deployment tokens from substituting for console sessions.

@@ -38,7 +38,7 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if err != nil {
 			return err
 		}
-		unit, err := queuedUnitTx(ctx, tx, p.Capability, demand, kinds)
+		unit, err := queuedUnitTx(ctx, tx, demand, kinds)
 		if errors.Is(err, ErrNotFound) {
 			waiting = err
 			if demand.Target != nil {
@@ -153,7 +153,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	named := demand
 	named.Kinds = nil
 	named.Target = &unit
-	if _, err := queuedUnitTx(ctx, tx, p.Capability, named, []capability.UnitKind{unit.Kind}); err != nil {
+	if _, err := queuedUnitTx(ctx, tx, named, []capability.UnitKind{unit.Kind}); err != nil {
 		return UnitClaim{}, err
 	}
 	profile, requirements, err := readMatchingInputsTx(ctx, tx, named, unit, true)

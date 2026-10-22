@@ -18,8 +18,9 @@ import (
 var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowFactsTx":           "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
-	"(*Operator).claimCollectsAsksTx":            "deployment claims check for open ranking windows across teams; ordinary claimants append their bound team",
 	"(*Operator).claimRefusalTx":                 "a globally unique named run resolves its tenant before the authenticated claimant receives scoped eligibility diagnostics",
+	"(*Operator).cancelRestoredSchedulesTx":      "offline restore cancels every tenant scheduled run through its scoped lifecycle owner before the rotated epoch is recorded",
+	"(*Operator).AcknowledgeRestore":             "offline restore acknowledgement advances every tenant schedule past the recovery window before schedules resume",
 	"(*Operator).installAuditProtection":         "baseline audit collision protection checks globally unique event IDs across teams",
 	"(*Operator).installRunTombstones":           "baseline tombstone trigger writes OLD.team for each deleted run, including bulk retention and purge",
 	"(*Operator).readAuthorityNodeTx":            "a global capability prefix or session hash identifies authority before its authenticated team and immutable membership epoch can be resolved",

@@ -288,3 +288,15 @@ func TestRetryBackoffRefusesValuesAboveExecutionBound(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerLabelsNormalizeAcrossRunAndJobSources(t *testing.T) {
+	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
+	request := runspec.SealedRequest{Request: runspec.Request{Options: runspec.Options{Requires: present([]string{"", " gpu ", "gpu"}), Prefers: present([]string{"", " fast ", "fast"})}}}
+	result, err := ResolvePlan(PlanInputs{Request: request, Declarations: declarations, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Requires: []string{"", " gpu ", "os=linux, os=macos"}}}}, Context: Context{Local: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Jobs["build"]; !reflect.DeepEqual(got.Requires.Value, []string{"gpu", "os=linux, os=macos"}) || !reflect.DeepEqual(got.Prefers.Value, []string{"fast"}) {
+		t.Fatalf("resolved runner labels = %+v", got)
+	}
+}

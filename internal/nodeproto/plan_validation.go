@@ -104,6 +104,11 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 			return PlanDoc{}, err
 		}
 	}
+	for i := range plan.Jobs {
+		job := &plan.Jobs[i]
+		job.Requires = NormalizeLabels(job.Requires)
+		job.Prefers = NormalizeLabels(job.Prefers)
+	}
 	for i, job := range plan.Jobs {
 		if err := v.registerJob(job, fmt.Sprintf("jobs[%d]", i)); err != nil {
 			return PlanDoc{}, err

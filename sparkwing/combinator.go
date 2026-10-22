@@ -127,7 +127,7 @@ func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
 	return g
 }
 
-// Prefers ranks eligible runners for every member without relaxing requirements, reservations or resource bounds.
+// Prefers ranks eligible runners for every member without relaxing requirements, reservations or placement policy.
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Prefers(labels...)

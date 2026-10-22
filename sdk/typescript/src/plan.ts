@@ -483,12 +483,12 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   requires(...labels: readonly string[]): this {
     this.assertMutable();
-    this.#requires = names("runner label", labels);
+    this.#requires = [...labels];
     return this;
   }
   prefers(...labels: readonly string[]): this {
     this.assertMutable();
-    this.spec.prefers = names("runner preference", labels);
+    this.spec.prefers = [...labels];
     return this;
   }
   inline(): this {
@@ -517,7 +517,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   override toSpec(): JobSpec {
     const spec = super.toSpec();
-    const requires = unique([...this.#requires, ...this.#tools]);
+    const requires = [...this.#requires, ...this.#tools];
     if (requires.length) spec.requires = requires;
     return spec;
   }

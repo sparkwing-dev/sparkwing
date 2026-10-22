@@ -99,8 +99,8 @@ func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, t
 		}
 		now := tx.now(ctx)
 		expires := now.Add(ttl)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(credential_epoch,hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
+ VALUES (?,?,?,?, '',?,?,?,?)`, tx.store.credentialEpoch, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
 			return err
 		}
 		if err := tx.operator.recordSessionMembershipsTx(ctx, tx, sessionDigest(raw)); err != nil {

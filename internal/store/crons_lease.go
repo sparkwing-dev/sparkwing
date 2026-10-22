@@ -16,6 +16,13 @@ const CronTickWindow = 55 * time.Second
 
 // RunCronTickLeased runs one schedule tick under the deployment's fenced lease.
 func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
+	state, err := o.RestoreStatus(ctx)
+	if err != nil {
+		return false, err
+	}
+	if state.Pending {
+		return false, ErrRestorePending
+	}
 	return o.runWindowLeased(ctx, "schedules.tick", cronTickStamp, holder, CronTickWindow, ttl, fn)
 }
 
