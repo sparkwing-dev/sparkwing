@@ -2,8 +2,8 @@
 
 package cluster
 
-import "syscall"
+import "github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 func restartRunner(executable string, args, environment []string) error {
-	return syscall.Exec(executable, append([]string{executable}, args...), environment)
+	return procenv.Replace(executable, append([]string{executable}, args...), environment)
 }

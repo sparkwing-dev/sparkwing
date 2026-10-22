@@ -110,8 +110,9 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		return SDKCommand{}, err
 	}
 	// safety: verification selects an absolute executable; PATH cannot substitute the ambient CLI.
-	command := exec.Command(r.Executable, "__sdk-install")
-	command.Dir, command.Env, command.Stdin = dir, environment, bytes.NewReader(body)
+	command := procenv.Command(
+		environment, r.Executable, "__sdk-install")
+	command.Dir, command.Stdin = dir, bytes.NewReader(body)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	err = runSDKInstaller(ctx, command, sdkInstallTimeout)

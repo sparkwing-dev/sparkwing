@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type automationTransport func(*http.Request) (*http.Response, error)
@@ -55,6 +56,7 @@ func TestGitHubAppAutomationRevokedDuringDiscoveryStartsNoRun(t *testing.T) {
 					t.Fatalf("revoke = %d", code)
 				}
 				if scenario == "revoke and reenable" {
+					f.advance(time.Second)
 					enableAutomation(t, f, owner)
 				}
 			case "suspend":
@@ -127,7 +129,7 @@ func TestGitHubAppAutomationFailsClosedAndRemovalRevokesConsent(t *testing.T) {
 	if code, _ := f.deliver("push", pushPayload(7, 701, "acme/plans", strings.Repeat("c", 40)), ""); code < 400 {
 		t.Fatalf("mismatched repository identity dispatch=%d", code)
 	}
-	stale := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("b", 40)), time.Now().Add(-5*time.Minute))
+	stale := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("b", 40)), teststore.Now(f.store).Add(-5*time.Minute))
 	if _, out := f.deliver("push", stale, ""); out["status"] != "ignored" {
 		t.Fatalf("pre-consent delivery=%+v", out)
 	}

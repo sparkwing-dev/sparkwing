@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -180,14 +181,14 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 					t.Fatalf("selected installer: %+v %+v", got, request)
 				}
 				return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, nil
-			}, buildEnv: func(kind procenv.Kind, _ procenv.Base, _ procenv.Runtime) ([]string, error) {
+			}, buildEnv: func(kind procenv.Kind, _ procenv.Base, _ procenv.Runtime) (procenv.Env, error) {
 				kinds = append(kinds, kind)
-				return []string{"CLEAN=yes"}, nil
-			}, exec: func(_ context.Context, dir string, env []string, program string, args ...string) ([]byte, error) {
+				return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: []string{"CLEAN=yes"}}, procenv.Runtime{})
+			}, exec: func(_ context.Context, dir string, env procenv.Env, program string, args ...string) ([]byte, error) {
 				if dir != root && dir != filepath.Join(root, ".sparkwing") {
 					t.Fatalf("ran outside staged checkout: %s", dir)
 				}
-				if len(env) == 0 || env[0] != "CLEAN=yes" {
+				if env.Lookup("CLEAN") != "yes" {
 					t.Fatalf("unfiltered environment: %v", env)
 				}
 				commands = append(commands, append([]string{program}, args...))
@@ -243,7 +244,7 @@ func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 				return engine.SDKCommand{}, failure
 			}
 			return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, nil
-		}, buildEnv: func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) { return nil, nil }, exec: func(context.Context, string, []string, string, ...string) ([]byte, error) {
+		}, buildEnv: func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) { return procenv.Env{}, nil }, exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
 			calls++
 			if calls == failAt {
 				return nil, failure
@@ -294,7 +295,7 @@ func TestUpgradeVerifierRequiresSelectedInstallerResult(t *testing.T) {
 			install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				return command, nil
 			},
-			exec: func(context.Context, string, []string, string, ...string) ([]byte, error) {
+			exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
 				t.Fatal("checked after invalid installation")
 				return nil, nil
 			},
@@ -336,8 +337,8 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 					}
 					return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "entry")}}, fail()
 				},
-				exec: func(_ context.Context, _ string, env []string, _ string, _ ...string) ([]byte, error) {
-					if strings.Contains(strings.Join(env, "\n"), "SPARKWING_TOKEN=") {
+				exec: func(_ context.Context, _ string, env procenv.Env, _ string, _ ...string) ([]byte, error) {
+					if strings.Contains(strings.Join(slices.Collect(env.Values()), "\n"), "SPARKWING_TOKEN=") {
 						t.Fatal("verification received a credential")
 					}
 					return []byte("{\"name\":\"check\"}\n"), fail()

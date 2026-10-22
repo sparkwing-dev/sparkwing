@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -40,7 +41,7 @@ func TestClaimedEnvironmentRegistrationCannotCollideWithAcceptedIdentifiers(t *t
 		claimed.Acquire = func(_ context.Context, _ source.Spec, options source.Options) (*source.Entry, error) {
 			called = true
 			env, err := options.BuildEnvironment(procenv.Install, options.Base, procenv.Runtime{})
-			if len(env) != 0 {
+			if len(slices.Collect(env.Values())) != 0 {
 				t.Fatal("colliding environment was projected")
 			}
 			return nil, err
@@ -65,11 +66,11 @@ func TestEnvironmentRegistrationPublishesOnlyAcceptedPatterns(t *testing.T) {
 	value := "private-proxy-password"
 	build := registry.environment(nil)
 	env, err := build(procenv.Plan, procenv.Base{Local: true, Captured: []string{"HTTPS_PROXY=https://maskuser:" + value + "@proxy"}}, procenv.Runtime{})
-	if err != nil || len(env) == 0 || registry.masker.Mask(value) != "***" {
+	if err != nil || len(slices.Collect(env.Values())) == 0 || registry.masker.Mask(value) != "***" {
 		t.Fatalf("environment registration lost masking: %v", err)
 	}
 	expected := secrets.NewMasker()
-	if _, err := procenv.Build(procenv.Plan, procenv.Base{Local: true, Captured: env, Masker: expected}, procenv.Runtime{}); err != nil {
+	if _, err := procenv.Build(procenv.Plan, procenv.Base{Local: true, Captured: slices.Collect(env.Values()), Masker: expected}, procenv.Runtime{}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(expected.Values(), registry.masker.Values()) {

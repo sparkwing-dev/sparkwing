@@ -531,7 +531,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: "UNCHANGED", Value: "original-envelope", Masked: true}, time.Now()); err != nil {
+		if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: "UNCHANGED", Value: "original-envelope", Masked: true}, teststore.Now(s)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -572,7 +572,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedSecret(f.store, tenant.Team(), row, time.Now()); err != nil {
+	if err := teststore.SeedSecret(f.store, tenant.Team(), row, teststore.Now(f.store)); err != nil {
 		t.Fatal(err)
 	}
 	gitValue, err := store.SealGitCredential(cipher, "team", store.GitCredential{HostWide: true, Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "private key"})

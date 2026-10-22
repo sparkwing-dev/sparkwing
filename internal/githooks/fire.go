@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 )
 
@@ -185,9 +185,9 @@ func refusingHook(out string) (string, bool) {
 }
 
 func runGitIn(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := procenv.ControlCommand(append(os.Environ(), env...), "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
+
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

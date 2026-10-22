@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
 type Source interface {
@@ -53,4 +53,4 @@ func (c *Cached) Resolve(ctx context.Context, name string) (string, bool, error)
 }
 
 // ErrSecretMissing is what a [Source] returns for a name it does not hold.
-var ErrSecretMissing = sparkwing.ErrSecretMissing
+var ErrSecretMissing = secretname.ErrMissing

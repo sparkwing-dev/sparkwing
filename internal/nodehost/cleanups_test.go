@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
@@ -39,8 +41,9 @@ func requireUnix(t *testing.T) {
 	}
 }
 
-func shellEnv(extra ...string) []string {
-	return append([]string{"PATH=" + os.Getenv("PATH")}, extra...)
+func shellEnv(t testing.TB, extra ...string) procenv.Env {
+	t.Helper()
+	return testProcessEnv(t, append([]string{"PATH=" + os.Getenv("PATH")}, extra...)...)
 }
 
 func TestCleanupsRunNewestFirstSkippingReleasedOnes(t *testing.T) {
@@ -58,7 +61,7 @@ func TestCleanupsRunNewestFirstSkippingReleasedOnes(t *testing.T) {
 			}
 		}
 	}
-	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv(t)}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "order"))
@@ -68,7 +71,7 @@ func TestCleanupsRunNewestFirstSkippingReleasedOnes(t *testing.T) {
 	if string(got) != "third\nfirst\n" {
 		t.Fatalf("cleanups ran as %q, want third then first", got)
 	}
-	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv(t)}); err != nil {
 		t.Fatal(err)
 	}
 	if again, err := os.ReadFile(filepath.Join(dir, "order")); err != nil || !bytes.Equal(again, got) {
@@ -86,7 +89,7 @@ func TestCleanupRunsWithTheNodesEnvironmentNotTheHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var log bytes.Buffer
-	scope := nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv("NODE_VAR=node-value")}
+	scope := nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t, "NODE_VAR=node-value")}
 	if err := cleanups.Run(cleanupContext(t), scope); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +108,7 @@ func TestCleanupResolvesItsProgramOnTheNodesPath(t *testing.T) {
 	}
 	mustRegisterCleanup(t, cleanups, "node-tool")
 	var log bytes.Buffer
-	scope := nodehost.CleanupScope{Dir: t.TempDir(), Log: &log, Env: []string{"PATH=" + bin}}
+	scope := nodehost.CleanupScope{Dir: t.TempDir(), Log: &log, Env: testProcessEnv(t, "PATH="+bin)}
 	if err := cleanups.Run(cleanupContext(t), scope); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +125,7 @@ func TestCleanupFailuresNameOnlyTheProgramAndTheRestStillRun(t *testing.T) {
 	mustRegisterCleanup(t, cleanups, "no-such-program-xyz", "--token=s3cret-arg")
 	mustRegisterCleanup(t, cleanups, "sh", "-c", "exit 3", "s3cret-arg")
 	var log bytes.Buffer
-	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); err == nil {
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); err == nil {
 		t.Fatal("failed cleanups returned success")
 	}
 	out := log.String()
@@ -148,7 +151,7 @@ func TestCleanupsAreConfinedToTheirNode(t *testing.T) {
 		t.Fatalf("node B released node A's cleanup: error=%v", err)
 	}
 	mustRegisterCleanup(t, cleanupsB, "sh", "-c", "touch b-ran")
-	if err := cleanupsA.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
+	if err := cleanupsA.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv(t)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a-ran")); err != nil {
@@ -197,4 +200,13 @@ func TestCleanupRegistrationLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustRegisterCleanup(t, cleanups, "true")
+}
+
+func testProcessEnv(t testing.TB, values ...string) procenv.Env {
+	t.Helper()
+	env, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: values}, procenv.Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
 }

@@ -49,7 +49,7 @@ func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionCo
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := ProtocolSessionConfig{Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { return nil }}
+	cfg := ProtocolSessionConfig{Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { return nil }}
 	if edit != nil {
 		edit(&cfg)
 	}
@@ -825,7 +825,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 					}
 					return nil
 				}
-				cfg := ProtocolSessionConfig{Command: command, Environment: []string{"GORACE=atexit_sleep_ms=0"}, Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Log: log, Debug: !debug, Revoke: func() error { return nil }}
+				cfg := ProtocolSessionConfig{Command: command, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"), Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Log: log, Debug: !debug, Revoke: func() error { return nil }}
 				var process ExecutorProcess
 				switch adapter {
 				case "direct":

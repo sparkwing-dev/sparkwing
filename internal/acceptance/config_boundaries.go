@@ -171,7 +171,7 @@ run: {submit_env_allow: [BUILD_REGION], cache_from: prod}
 	if err != nil {
 		return err
 	}
-	for _, assignment := range env {
+	for assignment := range env.Values() {
 		if strings.HasPrefix(assignment, "SPARKWING_WORKERS=") || strings.HasPrefix(assignment, "SPARKWING_NODE_TOKEN=") || strings.HasPrefix(assignment, "SPARKWING_CACHE_URL=") {
 			return errors.New("removed engine environment name survived")
 		}

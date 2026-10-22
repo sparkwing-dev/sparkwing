@@ -53,8 +53,8 @@ func captureLocalRunEnvironment(ctx context.Context, home, checkout, index strin
 	if err != nil {
 		return runspec.EnvSnapshot{}, err
 	}
-	gitEnv = append(gitEnv, "GIT_INDEX_FILE="+path)
-	if _, err := (triggerCheckout{directory: checkout, environment: gitEnv}).read(ctx, "update-index", "--no-split-index"); err != nil {
+	gitValues := append(slices.Collect(gitEnv.Values()), "GIT_INDEX_FILE="+path)
+	if _, err := (triggerCheckout{directory: checkout, environment: gitValues}).read(ctx, "update-index", "--no-split-index"); err != nil {
 		return runspec.EnvSnapshot{}, err
 	}
 	if err := fssecure.SecurePrivateConfig(path); err != nil {

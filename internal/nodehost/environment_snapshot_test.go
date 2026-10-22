@@ -183,9 +183,9 @@ func TestSDKEnvironmentRechecksLoadedSnapshotBeforeBuilding(t *testing.T) {
 			defer cancel()
 			built := false
 			refused := errors.New("snapshot read failed")
-			policy := SDKEnvironment{Base: procenv.Base{Local: true, Captured: []string{"CAPTURED=original"}}, Build: func(_ procenv.Kind, base procenv.Base, _ procenv.Runtime) ([]string, error) {
+			policy := SDKEnvironment{Base: procenv.Base{Local: true, Captured: []string{"CAPTURED=original"}}, Build: func(_ procenv.Kind, base procenv.Base, _ procenv.Runtime) (procenv.Env, error) {
 				built = true
-				return base.Captured, nil
+				return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: base.Captured}, procenv.Runtime{})
 			}}
 			policy.Snapshots = capturedLoaderFunc(func(_ context.Context, received runspec.EnvSnapshot) ([]string, error) {
 				switch mode {
@@ -211,12 +211,12 @@ func TestSDKEnvironmentRechecksLoadedSnapshotBeforeBuilding(t *testing.T) {
 			}
 			environment, err := policy.build(ctx, procenv.Plan, expected, procenv.Runtime{})
 			if mode == "in_memory_original" {
-				if err != nil || !built || !reflect.DeepEqual(environment, []string{"CAPTURED=original"}) {
+				if err != nil || !built || !reflect.DeepEqual(slices.Collect(environment.Values()), []string{"CAPTURED=original"}) {
 					t.Fatalf("verified in-memory capture: %v %v", environment, err)
 				}
 				return
 			}
-			if err == nil || environment != nil || built || seal.Names[0] != "CAPTURED" {
+			if err == nil || len(slices.Collect(environment.Values())) != 0 || built || seal.Names[0] != "CAPTURED" {
 				t.Fatalf("snapshot bypassed verification: env=%v built=%v error=%v", environment, built, err)
 			}
 			if mode == "partial" && !errors.Is(err, refused) || mode == "cancelled" && !errors.Is(err, context.Canceled) {
@@ -250,9 +250,9 @@ func TestOwnerHostRefusesChangedCapturedValuesBeforeSourceEnvironment(t *testing
 	input.SealedRequest, _ = json.Marshal(request)
 	host.Acquire = nil
 	host.Source.Base = procenv.Base{Local: true, Captured: []string{"CAPTURED=changed"}}
-	host.Source.BuildEnvironment = func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) {
+	host.Source.BuildEnvironment = func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) {
 		t.Fatal("built source environment after the captured values changed")
-		return nil, nil
+		return procenv.Env{}, nil
 	}
 	_, err := host.Run(t.Context(), input)
 	if err == nil || state.finished.Transition.RunID == "" || state.accepted.RunID != "" {

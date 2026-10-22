@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // safety: a signature covers bytes, not a tag, so an older signed release
@@ -14,7 +16,7 @@ import (
 func assertReleaseVersion(binPath, version string) error {
 	args := []string{"version", "-o", "json", "--offline"}
 	// #nosec G702 -- the release binary this process just verified against its signed manifest, asked only for its version
-	out, err := exec.Command(binPath, args...).Output()
+	out, err := procenv.HostCommand(binPath, args...).Output()
 	if err != nil {
 		return fmt.Errorf("ask the fetched sparkwing %s for its version: `%s %s`: %w%s",
 			version, binPath, strings.Join(args, " "), err, childStderr(err))

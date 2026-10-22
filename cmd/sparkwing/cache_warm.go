@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -35,7 +36,7 @@ type cacheWarmResult struct {
 type cacheWarmDependencies struct {
 	locate      func() (string, error)
 	environment []string
-	buildEnv    func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	buildEnv    func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error)
 	diagnostics io.Writer
 	clear       func(context.Context) (bincache.PruneResult, error)
 	prepare     func(context.Context, string, []string, io.Writer) (cacheWarmResult, error)
@@ -90,7 +91,7 @@ func runCacheWarmCommand(ctx context.Context, inv clisurface.Invocation, out io.
 		diagnostics = io.Discard
 	}
 	masked := &installDiagnostics{out: diagnostics, stream: masker.Stream()}
-	result, prepareErr := deps.prepare(ctx, dir, env, masked)
+	result, prepareErr := deps.prepare(ctx, dir, slices.Collect(env.Values()), masked)
 	if err := errors.Join(prepareErr, masked.close(), ctx.Err()); err != nil {
 		return &maskedCLIError{err: err, masker: masker}
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
@@ -27,8 +28,7 @@ func BuildGoSDKFixture(ctx context.Context) (string, func(), error) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := exec.CommandContext(ctx, "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
-	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+	build := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
 	if output, err := build.CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("compile protocol fixture: %w: %s", err, strings.TrimSpace(string(output)))
@@ -60,13 +60,14 @@ func StartGoSDKProcess(ctx context.Context, bin string) (*GoSDKProcess, error) {
 	}
 	defer frameW.Close()
 	p := &GoSDKProcess{request: requestW, frame: frameR, frames: nodeproto.NewReader(frameR)}
-	p.command = exec.CommandContext(ctx, bin, protofd.Arg)
-	p.command.Dir = filepath.Dir(bin)
+	var environment []string
 	for _, item := range os.Environ() {
 		if !strings.HasPrefix(item, "SPARKWING_") {
-			p.command.Env = append(p.command.Env, item)
+			environment = append(environment, item)
 		}
 	}
+	p.command = procenv.ControlCommandContext(ctx, environment, bin, protofd.Arg)
+	p.command.Dir = filepath.Dir(bin)
 	p.command.Stdout, p.command.Stderr = &p.stdout, &p.stderr
 	err = goSDKCommandPipes(p.command, requestR, frameW)
 	if err == nil {

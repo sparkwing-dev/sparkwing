@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func publishedReleasePages() ([]byte, error) {
@@ -15,7 +16,7 @@ func publishedReleasePages() ([]byte, error) {
 		return nil, fmt.Errorf("GITHUB_REPOSITORY is required to list published releases")
 	}
 	// #nosec G702 -- gh receives one repos/-prefixed endpoint argument without a shell or option expansion.
-	body, err := exec.Command("gh", "api", "--paginate", "--slurp", "repos/"+repo+"/releases?per_page=100").Output()
+	body, err := procenv.HostCommand("gh", "api", "--paginate", "--slurp", "repos/"+repo+"/releases?per_page=100").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list published releases: %w", err)
 	}

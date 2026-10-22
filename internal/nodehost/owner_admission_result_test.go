@@ -100,7 +100,7 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 					t.Fatal(err)
 				}
 				before := capacityRow(t, fixture, "finished")
-				expired := time.Now().UnixNano()
+				expired := teststore.Now(fixture.Store).UnixNano()
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id=?`, expired, fixture.Input.RunID); err != nil {
 					t.Fatal(err)
 				}
@@ -155,13 +155,15 @@ func TestResumedPlanRefusalPreservesCompletedWork(t *testing.T) {
 func TestOwnerPersistsStoreAdmissionRefusals(t *testing.T) {
 	for _, policy := range []string{"skip", "fail", "queue"} {
 		t.Run(policy, func(t *testing.T) {
-			f := newStoreHostFixture(t, capacityPlan(policy, 1, "held", "refused"))
-			admission := &StoreAdmission{Store: f.Tenant, Owner: f.Actor}
-			if err := admission.Node(t.Context(), f.Accepted, capacityRow(t, f, "held"), func(context.Context) error { return nil }); err != nil {
-				t.Fatal(err)
-			}
-			f.Host.Admit = admission.Node
-			assertOwnerRefusal(t, f, "refused", policy)
+			synctest.Test(t, func(t *testing.T) {
+				f := newStoreHostFixture(t, capacityPlan(policy, 1, "held", "refused"), teststore.WithClock(time.Now))
+				admission := &StoreAdmission{Store: f.Tenant, Owner: f.Actor}
+				if err := admission.Node(t.Context(), f.Accepted, capacityRow(t, f, "held"), func(context.Context) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+				f.Host.Admit = admission.Node
+				assertOwnerRefusal(t, f, "refused", policy)
+			})
 		})
 	}
 }
@@ -239,33 +241,35 @@ func TestOwnerPersistsPlanAdmissionRefusalAndEndsUnit(t *testing.T) {
 	for _, policy := range []string{"skip", "fail", "queue"} {
 		for _, optional := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/optional=%t", policy, optional), func(t *testing.T) {
-				plan := planGrouped("global", policy, "body")
-				plan.Concurrency[0].QueueTimeoutMS = new(int64(1))
-				plan.Jobs[0].ContinueOnError = true
-				plan.Jobs[0].Optional = optional
-				first := newStoreHostFixture(t, plan)
-				admission := &StoreAdmission{Store: first.Tenant, Owner: first.Actor}
-				if _, err := admission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
-					t.Fatal(err)
-				}
-				second := newStoreHostFixtureOn(t, first.Store, plan, runspec.Options{})
-				admission = &StoreAdmission{Store: second.Tenant, Owner: second.Actor}
-				second.Host.Around = admission.Run
-				completion, err := second.Host.Run(t.Context(), second.Input)
-				want := "failed"
-				if policy == "skip" || optional {
-					want = "success"
-				}
-				if err != nil || completion.Outcome != want {
-					t.Errorf("plan refusal escaped: %+v %v", completion, err)
-				}
-				row, err := second.Tenant.ReadRun(t.Context(), second.Input.RunID)
-				if err != nil || string(row.State) != want || row.FinishedAt == nil {
-					t.Errorf("plan remains active: state=%s finished=%v %v", row.State, row.FinishedAt, err)
-				}
-				if _, err := second.Store.AsOperator().RenewUnit(t.Context(), second.Actor.CapabilityPrefix, false); err == nil {
-					t.Error("refused plan left live unit")
-				}
+				synctest.Test(t, func(t *testing.T) {
+					plan := planGrouped("global", policy, "body")
+					plan.Concurrency[0].QueueTimeoutMS = new(int64(1))
+					plan.Jobs[0].ContinueOnError = true
+					plan.Jobs[0].Optional = optional
+					first := newStoreHostFixture(t, plan, teststore.WithClock(time.Now))
+					admission := &StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+					if _, err := admission.Run(t.Context(), first.Accepted, func(context.Context) (RunCompletion, error) { return RunCompletion{}, nil }); err != nil {
+						t.Fatal(err)
+					}
+					second := newStoreHostFixtureOn(t, first.Store, plan, runspec.Options{})
+					admission = &StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+					second.Host.Around = admission.Run
+					completion, err := second.Host.Run(t.Context(), second.Input)
+					want := "failed"
+					if policy == "skip" || optional {
+						want = "success"
+					}
+					if err != nil || completion.Outcome != want {
+						t.Errorf("plan refusal escaped: %+v %v", completion, err)
+					}
+					row, err := second.Tenant.ReadRun(t.Context(), second.Input.RunID)
+					if err != nil || string(row.State) != want || row.FinishedAt == nil {
+						t.Errorf("plan remains active: state=%s finished=%v %v", row.State, row.FinishedAt, err)
+					}
+					if _, err := second.Store.AsOperator().RenewUnit(t.Context(), second.Actor.CapabilityPrefix, false); err == nil {
+						t.Error("refused plan left live unit")
+					}
+				})
 			})
 		}
 	}

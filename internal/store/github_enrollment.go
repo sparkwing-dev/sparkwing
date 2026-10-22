@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // RegisterGitHubRunner records repository consent under current team administration authority.
@@ -107,8 +106,8 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		len(spec.Grants) != 2 || !slices.Contains(spec.Grants, capability.NodesClaim) || !slices.Contains(spec.Grants, capability.TriggersClaim) {
 		return bindingRefusal()
 	}
-	if spec.ExpiresAt == nil || spec.ExpiresAt.After(tx.now(ctx).Add(limits.GitHubRunnerCredentialTTL)) {
-		return authorityError(apierr.Forbidden, "Actions credential exceeds its lifetime")
+	if spec.ExpiresAt == nil {
+		return authorityError(apierr.Forbidden, "Actions credential requires its verified expiry ceiling")
 	}
 	var live int
 	now := tx.now(ctx)
