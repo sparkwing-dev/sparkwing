@@ -1,0 +1,12 @@
+[
+  {"op":"accept","want":"ok"},
+  {"op":"accept","want":"ok","unchanged":true},
+  {"op":"invalid_plan","want":"plan_invalid","unchanged":true},
+  {"op":"grant","reference":"welcome","amount":50000,"want":"created","balance":50000},
+  {"op":"grant","reference":"welcome","amount":50000,"want":"replayed","balance":50000,"unchanged":true},
+  {"op":"grant","reference":"welcome","amount":49999,"want":"grant_conflict","balance":50000,"unchanged":true},
+  {"op":"grant","reference":"invalid","amount":0,"want":"invalid_input","balance":50000,"unchanged":true},
+  {"op":"grant","reference":"bonus","amount":7000,"want":"created","balance":57000},
+  {"op":"start","want":"ok","balance":57000},
+  {"op":"renew","want":"ok","balance":57000}
+]

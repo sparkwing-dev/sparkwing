@@ -18,7 +18,6 @@ applies, so both judge the whole tree.
 | `forbidigo-f1.allow` | F1: `(*store.Store).ForTeam`, `AsOperator` or `SetTestClock` outside `cmd/`, `internal/wingd/localcontroller`, `internal/controller/composition.go`, `internal/web/browserfixture/main.go` and the test-only `internal/store/teststore` and `internal/store/internal/storetest`, and `TestOnly*` outside `_test.go` | `<file><TAB><method>`, one line per call |
 | `forbidigo-f2.allow` | F2: `(*license.License).Allows` outside `internal/deployment`, so the deployment kind is decided once at startup; it has no entries and should keep none | `<file><TAB><method>`, one line per call |
 | `unexport.allow` | exported identifiers in an `internal/` package that no other package uses, that satisfy no interface and that no used type exposes | `<package><TAB><count>` |
-| `acceptance-skips.allow` | required acceptance cells that skip rather than execute; `tests/acceptance` enforces it on linux | `<scenario>/<target>` |
 
 `guardcheck` prints the identifiers behind a rising unexport count. The
 acceptance list is judged by the `tests/acceptance` package itself: a skipped

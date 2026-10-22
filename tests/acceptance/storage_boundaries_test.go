@@ -18,19 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// safety: component proofs do not replace the native target's transaction and transport evidence.
-func storageBoundaryChecks() map[string]func(*testing.T) {
-	return map[string]func(*testing.T){
-		"storage-cas-integrity":                          checkStorageCAS,
-		"storage-reference-edge-laundering":              checkStorageReceipts,
-		"storage-memo-and-depcache-scope":                checkStorageNamespaces,
-		"storage-binary-provenance":                      checkStorageBinaryTrust,
-		"storage-owner-receipts-and-stream-verification": checkStorageOwnerReceipts,
-		"storage-hasmany-large-budget":                   checkStoragePresence,
-		"storage-local-remote-cache-opt-in":              checkStorageRemoteCache,
-	}
-}
-
 func checkStorageCAS(t *testing.T) {
 	t.Run("streams", checkStorageStreams)
 	t.Run("filesystem", checkStorageFilesystemCAS)

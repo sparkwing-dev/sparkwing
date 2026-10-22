@@ -33,7 +33,7 @@ type poolKey struct {
 
 // OpenExisting opens path with store.Open and records it for SQL. Use it
 // to reopen a compatible database a test already created. Unless WithClock is
-// supplied, time advances by the monotonic interval since opening the fixture.
+// supplied, time stays pinned to when the fixture opened.
 func OpenExisting(path string, opts ...store.Option) (*store.Store, error) {
 	st, err := store.Open(path, fixtureOptions(opts)...)
 	if err != nil {
