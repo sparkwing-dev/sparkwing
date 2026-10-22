@@ -102,3 +102,16 @@ secret and annotation conformance. PASS doccheck, guardcheck, diff check. Review
 Deferred native/full/PostgreSQL checks and excluded masking fixture updates to lead.
 Xwing candidate inspection still refuses its session-index write (read-only).
 Generated-only argument wire contract remains pending; no commits or Git mutations.
+
+CU continuation 5 - base 4f234e217; integration is merged, no conflicts.
+Reproduced red then green: TestHooksStatus_RejectsIncompleteOrStaleGate/undeclared.
+An obsolete managed gate reported current=false but left the summary armed;
+fleet comparison now includes installed gates as well as expected hooks.
+Recovery is manual: remove obsolete managed hooks and reinstall; no new machinery.
+PASS normal and rewrite_integration: cmd/sparkwing -run
+'^(TestHooksStatus|TestStatusHooks|TestRenderHooksSurvey)' -count=1.
+PASS internal/doccheck, guardcheck -fast, docs mirror check, git diff --check.
+No Git mutations or commits; scratch directory removed after verification.
+B1 generated-only argument declarations and host-prepared execution values still
+need the lead's wire-contract decision. Full/native/PostgreSQL remain with lead;
+the lead's two masking-fixture failures remain outside this lane's ownership.

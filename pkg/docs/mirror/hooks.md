@@ -325,8 +325,10 @@ home's runs, locks or daemon.
 `sparkwing pipeline hooks status` compares each managed hook with the expected
 script and format version, and checks which directory Git reads. JSON hook
 records include `current`; a stale or edited script prints a warning to reinstall.
-Run `sparkwing pipeline hooks install` to replace stale scripts. For a manual
-execution check, use a throwaway commit in a disposable checkout.
+Remove obsolete managed gates whose pipeline triggers are no longer declared, then run
+`sparkwing pipeline hooks install` to replace stale scripts. Fleet status also
+reports obsolete managed gates as broken. For a manual execution check, use a
+throwaway commit in a disposable checkout.
 
 Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
 `pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--all-repos`

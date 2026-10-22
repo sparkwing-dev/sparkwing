@@ -683,7 +683,9 @@ func checkExpectedHooks(git githooks.Git, survey *githooks.RepoGates) {
 		return
 	}
 	var stale []string
-	for _, name := range slices.Sorted(maps.Keys(expected)) {
+	names := append(slices.Collect(maps.Keys(expected)), survey.Installed...)
+	slices.Sort(names)
+	for _, name := range slices.Compact(names) {
 		path := filepath.Join(survey.HooksDir, name)
 		body, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -695,7 +697,7 @@ func checkExpectedHooks(git githooks.Git, survey *githooks.RepoGates) {
 		}
 	}
 	if len(stale) > 0 {
-		survey.State, survey.ConfigError = githooks.GateBroken, "hooks missing, not executable, or different from expected content/format: "+strings.Join(stale, ", ")+"; run sparkwing pipeline hooks install"
+		survey.State, survey.ConfigError = githooks.GateBroken, "hooks missing, not executable, or different from expected content/format: "+strings.Join(stale, ", ")+"; remove obsolete managed hooks, then run sparkwing pipeline hooks install"
 	}
 }
 

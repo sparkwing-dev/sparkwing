@@ -791,7 +791,7 @@ func TestHooksStatus_ComparesExpectedContentAndFormat(t *testing.T) {
 }
 
 func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
-	modes := []string{"missing", "unmanaged", "content", "version"}
+	modes := []string{"missing", "unmanaged", "content", "version", "undeclared"}
 	if runtime.GOOS != "windows" {
 		modes = append(modes, "not-executable")
 	}
@@ -817,6 +817,8 @@ func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
 				writeRepoFile(t, path, body+"exit 0\n")
 			case "version":
 				writeRepoFile(t, path, strings.Replace(body, "(format 1)", "(format 0)", 1))
+			case "undeclared":
+				writeExec(t, filepath.Join(repo, ".git", "hooks", "pre-push"), renderHookScript("pre-push", []string{"old-gate"}, false))
 			}
 			output := captureStdout(t, func() {
 				if err := statusHooks(git.run, repo, "json"); err != nil {
