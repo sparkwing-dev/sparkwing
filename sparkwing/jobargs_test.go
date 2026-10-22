@@ -43,19 +43,6 @@ func (j *jobargsJobNoArgs) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-type jobargsCollidingArgs struct {
-	Replicas int `flag:"replicas" desc:"colliding name"`
-}
-
-type jobargsJobColliding struct {
-	Base
-	WithArgs[jobargsCollidingArgs]
-}
-
-func (j *jobargsJobColliding) Work(w *Work) (*WorkStep, error) {
-	return Step(w, "run", func(_ context.Context) error { return nil }), nil
-}
-
 type jobargsSecretArgs struct {
 	Token string `flag:"token" secret:"true"`
 }

@@ -59,31 +59,6 @@ func TestParseInputsSchema_AllTypes(t *testing.T) {
 	}
 }
 
-type requiredWithDefault struct {
-	X string `flag:"x" required:"true" default:"foo"`
-}
-
-type enumWithoutDefaultOrRequired struct {
-	X string `flag:"x" enum:"a,b,c"`
-}
-
-type enumOnInt struct {
-	X int `flag:"x" enum:"1,2,3" required:"true"`
-}
-
-type enumDefaultOutOfSet struct {
-	X string `flag:"x" enum:"a,b,c" default:"d"`
-}
-
-type shortCollision struct {
-	X string `flag:"xray" short:"x"`
-	Y string `flag:"yankee" short:"x"`
-}
-
-type shortMultiChar struct {
-	X string `flag:"x" short:"xx"`
-}
-
 type extraWithOtherTags struct {
 	X map[string]string `flag:",extra" desc:"forbidden"`
 }

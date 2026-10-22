@@ -11,13 +11,13 @@ import (
 )
 
 type inputs struct {
-	Text     string        `flag:"text" required:"true"`
+	Text     string        `flag:"text" required:"true" enum:" yes , no "`
 	Bool     bool          `flag:"bool"`
 	Int      int           `flag:"int"`
 	Int64    int64         `flag:"int64"`
 	Float    float64       `flag:"float"`
 	Duration time.Duration `flag:"duration"`
-	List     []string      `flag:"list" enum:"dev,prod" default:"dev, prod"`
+	List     []string      `flag:"list" enum:" dev , prod " default:"dev, prod"`
 	Empty    string        `flag:"empty" default:""`
 }
 type requiredDefault struct {
@@ -55,6 +55,7 @@ func (pipe[T]) Plan(_ context.Context, p *sw.Plan, _ T, _ sw.RunContext) error {
 	sw.Job(p, "job", func(context.Context) error { return nil })
 	return nil
 }
+
 func main() {
 	sw.Register[inputs]("args", func() sw.Pipeline[inputs] { return pipe[inputs]{} })
 	sw.Register[requiredDefault]("required-default", func() sw.Pipeline[requiredDefault] { return pipe[requiredDefault]{} })

@@ -48,7 +48,8 @@ infinity are refused. Help and describe inspect declarations without requiring
 invocation values. Errors come from host preparation as `invalid_args`.
 Duration arguments use Go syntax such as `1h30m`, including `0`, `+0` and `-0`.
 String-array arguments use comma splitting, trimming and empty-item removal in
-both the raw argument map and typed values. Enum checks apply to each list item.
+both the raw argument map and typed values. The host trims enum choices and checks
+each list item. Scalar string values keep their whitespace.
 SDK declarations and direct `toDoc()` calls rely on host validation of argument
 schemas, plan graphs and secret declarations. Annotation locations are validated
 by the host service; TypeScript retains transport type checks.

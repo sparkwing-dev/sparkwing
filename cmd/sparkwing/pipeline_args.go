@@ -168,7 +168,7 @@ func pipelineFlagLine(a nodeproto.ArgumentDescription) string {
 	}
 	head += " <" + a.Type + ">"
 	var suffix strings.Builder
-	if a.Default != nil {
+	if a.Default != nil && *a.Default != "" {
 		fmt.Fprintf(&suffix, " (default: %s)", *a.Default)
 	}
 	if len(a.Enum) > 0 {

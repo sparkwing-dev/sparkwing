@@ -74,8 +74,9 @@ The host validates arguments after describe and before planning. Empty defaults 
 no default; a required argument cannot also have a non-empty default. Numeric and
 duration values use Go parsing rules, and floating-point NaN and infinity are
 refused. Lists split on commas, trim each item and drop empty items; both the raw
-argument map and typed list receive that normalized value. Enum checks apply to
-each list item. Invalid arguments and declarations fail during host preparation
+argument map and typed list receive that normalized value. The host trims enum
+choices and checks each list item. Scalar string values keep their whitespace.
+Invalid arguments and declarations fail during host preparation
 with `invalid_args`. SDKs project declarations and decode the host's prepared
 values. Plan graph and secret declaration validation also belong to the host.
 Annotation locations, including an end line preceding the start, are checked by

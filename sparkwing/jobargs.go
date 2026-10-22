@@ -35,7 +35,6 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 		if f.isExtraBag {
 			panic(fmt.Sprintf("sparkwing: Job(%q): WithArgs[%s] field %s: flag:\",extra\" is only supported on pipeline Inputs", id, argsType, f.GoName))
 		}
-
 	}
 	p.jobArgs = append(p.jobArgs, jobArgsDecl{jobID: id, schema: schema, goType: argsType, holder: holder})
 }

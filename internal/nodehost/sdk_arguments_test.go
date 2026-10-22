@@ -68,6 +68,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 		{"infinity", "args", map[string]string{"text": "yes", "float": "+Inf"}, "argument --float must be float64"},
 		{"duration", "args", map[string]string{"text": "yes", "duration": "later"}, "argument --duration must be duration"},
 		{"enum", "args", map[string]string{"text": "yes", "list": "dev,other"}, "argument --list is not an allowed value"},
+		{"scalar-whitespace", "args", map[string]string{"text": " yes "}, "argument --text is not an allowed value"},
 		{"duplicate-name", "duplicate-name", nil, "SDK describe has ambiguous arguments"},
 		{"duplicate-short", "duplicate-short", nil, "argument --two has an invalid or duplicate short name"},
 		{"invalid-short", "invalid-short", nil, "argument --one has an invalid or duplicate short name"},

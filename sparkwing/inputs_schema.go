@@ -202,11 +202,7 @@ func walkInputFields(
 		field.Secret = boolTag(f.Tag.Get("secret"))
 		field.Short = f.Tag.Get("short")
 		if enumTag := f.Tag.Get("enum"); enumTag != "" {
-			vals := strings.Split(enumTag, ",")
-			for j, v := range vals {
-				vals[j] = strings.TrimSpace(v)
-			}
-			field.Enum = vals
+			field.Enum = strings.Split(enumTag, ",")
 		}
 
 		kind := classifyKind(f.Type)

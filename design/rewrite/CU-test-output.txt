@@ -77,3 +77,19 @@ fixtures still need updates: diagnostics.test.ts:98 expects SDK invalid_args;
 accepted_masks_streams_unix_test.go:203 describes no token but supplies one.
 Full/native/socket/PostgreSQL suites remain with the lead. Candidate installation
 was unavailable: xwing env context refused its session-index write (read-only).
+
+CU continuation 3 - base 00312a9d4; integration remains an ancestor, no conflicts.
+Reproduced red then green: host Go/TS conformance with padded enum choices,
+and TestPipelineHelpFromDescribe with an empty default. Host trims enum choices;
+SDK projection no longer trims them. Scalar values retain whitespace.
+Deleted unused SDK validation fixtures. No Git mutations or commits.
+PASS normal and rewrite_integration: internal/nodeproto, sparkwing,
+sparkwing/sparkwingtest, internal/doccheck; focused nodehost host-argument,
+secret-declaration and annotation conformance; cmd argument parsing/help tests.
+PASS: command compilation, guardcheck, gofmt, docs mirror check, diff check.
+Independent correctness review found no defects. Full/native/PostgreSQL checks
+remain with the lead; prior native failures are in excluded masking fixtures.
+Pending B1: generator replies carry only JobSpec[], with no argument schemas;
+Go binds generated arguments before replying. Recommend JobSpec declarations
+plus host-prepared values on execution requests. Alternative: require generated
+arguments to be declared statically. Await the lead's wire-contract decision.

@@ -55,7 +55,7 @@ func ValidateArgument(arg ArgumentDescription, value string) (string, error) {
 		}
 	}
 	for _, item := range values {
-		if len(arg.Enum) > 0 && !slices.Contains(arg.Enum, item) {
+		if len(arg.Enum) > 0 && !slices.ContainsFunc(arg.Enum, func(choice string) bool { return strings.TrimSpace(choice) == item }) {
 			return "", fmt.Errorf("argument --%s is not an allowed value", arg.Name)
 		}
 	}

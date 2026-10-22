@@ -2,11 +2,11 @@ import { definePipeline } from "../../src/plan.ts";
 import { describe } from "../../src/describe.ts";
 const declarations = {
  args: [
-  {name:"text", type:"string", required:true},
+  {name:"text", type:"string", required:true, enum:[" yes "," no "]},
   {name:"bool", type:"bool"}, {name:"int", type:"int"},
   {name:"int64", type:"int64"}, {name:"float", type:"float64"},
   {name:"duration", type:"duration"},
-  {name:"list", type:"[]string", enum:["dev","prod"], default:"dev, prod"},
+  {name:"list", type:"[]string", enum:[" dev "," prod "], default:"dev, prod"},
   {name:"empty", type:"string", default:""},
  ],
  "duplicate-name": [{name:"value",type:"string"},{name:"value",type:"string"}],
