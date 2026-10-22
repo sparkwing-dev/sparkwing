@@ -18,6 +18,7 @@ func ownerPlacementFixture(t *testing.T) (*Tenant, Actor) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
@@ -87,6 +88,7 @@ func TestOwnerSnapshotRechecksLabelsAndLivePreferences(t *testing.T) {
 			}
 			if change == "labels" {
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["gpu"]}}`))
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 			} else {
 				preferred := authorityRoot("preferred", "a")
@@ -212,6 +214,7 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"tool:git", capacity}}}
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=1,spec_hash='declaration',execution_json=?`, raw)
+			indexFixtureUnit(t, tenant.s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 			owner, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
 				t.Fatal(err)
@@ -328,6 +331,7 @@ func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
 func TestOwnerNodeReadKeepsARefusedPlacementDecision(t *testing.T) {
 	tenant, actor := ownerPlacementFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["gpu"]}}`))
+	indexFixtureUnit(t, tenant.s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	s := tenant.s
 	s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',ready_at=?`, s.now().UnixNano())

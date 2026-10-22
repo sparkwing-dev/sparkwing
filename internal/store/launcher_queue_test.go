@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func launcherQueueFixture(t *testing.T, unpaid, funded int) (*Store, UnitDemand) {
@@ -15,11 +16,14 @@ func launcherQueueFixture(t *testing.T, unpaid, funded int) (*Store, UnitDemand)
 	s, demand, _ := meteredUnitFixture(t, true)
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','older',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,0,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT 'b','older',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
+	indexFixtureUnit(t, s, "b", UnitRef{Kind: capability.UnitTrigger, RunID: "older"})
 	for i := range unpaid {
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','older',?,status,ready_at,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, fmt.Sprintf("unpaid-%03d", i))
+		node := fmt.Sprintf("unpaid-%03d", i)
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','older',?,status,ready_at,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, node)
+		indexFixtureUnit(t, s, "b", UnitRef{Kind: capability.UnitNode, RunID: "older", NodeID: runspec.NodeID(node)})
 	}
 	for i := 1; i < funded; i++ {
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,status,ready_at,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`, fmt.Sprintf("paid-%03d", i))
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,?,status,ready_at,spec_json,execution_json,claim_requirements,claim_context FROM nodes WHERE team='a' AND node_id='job'`, fmt.Sprintf("paid-%03d", i))
 	}
 	demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 	return s, demand
@@ -80,6 +84,7 @@ func TestMeteredPlanRenewalExcludesSchedulingWait(t *testing.T) {
 	demand.Target = &UnitRef{Kind: capability.UnitPlan, RunID: "run"}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitPlan, RunID: "run"})
 	rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 	claim, actor := meteredUnitClaim(t, s, demand)
 	unitBillingTotal(t, s, 120, false)

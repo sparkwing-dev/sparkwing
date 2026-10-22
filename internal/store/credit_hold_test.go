@@ -22,6 +22,8 @@ func executingRunFixture(t *testing.T, dispatch runspec.Dispatch) (*Store, UnitD
 	s, demand := unitClaimFixture(t)
 	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Dispatch: dispatch, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,dispatch=?`, request, dispatch)
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
 	return s, demand
 }
 
@@ -30,6 +32,7 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand := executingRunFixture(t, runspec.DispatchController)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
+			indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitPlan, RunID: "run"})
 			meteredRunnerOnly(t, s)
 			if kind == capability.UnitNode {
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=?`, s.now().UnixNano())
@@ -75,6 +78,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	t.Helper()
 	s, demand := executingRunFixture(t, runspec.DispatchController)
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitPlan, RunID: "run"})
 	if kind == capability.UnitPlan {
 		rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 	} else {

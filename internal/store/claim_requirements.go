@@ -55,5 +55,5 @@ func persistClaimRequirementsTx(ctx context.Context, tx *storeTx, team Team, sel
 }
 
 func (q *claimSQL) requirementsMatchSQL(team, requirements string, matches func(string) string) string {
-	return `NOT EXISTS (SELECT 1 FROM claim_requirement_terms term WHERE term.team=` + team + ` AND term.requirements=` + requirements + ` AND NOT EXISTS (SELECT 1 FROM claim_requirement_terms alt WHERE alt.team=term.team AND alt.requirements=term.requirements AND alt.term=term.term AND alt.label<>'' AND ` + matches("alt.label") + `))`
+	return `NOT EXISTS (SELECT 1 FROM claim_requirement_terms term WHERE term.team=` + team + ` AND term.requirements=` + requirements + ` GROUP BY term.term HAVING MAX(CASE WHEN term.label<>'' AND ` + matches("term.label") + ` THEN 1 ELSE 0 END)=0)`
 }
