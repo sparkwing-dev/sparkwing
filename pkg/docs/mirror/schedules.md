@@ -8,6 +8,11 @@ Use `--profile NAME` for a saved controller connection. Omit it to use the
 local controller. Reads, pause/resume, cadence edits and immediate runs share
 the same HTTP contract on both connections.
 
+A restore invalidates the recorded consent of API/local schedules. Reinstall or
+rearm them with fresh credentials before they can fire again. Acknowledging the
+restore lifts the schedule hold but does not renew that consent. Unfinished
+scheduled runs from the backup are cancelled with "cancelled by restore; rerun if needed".
+
 ## Inspect schedules
 
 ```sh

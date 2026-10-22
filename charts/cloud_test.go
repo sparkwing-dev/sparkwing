@@ -70,8 +70,10 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 			t.Errorf("missing %s", kind)
 		}
 	}
-	if kinds["PersistentVolumeClaim"] {
-		t.Error("RDS/S3 install requires a PVC")
+	for _, resource := range resources {
+		if resource.Kind == "PersistentVolumeClaim" && !strings.HasSuffix(resource.Metadata.Name, "-credential-epoch") {
+			t.Errorf("RDS/S3 install has an unexpected PVC %s", resource.Metadata.Name)
+		}
 	}
 }
 
@@ -127,7 +129,7 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 				}
 				owned := false
 				for _, init := range pod.InitContainers {
-					if slices.Equal(init.Command, []string{"/bin/chown"}) && slices.Equal(init.Args, []string{"65534:65534", "/data"}) && init.SecurityContext != nil && init.SecurityContext.RunAsUser != nil && *init.SecurityContext.RunAsUser == 0 {
+					if slices.Equal(init.Command, []string{"/bin/chown"}) && slices.Equal(init.Args, []string{"65534:65534", "/data", "/var/lib/sparkwing/credential-epoch"}) && init.SecurityContext != nil && init.SecurityContext.RunAsUser != nil && *init.SecurityContext.RunAsUser == 0 {
 						for _, mount := range init.VolumeMounts {
 							owned = owned || mount.Name == "data" && mount.MountPath == "/data" && !mount.ReadOnly
 						}

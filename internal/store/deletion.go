@@ -89,20 +89,6 @@ type AccountDeletion struct {
 	RevokedPrefixes []string
 }
 
-// RequestTeamDeletion queues a team for deletion on the operator's word,
-// with no membership check, for a deletion request that arrived by mail.
-func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team) (TeamDeletion, []string, error) {
-	t := &Tenant{s: o.s, team: NormalizeTeam(team)}
-	var result TeamDeletion
-	var revoked []string
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, tx.now(ctx))
-		return err
-	})
-	return result, revoked, err
-}
-
 // Deletion closes existing authority without requiring its former membership to remain live.
 func (op *Operator) discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet, where string, args ...any) lockSet {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,COALESCE(team,'') FROM capabilities WHERE `+where, args...)

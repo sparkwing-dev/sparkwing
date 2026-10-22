@@ -40,7 +40,6 @@ type PaymentScope struct {
 // settled.
 const PaymentOwnershipReason = "payment_ownership_conflict"
 
-
 type paymentMetadata map[string]any
 
 func (m paymentMetadata) get(key string) string {

@@ -316,27 +316,10 @@ func (k *Keyring) create() ([]byte, error) {
 		}
 		return winner, nil
 	}
-	if err := syncDir(dir); err != nil {
+	if err := fssecure.SyncDir(dir); err != nil {
 		return nil, fmt.Errorf("persist the local secrets key at %s: %w", k.path, err)
 	}
 	return key, nil
-}
-
-// safety: a crash after the link but before the directory entry reaches disk
-// would lose the key while values sealed under it survive in state.db.
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	serr := d.Sync()
-	if cerr := d.Close(); serr == nil {
-		serr = cerr
-	}
-	if serr != nil && runtime.GOOS == "windows" {
-		return nil
-	}
-	return serr
 }
 
 // MissingKey reports why this keyring must not create a key for st: st

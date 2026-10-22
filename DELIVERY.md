@@ -610,7 +610,7 @@ file. Other syntax and workflow checks remain active.
   integration` installs nothing and takes whatever client the developer's
   machine has.
 - **Backup and restore drill:** `TestBackupRestoreDrill` in `internal/store`
-  runs the procedure in `docs/backup-restore.md` end to end. Its SQLite
+  checks durable state through a backup and restore. Its SQLite
   subtests always run. Its Postgres subtest shells out to `pg_dump` and
   `pg_restore`, taking them from `SPARKWING_PG_BIN` or `PATH` and
   skipping when neither supplies them. Run it against a server with
