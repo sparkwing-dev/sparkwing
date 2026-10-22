@@ -31,8 +31,8 @@ func TestSecretRegistrationIncludesRawEffectiveDefaultsAndListItems(t *testing.T
 	}
 }
 
-func TestSecretRegistrationRefusesShortAndMarkerListItems(t *testing.T) {
-	for _, raw := range []string{"ab,long-enough", "long-enough,***marker"} {
+func TestSecretRegistrationRefusesShortListItems(t *testing.T) {
+	for _, raw := range []string{"ab,long-enough", "long-enough,abc"} {
 		request := Request{RequestedArgs: map[string]string{"tokens": raw}, SecretArgs: Optional[[]string]{Set: true, Value: []string{"tokens"}}}
 		resolved := Resolved{Args: map[string]string{"tokens": raw}, SecretArgs: []string{"tokens"}, SecretRegistration: SecretRegistration{ListArgs: []string{"tokens"}}}
 		_, err := BuildSecretRegistration(request, resolved)

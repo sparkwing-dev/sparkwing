@@ -3,17 +3,17 @@ package store_test
 import (
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	st := storetest.Open(t)
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
 	ctx := t.Context()
-	now := time.Now().Truncate(time.Millisecond)
+	now := teststore.Now(st)
 	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}

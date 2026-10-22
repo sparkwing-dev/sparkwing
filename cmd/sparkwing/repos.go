@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -448,9 +449,9 @@ func (o execOps) Plan(sparkwingDir, pipeline string) (repos.Plan, error) {
 	if err != nil {
 		self = "sparkwing"
 	}
-	cmd := exec.CommandContext(o.context(), self, "pipeline", "plan", "--pipeline", pipeline, "-o", "json")
+	cmd := procenv.ControlCommandContext(o.context(), os.Environ(), self, "pipeline", "plan", "--pipeline", pipeline, "-o", "json")
 	cmd.Dir = filepath.Dir(sparkwingDir)
-	cmd.Env = os.Environ()
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -511,7 +512,7 @@ func (o execOps) Verify(dir string) error {
 	if _, err := exec.LookPath("pre-commit"); err != nil {
 		return fmt.Errorf("pre-commit not on PATH; install it or drop --verify")
 	}
-	cmd := exec.CommandContext(o.context(), "pre-commit", "run", "--all-files")
+	cmd := procenv.HostCommandContext(o.context(), "pre-commit", "run", "--all-files")
 	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -549,9 +550,9 @@ func runGoModCmd(ctx context.Context, dir string, args ...string) (string, error
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := procenv.ControlCommandContext(ctx, env, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = env
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

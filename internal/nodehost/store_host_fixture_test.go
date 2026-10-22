@@ -98,9 +98,9 @@ type storeHostFixture struct {
 	Host        OwnerHost
 }
 
-func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc) *storeHostFixture {
+func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.Option) *storeHostFixture {
 	t.Helper()
-	return newStoreHostFixtureOn(t, openStore(t), plan, runspec.Options{})
+	return newStoreHostFixtureOn(t, openStore(t, opts...), plan, runspec.Options{})
 }
 
 func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, options runspec.Options) *storeHostFixture {
@@ -163,10 +163,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	}
 	root := "host-fixture-root"
 	if _, err := database.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}); err != nil {
-		now, err := teststore.Now(ctx, database)
-		if err != nil {
-			t.Fatal(err)
-		}
+		now := teststore.Now(database)
 		until := now.Add(time.Hour)
 		credential := capability.Capability{Prefix: root, Digest: sha256.Sum256([]byte(root)), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite, capability.TriggersClaim, capability.NodesClaim, capability.ApprovalsWrite, capability.RunsControl}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, IssuedAt: now, ExpiresAt: &until, Repositories: nil, ReservedPools: []string{}}
 		record := store.CapabilityRecord{Version: 1, Value: credential}

@@ -8,11 +8,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinegen"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 type options struct {
@@ -148,7 +148,7 @@ func filterSpec(specs []pipelinegen.Spec, name string) ([]pipelinegen.Spec, erro
 }
 
 func repoRoot(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
+	out, err := procenv.HostCommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", fmt.Errorf("locate repo root: %w", err)
 	}
@@ -162,7 +162,7 @@ func buildSparkwing(ctx context.Context, root string) (bin string, cleanup func(
 	}
 	cleanup = func() { _ = os.RemoveAll(dir) }
 	bin = filepath.Join(dir, "sparkwing")
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/sparkwing")
+	cmd := procenv.HostCommandContext(ctx, "go", "build", "-o", bin, "./cmd/sparkwing")
 	cmd.Dir = root
 	if out, buildErr := cmd.CombinedOutput(); buildErr != nil {
 		cleanup()

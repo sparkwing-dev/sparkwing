@@ -110,9 +110,8 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	defer func() { _ = frameR.Close() }()
 
 	var stderr bytes.Buffer
-	cmd := entry.Exec()
+	cmd := entry.Exec(environment)
 	cmd.Dir, cmd.Stderr = dir, &stderr
-	cmd.Env = environment
 	// safety: a grandchild holding stderr must not hold Wait past the kill.
 	cmd.WaitDelay = 100 * time.Millisecond
 	tree, err := startTree(cmd, reqR, frameW)

@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func runGit(dir string, gitArgs ...string) (string, error) {
@@ -13,7 +14,7 @@ func runGit(dir string, gitArgs ...string) (string, error) {
 }
 
 func runGitContext(ctx context.Context, dir string, gitArgs ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	cmd := procenv.HostCommandContext(ctx, "git", gitArgs...)
 	if dir != "" {
 		cmd.Dir = dir
 	}

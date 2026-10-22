@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -308,7 +309,7 @@ func runCommandAt(ctx context.Context, dir, name string, args ...string) (string
 	if dir == "" {
 		return "", fmt.Errorf("inputs.runCommandAt(%s): %w", name, sparkwing.ErrNoProject)
 	}
-	command := exec.CommandContext(ctx, name, args...)
+	command := procenv.HostCommandContext(ctx, name, args...)
 	command.Dir = dir
 	output, err := command.Output()
 	if err != nil {

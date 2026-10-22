@@ -23,7 +23,7 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	if cache.Resolver != depcache.ResolverGoModules && cache.Resolver != depcache.ResolverNpm || input.Entry == nil || input.Entry.Directory == "" {
 		return "", errors.New("cache resolution requires a known resolver and workspace")
 	}
-	var env []string
+	var env procenv.Env
 	var err error
 	// safety: the host archives and restores this directory, so job-declared values and a
 	// job-chosen go binary must not pick it on a host the run's owner does not own.
@@ -35,15 +35,7 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	if err != nil {
 		return "", err
 	}
-	lookup := func(name string) string {
-		for _, assignment := range env {
-			key, value, _ := strings.Cut(assignment, "=")
-			if key == name || runtime.GOOS == "windows" && strings.EqualFold(key, name) {
-				return value
-			}
-		}
-		return ""
-	}
+	lookup := env.Lookup
 	variable := "GOMODCACHE"
 	if cache.Resolver == depcache.ResolverNpm {
 		variable = "npm_config_cache"
@@ -60,16 +52,16 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	}
 	var command *exec.Cmd
 	if cache.Resolver == depcache.ResolverNpm {
-		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, lookPath, "config", "get", "cache")
+		command, err = pipelineentry.NPMCommand(ctx, env, runtime.GOOS, lookPath, "config", "get", "cache")
 	} else {
 		var executable string
 		executable, err = lookPath("go")
 		if err == nil {
-			command = exec.CommandContext(ctx, executable, "env", "GOMODCACHE")
+			command = procenv.CommandContext(ctx, env, executable, "env", "GOMODCACHE")
 		}
 	}
 	if err == nil {
-		command.Env, command.Dir = env, sdkWorkingDirectory(input.Entry)
+		command.Dir = sdkWorkingDirectory(input.Entry)
 		if !e.Base.Local {
 			command.Dir = filepath.Dir(command.Path)
 		}

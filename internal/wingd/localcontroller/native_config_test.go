@@ -151,7 +151,7 @@ func TestNativeServicesBindsSubmittedValuesBeforeProcessStartup(t *testing.T) {
 			})
 			for _, kind := range []procenv.Kind{procenv.Plan, procenv.Install, procenv.Attempt, procenv.Eval} {
 				env, err := procenv.Build(kind, services.Config.Source.Base, procenv.Runtime{})
-				if err != nil || slices.Contains(env, "BUILD_NOTE="+value) == (kind == procenv.Install) || slices.Contains(env, "BUILD_EMPTY=") == (kind == procenv.Install) || slices.Contains(env, "UNLISTED=ambient-private") {
+				if err != nil || slices.Contains(slices.Collect(env.Values()), "BUILD_NOTE="+value) == (kind == procenv.Install) || slices.Contains(slices.Collect(env.Values()), "BUILD_EMPTY=") == (kind == procenv.Install) || slices.Contains(slices.Collect(env.Values()), "UNLISTED=ambient-private") {
 					t.Fatal("native environment lost private input or used unlisted ambient values", err)
 				}
 			}

@@ -123,6 +123,7 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 		}
 	}
 
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "known customer"}, nil); code != http.StatusOK {
 		t.Fatalf("trust = %d", code)
 	}
@@ -133,11 +134,13 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 		t.Errorf("a grant with no key = %d want 400", code)
 	}
 	grant := map[string]any{"amount_cents": 2_000, "reason": "launch promo", "key": "k1"}
+	f.advance(time.Second)
 	for range 2 {
 		if code := f.call("POST", base+"/grants", operator.auth, grant, nil); code != http.StatusCreated {
 			t.Fatalf("grant = %d", code)
 		}
 	}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse report"}, nil); code != http.StatusOK {
 		t.Fatalf("freeze = %d", code)
 	}
@@ -153,6 +156,7 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 		t.Errorf("after the actions = %+v", team)
 	}
 
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "resolved"}, &team); code != http.StatusOK || team.Frozen || len(team.Holds) != 0 {
 		t.Errorf("unfreeze = %d %+v", code, team)
 	}
@@ -180,6 +184,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	f, operator, owner := operatorFixture(t)
 	base := "/api/v1/operator/teams/" + owner.team
 	revoke := map[string]any{"trust": "revoked", "reason": "chargeback"}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/trust", operator.auth, revoke, nil); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
@@ -188,12 +193,14 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Fatalf("committed revocation = %d %+v", code, team.Billing)
 	}
 
-	if _, err := teststore.SQL(t, f.store).ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, f.store).ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_1", owner.team, "", "chargeback", teststore.Now(f.store).UnixNano()); err != nil {
 		t.Fatalf("dispute hold: %v", err)
 	}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse"}, nil); code != http.StatusOK {
 		t.Fatalf("freeze = %d", code)
 	}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "done"}, &team); code != http.StatusOK ||
 		!team.Frozen || !slices.Equal(team.Holds, []string{"dp_1"}) {
 		t.Errorf("unfreeze = %d %+v, want only the dispute hold left", code, team)
@@ -201,6 +208,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"hold": "dp_9", "reason": "won"}, nil); code != http.StatusNotFound {
 		t.Errorf("releasing a hold the team does not hold = %d want 404", code)
 	}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"hold": "dp_1", "reason": "dispute won"}, &team); code != http.StatusOK ||
 		team.Frozen || len(team.Holds) != 0 {
 		t.Errorf("releasing the dispute hold = %d %+v, want the team released", code, team)
@@ -279,18 +287,9 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 	f, operator, owner := operatorFixture(t)
 	f.setSignUp(map[string]any{"mode": "waitlist", "reason": "until launch"})
 	ids := map[string]string{}
-	for i, name := range []string{"ann", "bob", "cat"} {
+	for _, name := range []string{"ann", "bob", "cat"} {
+		f.advance(time.Second)
 		ids[name] = f.signIn(person("w-"+name, name+"@example.com", name)).User.ID
-		// safety: a host clock sync can step the wall clock back between two
-		// sign-ups, so the order this test reads is pinned rather than taken
-		// from the stamps the sign-ups wrote.
-		res, err := teststore.SQL(t, f.store).Exec(`UPDATE accounts SET waitlisted_at = ? WHERE id = ?`, int64(i+1), ids[name])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			t.Fatalf("pin %s's waitlist order: %d rows", name, n)
-		}
 	}
 
 	var page operatorWaitlist
@@ -373,12 +372,14 @@ func TestOperatorConsoleReleasesItsHoldAsNoFault(t *testing.T) {
 		Holds      []string `json:"holds"`
 		HoldCauses []string `json:"hold_causes"`
 	}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse report"}, &held); code != http.StatusOK || len(held.Holds) != 1 || held.HoldCauses[0] != store.HoldCauseOperator {
 		t.Fatalf("freeze = %d %+v", code, held)
 	}
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "x", "hold": "dp_missing", "no_fault": true}, nil); code != http.StatusBadRequest {
 		t.Errorf("no-fault release of a payment hold = %d want 400", code)
 	}
+	f.advance(time.Second)
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "report was mistaken", "hold": held.Holds[0], "no_fault": true}, nil); code != http.StatusOK {
 		t.Fatalf("no-fault release = %d", code)
 	}

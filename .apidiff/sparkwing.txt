@@ -97,7 +97,7 @@ type EnvVarDocer interface {
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
-var ErrSecretMissing = secrets.ErrSecretMissing
+var ErrSecretMissing = secretname.ErrMissing
 func Error(ctx context.Context, format string, args ...any)
 type Example struct {
 	Comment string
@@ -440,6 +440,7 @@ func (nopLogger) Log(level, msg string)
 func (l protocolLogger) Emit(r LogRecord)
 func (l protocolLogger) Log(level, message string)
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
+func (sdkOperations) Arguments(plan any) []nodeproto.ArgumentDescription
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context
 func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error)
 func (sdkOperations) Document(plan any) nodeproto.PlanDoc

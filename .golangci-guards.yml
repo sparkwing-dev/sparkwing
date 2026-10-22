@@ -59,13 +59,13 @@ linters:
             - "!**/sparkwingtest/**"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal
-              desc: "The public SDK must not grow new internal imports. Anything the SDK needs at its surface belongs in the SDK or a leaf package; .guards/depguard-sdk-no-internal.allow lists the imports that predate this rule."
+              desc: "The public SDK shares procenv as its process boundary and swtags as build metadata. Other new SDK dependencies belong in the SDK or a leaf package; .guards/depguard-sdk-no-internal.allow lists the imports that predate this rule."
           allow:
             - $gostd
             # Argument parsing and host registration share this leaf grammar.
             - github.com/sparkwing-dev/sparkwing/internal/argvalue
             - github.com/sparkwing-dev/sparkwing/internal/swtags
-            - github.com/sparkwing-dev/sparkwing/internal/secrets
+            - github.com/sparkwing-dev/sparkwing/internal/procenv
 
         store-allowed-internal:
           list-mode: lax

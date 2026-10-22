@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -146,25 +147,29 @@ func TestConcurrency_CostPromotionBackfillsBehindNonFittingHeavyWaiter(t *testin
 }
 
 func TestConcurrency_CostBackfillStopsWhenYoungerHolderBlocksOldestWaiter(t *testing.T) {
-	s := storetest.Open(t)
+	now := time.Unix(1700000000, 0).UTC()
+	s := storetest.Open(t, teststore.WithClock(func() time.Time { return now }))
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "older/n", RunID: "older", NodeID: "n",
 		Capacity: 10, Cost: 5, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireGranted {
 		t.Fatalf("older: want Granted got %s", r.Kind)
 	}
+	now = now.Add(time.Nanosecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "heavy/n", RunID: "heavy", NodeID: "n",
 		Capacity: 10, Cost: 8, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("heavy: want Queued got %s", r.Kind)
 	}
+	now = now.Add(time.Nanosecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "light-1/n", RunID: "light-1", NodeID: "n",
 		Capacity: 10, Cost: 5, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireGranted {
 		t.Fatalf("light-1: want Granted as backfill got %s", r.Kind)
 	}
+	now = now.Add(time.Nanosecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "light-2/n", RunID: "light-2", NodeID: "n",
 		Capacity: 10, Cost: 5, Policy: store.OnLimitQueue,

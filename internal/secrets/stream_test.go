@@ -39,15 +39,7 @@ func TestStreamEmitsLargeInputsWithoutRetainingEntireStream(t *testing.T) {
 }
 
 func TestStreamHidesReplacementJoinsAndRegistryUpdates(t *testing.T) {
-	m := NewMasker()
-	for _, value := range []string{"abcd", "x***y"} {
-		if err := m.Register(value); err == nil && strings.Contains(value, "***") {
-			t.Fatal("marker-containing value accepted")
-		}
-	}
-	if err := m.Register("xyzz"); err != nil {
-		t.Fatal(err)
-	}
+	m := newTestMasker("abcd", "xyzz")
 	stream := m.Stream()
 	var got strings.Builder
 	got.WriteString(stream.Mask("prefix ab"))

@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 // A freeze is one row per dispute and the team stays frozen while any is
@@ -17,7 +17,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	acme := teamHandle(t, s, "acme")
-	now := time.Now()
+	now := teststore.Now(s)
 	for _, dispute := range []string{"dp_1", "dp_2", "dp_1"} {
 		if _, err := acme.TestOnlyHoldForDispute(ctx, dispute, "", "dispute opened", now); err != nil {
 			t.Fatalf("hold %s: %v", dispute, err)
@@ -60,7 +60,7 @@ func TestReleaseCreditFreezesRefusesABlankHold(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	acme := teamHandle(t, s, "acme")
-	now := time.Now()
+	now := teststore.Now(s)
 	if _, err := acme.TestOnlyHoldForDispute(ctx, "dp_1", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}

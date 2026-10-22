@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
@@ -384,14 +385,15 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 
-	cmd := commandContext(ctx, name, args...)
-	cmd.Dir = dir
+	var environment []string
 	if len(extraEnv) > 0 {
-		cmd.Env = os.Environ()
+		environment = os.Environ()
 		for k, v := range extraEnv {
-			cmd.Env = append(cmd.Env, k+"="+v)
+			environment = append(environment, k+"="+v)
 		}
 	}
+	cmd := commandContext(ctx, environment, name, args...)
+	cmd.Dir = dir
 	streamsDone := make(chan struct{})
 	configureProcessGroup(ctx, cmd, streamsDone)
 
@@ -628,4 +630,11 @@ func formatEnvDiff(env map[string]string) string {
 		b.WriteString(env[k])
 	}
 	return b.String()
+}
+
+func processCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
+	if environment == nil {
+		return procenv.HostCommandContext(ctx, name, args...)
+	}
+	return procenv.ControlCommandContext(ctx, environment, name, args...)
 }

@@ -29,7 +29,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	bin := buildNativeSDKFixture(t, ctx, "stepsfixture")
-	cfg := ProtocolSessionConfig{Command: []string{bin}, Environment: []string{"PATH=" + os.Getenv("PATH")}, Revoke: func() error { return nil }}
+	cfg := ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH")), Revoke: func() error { return nil }}
 	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
 	var hello nodeproto.HelloResult
 	plans := map[bool]nodeproto.PlanDoc{}
@@ -298,7 +298,7 @@ func buildNativeSDKFixture(t *testing.T, ctx context.Context, name string) strin
 
 func planNativeSDKFixture(t *testing.T, ctx context.Context, bin, pipeline string, args map[string]string, run nodeproto.RunContext, runner nodeproto.RunnerIdentity) (nodeproto.HelloResult, nodeproto.PlanDoc) {
 	t.Helper()
-	process, err := StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: []string{"PATH=" + os.Getenv("PATH")}})
+	process, err := StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH"))})
 	if err != nil {
 		t.Fatal(err)
 	}

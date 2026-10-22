@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -69,26 +70,32 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
 }
 
-func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
+func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engine.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
 	if !filepath.IsAbs(request.ExecutableDirectory) {
 		return nil, "", errors.New("Go installation requires an owned executable directory")
 	}
 	flags := ""
-	for _, setting := range environment {
+	for setting := range environment.Values() {
 		if value, ok := strings.CutPrefix(setting, "GOFLAGS="); ok {
 			flags = value
 		}
 	}
-	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
+	environment, err := environment.GoTool("GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
+	if err != nil {
+		return nil, "", err
+	}
 	qa, err := engine.QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
 		return installTool(ctx, dir, environment, "go", args...)
 	})
 	if err != nil {
 		return nil, "", err
 	}
-	environment = append(environment, qa...)
+	environment, err = environment.GoTool(qa...)
+	if err != nil {
+		return nil, "", err
+	}
 	var buildDiagnostics bytes.Buffer
-	options := bincache.CompileOptions{Environment: environment, Diagnostics: &buildDiagnostics, HashAllFiles: request.HashAllFiles}
+	options := bincache.CompileOptions{Environment: slices.Collect(environment.Values()), Diagnostics: &buildDiagnostics, HashAllFiles: request.HashAllFiles}
 	name := "pipeline"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -114,7 +121,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		return nil, "", err
 	}
 	args := []string{"list"}
-	if overlay := bincache.EffectiveOverlay(dir, environment); overlay != "" {
+	if overlay := bincache.EffectiveOverlay(dir, slices.Collect(environment.Values())); overlay != "" {
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-m", "-json", engine.GoModule)
@@ -149,7 +156,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	return []string{binary.Path()}, lease.CachedPath(), nil
 }
 
-func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
+func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
 	var manifest struct{ Main string }
 	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
@@ -185,16 +192,16 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, envir
 	return []string{node, main}, err
 }
 
-func installTool(ctx context.Context, dir string, environment []string, name string, args ...string) ([]byte, error) {
-	command := exec.Command(name, args...)
+func installTool(ctx context.Context, dir string, environment procenv.Env, name string, args ...string) ([]byte, error) {
+	command := procenv.Command(environment, name, args...)
 	if name == "npm" {
 		var err error
-		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
+		command, err = pipelineentry.NPMCommand(ctx, environment, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return nil, fmt.Errorf("resolve npm: %w", err)
 		}
 	}
-	command.Dir, command.Env = dir, environment
+	command.Dir = dir
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := gotoolchain.Run(ctx, command); err != nil {

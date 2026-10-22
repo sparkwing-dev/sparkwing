@@ -4293,6 +4293,8 @@ Controllers and execution hosts use it rather than infer list semantics from
 joined values. Display receipts continue to use the accepted spec's latest secret
 classification.
 
-Secret storage and declaration entry points refuse values under four characters
-or containing `***`, including each nonempty normalized list item. Plain config
-variables remain available for such values.
+Stored secrets, supplied secret arguments and nonempty defaults of the selected
+pipeline require at least four characters, including each nonempty normalized
+list item. Empty and unselected defaults do not refuse a run. Short derived
+values are skipped. Secrets containing `***` are accepted. Plain config variables
+remain available for shorter values.

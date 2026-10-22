@@ -1210,7 +1210,7 @@ valid discovered secret default, list argument kinds, raw/effective values and n
 items. Go argument parsing and projection use `argvalue.List`. TypeScript uses
 the same comma split, Unicode White_Space trim and empty-item omission contract.
 All registrations precede author execution. Lazily issued values are registered
-before release. Refuse fewer than four characters or `***` in customer-stored
+before release. Refuse fewer than four characters in customer-stored
 secrets, supplied secret args and selected nonempty defaults, including individual
 list items. Refusals direct authors to a plain config variable. Empty defaults
 carry no value. Unselected defaults do not refuse a run. Unsafe derived proxy

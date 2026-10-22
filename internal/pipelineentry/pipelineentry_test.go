@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func writeFile(t *testing.T, path, body string) {
@@ -82,7 +84,7 @@ func TestTypeScriptStartsTheInstalledSDKEntry(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
-	if args := got.Exec().Args; args[len(args)-1] != ProtocolArg || len(args) != len(want)+1 {
+	if args := got.Exec(procenv.Env{}).Args; args[len(args)-1] != ProtocolArg || len(args) != len(want)+1 {
 		t.Fatalf("exec args = %q", args)
 	}
 

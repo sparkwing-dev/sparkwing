@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,8 +82,8 @@ func TestSDKGateIndexReachesCheckingTools(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		command := exec.Command(executable, "-test.run=^TestSDKGateIndexReachesCheckingTools$")
-		command.Env, command.Dir = environment, dir
+		command := procenv.Command(environment, executable, "-test.run=^TestSDKGateIndexReachesCheckingTools$")
+		command.Dir = dir
 		out, err := command.CombinedOutput()
 		if err != nil || string(out) != "alternate\n" {
 			t.Errorf("kind %d checked wrong index: %q, %v", kind, out, err)
@@ -90,7 +91,7 @@ func TestSDKGateIndexReachesCheckingTools(t *testing.T) {
 	}
 	remote := SDKEnvironment{Base: procenv.Base{Ambient: []string{gitenv.GateIndexVar + "=" + index}, SubmitEnvAllow: []string{gitenv.GateIndexVar}}}
 	environment, err := remote.build(t.Context(), procenv.Plan, seal, procenv.Runtime{GateIndex: index})
-	if err != nil || strings.Contains(strings.Join(environment, "\n"), index) {
+	if err != nil || strings.Contains(strings.Join(slices.Collect(environment.Values()), "\n"), index) {
 		t.Fatalf("remote inherited machine binding: %v, %v", environment, err)
 	}
 }

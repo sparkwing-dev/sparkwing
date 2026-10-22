@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"slices"
 	"sync"
 	"time"
 
@@ -36,7 +35,7 @@ type ProtocolSessionConfig struct {
 	Masks           *MaskRegistry
 	Command         []string
 	Directory       string
-	Environment     []string
+	Environment     procenv.Env
 	Environments    SDKEnvironment
 	Log             func(context.Context, nodeproto.FrameLog) error
 	Revoke          func() error
@@ -45,7 +44,8 @@ type ProtocolSessionConfig struct {
 	Debug           bool
 	ParseFrame      func([]byte) (nodeproto.Frame, error)
 	ValidateRequest func(nodeproto.Request) error
-	cleanupEnv      []string
+	cleanupEnv      procenv.Env
+	cleanupEnvSet   bool
 	grace           time.Duration
 }
 
@@ -69,6 +69,7 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 	}
 	cfg.Environment = env
 	cfg.cleanupEnv = complete
+	cfg.cleanupEnvSet = true
 	return cfg.start(ctx)
 }
 
@@ -92,6 +93,7 @@ func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input Eval
 	}
 	cfg.Environment = env
 	cfg.cleanupEnv = complete
+	cfg.cleanupEnvSet = true
 	return cfg.start(ctx)
 }
 
@@ -112,7 +114,8 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 		return nil, cfg.failedStartup(err)
 	}
 	cfg.Environment = env
-	cfg.cleanupEnv = slices.Clone(env)
+	cfg.cleanupEnv = env
+	cfg.cleanupEnvSet = true
 	return cfg.start(ctx)
 }
 
@@ -216,8 +219,8 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 			child = append(child, w)
 		}
 	}
-	cmd := pipelineentry.Command(cfg.Command).Exec()
-	cmd.Dir, cmd.Env = cfg.Directory, append([]string{}, cfg.Environment...)
+	cmd := pipelineentry.Command(cfg.Command).Exec(cfg.Environment)
+	cmd.Dir = cfg.Directory
 	cmd.Stdout, cmd.Stderr = child[2], child[3]
 	process, err := startSDKProcess(cmd, child[0], child[1])
 	closeProtocolFiles(child)
@@ -630,7 +633,7 @@ func (s *ProtocolSession) Close() error {
 func (s *ProtocolSession) Cleanup(ctx context.Context) error {
 	if s.cfg.RunCleanups != nil {
 		env := s.cfg.cleanupEnv
-		if env == nil {
+		if !s.cfg.cleanupEnvSet {
 			env = s.cfg.Environment
 		}
 		cleanup, cancel := context.WithCancelCause(ctx)
@@ -640,7 +643,7 @@ func (s *ProtocolSession) Cleanup(ctx context.Context) error {
 		if s.executionCtx.Err() != nil {
 			cancel(context.Cause(s.executionCtx))
 		}
-		return s.cfg.RunCleanups(cleanup, CleanupScope{Dir: s.cfg.Directory, Env: append([]string{}, env...)})
+		return s.cfg.RunCleanups(cleanup, CleanupScope{Dir: s.cfg.Directory, Env: env})
 	}
 	return nil
 }

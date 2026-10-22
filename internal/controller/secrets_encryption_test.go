@@ -82,7 +82,7 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 
 func TestSecrets_InvalidMaskedValuesRequirePlainConfig(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	for _, value := range []string{"", "abc", "prefix***suffix"} {
+	for _, value := range []string{"", "abc"} {
 		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value})
 		if code != http.StatusBadRequest || !strings.Contains(body, "plain config variable") {
 			t.Fatalf("masked value %q: HTTP %d %s", value, code, body)
@@ -289,5 +289,13 @@ func TestSecretsMalformedEnvelopeReadsProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSecrets_MarkerContainingValuesAreAccepted(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": "prefix***suffix"})
+	if code != http.StatusNoContent {
+		t.Fatalf("HTTP %d %s", code, body)
 	}
 }

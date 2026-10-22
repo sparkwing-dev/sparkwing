@@ -27,11 +27,11 @@ type Masker struct {
 func NewMasker() *Masker { return &Masker{} }
 
 // ErrInvalidValue is safe to present when discovery cannot classify author output.
-var ErrInvalidValue = errors.New("secret value must contain at least 4 characters and must not contain ***; use a plain config variable instead")
+var ErrInvalidValue = errors.New("secret value must contain at least 4 characters; use a plain config variable instead")
 
-// Validate refuses values that cannot be masked safely as independent secrets.
+// Validate enforces the minimum secret length.
 func Validate(value string) error {
-	if utf8.RuneCountInString(value) < 4 || strings.Contains(value, "***") {
+	if utf8.RuneCountInString(value) < 4 {
 		return ErrInvalidValue
 	}
 	return nil

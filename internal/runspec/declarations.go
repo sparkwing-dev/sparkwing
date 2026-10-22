@@ -84,7 +84,7 @@ func (g *DeclarationGate) Resolve(name string, args map[string]string, secretArg
 
 // RegisterArguments is the argument registration projection for every host entrypoint.
 func RegisterArguments(arguments []nodeproto.ArgumentDescription, args map[string]string, secretArgs []string, masker *secrets.Masker) (DeclaredArguments, error) {
-	resolved, err := ProjectArguments(arguments, args, secretArgs)
+	resolved, err := projectArguments(arguments, args, secretArgs)
 	if err != nil {
 		return resolved, err
 	}
@@ -96,8 +96,7 @@ func RegisterArguments(arguments []nodeproto.ArgumentDescription, args map[strin
 	return resolved, nil
 }
 
-// ProjectArguments resolves declared defaults and seals their normalized registration set.
-func ProjectArguments(arguments []nodeproto.ArgumentDescription, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
+func projectArguments(arguments []nodeproto.ArgumentDescription, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
 	resolved := DeclaredArguments{Args: maps.Clone(args), SecretArgs: append([]string{}, secretArgs...)}
 	if resolved.Args == nil {
 		resolved.Args = map[string]string{}

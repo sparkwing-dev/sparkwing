@@ -64,14 +64,14 @@ internal/profile	23
 internal/ratelimit	3
 internal/releaseasset	1
 internal/releaseauth	1
-internal/repos	23
+internal/repos	20
 internal/runflags	11
 internal/runners	3
 internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
 internal/runspec	4
-internal/secrets	5
+internal/secrets	2
 internal/secretsource	2
 internal/sessionledger	8
 internal/settings	55

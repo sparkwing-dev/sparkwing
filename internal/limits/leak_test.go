@@ -1,4 +1,4 @@
-package limits
+package limits_test
 
 import (
 	"testing"

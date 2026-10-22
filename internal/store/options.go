@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -58,10 +57,8 @@ func (s *Store) configurePolicies(policies Policies) {
 }
 
 func init() {
+	storeclock.Now = func(s any) time.Time { return s.(*Store).now() }
 	storeclock.Option = func(clock func() time.Time) any {
-		return Option{apply: func(s *Store) { s.clock = clock }}
-	}
-	storeclock.Now = func(ctx context.Context, fixture any) (time.Time, error) {
-		return fixture.(*Store).databaseNow(ctx)
+		return Option{apply: func(s *Store) { s.clock, s.pinnedClock = clock, s.now }}
 	}
 }

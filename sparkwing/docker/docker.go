@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
@@ -357,7 +358,7 @@ func ensureDocker() error {
 }
 
 func buildxAvailable(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "docker", "buildx", "version")
+	cmd := procenv.HostCommandContext(ctx, "docker", "buildx", "version")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return cmd.Run() == nil
@@ -443,7 +444,7 @@ func platformAdvertised(wish string, advertised []string) bool {
 }
 
 func runDocker(ctx context.Context, stdin io.Reader, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := procenv.HostCommandContext(ctx, "docker", args...)
 	if stdin != nil {
 		cmd.Stdin = stdin
 	}

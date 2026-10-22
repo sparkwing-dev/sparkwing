@@ -44,8 +44,7 @@ func NameKey(name, goos string) string {
 	return name
 }
 
-// Validate refuses invalid names and engine-owned assignments without exposing values in errors.
-func Validate(env []Assignment) error {
+func validate(env []Assignment) error {
 	for _, assignment := range env {
 		if !validName(assignment.Name) {
 			return errors.New("invalid environment variable name")
@@ -76,12 +75,17 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
 // Git never inherits a repository/index/config override or a credential helper from a caller.
 // Remote installs on a host the run's owner does not own set GOENV=off.
-func Build(k Kind, b Base, rt Runtime) ([]string, error) {
-	if k > Git {
+func Build(k Kind, b Base, rt Runtime) (Env, error) {
+	values, err := build(k, b, rt)
+	return Env{values: values, masker: b.Masker, remote: !b.Local && k != HostChild}, err
+}
+
+func build(k Kind, b Base, rt Runtime) ([]string, error) {
+	if k >= kindCount {
 		return nil, errors.New("unknown process environment kind")
 	}
 	if k == StepTool || k == Cleanup {
-		return inheritAttempt(rt.AttemptEnv, b.Masker)
+		return inheritAttempt(rt.AttemptEnv.values, b.Masker)
 	}
 	if !b.Local && (k == Plan || k == Attempt || k == Eval || k == Install) {
 		if err := ValidateSubmitEnvAllow(b.SubmitEnvAllow); err != nil {
@@ -111,7 +115,7 @@ func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 		composeRuntime(env, k, rt)
 	}
 	if k == Attempt || k == Eval {
-		if err := Validate(rt.Startup); err != nil {
+		if err := validate(rt.Startup); err != nil {
 			return nil, err
 		}
 		for _, a := range rt.Startup {

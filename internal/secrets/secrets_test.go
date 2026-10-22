@@ -109,9 +109,9 @@ func TestNewCipherWithPrevious_RejectsAShortPreviousKey(t *testing.T) {
 	}
 }
 
-func TestMaskerRejectsUnsafeValues(t *testing.T) {
+func TestMaskerRejectsShortValues(t *testing.T) {
 	m := NewMasker()
-	for _, value := range []string{"", "abc", "ééé", "long***secret"} {
+	for _, value := range []string{"", "abc", "ééé"} {
 		if err := m.Register(value); err == nil || !strings.Contains(err.Error(), "plain config variable") {
 			t.Fatalf("Register(%q) = %v", value, err)
 		}
@@ -121,5 +121,19 @@ func TestMaskerRejectsUnsafeValues(t *testing.T) {
 	}
 	if err := m.Register("éééé"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMaskerAcceptsMarkerContainingSecrets(t *testing.T) {
+	for _, value := range []string{"long***secret", "****", "x***"} {
+		m := NewMasker()
+		if err := m.Register(value); err != nil {
+			t.Fatal(err)
+		}
+		stream := m.Stream()
+		got := stream.Mask(value[:2]) + stream.Mask(value[2:]) + stream.Flush()
+		if got != "***" {
+			t.Fatalf("%q masked to %q", value, got)
+		}
 	}
 }

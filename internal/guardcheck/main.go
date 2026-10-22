@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
@@ -86,6 +87,13 @@ func run(repo string, fast, unexport bool, base string) ([]string, error) {
 		}
 		problems = append(problems, compareEntries(name, findings[name], allows[name])...)
 	}
+	if !fast {
+		spawns, err := spawnFindings(repo)
+		if err != nil {
+			return nil, err
+		}
+		problems = append(problems, spawns...)
+	}
 	if unexport {
 		counts, names, err := unexportCandidates(repo)
 		if err != nil {
@@ -119,9 +127,9 @@ func lintFindings(repo string, fast bool) (map[string][]string, error) {
 	if fast {
 		args = append(args, "--enable-only=depguard")
 	}
-	cmd := exec.Command("golangci-lint", append(args, "./...")...)
+	cmd := procenv.ControlCommand(append(os.Environ(), "GOLANGCI_LINT_CACHE="+lintCacheDir(repo)), "golangci-lint", append(args, "./...")...)
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(), "GOLANGCI_LINT_CACHE="+lintCacheDir(repo))
+
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
@@ -356,7 +364,7 @@ func growth(repo, base string, allows map[string][]string) ([]string, error) {
 }
 
 func git(repo string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	cmd := procenv.HostCommand("git", append([]string{"-C", repo}, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -56,8 +56,12 @@ func TestPlainSubmittedConfigDoesNotRequireASecretPattern(t *testing.T) {
 		if err != nil || !slices.Contains(base.Ambient, "BUILD_CONFIG="+value) {
 			t.Fatalf("plain config was lost at host boundary: %v", err)
 		}
-		if got := masker.Mask(value); got != value {
-			t.Fatalf("plain config became a mask: %q", got)
+		want := value
+		if value == "plain***config" {
+			want = "***"
+		}
+		if got := masker.Mask(value); got != want {
+			t.Fatalf("plain config mask = %q, want %q", got, want)
 		}
 	}
 }
@@ -89,7 +93,7 @@ func TestAcceptedSubmittedNameAlreadySetByHostReachesPipeline(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
-				env, err := Build(kind, base, Runtime{})
+				env, err := buildEntries(kind, base, Runtime{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -137,7 +141,7 @@ func TestSubmittedNamesSurviveOnlyInsideTheOperatorAllowList(t *testing.T) {
 			continue
 		}
 		for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
-			environment, err := Build(kind, base, Runtime{})
+			environment, err := buildEntries(kind, base, Runtime{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,12 +180,12 @@ func TestSubmittedGoToolchainAndNetworkNamesAreRefused(t *testing.T) {
 }
 
 func TestRemoteInstallsIgnoreTheHostGoEnvFile(t *testing.T) {
-	remote, err := Build(Install, Base{Masker: secrets.NewMasker()}, Runtime{})
+	remote, err := buildEntries(Install, Base{Masker: secrets.NewMasker()}, Runtime{})
 	if err != nil || !slices.Contains(remote, "GOENV=off") {
 		t.Fatalf("remote install environment %v: %v", remote, err)
 	}
 	for _, base := range []Base{{Local: true}, {OwnerMachine: true, Masker: secrets.NewMasker()}} {
-		owned, err := Build(Install, base, Runtime{})
+		owned, err := buildEntries(Install, base, Runtime{})
 		if err != nil || slices.Contains(owned, "GOENV=off") {
 			t.Fatalf("an owner's install lost its go env file: %v %v", owned, err)
 		}
@@ -208,7 +212,7 @@ func TestSubmittedValuesNeverRedirectTheRunnersOwnState(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
-		env, err := Build(kind, base, Runtime{})
+		env, err := buildEntries(kind, base, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}

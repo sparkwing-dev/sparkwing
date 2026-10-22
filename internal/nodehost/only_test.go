@@ -207,7 +207,7 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := "SPARKWING_DRY_RUN=" + strconv.FormatBool(dryRun)
-		if !slices.Contains(planned, want) || !slices.Contains(attempt, want) {
+		if !slices.Contains(slices.Collect(planned.Values()), want) || !slices.Contains(slices.Collect(attempt.Values()), want) {
 			t.Fatalf("plan=%v attempt=%v, want %s", planned, attempt, want)
 		}
 	}

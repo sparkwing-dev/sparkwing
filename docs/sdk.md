@@ -363,7 +363,7 @@ mask registrations. Pipeline code run without a Sparkwing host is unmasked.
 The host registers accepted secret arguments, defaults and normalized list items
 before execution. Stored secrets and OIDC tokens are registered before release.
 Stored secrets, supplied secret arguments and nonempty secret defaults of the
-selected pipeline need at least four characters and must not contain `***`.
+selected pipeline need at least four characters. Secrets containing `***` are accepted.
 This includes each nonempty list item. An empty default is no value.
 Use a plain config variable for values that fail this rule. Defaults belonging
 to unselected pipelines do not refuse a run. Derived proxy credential parts

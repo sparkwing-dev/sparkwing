@@ -101,10 +101,10 @@ func TestOutputGateIsScopedToOneOperation(t *testing.T) {
 	}
 }
 
-func TestHostRefusesShortAndMarkerSecretListItems(t *testing.T) {
+func TestHostRefusesShortSecretListItems(t *testing.T) {
 	const name = "sparkwingtest-registration-list-refusal"
 	sparkwing.Register[registrationArgs](name, func() sparkwing.Pipeline[registrationArgs] { return registrationPipeline{} })
-	for _, raw := range []string{"abc,valid-secret", "prefix-***-suffix,valid-secret"} {
+	for _, raw := range []string{"abc,valid-secret", "valid-secret,abc"} {
 		t.Run(raw, func(t *testing.T) {
 			h := newHost(Options{}).(*host)
 			defer h.Close()
@@ -256,5 +256,15 @@ func TestIncompleteDiscoveryWithholdsSelectedPlanningOutput(t *testing.T) {
 	}
 	if records := h.Records(); len(records) != 0 {
 		t.Fatalf("incomplete discovery released planning output: %+v", records)
+	}
+}
+
+func TestHostAcceptsMarkerSecretListItems(t *testing.T) {
+	const name = "sparkwingtest-registration-marker-list"
+	sparkwing.Register[registrationArgs](name, func() sparkwing.Pipeline[registrationArgs] { return registrationPipeline{} })
+	h := newHost(Options{}).(*host)
+	defer h.Close()
+	if _, err := h.Plan(t.Context(), name, map[string]string{"tokens": "prefix-***-suffix,valid-secret"}); err != nil {
+		t.Fatal(err)
 	}
 }

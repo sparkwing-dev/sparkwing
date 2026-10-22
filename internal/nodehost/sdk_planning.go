@@ -9,6 +9,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -52,7 +54,7 @@ type PreparedPlanning struct {
 // owner evaluates guards from the returned arguments before starting planning.
 type SDKPlanner struct {
 	CacheDirectory string
-	Environment    func(context.Context, PlanningProcessInput) ([]string, error)
+	Environment    func(context.Context, PlanningProcessInput) (procenv.Env, error)
 	Start          func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error)
 	EnsureEngine   func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
 	Masker         *secrets.Masker

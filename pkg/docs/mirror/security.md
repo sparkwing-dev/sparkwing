@@ -43,8 +43,9 @@ credential stays outside the Job. See [Runner Job placement](#runner-job-placeme
 An authorized pipeline can use and disclose its secrets. Masking covers values
 registered with the host and their supported encodings. Arbitrary transformations,
 network exfiltration and files outside the host's output path are outside that
-protection. Registered secrets are refused in job, step, group and approval IDs
-because stored identifiers cannot be masked safely. One Go host module masks every presentation payload. Stdout and stderr
+protection. Plan acceptance refuses known registered secrets in job, step, group
+and approval IDs because stored identifiers cannot be masked safely. A lazily
+issued secret is registered before release without revalidating accepted IDs. One Go host module masks every presentation payload. Stdout and stderr
 are masked as byte streams before line splitting. Protocol frames are decoded
 first, then their payloads are sanitized before trusted envelopes are built.
 The accepted run seals one registration projection containing raw arguments,
@@ -52,13 +53,15 @@ secret defaults, effective values and every normalized list item. Stored secrets
 and OIDC tokens are registered before the host releases them. Explicit `Mask`
 registers author-generated values before subsequent output.
 
-Secrets shorter than four characters or containing `***` are refused when stored,
-declared or registered. This also applies to each nonempty list item. Use a plain
-config variable for these values. The old twelve-byte line/list fragment policy
+Stored secrets, supplied secret arguments and nonempty secret defaults of the
+selected pipeline must contain at least four characters, including each nonempty
+list item. Use a plain config variable for shorter values. Empty defaults carry
+no value. Defaults of unselected pipelines do not refuse a run. Secrets containing
+`***` are accepted. The old twelve-byte line/list fragment policy
 is removed. Remote environment values still use their separate twelve-byte
 registration threshold. Plain submitted config is preserved when it is too short
-or contains `***`, without registering a mask. Extracted proxy credentials must
-meet the secret requirements. Planning output waits until declarations are known.
+to register a mask. Derived proxy credential parts shorter than four characters
+are skipped. Planning output waits until declarations are known.
 Failed discovery withholds output. A healthy selected pipeline can still plan
 when a sibling fails discovery, with planning output withheld. Structured attributes are masked as JSON text
 and checked for valid JSON, duplicate keys and object shape. A failed check

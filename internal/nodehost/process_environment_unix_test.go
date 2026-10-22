@@ -47,19 +47,19 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 				policy := sdkTestEnvironment(st)
 				refused := errors.New("environment refused")
 				built := false
-				want := []string{"GORACE=atexit_sleep_ms=0", "CAPTURED=value"}
-				policy.Build = func(gotKind procenv.Kind, _ procenv.Base, runtime procenv.Runtime) ([]string, error) {
+				want := []string{"CAPTURED=value", "GORACE=atexit_sleep_ms=0"}
+				policy.Build = func(gotKind procenv.Kind, _ procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 					built = true
 					if gotKind != kind || runtime.RunID != "run" || (kind != procenv.Plan && runtime.JobID != input.NodeID) {
 						t.Fatalf("wrong environment policy: kind=%v runtime=%+v", gotKind, runtime)
 					}
 					if refuse {
-						return nil, refused
+						return procenv.Env{}, refused
 					}
-					return want, nil
+					return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: want}, procenv.Runtime{})
 				}
 				revoked := 0
-				cfg := ProtocolSessionConfig{Environments: policy, Environment: []string{"UNBUILT=unsafe"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked++; return nil }}
+				cfg := ProtocolSessionConfig{Environments: policy, Environment: testProcessEnv(t, "UNBUILT=unsafe"), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked++; return nil }}
 				var process ExecutorProcess
 				switch kind {
 				case procenv.Plan:
@@ -211,12 +211,12 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "startup_" + value}
 			policy := sdkTestEnvironment(st)
 			policy.Split = procenv.SplitJobEnv
-			policy.Build = func(_ procenv.Kind, _ procenv.Base, runtime procenv.Runtime) ([]string, error) {
+			policy.Build = func(_ procenv.Kind, _ procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 				env := []string{"GORACE=atexit_sleep_ms=0"}
 				for _, assignment := range runtime.Startup {
 					env = append(env, assignment.Name+"="+assignment.Value)
 				}
-				return env, nil
+				return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: env}, procenv.Runtime{})
 			}
 			body, revoked, cleaned := false, false, false
 			cfg := ProtocolSessionConfig{
@@ -285,11 +285,11 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 						t.Fatal("cleanup ran before revocation or in another directory")
 					}
 					for _, entry := range []string{"GOMAXPROCS=2", "NODE_OPTIONS=--no-warnings", "BODY=after-plan", "DOCKER_HOST=tcp://declared:2375", "SPARKWING_JOB_ID=build"} {
-						if !slices.Contains(scope.Env, entry) {
+						if !slices.Contains(slices.Collect(scope.Env.Values()), entry) {
 							t.Fatalf("cleanup omitted %s: %v", entry, scope.Env)
 						}
 					}
-					if strings.Contains(strings.Join(scope.Env, "\n"), "private-value") || slices.Contains(scope.Env, "DOCKER_HOST=tcp://captured:2375") {
+					if strings.Contains(strings.Join(slices.Collect(scope.Env.Values()), "\n"), "private-value") || slices.Contains(slices.Collect(scope.Env.Values()), "DOCKER_HOST=tcp://captured:2375") {
 						t.Fatal("cleanup inherited a credential or lost the body override")
 					}
 					return cleanups.Run(ctx, scope)

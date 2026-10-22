@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -61,7 +62,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	input.EnvironmentSource = runspec.EnvironmentSubmitted
 	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "local-secret", LocalSecrets: map[string]string{"TOKEN": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte(submittedValue), "BUILD_EMPTY": {}}})
-	if utf8.RuneCountInString(value) < 4 || strings.Contains(value, "***") {
+	if utf8.RuneCountInString(value) < 4 {
 		if err == nil || !strings.Contains(err.Error(), "plain config variable") {
 			t.Fatalf("invalid local secret intake: %v", err)
 		}
@@ -90,7 +91,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	for _, kind := range []procenv.Kind{procenv.Install, procenv.Plan, procenv.Attempt, procenv.Eval} {
 		environment, err := procenv.Build(kind, base, procenv.Runtime{})
-		if err != nil || strings.Contains(strings.Join(environment, "\n"), "BUILD_REGION="+submittedValue) == (kind == procenv.Install) || strings.Contains(strings.Join(environment, "\n"), "UNLISTED=") {
+		if err != nil || strings.Contains(strings.Join(slices.Collect(environment.Values()), "\n"), "BUILD_REGION="+submittedValue) == (kind == procenv.Install) || strings.Contains(strings.Join(slices.Collect(environment.Values()), "\n"), "UNLISTED=") {
 			t.Fatal("remote process lost submitted values or inherited unlisted input", err)
 		}
 	}
@@ -318,7 +319,7 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 		}
 		return w.Body.String()
 	}
-	if utf8.RuneCountInString(value) < 4 || strings.Contains(value, "***") {
+	if utf8.RuneCountInString(value) < 4 {
 		if body := send(s.Handler(), request, http.StatusBadRequest); !strings.Contains(body, "plain config variable") {
 			t.Fatalf("invalid local secret refusal: %s", body)
 		}

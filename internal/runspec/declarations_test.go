@@ -24,7 +24,7 @@ func TestDeclarationRefusalOnlyAppliesToSelectedDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = gate.Resolve("other", nil, nil)
-			if value == "" {
+			if value != "a" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -62,7 +62,7 @@ func TestDeclarationProjectionRetainsValidSiblingDefaults(t *testing.T) {
 	}
 }
 
-func TestDeclarationPresentationHidesUnselectedRefusedDefaults(t *testing.T) {
+func TestDeclarationPresentationHidesUnselectedSecretDefaults(t *testing.T) {
 	for _, value := range []string{"abc", "prefix-***-suffix"} {
 		t.Run(value, func(t *testing.T) {
 			doc := nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{

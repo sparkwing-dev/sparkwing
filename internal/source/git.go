@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -68,8 +69,7 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 	if directory != "" {
 		commandArgs = append(commandArgs, "-C", directory)
 	}
-	cmd := exec.CommandContext(ctx, "git", append(commandArgs, args...)...)
-	cmd.Env = env
+	cmd := procenv.ControlCommandContext(ctx, env, "git", append(commandArgs, args...)...)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}

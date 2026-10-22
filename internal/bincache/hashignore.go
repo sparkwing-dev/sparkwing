@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func ignoredUnder(dir string, candidates []string) map[string]bool {
@@ -12,7 +14,7 @@ func ignoredUnder(dir string, candidates []string) map[string]bool {
 		return nil
 	}
 
-	cmd := exec.Command("git", "check-ignore", "-z", "--stdin")
+	cmd := procenv.HostCommand("git", "check-ignore", "-z", "--stdin")
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(strings.Join(candidates, "\x00") + "\x00")
 	var out bytes.Buffer

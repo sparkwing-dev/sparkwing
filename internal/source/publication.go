@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -69,7 +68,7 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 	if err := errors.Join(copyErr, input.Close(), ctx.Err()); err != nil {
 		return nil, nil, err
 	}
-	if err := scanPublication(ctx, root, stream, environment, publication); err != nil {
+	if err := scanPublication(ctx, root, stream, slices.Collect(environment.Values()), publication); err != nil {
 		return nil, nil, err
 	}
 	if _, err := stream.Seek(0, io.SeekStart); err != nil {
@@ -140,8 +139,7 @@ func scanPublication(ctx context.Context, root string, bundle *os.File, environm
 	}
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(scanCtx, "git", "-C", checkout, "cat-file", "--batch")
-	cmd.Env = client.env
+	cmd := procenv.ControlCommandContext(scanCtx, client.env, "git", "-C", checkout, "cat-file", "--batch")
 	cmd.Stdin = strings.NewReader(objects)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

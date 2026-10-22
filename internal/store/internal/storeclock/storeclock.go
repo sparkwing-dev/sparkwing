@@ -3,7 +3,6 @@
 package storeclock
 
 import (
-	"context"
 	"time"
 )
 
@@ -11,5 +10,5 @@ import (
 // installs clock; teststore converts the result back to store.Option.
 var Option func(clock func() time.Time) any
 
-// Now reads a fixture's transaction clock without exposing it to production callers.
-var Now func(context.Context, any) (time.Time, error)
+// Now returns the clock of a store passed by teststore.
+var Now func(store any) time.Time

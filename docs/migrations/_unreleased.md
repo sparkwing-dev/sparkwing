@@ -3141,7 +3141,7 @@ Run pipeline code through a Sparkwing host to get masked logs and diagnostics.
 The SDKs no longer mask standalone execution. Continue calling `Mask` before
 logging author-generated credentials.
 
-Replace masked secrets shorter than four characters or containing `***` with
+Replace masked secrets shorter than four characters with
 plain config variables, or use a longer secret. The same rule applies to each
 nonempty list item. Only supplied arguments and defaults of the selected pipeline
 are subject to refusal. Empty defaults carry no value. Unsafe derived proxy

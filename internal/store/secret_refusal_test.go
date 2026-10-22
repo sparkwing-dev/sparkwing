@@ -15,7 +15,7 @@ func (c *refusalCipher) SealBound(secrets.Purpose, string, string, string, bool,
 }
 
 func TestStoredSecretRefusesUnmaskableValueBeforeEncryption(t *testing.T) {
-	for _, value := range []string{"abc", "prefix***suffix"} {
+	for _, value := range []string{"abc", ""} {
 		cipher := &refusalCipher{}
 		_, err := SealSecret(cipher, "team", Secret{Name: "TOKEN", Value: value, Masked: true})
 		if err == nil || !strings.Contains(err.Error(), "plain config variable") || cipher.called {
@@ -44,5 +44,19 @@ func TestPlainConfigValuesCanBeShortOrContainMaskMarker(t *testing.T) {
 		if sealed.Row().Masked || !secrets.IsBound(sealed.Row().Value) {
 			t.Fatal("plain config classification changed")
 		}
+	}
+}
+
+func TestStoredSecretAcceptsMaskMarker(t *testing.T) {
+	cipher, err := secrets.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := SealSecret(cipher, "team", Secret{Name: "TOKEN", Value: "prefix***suffix", Masked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sealed.Row().Masked || !secrets.IsBound(sealed.Row().Value) {
+		t.Fatal("masked value was not sealed")
 	}
 }

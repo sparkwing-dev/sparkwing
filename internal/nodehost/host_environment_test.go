@@ -48,7 +48,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 						t.Fatalf("persisted environment=%+v", values)
 					}
 					return procenv.JobEnv{Startup: values[1:], Body: values[:1]}, nil
-				}, Build: func(gotKind procenv.Kind, base procenv.Base, runtime procenv.Runtime) ([]string, error) {
+				}, Build: func(gotKind procenv.Kind, base procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 					built++
 					if gotKind != kind || !base.Local || !reflect.DeepEqual(base.Captured, []string{"CAPTURED=sealed"}) || runtime.RunID != input.Accepted.RunID || runtime.Runner.Name != input.GrantedRunner.Name || !runtime.DryRun {
 						t.Fatalf("environment policy changed sealed values: kind=%v runtime=%+v", gotKind, runtime)
@@ -60,7 +60,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 					} else if runtime.JobID != input.NodeID || !reflect.DeepEqual(runtime.Startup, []procenv.Assignment{{Name: "STARTUP", Value: "before exec", Startup: true}}) || split != 1 {
 						t.Fatal("attempt or eval startup included body environment")
 					}
-					return []string{"PARTIAL=refused"}, boundary
+					return testProcessEnv(t, "PARTIAL=refused"), boundary
 				},
 			}}
 			var process ExecutorProcess

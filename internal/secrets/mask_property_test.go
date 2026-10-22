@@ -135,6 +135,8 @@ func TestRegisterOfAKnownValueDoesNoWork(t *testing.T) {
 
 // Concatenated emissions, including a final EOF flush, must never expose any
 // registered spelling even when matching or replacement crosses a chunk edge.
+// Decision 49 accepts marker-containing secrets but excludes them from closure:
+// replacement may form such a secret across emissions that cannot be recalled.
 func TestStreamReplacementClosureProperty(t *testing.T) {
 	random := rand.New(rand.NewSource(43109))
 	candidates := []string{

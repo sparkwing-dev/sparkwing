@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -140,5 +141,5 @@ func sourceEnvironment(options Options, kind procenv.Kind) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("source process environment: %w", err)
 	}
-	return append([]string{}, env...), nil
+	return slices.Collect(env.Values()), nil
 }

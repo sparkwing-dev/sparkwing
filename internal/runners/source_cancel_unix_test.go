@@ -36,17 +36,17 @@ func TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout(t *testing.T) {
 	tools, workspace := t.TempDir(), t.TempDir()
 	ready, block := filepath.Join(tools, "ready"), filepath.Join(tools, "block")
 	for _, path := range []string{ready, block} {
-		if err := unix.Mkfifo(path, 0600); err != nil {
+		if err := unix.Mkfifo(path, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	reader, err := os.OpenFile(ready, os.O_RDWR, 0600)
+	reader, err := os.OpenFile(ready, os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer reader.Close()
 	script := "#!/bin/sh\nfor arg do\n if [ \"$arg\" = fetch ]; then\n  printf x > \"$FETCH_READY\"\n  read ignored < \"$FETCH_BLOCK\"\n  exit 1\n fi\ndone\nexec \"$REAL_GIT\" \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(tools, "git"), []byte(script), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(tools, "git"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -60,8 +60,8 @@ func TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout(t *testing.T) {
 	}()
 	entry, err := source.PrepareCheckout(ctx, source.Spec{
 		RepoKey: "git:8.8.8.8/team/repo", RemoteURL: "https://8.8.8.8/team/repo", SHA: "0123456789abcdef0123456789abcdef01234567",
-	}, source.Options{Workspace: workspace, Access: cancelledSourceAccess{}, BuildEnvironment: func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) {
-		return []string{"PATH=" + os.Getenv("PATH"), "REAL_GIT=" + realGit, "FETCH_READY=" + ready, "FETCH_BLOCK=" + block}, nil
+	}, source.Options{Workspace: workspace, Access: cancelledSourceAccess{}, BuildEnvironment: func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) {
+		return procenv.Build(procenv.HostChild, procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH"), "REAL_GIT=" + realGit, "FETCH_READY=" + ready, "FETCH_BLOCK=" + block}}, procenv.Runtime{})
 	}})
 	if entry != nil {
 		err = errors.Join(err, entry.Close(), errors.New("cancelled fetch returned an entry"))
