@@ -502,6 +502,26 @@ func BenchmarkStreamOverlapAAAA(b *testing.B) {
 	}
 }
 
+func BenchmarkStreamPercentLongNonterminalPrefix(b *testing.B) {
+	m := newTestMasker(strings.Repeat("a", 4096) + "/")
+	m.matcher()
+	input := strings.Repeat("a", 1<<20)
+	stream := m.Stream()
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		streamBenchmarkSink = stream.Mask(input)
+	}
+}
+
+func TestPercentTerminalSuffixAfterLongerSpellingMismatch(t *testing.T) {
+	m := newTestMasker("ABbcd/long", "bcd/")
+	if got := m.Mask("abbcd%2flong"); got != "ab***long" {
+		t.Fatalf("terminal suffix = %q", got)
+	}
+}
+
 func TestStreamBoundsReplacementClosureChain(t *testing.T) {
 	m := newTestMasker("ab**", "xxxx")
 	for _, width := range []int{1, 2, 3, 128, 1024} {

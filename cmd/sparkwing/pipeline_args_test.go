@@ -36,13 +36,9 @@ func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema, err := inspection.describe(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	args, err := parsePipelineArgs(schema, []string{"--target", "production", "--image", "release"})
-	if err != nil || args["target"] != "production" || args["image"] != "release" || inspection.input.Run.Pipeline != "deploy-prod" || inspection.input.Entrypoint != "Deploy" {
-		t.Fatalf("selection=%+v args=%v error=%v", inspection.input, args, err)
+	planned, err := planPipelineEntry(ctx, inspection, "deploy-prod", []string{"--target", "production", "--image", "release"})
+	if err != nil || planned.args["target"] != "production" || planned.args["image"] != "release" || inspection.input.Run.Pipeline != "deploy-prod" || inspection.input.Entrypoint != "Deploy" {
+		t.Fatalf("selection=%+v args=%v error=%v", inspection.input, planned.args, err)
 	}
 	presentation, err := inspection.presentation(ctx)
 	if err != nil {

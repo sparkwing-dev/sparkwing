@@ -100,6 +100,24 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	}
 }
 
+func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
+	planner, input, fixture, _ := sdkPlanningFixture(t)
+	planner.ValidatePlan = nodeproto.ValidatePlan
+	planner.Masks = NewMaskRegistry(planner.Masker)
+	if err := planner.Masks.registerIssued("issued-token"); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := planner.Prepare(t.Context(), input, fixture.input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = prepared.Functions.Validate(json.RawMessage(`{"jobs":[{"id":"new-issued-token","steps":[{"id":"run"}]}]}`), nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: planner.Masks.replayMasks})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+		t.Fatalf("fresh plan validation = %v", err)
+	}
+}
+
 func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planningFixture, *[]*executorProcess) {
 	t.Helper()
 	f := newPlanningFixture(t)

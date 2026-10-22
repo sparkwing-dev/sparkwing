@@ -209,13 +209,6 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 	return fn(ctx, inspection, filepath.Dir(selection.execution.Directory))
 }
 
-func (p pipelineInspection) describe(ctx context.Context) (nodeproto.PipelineDescription, error) {
-	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
-	schema := prepared.Description
-	schema.Name = p.input.Run.Pipeline
-	return schema, err
-}
-
 func (p pipelineInspection) presentation(ctx context.Context) (runspec.PipelinePresentation, error) {
 	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
 	if err != nil {
@@ -225,6 +218,9 @@ func (p pipelineInspection) presentation(ctx context.Context) (runspec.PipelineP
 	for i, private := range prepared.Declarations.Declarations().Pipelines {
 		if private.Name == p.input.Entrypoint {
 			schema := public.Pipelines[i]
+			if schema.Error != nil {
+				return runspec.PipelinePresentation{}, schema.Error
+			}
 			if schema.Name != "" {
 				schema.Name = p.planner.Masker.Mask(p.input.Run.Pipeline)
 			}

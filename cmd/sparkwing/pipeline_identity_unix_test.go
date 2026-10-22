@@ -27,7 +27,7 @@ func TestPipelineAliasSourceUsesTheInvokingCheckoutBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema, err := entry.describe(t.Context())
+	schema, err := entry.presentation(t.Context())
 	if err != nil || schema.Name != "deploy-prod" || len(schema.Args) != 1 || schema.Args[0].JobID != "rollout" {
 		t.Fatalf("source changed the invocation binding: %+v %v", schema, err)
 	}

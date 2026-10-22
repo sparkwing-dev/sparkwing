@@ -219,8 +219,16 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	if err != nil {
 		return nil, runspec.SecretRegistration{}, err
 	}
-	_, err = h.ValidatePlan(body, validation)
+	plan, err := h.ValidatePlan(body, validation)
 	if err != nil {
+		return nil, runspec.SecretRegistration{}, err
+	}
+	if err := nodeproto.VisitPlanIdentifiers(plan, func(value, path string) error {
+		if h.deps.Masker.ContainsSecret(value) {
+			return identifierMaskError(path)
+		}
+		return nil
+	}); err != nil {
 		return nil, runspec.SecretRegistration{}, err
 	}
 	registration, err := generatorRegistration(spec, session.arguments)

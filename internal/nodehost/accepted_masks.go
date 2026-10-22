@@ -40,7 +40,8 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 		}
 		namespace.Jobs = append(namespace.Jobs, job)
 	}
-	return r.Accept(namespace, func() error { return nil })
+	// The snapshot and seal supply accepted topology, never fresh declarations.
+	return r.accept(namespace, func() error { return nil }, r.replayMasks)
 }
 
 func (r *MaskRegistry) initializeSeal(accepted AcceptedRun) error {

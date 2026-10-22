@@ -125,7 +125,9 @@ func compilePatterns(patterns []string, fold bool) automaton {
 				}
 			}
 		}
-		a.nodes[at].match = int32(len(pattern))
+		if !fold {
+			a.nodes[at].match = int32(len(pattern))
+		}
 		if fold {
 			a.patterns[at] = append(a.patterns[at], pattern)
 		}
@@ -133,7 +135,16 @@ func compilePatterns(patterns []string, fold bool) automaton {
 	queue := make([]int32, 1, len(a.nodes))
 	for head := 0; head < len(queue); head++ {
 		at := queue[head]
-		a.nodes[at].match = max(a.nodes[at].match, a.nodes[a.nodes[at].fail].match)
+		fail := a.nodes[at].fail
+		if fold {
+			// Percent matches require spelling checks, so retain only terminal links.
+			a.nodes[at].match = a.nodes[fail].match
+			if len(a.patterns[fail]) > 0 {
+				a.nodes[at].match = fail
+			}
+		} else {
+			a.nodes[at].match = max(a.nodes[at].match, a.nodes[fail].match)
+		}
 		for next := a.nodes[at].child; next != 0; next = a.nodes[next].sibling {
 			if at != 0 {
 				fail := a.nodes[at].fail
@@ -191,7 +202,7 @@ func (a *automaton) matched(text string, at int32, end int) int {
 	if !a.fold {
 		return int(a.nodes[at].match)
 	}
-	for state := at; state != 0; state = a.nodes[state].fail {
+	for state := at; state != 0; state = a.nodes[state].match {
 		for _, pattern := range a.patterns[state] {
 			if percentEqual(text[end-len(pattern):end], pattern) {
 				return len(pattern)
@@ -224,7 +235,7 @@ func (a *automaton) tail(text string, at int32) int {
 	return len(text)
 }
 
-func (a *automaton) scan(text string, spans []span, units []span) ([]span, int) {
+func (a *automaton) scan(text string, spans, units []span) ([]span, int) {
 	if len(a.nodes) == 1 || a.singleStart && (!a.fold || a.onlyStart < 'A' || a.onlyStart > 'F') && strings.IndexByte(text, a.onlyStart) < 0 {
 		return spans, len(text)
 	}
@@ -261,7 +272,7 @@ func (a *automaton) scan(text string, spans []span, units []span) ([]span, int) 
 	return spans, a.tail(text, at)
 }
 
-func (m *patternMatcher) view(text string, units []span, spans []span) ([]span, int) {
+func (m *patternMatcher) view(text string, units, spans []span) ([]span, int) {
 	spans, cut := m.exact.scan(text, spans, units)
 	if len(m.percent.nodes) > 1 {
 		var percentCut int

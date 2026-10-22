@@ -113,6 +113,35 @@ func TestOwnerEvaluationEmptyExpansionIsExplicit(t *testing.T) {
 	}
 }
 
+func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
+	in, _, deps, process := evaluationFixture(t)
+	deps.Masks = NewMaskRegistry(deps.Masker)
+	deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: deps.Masks.replayMasks}
+	deps.ValidatePlan = nodeproto.ValidatePlan
+	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
+		if request.Op != nodeproto.OpEval {
+			return nil, nil
+		}
+		if err := deps.Masks.registerIssued("build"); err != nil {
+			t.Fatal(err)
+		}
+		jobs := []nodeproto.JobSpec{}
+		if request.Closure == "first" {
+			jobs = append(jobs, nodeproto.JobSpec{ID: "new-build", Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "run"}}})
+		}
+		raw, _ := json.Marshal(jobs)
+		return nodeproto.EvalResult{Value: raw}, nil
+	}
+	host, err := NewOwnerEvaluator(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _, failure, err := host.Expand(t.Context(), in)
+	if err != nil || failure == nil || failure.Code != apierr.SecretInIdentifier || len(body) != 0 {
+		t.Fatalf("fresh expansion = %s, failure = %+v, error = %v", body, failure, err)
+	}
+}
+
 func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 	for _, mode := range []string{"sdk", "shape", "validator", "drift", "output", "close", "cleanup"} {
 		t.Run(mode, func(t *testing.T) {

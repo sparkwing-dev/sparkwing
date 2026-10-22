@@ -3,11 +3,13 @@ package sparkwingtest
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -175,11 +177,13 @@ func TestDirectPlanRegistersJobSecretDefaults(t *testing.T) {
 	}
 }
 
-type secretOutput struct{ Value string }
-type secretProducer struct {
-	sparkwing.Base
-	sparkwing.Produces[secretOutput]
-}
+type (
+	secretOutput   struct{ Value string }
+	secretProducer struct {
+		sparkwing.Base
+		sparkwing.Produces[secretOutput]
+	}
+)
 
 func (secretProducer) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(work, "run", func(context.Context) (secretOutput, error) { return secretOutput{Value: "output-private-value"}, nil }), nil
@@ -219,6 +223,11 @@ func TestIssuedTokenDoesNotRefuseAcceptedIdentifier(t *testing.T) {
 	const token = "issued-private-token"
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, token+"-job", secretProducer{})
+	source := sparkwing.Job(plan, "source", func(context.Context) error { return nil })
+	generator := source.Generate(func(_ context.Context, expansion *sparkwing.Plan) error {
+		sparkwing.Job(expansion, "public-child", func(context.Context) error { return nil })
+		return nil
+	})
 	h := newHost(Options{OIDCToken: func(context.Context, string) (string, error) { return token, nil }}).(*host)
 	defer h.Close()
 	if err := h.remember(plan); err != nil {
@@ -234,10 +243,67 @@ func TestIssuedTokenDoesNotRefuseAcceptedIdentifier(t *testing.T) {
 	if _, err := h.RunStep(t.Context(), plan, token+"-job", "run"); err != nil {
 		t.Fatalf("issued token refused accepted step: %v", err)
 	}
+	if _, err := h.Eval(t.Context(), plan, "source", generator.ID(), nil); err != nil {
+		t.Fatalf("issued token refused accepted sibling during generation: %v", err)
+	}
 }
 
-type incompleteDiscoveryPipeline struct{}
-type incompleteDiscoveryKey struct{}
+func TestGeneratorRefusesIssuedTokenInFreshIdentifier(t *testing.T) {
+	const token = "issued-private-token"
+	var issued string
+	plan := sparkwing.NewPlan()
+	source := sparkwing.Job(plan, "source", func(ctx context.Context) error {
+		var err error
+		issued, err = sparkwing.OIDCToken(ctx, "audience")
+		return err
+	})
+	generator := source.Generate(func(_ context.Context, expansion *sparkwing.Plan) error {
+		sparkwing.Job(expansion, "generated-"+issued, func(context.Context) error { return nil })
+		return nil
+	})
+	h := newHost(Options{OIDCToken: func(context.Context, string) (string, error) { return token, nil }}).(*host)
+	defer h.Close()
+	if _, err := h.RunStep(t.Context(), plan, "source", "run"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.Eval(t.Context(), plan, "source", generator.ID(), nil)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+		t.Fatalf("fresh generator acceptance = %v", err)
+	}
+}
+
+func TestIssuedTokenExemptsOnlyExactAcceptedTopology(t *testing.T) {
+	const token = "issued-private-token"
+	h := newHost(Options{}).(*host)
+	defer h.Close()
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, token+"-job", secretProducer{})
+	if err := h.remember(plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.registerIssued(t.Context(), token); err != nil {
+		t.Fatal(err)
+	}
+	sparkwing.Job(plan, "public-new-job", secretProducer{})
+	if err := h.remember(plan); err != nil {
+		t.Fatalf("unchanged accepted job refused beside a new public job: %v", err)
+	}
+	for _, id := range []string{"fresh-" + token, token + "-job"} {
+		fresh := sparkwing.NewPlan()
+		sparkwing.Job(fresh, id, func(context.Context) error { return nil })
+		err := h.remember(fresh)
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+			t.Fatalf("fresh topology acceptance = %v", err)
+		}
+	}
+}
+
+type (
+	incompleteDiscoveryPipeline struct{}
+	incompleteDiscoveryKey      struct{}
+)
 
 func (incompleteDiscoveryPipeline) Plan(ctx context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	if ctx.Value(incompleteDiscoveryKey{}) == true {

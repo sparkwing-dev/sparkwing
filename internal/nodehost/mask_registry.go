@@ -13,16 +13,16 @@ import (
 type MaskRegistry struct {
 	mu     sync.Mutex
 	masker *secrets.Masker
-	// Issued credentials sanitize presentation without changing accepted topology.
-	identifierMasks *secrets.Masker
-	identifiers     map[string]string
+	// Replay must reproduce accepted topology even after credentials are issued.
+	replayMasks *secrets.Masker
+	identifiers map[string]string
 }
 
 // NewMaskRegistry uses the same masker that host logs and returned errors use.
 func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
-	identifierMasks := secrets.NewMasker()
-	identifierMasks.Merge(masker)
-	return &MaskRegistry{masker: masker, identifierMasks: identifierMasks, identifiers: map[string]string{}}
+	replayMasks := secrets.NewMasker()
+	replayMasks.Merge(masker)
+	return &MaskRegistry{masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
 }
 
 // ContainsSecret reports every presentation mask, including issued credentials.
@@ -61,13 +61,17 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 		}
 	}
 	r.masker.Merge(candidate)
-	r.identifierMasks.Merge(candidate)
+	r.replayMasks.Merge(candidate)
 	return nil
 }
 
 // Accept checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
 func (r *MaskRegistry) Accept(plan nodeproto.PlanDoc, commit func() error) error {
+	return r.accept(plan, commit, r.masker)
+}
+
+func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, matcher *secrets.Masker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil || commit == nil {
@@ -75,7 +79,7 @@ func (r *MaskRegistry) Accept(plan nodeproto.PlanDoc, commit func() error) error
 	}
 	identifiers := map[string]string{}
 	if err := nodeproto.VisitPlanIdentifiers(plan, func(identifier, path string) error {
-		if r.identifierMasks.ContainsSecret(identifier) {
+		if matcher.ContainsSecret(identifier) {
 			return identifierMaskError(path)
 		}
 		identifiers[identifier] = path

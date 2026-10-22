@@ -89,6 +89,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	validate, hash := functions.Validate, functions.Hash
 	declarationsKnown := false
 	functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+		validation.Secrets = p.Masker
 		plan, err := validate(raw, validation)
 		if err != nil {
 			return nodeproto.PlanDoc{}, p.planningError(context.Background(), err, declarationsKnown)

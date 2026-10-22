@@ -17,11 +17,11 @@ spellings. Percent escape hex digits match regardless of case. Encoded forms
 are not recursively derived. The marker is `***`. Overlapping matches merge,
 and replacement closure uses at most four passes. If ambiguity remains, the
 remaining payload is replaced as a whole. Secrets containing `***` are accepted
-under decision 49. Replacement can form one across already published emissions,
-so replacement closure excludes those secrets. Stream and batch masking may
-differ at these marker edges. Decision 49 accepts this residual.
-If a future marker could recreate a spelling at an emission boundary, the
-ambiguous emission is replaced before publication.
+under decision 49. Replacement can form a registered value containing `***`,
+or a value containing `*` beside a replacement marker, across already published
+emissions. For example, a published `aab` followed by a marker forms `aab*`.
+Decision 49 accepts this residual. Replacement closure excludes these values,
+and stream and batch masking may differ at these marker edges.
 JSON escape views cover serialized attributes whose string values themselves contain
 escaped spellings.
 
@@ -36,6 +36,11 @@ Each stream has one goroutine owner. Registration can add values while a stream
 exists; bytes already emitted cannot be recalled. The host therefore registers
 known values before spawning author code and lazily issued values before
 releasing them.
+
+Fresh identifiers are checked against every registered mask, including issued
+values. Issuance does not invalidate identifiers already accepted. That exemption
+applies only to exact replay of accepted topology. New generated job IDs and
+expansions receive the full check.
 
 `Attributes` masks serialized JSON using the same matcher, then requires a
 single JSON object with unique keys at every level. If the result is invalid,

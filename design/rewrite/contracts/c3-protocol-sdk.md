@@ -1215,7 +1215,9 @@ secrets, supplied secret args and selected nonempty defaults, including individu
 list items. Refusals direct authors to a plain config variable. Empty supplied
 arguments and defaults carry no value. Unselected defaults do not refuse a run.
 Their valid values and list items register while short items are skipped. Unsafe
-derived proxy parts are skipped. Issued values do not revalidate accepted job identifiers.
+derived proxy parts are skipped. Issued values do not invalidate exact replay of
+accepted topology. Fresh identifiers, including generated job IDs and expansions,
+are validated against every registered mask, including issued values.
 
 Stdout/stderr bytes enter the stream masker before line splitting. Decode protocol
 frames before sanitizing payloads and constructing trusted envelopes. Attribute
@@ -1232,6 +1234,7 @@ CLI discovery, production and the test host consume one declaration gate.
 CLI lookup, flag parsing and routing use private declarations. Only help, cache
 and display consume the separate presentation type. Incomplete discovery
 withholds all unclassified presentation text, including names, shorts and job IDs.
+Help returns the safe incomplete-discovery diagnostic instead of an empty page.
 Directly constructed test plans use the same argument projection before callbacks run. The test host
 withholds secret-bearing step/eval outputs. Controller control text and public
 run presentation load accepted expansion registrations inside their owners.
@@ -1242,7 +1245,9 @@ bounded by the longest spelling. Completed redaction ranges emit immediately.
 Closure runs at most four passes, then replaces the remaining ambiguous payload
 as a whole. Registration adds sparse automata without rebuilding earlier ones.
 Decision 49 accepts stream/batch differences when replacement markers form a
-secret containing `***`. Safe partial lines flush after 25 ms of idle output. Incomplete pattern prefixes stay private until
+secret containing `***` or a value containing `*` beside a replacement marker.
+Percent matching follows terminal output links rather than every failure state.
+Safe partial lines flush after 25 ms of idle output. Incomplete pattern prefixes stay private until
 more input or EOF. Size and idle flushes end on UTF-8 boundaries. Every delivery
 failure reaches the session failure owner, including asynchronous flushes. Runs
 sealed without version 1 host masking registrations are refused before launch
