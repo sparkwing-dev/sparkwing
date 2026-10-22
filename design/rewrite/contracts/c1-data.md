@@ -4154,8 +4154,9 @@ capacity continuity.
 
 The schema already refuses coalesce waiter rows. Its unused admission and
 promotion paths, follower draining, cached acquisition outcomes and constants
-are deleted. Memo and coalesced result selection remain in the blob/result
-transactions. Authorized leader reads still require declared read edges.
+are deleted. Memo result selection remains in the blob/result transactions.
+Coalesced source requests are refused. The remaining cache/leader fields and
+leader-read redaction path are removed with durable admission.
 
 `TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector` replaces the obsolete
 inheritance surface tests. Weighted admission, backfill, cancellation, promotion,
@@ -4242,7 +4243,7 @@ the work's whole group set under the admission owner. Barrier snapshots check
 complete sets, capacity, live-waiter FIFO and settlement while admission, execution
 and maintenance race on both store dialects.
 
-Schema baseline 17 adds `admission_work`. Run/job identity and arrival survive
+Schema baseline 20 includes `admission_work`. Run/job identity and arrival survive
 owner handoff. Its generation and holder bind a start permit to the actual award.
 Every start requires a permit, including jobs without groups. Process delegation
 reads the same permit with its running attempt in one authentication snapshot.
@@ -4261,7 +4262,19 @@ Approval-only predicates and expansion callbacks receive store-issued evaluation
 permission. They hold no job groups. Approval callbacks hold no compute. Their
 typed outcomes commit under the exact source and live owner/evaluation fence.
 A predicate skip remains skipped. Controller-owned approval predicates use the
-same evaluation-unit lifecycle as generated work.
+same evaluation-unit lifecycle as generated work. A shared accepted-job predicate
+distinguishes approval evaluation from generator expansion when deriving output,
+secret and pipeline-reference read permissions. Approval evaluation retains its
+declared `Needs` and data grants on both placements, with the exact evaluation
+fence still required. Expansion cannot borrow those approval permissions.
+
+The simulation models claim, owner and per-level capacity deadlines independently.
+Claim loss alone cannot reset arrival or waive FIFO. It asserts each expected
+complete reservation set even when no rows are returned. Production `MayStart`
+fixtures replace the retired single-group test allocator. The source-writer check
+is architectural lint; behavioral permit and complete-set tests prove execution
+enforcement. Retired coalesce cache/leader fields and their redaction path are
+removed from requests, queue responses and the schema.
 
 ## Launcher execution host sealing
 

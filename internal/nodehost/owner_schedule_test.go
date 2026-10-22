@@ -46,7 +46,7 @@ func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	if !errors.Is(err, waiting) {
 		t.Fatalf("approval did not reach human wait: %v", err)
 	}
-	if !reflect.DeepEqual(layers, []string{"debug", "skip_if", "approval"}) {
+	if !reflect.DeepEqual(layers, []string{"debug", "skip_if"}) {
 		t.Fatalf("approval layers = %v", layers)
 	}
 }
@@ -278,7 +278,7 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	if _, err := releasedRequest(&host, t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 3 {
+	if policies != 2 {
 		t.Fatalf("owner policies=%d", policies)
 	}
 }

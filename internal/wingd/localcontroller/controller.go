@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -62,9 +63,13 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if err := fssecure.EnsureDir(home); err != nil {
 		return nil, err
 	}
+	epoch, err := credentials.LoadOrCreateEpoch(home)
+	if err != nil {
+		return nil, err
+	}
 	var services Services
 	var binding Binding
-	s, err := store.Open(filepath.Join(home, "state.db"), store.WithPolicies(func(s *store.Store) (store.Policies, error) {
+	s, err := store.Open(filepath.Join(home, "state.db"), store.WithCredentialEpoch(epoch), store.WithPolicies(func(s *store.Store) (store.Policies, error) {
 		tenant, err := s.ForTeam(ctx, store.DefaultTeam)
 		if err != nil {
 			return store.Policies{}, err
@@ -82,6 +87,9 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 		}
 	}()
 
+	if err := s.EnsureCredentialEpoch(ctx); err != nil {
+		return nil, err
+	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}

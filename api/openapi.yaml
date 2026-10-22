@@ -2817,15 +2817,9 @@ components:
           type: string
         blocking_reason:
           type: string
-        cache_key_hash:
-          type: string
         cost:
           type: integer
         job_id:
-          type: string
-        leader_job_id:
-          type: string
-        leader_run_id:
           type: string
         policy:
           type: string
@@ -6131,18 +6125,8 @@ components:
             - type: "null"
         Kind:
           type: string
-        LeaderNodeID:
-          type: string
-        LeaderRunID:
-          type: string
         LeaseExpiresAt:
           format: date-time
-          type: string
-        OriginNodeID:
-          type: string
-        OriginRunID:
-          type: string
-        OutputRef:
           type: string
         Position:
           type: integer
@@ -6161,11 +6145,6 @@ components:
         - Kind
         - HolderID
         - LeaseExpiresAt
-        - LeaderRunID
-        - LeaderNodeID
-        - OutputRef
-        - OriginRunID
-        - OriginNodeID
         - SupersededIDs
         - PreviousCapacity
         - DriftNote

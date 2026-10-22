@@ -101,9 +101,13 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 
 func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
 	b := c.Binding
-	node := c.Unit == capability.UnitNode && b.Kind == capability.BindingNode && b.NodeID != ""
+	approval, err := approvalEvaluationReaderTx(ctx, tx, c)
+	if err != nil {
+		return err
+	}
+	node := (c.Unit == capability.UnitNode || approval) && b.Kind == capability.BindingNode && b.NodeID != ""
 	owner := c.Unit == capability.UnitTrigger && b.Kind == capability.BindingTrigger || c.Unit == capability.UnitPlan && b.Kind == capability.BindingRun
-	if (!node && !owner) || !slices.Contains(c.Grants, capability.RefsRead) || b.Expansion != nil || b.RunID == "" || target.RunID != "" || target.SourceGeneration != 0 || target.Pipeline == "" {
+	if (!node && !owner) || !slices.Contains(c.Grants, capability.RefsRead) || b.Expansion != nil && !approval || b.RunID == "" || target.RunID != "" || target.SourceGeneration != 0 || target.Pipeline == "" {
 		return bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, Team(c.Team), b.RunID)
@@ -118,11 +122,11 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 		return err
 	}
 	now := tx.now(ctx)
-	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now) {
+	if !approval && (state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now)) {
 		return bindingRefusal()
 	}
 	for _, row := range snapshot.Nodes {
-		if node && (row.Ref.NodeID != runspec.NodeID(b.NodeID) || row.CapabilityPrefix != c.Prefix) {
+		if node && (row.Ref.NodeID != runspec.NodeID(b.NodeID) || !approval && row.CapabilityPrefix != c.Prefix) {
 			continue
 		}
 		var spec nodeproto.JobSpec

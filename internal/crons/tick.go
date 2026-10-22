@@ -58,6 +58,13 @@ type Decision struct {
 // the tick. dryRun evaluates and reports without launching anything or writing
 // anything.
 func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
+	state, err := s.Operator.RestoreStatus(ctx)
+	if err != nil {
+		return TickReport{}, err
+	}
+	if state.Pending {
+		return TickReport{}, store.ErrRestorePending
+	}
 	// safety: an empty LockPath is a caller that already holds exclusion of its
 	// own, such as the controller's store lease, not a caller that forgot one.
 	if s.LockPath != "" {
@@ -88,7 +95,7 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 		}
 		return nil
 	}
-	var err error
+	err = nil
 	if s.Schedules != nil {
 		err = tick(s)
 	} else {

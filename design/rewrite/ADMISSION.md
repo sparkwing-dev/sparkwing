@@ -1,68 +1,58 @@
 # One durable admission owner
 
-The controller store, or the local SQLite store, owns all logical capacity.
-Owners propose ready, approval and expansion releases. The store commits plan
-admission with permission to release. Hosts call `MayStart(job, award)` and receive
-admit, wait, skip or fail. Accepted declarations and the authenticated award supply
-every key, policy, weight and host. Plan and job namespaces stay separate. Plans
-cannot declare box scope. Job box scope uses the award's sealed execution host.
+The controller store, or local SQLite store, owns logical capacity. Owners propose
+releases. The store commits plan admission with release permission. Hosts call
+`MayStart(job, award)` for admit, wait, skip or fail. Accepted declarations and the
+authenticated award supply keys, policies, weights and host scope. Plan and job
+namespaces stay separate. Plans cannot declare box scope.
 
 `admission_work` identifies reservations by run and job. Each level's complete
-group set grants in one transaction with one durable arrival sequence. A queued
-set holds no group. Policy effects, including cancellation, roll back if another
-group must wait. Promotion runs through the same complete-set operation. Handoff
-changes authorization fences and start permits, never reservation identity or
-arrival. Queue timeouts apply only while waiting; replaying a retained grant cannot
-time out. An expired reservation starts a new arrival. Supersession cancels the current
-job award even when the reservation predates its claim. The retained transactional
-ledger and policy engine live in `internal/store/concurrency.go`. Every acquisition
-creates and locks the group entry before locking holders, including first arrivals.
+group set grants atomically with one durable arrival. A queued set holds nothing;
+policy effects roll back if another group waits. Hosts retry the same operation
+to promote. Handoff changes fences and permits, never reservation identity or
+arrival. Expired reservations start a new arrival. Queue timeouts apply only while
+waiting. The ledger and policy engine remain in `internal/store/concurrency.go`.
+Every acquisition creates and locks the group entry before locking holders.
 
 Every executable job needs an award-bound permit, including jobs without groups.
-The common start transition requires it, and process delegation reads its live
-permit with the authenticated running attempt. SkipIf and memo run first on the
-executing host after job admission and compute, under that award. A predicate skip
-settles the job and releases its reservations. Admission skip or failure commits
-the terminal outcome through the existing state machine and verdict owner.
-Owners return the committed finish verdict, including cancellation committed
-after their final scheduling snapshot.
+The common start transition and process delegation require it. SkipIf and memo
+run first on the executing host after logical admission and compute, under that
+award (decision 42). A skip settles and releases. Admission skip/fail commits the
+terminal outcome through the existing state machine and verdict owner. Completion
+returns the committed verdict, including cancellation after the owner's snapshot.
 
-Approvals cannot declare concurrency groups. Acceptance refuses them and points
-at the job after the approval. An approval's SkipIf runs on the run's coordinator
-before requesting approval, holding no capacity. An owner evaluator, or an
-evaluation unit acting for a controller coordinator, executes the SDK callback.
-The store never runs SDK code. It commits skip, failure or approval opening
-through one fenced verdict boundary. A true predicate stays skipped. Expansions
-use the same release boundary.
+Approvals cannot declare concurrency groups. Acceptance points at the job after
+the approval. An approval's SkipIf runs on the coordinator before requesting
+approval, holding no capacity (decision 51). Both placements preserve declared
+dependency, secret and reference reads through one accepted-job rule and the exact
+evaluation fence. Generator expansion cannot borrow approval permissions. The
+store never runs SDK code. One fenced verdict boundary commits skip, failure or
+approval opening. A true predicate stays skipped. Expansions share the release
+boundary.
 
-Acquisition, renewal and queue precedence use claim **or** owner liveness, bounded
-by the capacity lease and cancellation deadline. Acquisition and maintenance discard holders and waiters when neither source
-remains live. Maintenance only reaps. Hosts retry `MayStart` to promote a complete
-set through the same admission operation. Recovery reconciles immediately.
-Lapsed plan capacity queues indefinitely after the first release, regardless of
-its initial policy. Only new releases wait. Released jobs and evaluations settle
-without reacquiring the plan. Queue views name the group being reacquired.
+Acquisition, renewal and precedence require claim **or** owner liveness, bounded
+by the capacity lease and cancellation deadline. Maintenance only reaps complete
+sets. Recovery reconciles immediately. Lapsed plan capacity queues indefinitely
+after first release; only new releases wait (decision 38). Released jobs and
+evaluations settle without reacquiring the plan. Queue views name the group.
 
-Burst placement awards provisionally, requests logical admission, then tries
-compute without waiting. Unavailable compute relinquishes the award, permit and
-job reservations while preserving the original readiness ranking window. Compute
-releases after cleanup joins. Terminal job and run transitions release their
-logical reservations. `cancel_others` replaces capacity immediately and requests
-cooperative cancellation. Disconnected work can overlap until cleanup or the
-five-minute drain deadline. No cancellation timeout knob remains.
+Burst awards provisionally, requests logical admission, then tries compute without
+waiting. Busy compute relinquishes the award, permit and job reservations while
+preserving the readiness-ranking window. Compute releases after cleanup joins.
+Terminal transitions release logical reservations. `cancel_others` replaces
+capacity immediately and requests cooperative cancellation. Disconnected work can
+overlap until cleanup or the five-minute drain deadline. No timeout knob remains.
 
-Memo absence permits execution. Authorization and fence refusals remain errors.
+Memo absence permits execution; authorization and fence refusals remain errors.
 Publication stages a producer-owned record. Only committed success makes it
-reusable. Failed, cancelled or rolled-back settlement cannot publish reusable
-results. Successful cache records survive producer retention.
+reusable. Failed or rolled-back settlement cannot publish reusable results.
+Successful records survive producer retention. Retired coalesce fields are gone.
 
-The real-store seeded simulation varies host and store interleavings and checks
-complete grants, capacity, FIFO, award permits, host scope and settlement after
-every operation. Native recovery tests couple ready work, approvals and expansions.
-Mutation regressions reject coordinator predicates, recovery-entry gating,
-lost handoff arrivals, claim-first liveness, changed approval outcomes, memo
-refusals treated as misses and publication before success. The grant-owner guard
-rejects a second allocator. Both store dialects use the same fixtures.
-Concurrent workers use accepted plans and real awards to race admission, execution,
-settlement and whole-set reaping. Round barriers check complete reservations,
-capacity, live-waiter FIFO and eventual settlement without reading across writes.
+Real-store simulation models claim, owner and capacity leases independently per
+work and level. Every step checks expected complete sets, including absent sets,
+capacity, FIFO, permits, host scope and settlement. Claim-only loss cannot waive
+arrival checks. Native recovery couples ready work, approvals, expansions and
+contention. Mutations reproduce the ws12j/k failures. Production `MayStart` tests
+replace the shadow allocator on both dialects. Concurrent admission tests race
+execution, settlement and reaping. Architectural lint restricts ledger writers;
+behavioral tests prove permit enforcement and complete-set grants.

@@ -118,7 +118,7 @@ const (
 )
 
 // AwardPolicies is exhaustive for execution grants, including the here trigger-Award case.
-// Eval receives only expansion submission and source-output read authority.
+// Eval reads are restricted to its source or the approval predicate declarations.
 var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
@@ -131,7 +131,7 @@ var awardPolicies = []AwardPolicy{
 	{PurposePlan, UnitPlan, []Grant{TriggersClaim, ClaimsLaunch}, []Grant{
 		SourceRead, SecretsRelease, DataRead, DataWrite, NodeReport, NodeResult, LogTail,
 	}, []BindingKind{BindingRun}, ParentClaimantRoot},
-	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead}, []BindingKind{BindingNode}, ParentClaimantRoot},
+	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}, []BindingKind{BindingNode}, ParentClaimantRoot},
 	{PurposeHere, UnitTrigger, []Grant{RunsWrite}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,

@@ -16,14 +16,12 @@ import (
 func TestReleasedJobAdmissionDoesNotReacquirePlan(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
-	competitor, err := f.capacityCompetitor(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plan, owner := admissionAcceptedPlan(t, f)
+	competitor := plan.RunID
 	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND run_id=? AND node_id=''`), f.tenant.Team(), f.ref.RunID); err != nil {
 		t.Fatal(err)
 	}
-	occupied, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "plan:global:plan", HolderID: "competitor", RunID: competitor, Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
+	occupied, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: competitor, Generation: int64(owner.Owner.Generation)}, owner)
 	if err != nil || occupied.Kind != store.AcquireGranted {
 		t.Fatalf("occupy elapsed plan: %+v, %v", occupied, err)
 	}
@@ -53,14 +51,11 @@ func TestReleasedJobAdmissionDoesNotReacquirePlan(t *testing.T) {
 func TestAdmissionGroupSetIsAtomicAndUsesOneArrival(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
-	competitor, err := f.capacityCompetitor(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	occupied, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "job:global:node", HolderID: "competitor", RunID: competitor, NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Minute, Policy: store.OnLimitQueue})
-	if err != nil || occupied.Kind != store.AcquireGranted {
-		t.Fatalf("occupy later key: %+v %v", occupied, err)
-	}
+	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) {
+		doc.Concurrency = nil
+		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "node", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
+	})
+	admissionWant(t, f, blocker, award, store.AcquireGranted)
 	binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 	for range 3 {
 		result, err := f.tenant.MayStart(ctx, binding, f.holder)
@@ -81,9 +76,7 @@ func TestAdmissionGroupSetIsAtomicAndUsesOneArrival(t *testing.T) {
 			t.Fatal("queued award started without committed admission")
 		}
 	}
-	if _, _, _, err := f.tenant.ReleaseAndNotify(ctx, "job:global:node", "competitor", "success", "", "", 0, time.Minute); err != nil {
-		t.Fatal(err)
-	}
+	admissionFinishJob(t, f, blocker, award)
 	for _, key := range []string{"job:global:deploy", "job:global:node"} {
 		state, err := f.tenant.GetConcurrencyState(ctx, key)
 		if err != nil || len(state.Holders) != 0 {
@@ -233,15 +226,16 @@ func TestWaitingGroupSetDoesNotPreemptEarlierGroup(t *testing.T) {
 			{Group: "z-block", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")},
 		}
 	})
-	competitor, err := f.capacityCompetitor(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"job:global:a-cancel", "job:global:z-block"} {
-		result, err := f.tenant.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: key, HolderID: "competitor", RunID: competitor, NodeID: "job", Capacity: 1, Cost: 1, Policy: store.OnLimitQueue})
-		if err != nil || result.Kind != store.AcquireGranted {
-			t.Fatalf("occupy %s: %+v %v", key, result, err)
+	var competitor string
+	for _, group := range []string{"a-cancel", "z-block"} {
+		blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) {
+			doc.Concurrency = nil
+			doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: group, Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
+		})
+		if group == "a-cancel" {
+			competitor = blocker.RunID
 		}
+		admissionWant(t, f, blocker, award, store.AcquireGranted)
 	}
 	result, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
 	if err != nil || result.Kind != store.AcquireQueued {

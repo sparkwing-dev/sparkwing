@@ -13,7 +13,9 @@ import (
 	"testing"
 )
 
-func TestAdmissionHasOneGrantOwner(t *testing.T) {
+// Architectural lint restricts the known ledger writers. Production admission
+// tests establish permit enforcement and complete-set behavior.
+func TestAdmissionArchitectureHasOneGrantOwner(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Dir(file)
 	reservationInsert := regexp.MustCompile(`(?i)\binsert\s+into\s+concurrency_(holders|waiters)\b`)

@@ -35,6 +35,15 @@ func runSecretSelection(r runspec.SealedRequest) (secretSelection, error) {
 }
 
 func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
+	if c.Unit == capability.UnitEval {
+		approval, err := approvalEvaluationReaderTx(ctx, tx, c)
+		if err != nil {
+			return err
+		}
+		if !approval {
+			return bindingRefusal()
+		}
+	}
 	if c.Binding.RunID == "" || target.SecretName == "" || target.RunID != "" && target.RunID != c.Binding.RunID {
 		return bindingRefusal()
 	}

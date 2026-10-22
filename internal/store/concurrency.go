@@ -39,9 +39,8 @@ const (
 	OnLimitCancelOthers = "cancel_others"
 )
 
-// defaultConcurrencyLease is DefaultLeaseDuration by construction so
-// holder and claim leases can't drift apart; a holder must be silent
-// for the full window to be reaped.
+// defaultConcurrencyLease bounds logical capacity between renewals. Claim or
+// owner liveness retains it only within that lease and leaseBoundTx deadlines.
 const defaultConcurrencyLease = DefaultLeaseDuration
 
 // AcquireKind covers user-selectable + non-selectable outcomes.
@@ -57,16 +56,13 @@ const (
 
 // acquireSlotRequest selects a group and the work consuming its capacity.
 type acquireSlotRequest struct {
-	Key          string
-	HolderID     string
-	RunID        string
-	NodeID       string
-	Capacity     int
-	Policy       string
-	CacheKeyHash string
-	CacheTTL     time.Duration
-	Lease        time.Duration
-	BypassRead   bool
+	Key      string
+	HolderID string
+	RunID    string
+	NodeID   string
+	Capacity int
+	Policy   string
+	Lease    time.Duration
 
 	// Cost is the admission weight this arrival draws from the key's
 	// capacity (author-defined units). Zero or negative is treated as
@@ -81,11 +77,6 @@ type AcquireSlotResponse struct {
 	Kind             AcquireKind
 	HolderID         string
 	LeaseExpiresAt   time.Time
-	LeaderRunID      string
-	LeaderNodeID     string
-	OutputRef        string
-	OriginRunID      string
-	OriginNodeID     string
 	SupersededIDs    []string
 	PreviousCapacity int
 	DriftNote        string
@@ -112,9 +103,8 @@ type ConcurrencyHolder struct {
 	Superseded     bool
 
 	// Cost is the admission weight this holder draws from the key's
-	// budget; DeclaredCapacity is the capacity it declared. Populated by
-	// GetConcurrencyState for the operator budget view; zero on the hot
-	// acquire/promote paths that don't need them.
+	// budget; DeclaredCapacity is the capacity it declared. Both are loaded
+	// for admission and the operator budget view.
 	Cost             int
 	DeclaredCapacity int
 
@@ -134,9 +124,6 @@ type ConcurrencyWaiter struct {
 	HolderID       string
 	ArrivedAt      time.Time
 	Policy         string
-	CacheKeyHash   string
-	LeaderRunID    string
-	LeaderNodeID   string
 
 	// Cost is the admission weight this waiter will draw once promoted;
 	// DeclaredCapacity is the capacity this waiter declared, a
@@ -427,8 +414,8 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		}
 		if err := txPark(ctx, tx, t.team, ConcurrencyWaiter{
 			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
-			Policy: OnLimitQueue, CacheKeyHash: req.CacheKeyHash,
-			Cost: req.Cost, DeclaredCapacity: req.Capacity,
+			Policy: OnLimitQueue,
+			Cost:   req.Cost, DeclaredCapacity: req.Capacity,
 		}, arrivedNS, now.Add(req.Lease).UnixNano()); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -834,21 +821,17 @@ func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, ar
 	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO concurrency_waiters
-		   (team, key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cost, declared_capacity, generation, lease_expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   (team, key, run_id, node_id, holder_id, arrived_at, policy, cost, declared_capacity, generation, lease_expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (team, key, run_id, node_id) DO UPDATE SET
 		   holder_id         = excluded.holder_id,
 		   arrived_at        = excluded.arrived_at,
 		   policy            = excluded.policy,
-		   cache_key_hash    = excluded.cache_key_hash,
-		   leader_run_id     = excluded.leader_run_id,
-		   leader_node_id    = excluded.leader_node_id,
 		   cost              = excluded.cost,
 		   declared_capacity = excluded.declared_capacity,
 		   generation        = excluded.generation,
 		   lease_expires_at  = excluded.lease_expires_at`,
-		string(team), w.Key, w.RunID, w.NodeID, w.HolderID, arrivedNS, w.Policy, w.CacheKeyHash,
-		w.LeaderRunID, w.LeaderNodeID, w.Cost, w.DeclaredCapacity, generation, expiresNS,
+		string(team), w.Key, w.RunID, w.NodeID, w.HolderID, arrivedNS, w.Policy, w.Cost, w.DeclaredCapacity, generation, expiresNS,
 	)
 	return err
 }
@@ -1087,14 +1070,14 @@ func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
 	var w ConcurrencyWaiter
 	var arrivedNS int64
 	if err := rs.Scan(&w.Key, &w.RunID, &w.NodeID, &w.HolderID, &arrivedNS, &w.Policy,
-		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &w.Cost, &w.DeclaredCapacity, &w.team, &w.generation); err != nil {
+		&w.Cost, &w.DeclaredCapacity, &w.team, &w.generation); err != nil {
 		return ConcurrencyWaiter{}, err
 	}
 	w.ArrivedAt = time.Unix(0, arrivedNS)
 	return w, nil
 }
 
-const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cost, declared_capacity, team, generation`
+const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cost, declared_capacity, team, generation`
 
 func nodeIDOrDash(nodeID string) string {
 	if strings.TrimSpace(nodeID) == "" {

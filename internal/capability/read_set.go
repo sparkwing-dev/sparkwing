@@ -21,3 +21,8 @@ func ReadsJobOutput(reader, output nodeproto.JobSpec) bool {
 	}
 	return false
 }
+
+// EvaluationReadsDeclarations separates approval predicates from source-only generators.
+func EvaluationReadsDeclarations(job nodeproto.JobSpec) bool {
+	return job.Approval != nil && len(job.Closures.SkipIf) > 0
+}

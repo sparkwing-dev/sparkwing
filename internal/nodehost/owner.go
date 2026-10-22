@@ -28,7 +28,7 @@ type OwnerStore interface {
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
 	ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error)
- AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
+	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
@@ -61,22 +61,21 @@ type OwnerHost struct {
 	Store              OwnerStore
 	Lease              lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
-	Renew           func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
-	Computing       func(string) bool
-	Source          source.Options
-	Acquire         func(context.Context, RunInput) (*source.Entry, error)
-	Prepare         func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
-	Planner         *SDKPlanner
-	Planning        PlanningInput
-	Project         func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	Decide          func(store.ScheduleSnapshot) store.ScheduleDecision
-	Wait            func(context.Context, store.RunSnapshot) error
-	WaitNode        WaitNodeChange
-	Debug           DebugBoundaryWaiter
-	DebugPolicy     OwnerPolicy
-	SkipPolicy      OwnerPolicy
-	ApprovalPolicy  OwnerPolicy
-	Local           func(store.NodeRow) bool
+	Renew       func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Computing   func(string) bool
+	Source      source.Options
+	Acquire     func(context.Context, RunInput) (*source.Entry, error)
+	Prepare     func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Planner     *SDKPlanner
+	Planning    PlanningInput
+	Project     func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide      func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait        func(context.Context, store.RunSnapshot) error
+	WaitNode    WaitNodeChange
+	Debug       DebugBoundaryWaiter
+	DebugPolicy OwnerPolicy
+	SkipPolicy  OwnerPolicy
+	Local       func(store.NodeRow) bool
 	// AdoptClaim retains the private award for per-attempt process delegation.
 	AdoptClaim     func(context.Context, store.ReconciledNode) error
 	Delegator      OwnerDelegator

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -17,9 +18,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func approvalEvaluationFixture(t *testing.T) (*Tenant, controllerwire.NodeRef, UnitClaim) {
+func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, controllerwire.NodeRef, UnitClaim) {
 	t.Helper()
-	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}, {ID: "next", Needs: []string{"gate"}}}})
+	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}, {ID: "next", Needs: []string{"gate"}}}}, prepare...)
 	root := authorityRoot("approval-evaluator", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)
@@ -232,9 +233,104 @@ func TestApprovalEvaluationReadsOnlyDeclaredDependencyOutputs(t *testing.T) {
 		if (err == nil) != (id == "producer") {
 			t.Fatalf("approval output %s: %v", id, err)
 		}
+		route, ok := capability.LookupRoute("GET", "/api/v1/runs/{run}/jobs/{job}/output")
+		if !ok {
+			t.Fatal("missing output route")
+		}
+		target := capability.Target{Team: string(tenant.team), RunID: string(ref.RunID), NodeID: id, SourceGeneration: 3}
+		authenticated, err := capability.NewAuthenticator(tenant.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: string(claim.Bearer), Evidence: capability.RequestEvidence{Target: target}}, route)
+		if err == nil {
+			_, err = capability.Authorize(t.Context(), tenant.s.AsOperator(), route, authenticated, target)
+		}
+		if (err == nil) != (id == "producer") {
+			t.Fatalf("authenticated approval output %s: %v", id, err)
+		}
 	}
 	present, err := tenant.ReadableBlobs(t.Context(), blob.HasManyRequest{Authority: blob.Authority{CapabilityRef: claim.Award.CapabilityPrefix}, Digests: digests})
 	if err != nil || len(present.Present) != 1 || present.Present[0] != digests[0] {
 		t.Fatalf("approval read-set escaped accepted dependency: %+v %v", present, err)
+	}
+}
+
+func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t *testing.T) {
+	for _, change := range []string{"live", "undeclared_secret", "undeclared_reference", "eval_holder", "eval_generation", "source_generation", "eval_expiry", "controller_generation", "controller_expiry"} {
+		t.Run(change, func(t *testing.T) {
+			tenant, ref, claim := approvalEvaluationFixture(t, func(tenant *Tenant, request *PlanAcceptance) {
+				var plan nodeproto.PlanDoc
+				if err := json.Unmarshal(request.Seal.Plan, &plan); err != nil {
+					t.Fatal(err)
+				}
+				plan.Jobs[0].References = []nodeproto.PipelineReference{{Pipeline: "upstream", Job: "artifact"}}
+				var err error
+				request.Seal.Plan, err = json.Marshal(plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Seal.Resolved.SecretNames = []string{"TOKEN"}
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,pipeline,value,principal,masked,created_at,updated_at) VALUES ('a','TOKEN','p','encrypted','owner',0,1,1)`)
+			})
+			switch change {
+			case "eval_holder":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET claimed_by='replacement' WHERE team=? AND run_id=?`, tenant.team, ref.RunID)
+			case "eval_generation":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET generation=generation+1 WHERE team=? AND run_id=?`, tenant.team, ref.RunID)
+			case "source_generation":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET generation=generation+1 WHERE team=? AND run_id=? AND node_id=?`, tenant.team, ref.RunID, ref.NodeID)
+			case "eval_expiry":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET lease_expires_at=? WHERE team=? AND run_id=?`, tenant.s.now().UnixNano(), tenant.team, ref.RunID)
+			case "controller_generation":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET generation=generation+1 WHERE name='controller.owner'`)
+			case "controller_expiry":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, tenant.s.now().UnixNano())
+			}
+			for _, read := range []struct {
+				path     string
+				target   capability.Target
+				declared bool
+			}{
+				{"/api/v1/secrets/{name}", capability.Target{Team: string(tenant.team), SecretName: "TOKEN"}, change != "undeclared_secret"},
+				{"/api/v1/pipelines/{name}/latest", capability.Target{Team: string(tenant.team), Pipeline: "upstream", NodeID: "artifact"}, change != "undeclared_reference"},
+			} {
+				if !read.declared {
+					if read.target.SecretName != "" {
+						read.target.SecretName = "OTHER"
+					} else {
+						read.target.Pipeline = "other"
+					}
+				}
+				route, ok := capability.LookupRoute("GET", read.path)
+				if !ok {
+					t.Fatal("missing read route")
+				}
+				op := tenant.s.AsOperator()
+				authenticated, err := capability.NewAuthenticator(op).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: string(claim.Bearer), Evidence: capability.RequestEvidence{Target: read.target}}, route)
+				if err == nil {
+					_, err = capability.Authorize(t.Context(), op, route, authenticated, read.target)
+				}
+				allowed := read.declared && (change == "live" || change == "undeclared_secret" || change == "undeclared_reference")
+				if (err == nil) != allowed {
+					t.Fatalf("path=%s allowed=%v error=%v", read.path, allowed, err)
+				}
+			}
+		})
+	}
+}
+
+func TestGeneratorEvaluationCannotReadApprovalSecretsOrPipelineReferences(t *testing.T) {
+	s, _, _, issued := zeroEvalFixture(t)
+	for _, target := range []capability.Target{{Team: "a", SecretName: "TOKEN"}, {Team: "a", Pipeline: "upstream", NodeID: "artifact"}} {
+		rule := capability.BindReadSet
+		if target.SecretName != "" {
+			rule = capability.BindDeclaredSecret
+		}
+		principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.AsOperator().CheckBinding(t.Context(), principal, rule, target)
+		var refusal *apierr.Error
+		if !errors.As(err, &refusal) || refusal.Details["reason"] != apierr.ReasonBinding {
+			t.Fatalf("generator reached declaration lookup: target=%+v error=%v", target, err)
+		}
 	}
 }

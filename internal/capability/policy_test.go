@@ -118,8 +118,8 @@ func TestAwardVocabulary(t *testing.T) {
 		if len(policy.Bindings) == 0 || len(policy.ClaimGrants) == 0 || policy.Parent == "" {
 			t.Errorf("incomplete policy for %s", policy.Unit)
 		}
-		if policy.Purpose == capability.PurposeEval && (!slices.Equal(policy.Grants, []capability.Grant{capability.ExpansionSubmit, capability.DataRead}) || policy.Unit != capability.UnitEval) {
-			t.Fatal("eval has authority outside expansion and source reads")
+		if policy.Purpose == capability.PurposeEval && (!slices.Equal(policy.Grants, []capability.Grant{capability.ExpansionSubmit, capability.DataRead, capability.SecretsRelease, capability.RefsRead}) || policy.Unit != capability.UnitEval) {
+			t.Fatal("eval grant vocabulary differs from evaluation reads and submission")
 		}
 		if policy.Purpose == capability.PurposeWork && policy.Unit != capability.UnitNode {
 			t.Fatal("work is not persisted as node")

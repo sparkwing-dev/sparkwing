@@ -3,13 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -102,26 +99,6 @@ func slotLease(now, until time.Time, lease time.Duration) time.Duration {
 	return lease
 }
 
-func slotReadEdgeTx(ctx context.Context, tx *storeTx, a capability.Authorized, run, job string) error {
-	if run == "" && job == "" {
-		return nil
-	}
-	if run == "" || job == "" {
-		return bindingRefusal()
-	}
-	if a.Access.Credential != capability.CredentialClaim {
-		if err := bindingRunExistsTx(ctx, tx, a.Target.Team, run); err != nil {
-			return err
-		}
-		_, err := readNodeTx(ctx, tx, Team(a.Target.Team), controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)})
-		if errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
-			return bindingRefusal()
-		}
-		return err
-	}
-	return tx.CheckBinding(ctx, a.Principal, capability.BindReadSet, capability.Target{Team: a.Target.Team, RunID: run, NodeID: job})
-}
-
 // ReadAuthorizedGroup returns the selected tenant group under current read authority.
 func (t *Tenant) ReadAuthorizedGroup(ctx context.Context, a capability.Authorized, key string) (*ConcurrencyState, error) {
 	if key != a.Target.SlotKey {
@@ -132,26 +109,13 @@ func (t *Tenant) ReadAuthorizedGroup(ctx context.Context, a capability.Authorize
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	current, _, err := t.slotAuthorityTx(ctx, tx, a)
+	_, _, err = t.slotAuthorityTx(ctx, tx, a)
 	if err != nil {
 		return nil, err
 	}
 	state, err := t.concurrencyStateTx(ctx, tx, key)
 	if err != nil {
 		return nil, err
-	}
-	for i := range state.Waiters {
-		waiter := &state.Waiters[i]
-		if current.Access.Credential == capability.CredentialClaim {
-			waiter.CacheKeyHash = ""
-		}
-		if err := slotReadEdgeTx(ctx, tx, current, waiter.LeaderRunID, waiter.LeaderNodeID); err != nil {
-			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
-				return nil, err
-			}
-			waiter.LeaderRunID, waiter.LeaderNodeID = "", ""
-		}
 	}
 	return state, tx.Commit()
 }

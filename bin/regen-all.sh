@@ -8,6 +8,7 @@ cd "$ROOT"
 bash bin/gen-cli-docs.sh
 bash bin/gen-config-docs.sh
 GOWORK=off go -C "$ROOT" generate ./internal/doccheck
+GOWORK=off go -C "$ROOT" generate ./internal/store
 bash bin/gen-sdk-docs.sh
 bash bin/gen-api-docs.sh
 bash bin/regen-api-snapshot.sh
@@ -34,4 +35,4 @@ fi
 
 bash bin/sync-docs.sh >/dev/null
 
-echo "regen-all: cli/config/sdk/api docs, protocol schemas, api/openapi.yaml, .apidiff, wingwire shapes, launcher admission, chart vendor, pkg/docs mirror"
+echo "regen-all: cli/config/sdk/api docs, schema errors, protocol schemas, api/openapi.yaml, .apidiff, wingwire shapes, launcher admission, chart vendor, pkg/docs mirror"

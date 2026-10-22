@@ -2,13 +2,10 @@ package store_test
 
 import (
 	"encoding/json"
-	"fmt"
-	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -53,39 +50,6 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture) capability.Authori
 		t.Fatal(err)
 	}
 	return a
-}
-
-func TestAuthorizedConcurrencyGroupDoesNotDiscloseUndeclaredReadEdgesProperty(t *testing.T) {
-	f := slotFixture(t)
-	competitor, err := f.capacityCompetitor(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	random := rand.New(rand.NewPCG(88116, 7622))
-	for i := range 32 {
-		leaderRun := competitor
-		if i%2 == 0 {
-			leaderRun = fmt.Sprintf("foreign/%x", random.Uint64())
-		}
-		cache := fmt.Sprintf("memo/%x", random.Uint64())
-		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES (?,'job:global:deploy',3,1) ON CONFLICT(team,key) DO NOTHING`), f.tenant.Team()); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_waiters(team,key,run_id,node_id,holder_id,arrived_at,policy,cache_key_hash,leader_run_id,leader_node_id,generation,lease_expires_at) VALUES (?,'job:global:deploy',?,'job',?,?,'queue',?,?,'job',0,?)`), f.tenant.Team(), competitor, fmt.Sprintf("wait-%d", i), i+1, cache, leaderRun, time.Now().Add(time.Hour).UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-		state, err := f.tenant.ReadAuthorizedGroup(t.Context(), slotAuthorization(t, f), "job:global:deploy")
-		if err != nil || len(state.Waiters) != 1 {
-			t.Fatalf("group view unavailable: %+v, %v", state, err)
-		}
-		waiter := state.Waiters[0]
-		if waiter.RunID != competitor || waiter.LeaderRunID != "" || waiter.LeaderNodeID != "" || waiter.CacheKeyHash != "" {
-			t.Fatalf("group disclosed undeclared edge: %+v", waiter)
-		}
-		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `DELETE FROM concurrency_waiters WHERE team=? AND key='job:global:deploy'`), f.tenant.Team()); err != nil {
-			t.Fatal(err)
-		}
-	}
 }
 
 func TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes(t *testing.T) {

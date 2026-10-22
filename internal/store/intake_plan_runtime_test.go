@@ -40,9 +40,16 @@ func (f fakeIntakePolicy) ResolveIntake(ctx context.Context, r capability.Author
 	return facts, err
 }
 
-func intakeFixture(t *testing.T) (*Tenant, IntakeRequest, *time.Time) {
+func intakeFixture(t *testing.T, stores ...*Store) (*Tenant, IntakeRequest, *time.Time) {
 	t.Helper()
-	s := authorityStore(t)
+	var s *Store
+	if len(stores) == 0 {
+		s = authorityStore(t)
+	} else {
+		s = stores[0]
+		rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
+		rewriteSchemaExec(t, s.db, "INSERT INTO team_counters(team) VALUES ('a'),('b')")
+	}
 	now := time.Unix(1700000000, 0).UTC()
 	s.clock = func() time.Time { return now }
 	root := authorityRoot("member", "a")
@@ -62,9 +69,9 @@ func planFixture(t *testing.T, dispatch runspec.Dispatch) (*Tenant, PlanAcceptan
 	return planFixtureWithInput(t, dispatch, nil)
 }
 
-func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*IntakeRequest)) (*Tenant, PlanAcceptance, *time.Time) {
+func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*IntakeRequest), stores ...*Store) (*Tenant, PlanAcceptance, *time.Time) {
 	t.Helper()
-	tenant, in, now := intakeFixture(t)
+	tenant, in, now := intakeFixture(t, stores...)
 	in.Request.Dispatch = dispatch
 	if change != nil {
 		change(&in)

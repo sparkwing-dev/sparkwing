@@ -112,9 +112,6 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.SkipPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		return evaluator.skipLayer(ctx, input, row, processes.Log)
 	}
-	owner.ApprovalPolicy = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
-		return OwnerLayerResult{}, nil
-	}
 	if owner.Expand == nil {
 		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 			return evaluator.Expand(ctx, input)

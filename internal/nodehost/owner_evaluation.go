@@ -46,7 +46,7 @@ type EvaluationInput struct {
 // terminal generation and return its recorded JSON, including explicit null.
 // Bind delegates a fresh process bearer; the host revokes it before joining and cleanup.
 // Start owns run-log attribution, masking and environment. Bound input requires Bind.
-// ChildContext applies the shared deadline policy to skip and memo evaluation.
+// ChildContext applies the shared deadline policy to approval predicates.
 type EvaluationDependencies struct {
 	Store        EvaluationStore
 	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)

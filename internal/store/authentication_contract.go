@@ -64,7 +64,27 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 			return capability.AuthenticationSnapshot{}, err
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability}
-		err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind=? AND subject_id=? AND parent_id IS NULL ORDER BY created_at,prefix LIMIT 1`, team, lookup.Peer.Kind, lookup.Peer.ID).Scan(&ref.ID)
+		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind=? AND subject_id=? AND parent_id IS NULL ORDER BY created_at,prefix`, team, lookup.Peer.Kind, lookup.Peer.ID)
+		if err != nil {
+			return capability.AuthenticationSnapshot{}, err
+		}
+		prefixes, err := scanPrefixes(rows)
+		if err != nil {
+			return capability.AuthenticationSnapshot{}, err
+		}
+		for _, prefix := range prefixes {
+			record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
+			if err != nil {
+				return capability.AuthenticationSnapshot{}, err
+			}
+			if record.Value.CredentialEpoch == s.credentialEpoch {
+				ref.ID = prefix
+				break
+			}
+		}
+		if ref.ID == "" {
+			err = sql.ErrNoRows
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			c := capability.Capability{Team: team, Subject: lookup.Peer, Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}}
 			for _, scope := range ScopesForRole(RoleOwner) {

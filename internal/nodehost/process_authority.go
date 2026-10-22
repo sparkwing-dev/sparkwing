@@ -292,7 +292,10 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 	if rule == capability.BindOwnCleanup {
 		return nil
 	}
-	target.RunID, target.Team = binding.RunID, principal.Capability.Team
+	target.Team = principal.Capability.Team
+	if target.Pipeline == "" {
+		target.RunID = binding.RunID
+	}
 	if rule == capability.BindOwnNode && target.NodeID == "" {
 		target.NodeID = binding.NodeID
 	}

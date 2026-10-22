@@ -157,7 +157,7 @@ func TestQueueGroupScope(t *testing.T) {
 	for group, scope := range map[string]string{
 		runspec.ConcurrencyKey("job", "global", "", "payments@db"): "global",
 		runspec.ConcurrencyKey("job", "box", "host1", "db"):        "box (host1)",
-		"memo:abc123": "content-cache",
+		"memo:abc123": "unknown",
 	} {
 		var out bytes.Buffer
 		if err := renderQueueGroup(&out, controllerwire.QueueGroup{Group: group}, "pretty"); err != nil || !strings.Contains(out.String(), scope) {

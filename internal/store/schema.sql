@@ -313,6 +313,7 @@ CREATE TABLE accounts (
 );
 
 CREATE TABLE sessions (
+    credential_epoch TEXT NOT NULL DEFAULT '',
     hash TEXT NOT NULL PRIMARY KEY,
     principal TEXT NOT NULL,
     scopes TEXT NOT NULL,
@@ -614,9 +615,6 @@ CREATE TABLE concurrency_waiters (
     holder_id TEXT NOT NULL DEFAULT '',
     arrived_at BIGINT NOT NULL,
     policy TEXT NOT NULL CHECK(policy IN ('queue','skip','cancel_others')),
-    cache_key_hash TEXT NOT NULL DEFAULT '',
-    leader_run_id TEXT NOT NULL DEFAULT '',
-    leader_node_id TEXT NOT NULL DEFAULT '',
     cost BIGINT NOT NULL DEFAULT 1,
     declared_capacity BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),

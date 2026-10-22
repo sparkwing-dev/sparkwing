@@ -46,9 +46,8 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request, 
 		resp.Waiters = append(resp.Waiters, controllerwire.QueueGroupWaiter{
 			BlockingReason: wt.BlockingReason,
 			RunID:          wt.RunID, JobID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
-			Policy: wt.Policy, CacheKeyHash: wt.CacheKeyHash,
-			LeaderRunID: wt.LeaderRunID, LeaderJobID: wt.LeaderNodeID,
-			Cost: wt.Cost, Position: wt.Position + 1,
+			Policy: wt.Policy,
+			Cost:   wt.Cost, Position: wt.Position + 1,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

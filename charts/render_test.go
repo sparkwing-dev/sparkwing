@@ -233,6 +233,7 @@ type renderedVolumeMount struct {
 	Name      string `yaml:"name"`
 	MountPath string `yaml:"mountPath"`
 	SubPath   string `yaml:"subPath"`
+	ReadOnly  bool   `yaml:"readOnly"`
 }
 
 type renderedVolume struct {
@@ -488,7 +489,7 @@ func TestFullChartPreparesWritableHomesWithoutWeakeningTheRuntime(t *testing.T) 
 			}
 			init := pod.InitContainers[0]
 			if init.Name != "volume-permissions" || !reflect.DeepEqual(init.Command, []string{"/bin/chown"}) ||
-				!reflect.DeepEqual(init.Args, []string{"65534:65534", test.path}) {
+				!reflect.DeepEqual(init.Args, []string{"65534:65534", test.path, "/var/lib/sparkwing/credential-epoch"}) {
 				t.Fatalf("ownership init = %+v", init)
 			}
 			if len(pod.Containers) != 1 || init.Image != pod.Containers[0].Image {
@@ -504,7 +505,7 @@ func TestFullChartPreparesWritableHomesWithoutWeakeningTheRuntime(t *testing.T) 
 				!reflect.DeepEqual(security.Capabilities.Add, []string{"CHOWN"}) {
 				t.Fatalf("ownership init security = %+v, want root with CHOWN only", security)
 			}
-			wantMounts := []renderedVolumeMount{{Name: test.volume, MountPath: test.path}}
+			wantMounts := []renderedVolumeMount{{Name: test.volume, MountPath: test.path}, {Name: "credential-epoch", MountPath: "/var/lib/sparkwing/credential-epoch"}}
 			if !reflect.DeepEqual(init.VolumeMounts, wantMounts) {
 				t.Fatalf("ownership init mounts = %+v, want %+v", init.VolumeMounts, wantMounts)
 			}

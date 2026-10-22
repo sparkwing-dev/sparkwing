@@ -86,6 +86,7 @@ const RetrySourceManual = "manual"
 type Store struct {
 	creditMeteringOff  atomic.Bool
 	controllerEpoch    int64
+	credentialEpoch    string
 	controllerFailStop func(error)
 
 	runEnvCipher     SessionKeyCipher
@@ -129,7 +130,7 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 // txlock=immediate makes every transaction take the write lock at BEGIN
 // rather than upgrading a read lock to a write lock mid-transaction.
 // Without it, two connections that each SELECT-then-INSERT (the shape
-// of AcquireConcurrencySlot and most state mutations) can both read the
+// of admission and most state mutations) can both read the
 // same snapshot and then collide on the upgrade -- which surfaces as
 // SQLITE_BUSY_SNAPSHOT, a conflict busy_timeout does NOT retry. Taking
 // the lock up front turns that race into an ordinary busy-wait the
@@ -1489,8 +1490,7 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 				"(it holds tables but no sparkwing_schema_version); point sparkwing at an empty database")
 		}
 	default:
-		return fmt.Errorf("sparkwing: this store predates the baseline (it records schema version %d, this build "+
-			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
+		return schemaMismatchError(version, remedy)
 	}
 	translated, err := TranslateSchema(schemaNeutral, s.dialect)
 	if err == nil {

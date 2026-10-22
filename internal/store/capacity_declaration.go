@@ -73,7 +73,7 @@ func sealedCapacityRequestTx(ctx context.Context, tx *storeTx, team Team, req ac
 	if err != nil {
 		return acquireSlotRequest{}, err
 	}
-	if req.Capacity != 0 && req.Capacity != group.Capacity || req.Cost != 0 && req.Cost != group.Cost || req.Policy != "" && req.Policy != group.OnLimit || req.CacheKeyHash != "" || req.CacheTTL != 0 {
+	if req.Capacity != 0 && req.Capacity != group.Capacity || req.Cost != 0 && req.Cost != group.Cost || req.Policy != "" && req.Policy != group.OnLimit {
 		return acquireSlotRequest{}, bindingRefusal()
 	}
 	req.Capacity, req.Cost, req.Policy = group.Capacity, group.Cost, group.OnLimit

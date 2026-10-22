@@ -109,6 +109,10 @@ func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.P
 }
 
 func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request) *storeHostFixture {
+	return newStoreHostFixtureForEngine(t, database, plan, request, engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}})
+}
+
+func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request, selected engine.Identity) *storeHostFixture {
 	t.Helper()
 	f := newStoreOwnerFixture(t, database, request)
 	ctx, tenant, actor := t.Context(), f.Tenant, f.Actor
@@ -125,7 +129,6 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	accepted, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{RunID: f.Input.RunID, Actor: actor, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: selected, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
 	if err != nil {
 		t.Fatal(err)

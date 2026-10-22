@@ -5,7 +5,6 @@ import (
 	"math/rand/v2"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +42,12 @@ type admissionSimRun struct {
 	id, host                          string
 	owner, holder                     store.Actor
 	released, admitted, started, done bool
+	claimLease, ownerLease            time.Time
+	capacity                          map[string]admissionSimLease
+}
+
+type admissionSimLease struct {
+	expires, resetAt time.Time
 }
 
 type admissionSimulation struct {
@@ -53,7 +58,6 @@ type admissionSimulation struct {
 	machines         [2]string
 	runs             []admissionSimRun
 	previous         map[string]*store.ConcurrencyState
-	lapsed           map[string]time.Time
 	peak             map[string]int
 	lapseJobRun      int
 	jobLapsed        bool
@@ -74,7 +78,7 @@ func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &admissionSimulation{t: t, f: f, now: now, random: rand.New(rand.NewPCG(seed, seed+17)), previous: map[string]*store.ConcurrencyState{}, lapsed: map[string]time.Time{}, peak: map[string]int{}}
+	s := &admissionSimulation{t: t, f: f, now: now, random: rand.New(rand.NewPCG(seed, seed+17)), previous: map[string]*store.ConcurrencyState{}, peak: map[string]int{}}
 	s.lapseJobRun = s.random.IntN(6)
 	s.computeBusyRun = 1 + s.random.IntN(5)
 	f.s.SetTestClock(t, func() time.Time { return s.now })
@@ -107,6 +111,12 @@ func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
 		host := []string{"runner", "simulation"}[s.random.IntN(2)]
 		s.runs = append(s.runs, admissionSimRun{id: intake.RunID, host: host, owner: owner})
 	}
+	for i := range s.runs {
+		s.runs[i].capacity = map[string]admissionSimLease{}
+		s.observeAuthorityLeases(i)
+	}
+	// The fixture has already released its first job through plan admission.
+	s.reserve(0, "plan")
 	// Every seed changes the coupled arrival, handoff and completion order.
 	for _, i := range s.random.Perm(len(s.runs)) {
 		s.release(i)
@@ -198,9 +208,12 @@ func (s *admissionSimulation) admit(i int, job bool) store.AcquireKind {
 	if err != nil || result.Kind != store.AcquireGranted && result.Kind != store.AcquireQueued {
 		s.t.Fatalf("admit run=%d job=%t: %+v, %v", i, job, result, err)
 	}
+	level := "plan"
 	if job {
+		level = "job"
 		run.admitted = result.Kind == store.AcquireGranted
 	}
+	s.reserve(i, level)
 	s.check()
 	return result.Kind
 }
@@ -216,6 +229,7 @@ func (s *admissionSimulation) release(i int) {
 		s.t.Fatal(err)
 	}
 	run.released = !result.Waiting
+	s.reserve(i, "plan")
 	s.check()
 }
 
@@ -232,6 +246,7 @@ func (s *admissionSimulation) start(i int) {
 			s.t.Fatalf("claim run=%d: %v", i, err)
 		}
 		run.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(run.id), NodeID: "job", Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+		s.observeAuthorityLeases(i)
 	}
 	if s.admit(i, true) != store.AcquireGranted {
 		return
@@ -266,7 +281,8 @@ func (s *admissionSimulation) start(i int) {
 		} else {
 			run.host = "runner"
 		}
-		s.lapsed[run.id] = s.now
+		s.invalidate(i, "job")
+		run.claimLease = s.now
 		s.check()
 		return
 	}
@@ -283,9 +299,12 @@ func (s *admissionSimulation) handoff(i int) {
 	if _, err := s.f.s.DB().ExecContext(s.t.Context(), storetest.Rebind(s.f.s, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`), s.now.UnixNano(), s.f.tenant.Team(), run.id); err != nil {
 		s.t.Fatal(err)
 	}
+	run.ownerLease = s.now
 	if _, err := s.f.tenant.RenewNodeClaim(s.t.Context(), s.ref(i), run.holder); err != nil {
 		s.t.Fatal(err)
 	}
+	s.observeAuthorityLeases(i)
+	s.check()
 	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), s.f.lease, 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued {
 		s.t.Fatalf("owner crash run=%d: %+v, %v", i, units, err)
@@ -298,6 +317,7 @@ func (s *admissionSimulation) handoff(i int) {
 		s.t.Fatal("handoff retained owner fence")
 	}
 	run.owner = owner
+	s.observeAuthorityLeases(i)
 	s.check()
 }
 
@@ -305,10 +325,11 @@ func (s *admissionSimulation) crashClaim(i int) {
 	s.t.Helper()
 	run := &s.runs[i]
 	stale := run.holder
-	// The owner and logical queue lease remain live when the claim expires.
+	// Claim expiry alone must preserve the owner-backed reservation and FIFO.
 	if _, err := s.f.s.DB().ExecContext(s.t.Context(), storetest.Rebind(s.f.s, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id='job'`), s.now.UnixNano(), s.f.tenant.Team(), run.id); err != nil {
 		s.t.Fatal(err)
 	}
+	run.claimLease = s.now
 	s.check()
 	if _, err := s.f.tenant.MayStart(s.t.Context(), store.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err == nil {
 		s.t.Fatal("expired claim obtained execution permit")
@@ -317,7 +338,6 @@ func (s *admissionSimulation) crashClaim(i int) {
 	if err != nil || len(units) != 1 || !units[0].Requeued || units[0].NodeID != "job" {
 		s.t.Fatalf("claim crash: %+v, %v", units, err)
 	}
-	s.lapsed[run.id] = s.now
 	run.holder, run.admitted, run.started = store.Actor{}, false, false
 	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReadyNode{Ref: s.ref(i), Actor: run.owner}); err != nil {
 		s.t.Fatal(err)
@@ -332,7 +352,7 @@ func (s *admissionSimulation) lapse(i int, level string) {
 			s.t.Fatal(err)
 		}
 	}
-	s.lapsed[s.runs[i].id] = s.now
+	s.invalidate(i, level)
 }
 
 func (s *admissionSimulation) settle(i int) {
@@ -352,7 +372,76 @@ func (s *admissionSimulation) settle(i int) {
 		s.t.Fatal(err)
 	}
 	run.done = true
+	clear(run.capacity)
 	s.check()
+}
+
+func (s *admissionSimulation) observeAuthorityLeases(i int) {
+	s.t.Helper()
+	run := &s.runs[i]
+	var owner int64
+	if err := s.f.s.DB().QueryRowContext(s.t.Context(), storetest.Rebind(s.f.s, `SELECT lease_expires_at FROM triggers WHERE team=? AND id=?`), s.f.tenant.Team(), run.id).Scan(&owner); err != nil {
+		s.t.Fatal(err)
+	}
+	run.ownerLease = time.Unix(0, owner)
+	if run.holder.Kind != "" {
+		row, err := s.f.tenant.ReadNode(s.t.Context(), s.ref(i))
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		if row.LeaseExpiresAt == nil {
+			s.t.Fatal("claimed work has no claim lease")
+		}
+		run.claimLease = *row.LeaseExpiresAt
+	}
+}
+
+func (s *admissionSimulation) invalidate(i int, level string) {
+	run := &s.runs[i]
+	lease := admissionSimLease{expires: s.now}
+	// Arrival sequences can lead the wall clock when several sets arrive together.
+	for key, state := range s.previous {
+		keyLevel, _, _, _, _ := runspec.ParseConcurrencyKey(key)
+		if keyLevel != level {
+			continue
+		}
+		for _, holder := range state.Holders {
+			if holder.RunID == run.id && holder.QueueArrivedAt.After(lease.resetAt) {
+				lease.resetAt = holder.QueueArrivedAt
+			}
+		}
+		for _, waiter := range state.Waiters {
+			if waiter.RunID == run.id && waiter.ArrivedAt.After(lease.resetAt) {
+				lease.resetAt = waiter.ArrivedAt
+			}
+		}
+	}
+	run.capacity[level] = lease
+}
+
+func (s *admissionSimulation) reserve(i int, level string) {
+	run := &s.runs[i]
+	horizon := run.ownerLease
+	if run.claimLease.After(horizon) {
+		horizon = run.claimLease
+	}
+	expires := s.now.Add(store.DefaultLeaseDuration)
+	if horizon.Before(expires) {
+		expires = horizon
+	}
+	lease := run.capacity[level]
+	lease.expires = expires
+	run.capacity[level] = lease
+}
+
+func (s *admissionSimulation) live(id, level string, arrival time.Time) bool {
+	for _, run := range s.runs {
+		if run.id == id {
+			lease := run.capacity[level]
+			return !run.done && lease.expires.After(s.now) && (arrival.IsZero() || arrival.After(lease.resetAt)) && (run.claimLease.After(s.now) || run.ownerLease.After(s.now))
+		}
+	}
+	return false
 }
 
 func (s *admissionSimulation) check() {
@@ -420,28 +509,34 @@ func (s *admissionSimulation) check() {
 			checkArrival(waiter.RunID, waiter.ArrivedAt)
 		}
 		if previous := s.previous[key]; previous != nil {
-			for _, old := range previous.Waiters {
-				if !s.lapsed[old.RunID].Before(old.ArrivedAt) {
-					continue
+			checkRetained := func(runID, nodeID string, arrival time.Time) {
+				if !s.live(runID, level, arrival) {
+					return
 				}
 				retained := false
-				for _, waiter := range state.Waiters {
-					if old.RunID == waiter.RunID && old.NodeID == waiter.NodeID {
+				check := func(currentRun, currentNode string, currentArrival time.Time) {
+					if runID == currentRun && nodeID == currentNode {
 						retained = true
-						if !old.ArrivedAt.Equal(waiter.ArrivedAt) {
-							s.t.Fatalf("live waiter lost arrival: %s %+v -> %+v", key, old, waiter)
+						if !arrival.Equal(currentArrival) {
+							s.t.Fatalf("live reservation lost arrival: %s %s/%s %s -> %s", key, runID, nodeID, arrival, currentArrival)
 						}
 					}
 				}
-				for _, holder := range state.Holders {
-					retained = retained || old.RunID == holder.RunID && old.NodeID == holder.NodeID
+				for _, waiter := range state.Waiters {
+					check(waiter.RunID, waiter.NodeID, waiter.ArrivedAt)
 				}
-				for _, run := range s.runs {
-					retained = retained || run.id == old.RunID && run.done
+				for _, holder := range state.Holders {
+					check(holder.RunID, holder.NodeID, holder.QueueArrivedAt)
 				}
 				if !retained {
-					s.t.Fatalf("live waiter disappeared: %s %+v", key, old)
+					s.t.Fatalf("live reservation disappeared: %s %s/%s", key, runID, nodeID)
 				}
+			}
+			for _, old := range previous.Waiters {
+				checkRetained(old.RunID, old.NodeID, old.ArrivedAt)
+			}
+			for _, old := range previous.Holders {
+				checkRetained(old.RunID, old.NodeID, old.QueueArrivedAt)
 			}
 			for _, holder := range state.Holders {
 				alreadyHeld := false
@@ -452,7 +547,7 @@ func (s *admissionSimulation) check() {
 					continue
 				}
 				for _, waiter := range state.Waiters {
-					if s.lapsed[waiter.RunID].Before(waiter.ArrivedAt) && holder.LeaseExpiresAt.After(s.now) && (waiter.ArrivedAt.Before(holder.QueueArrivedAt) || holder.QueueArrivedAt.IsZero()) {
+					if s.live(waiter.RunID, level, waiter.ArrivedAt) && holder.LeaseExpiresAt.After(s.now) && (waiter.ArrivedAt.Before(holder.QueueArrivedAt) || holder.QueueArrivedAt.IsZero()) {
 						s.t.Fatalf("FIFO bypass: %s granted %s before %s", key, holder.RunID, waiter.RunID)
 					}
 				}
@@ -460,16 +555,21 @@ func (s *admissionSimulation) check() {
 		}
 		s.previous[key] = state
 	}
-	for set, kinds := range sets {
-		if kinds["holder"] != 0 && kinds["waiter"] != 0 {
-			s.t.Fatalf("partial group grant: %s %v", set, kinds)
-		}
-		want := 3
-		if strings.HasSuffix(set, ":plan") {
-			want = 2
-		}
-		if kinds["holder"]+kinds["waiter"] != want {
-			s.t.Fatalf("incomplete group set: %s %v want=%d", set, kinds, want)
+	for _, run := range s.runs {
+		for _, level := range []string{"plan", "job"} {
+			set := run.id + ":" + level
+			kinds := sets[set]
+			if kinds["holder"] != 0 && kinds["waiter"] != 0 {
+				s.t.Fatalf("partial group grant: %s %v", set, kinds)
+			}
+			want := 3
+			if level == "plan" {
+				want = 2
+			}
+			// Expired rows can remain until reconciliation; live work cannot vanish.
+			if s.live(run.id, level, time.Time{}) && kinds["holder"]+kinds["waiter"] != want {
+				s.t.Fatalf("incomplete group set: %s %v want=%d", set, kinds, want)
+			}
 		}
 	}
 	for _, run := range s.runs {

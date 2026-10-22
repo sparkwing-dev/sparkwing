@@ -15,7 +15,7 @@ func setTestPolicies(h *OwnerHost, f func(context.Context, testPolicyName, Evalu
 			return f(ctx, testPolicyName{name}, in, row, s)
 		}
 	}
-	h.DebugPolicy, h.SkipPolicy, h.ApprovalPolicy = bind("debug"), bind("skip_if"), bind("approval")
+	h.DebugPolicy, h.SkipPolicy = bind("debug"), bind("skip_if")
 }
 
 func setTestExecutor(d *ExecutorDependencies, f func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)) {

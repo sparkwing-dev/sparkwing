@@ -2,12 +2,14 @@ package store_test
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -118,7 +120,7 @@ func TestJobAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 	}
 }
 
-func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture) (store.CapacityBinding, store.Actor) {
+func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.PlanAcceptance, store.Actor) {
 	t.Helper()
 	ctx := t.Context()
 	intake, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
@@ -131,10 +133,32 @@ func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture) (store.Capaci
 	}
 	plan := f.plan
 	plan.RunID, plan.Actor, plan.Seal.Request = intake.RunID, owner, intake.Request
+	var doc nodeproto.PlanDoc
+	if err := json.Unmarshal(plan.Seal.Plan, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, edit := range edits {
+		edit(&doc)
+	}
+	plan.Seal.Plan, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: intake.Request, Declarations: plan.Seal.Declarations, Plan: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.tenant.AcceptPlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(intake.RunID), NodeID: f.ref.NodeID}
+	return plan, owner
+}
+
+func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.CapacityBinding, store.Actor) {
+	t.Helper()
+	ctx := t.Context()
+	plan, owner := admissionAcceptedPlan(t, f, edits...)
+	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: f.ref.NodeID}
 	if _, err := f.tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: owner}); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +168,7 @@ func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture) (store.Capaci
 	}
 	claim := release.Claim
 	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
-	return store.CapacityBinding{RunID: intake.RunID, NodeID: string(ref.NodeID), Generation: int64(claim.Generation)}, actor
+	return store.CapacityBinding{RunID: plan.RunID, NodeID: string(ref.NodeID), Generation: int64(claim.Generation)}, actor
 }
 
 func assertProcessPermitSnapshot(t *testing.T, f *storeRecoveryFixture, want bool) {

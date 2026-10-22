@@ -14,7 +14,7 @@ import (
 
 func pendingApprovalPredicate(row NodeRow) bool {
 	var job nodeproto.JobSpec
-	return row.Status == StatusPending && row.ReadyAt == nil && row.ClaimedBy == "" && json.Unmarshal(row.Spec, &job) == nil && job.Approval != nil && len(job.Closures.SkipIf) > 0
+	return row.Status == StatusPending && row.ReadyAt == nil && row.ClaimedBy == "" && json.Unmarshal(row.Spec, &job) == nil && capability.EvaluationReadsDeclarations(job)
 }
 
 func scheduleApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, actor Actor) (bool, bool, error) {

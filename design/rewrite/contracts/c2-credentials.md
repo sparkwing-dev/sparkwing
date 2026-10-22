@@ -1318,8 +1318,14 @@ subject into `Target` unit fields because capability cannot import blob
 without cycling through runspec. Plan claims use `log.tail` on
 `/claims/{claim}/logs`, `log-segments` and `log-manifest`. Eval uses a separate
 `CredentialEval` alternative requiring `expansion.submit`, `ownEval` and
-`LiveExpansion` on those same routes and heartbeat. Eval keeps exactly
-`expansion.submit` and `data.read`. Neither a sibling eval nor a run owner's
+`LiveExpansion` on those same routes and heartbeat. Eval carries
+`expansion.submit`, `data.read`, `secrets.release` and `refs.read`.
+The latter two require a pending approval predicate under the exact live
+evaluation fence. Generator expansion cannot read approval secrets or pipeline
+references. Approval dependency outputs use the same accepted `Needs` rule as
+run-host evaluation. Authentication accepts a pending approval source only from
+the store-derived eligibility fact, under the exact source, evaluation and
+controller fences. Neither a sibling eval nor a run owner's
 expansion delegate can use this log alternative. Log submission precedes
 lease-ending completion. A structured eval failure goes through the single
 `AcceptExpansion` transaction and `/jobs/{job}/expansion`, like success.

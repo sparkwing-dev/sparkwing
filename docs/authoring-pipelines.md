@@ -227,6 +227,8 @@ An approval's `SkipIf` runs on the run's coordinator before requesting approval,
 holding no capacity. A true predicate marks the approval skipped and satisfies
 its dependencies. Approvals cannot declare concurrency groups. Put the group on
 the job after the approval so that job takes its slot on its executing host.
+The predicate can read its declared `Needs`, secrets and pipeline references on
+both run-host and controller-owned runs.
 
 To gate the whole pipeline instead of one job, use a `guards:` block (see
 below).

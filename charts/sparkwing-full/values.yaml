@@ -207,6 +207,8 @@ controller:
     s3URL: ""
 
   # Set type=emptyDir for RDS + S3. The mount is still the process home.
+  # The credential epoch always uses its own retained 1Mi PVC, including with
+  # emptyDir. It uses pvc.storageClassName, or the cluster default when empty.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
     # "emptyDir" is ephemeral. Pair with PostgreSQL and S3 for durable state.

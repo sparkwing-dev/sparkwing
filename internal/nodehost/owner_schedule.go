@@ -282,7 +282,7 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 }
 
 func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
-	if h.DebugPolicy == nil || h.SkipPolicy == nil || h.ApprovalPolicy == nil {
+	if h.DebugPolicy == nil || h.SkipPolicy == nil {
 		return errors.New("run host requires owner layer policies before dispatch")
 	}
 	if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
@@ -333,9 +333,6 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		return err
 	}
 	if done, err := apply(h.SkipPolicy); done || err != nil {
-		return err
-	}
-	if done, err := apply(h.ApprovalPolicy); done || err != nil {
 		return err
 	}
 

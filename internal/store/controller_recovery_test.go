@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcceptance, *time.Time) {
+func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, PlanAcceptance, *time.Time) {
 	t.Helper()
 	tenant, request, now := planFixture(t, runspec.DispatchController)
 	var err error
@@ -29,13 +29,16 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanA
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, setup := range prepare {
+		setup(tenant, &request)
+	}
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
 	return tenant, request, now
 }
 
-func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
+func controllerJobAward(t *testing.T, tenant *Tenant, runID string) Actor {
 	t.Helper()
 	root := authorityRoot("runner", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
@@ -47,6 +50,12 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
 		t.Fatal(err)
 	}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	return actor
+}
+
+func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
+	t.Helper()
+	actor := controllerJobAward(t, tenant, runID)
 	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
@@ -422,11 +431,11 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		for _, kind := range []ActorKind{ActorRunHost, ActorHolder, ActorOperator, ActorController} {
 			forged := actor
 			forged.Kind = kind
-			if _, err := tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "job:global:retry", HolderID: "job-slot", RunID: retry.RunID, NodeID: "job", Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, NodeID: "job"}, forged); err == nil {
+			if _, err := tenant.MayStart(t.Context(), CapacityBinding{RunID: retry.RunID, NodeID: "job"}, forged); err == nil {
 				t.Fatalf("planner acquired copied job capacity as %s", kind)
 			}
 		}
-		if _, err := tenant.AcquireCapacity(t.Context(), acquireSlotRequest{Key: "plan:global:retry", HolderID: "run-slot", RunID: retry.RunID, Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, Generation: int64(actor.Owner.Generation)}, actor); err != nil {
+		if _, err := tenant.MayStart(t.Context(), CapacityBinding{RunID: retry.RunID, Generation: int64(actor.Owner.Generation)}, actor); err != nil {
 			t.Fatalf("live planner lost run capacity: %v", err)
 		}
 		before, err := tenant.ReadSnapshot(t.Context(), retry.RunID)

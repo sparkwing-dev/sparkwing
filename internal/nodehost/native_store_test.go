@@ -98,7 +98,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	var award store.ReconciledNode
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
-	f.Host.DebugPolicy, f.Host.SkipPolicy, f.Host.ApprovalPolicy = nil, nil, nil
+	f.Host.DebugPolicy, f.Host.SkipPolicy = nil, nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 		if award.Node.Ref.NodeID != runspec.NodeID(input.NodeID) || len(award.Bearer) == 0 {
 			return ProcessGrant{}, errors.New("native attempt has no adopted award")

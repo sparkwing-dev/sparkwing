@@ -55,14 +55,8 @@ func (f *storeRecoveryFixture) capacityCompetitor(ctx context.Context) (string, 
 func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
-	competitor, err := f.capacityCompetitor(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	blocker, err := f.tenant.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{Key: "job:global:deploy", HolderID: "blocker", RunID: competitor, NodeID: "job", Capacity: 1, Cost: 1, Policy: store.OnLimitQueue})
-	if err != nil || blocker.Kind != store.AcquireGranted {
-		t.Fatalf("blocker=%+v %v", blocker, err)
-	}
+	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) { doc.Concurrency = nil })
+	admissionWant(t, f, blocker, award, store.AcquireGranted)
 	queued, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
 	if err != nil || queued.Kind != store.AcquireQueued {
 		t.Fatalf("queue=%+v %v", queued, err)

@@ -14,7 +14,7 @@ import (
 // one: a missing SQLite file, or a database without this build's schema, is
 // an error rather than a fresh baseline. Break-glass tools use it, so a
 // mistyped target fails instead of acting on an empty store.
-func OpenExisting(ctx context.Context, dialect Dialect, target string) (*Store, error) {
+func OpenExisting(ctx context.Context, dialect Dialect, target string, opts ...Option) (*Store, error) {
 	driver, dsn := "pgx", target
 	if dialect == DialectSQLite {
 		if _, err := os.Lstat(target); err != nil {
@@ -50,6 +50,11 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string) (*Store, 
 	if err := requireCurrentSchema(ctx, conn, driver, label); err != nil {
 		return nil, errors.Join(err, st.Close())
 	}
+	for _, opt := range opts {
+		if opt.apply != nil {
+			opt.apply(st)
+		}
+	}
 	return st, nil
 }
 
@@ -66,6 +71,9 @@ func requireCurrentSchema(ctx context.Context, conn *sql.Conn, driver, label str
 		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&version); err != nil {
 			return fmt.Errorf("open existing store %s: %w", label, err)
 		}
+	}
+	if version > 0 && version != expectedSchemaVersion {
+		return schemaMismatchError(version, "recreate only a disposable store")
 	}
 	if version != expectedSchemaVersion {
 		return fmt.Errorf("open existing store: %s holds no Sparkwing store at schema version %d (found %d); point this at the controller's own store", label, expectedSchemaVersion, version)

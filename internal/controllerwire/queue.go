@@ -22,7 +22,7 @@ type QueueGroup struct {
 }
 
 // QueueGroupHolder identifies an existing lease, including superseded holders
-// that retain capacity until their work stops.
+// whose work is draining after replacement capacity was granted.
 type QueueGroupHolder struct {
 	HolderID       string     `json:"holder_id"`
 	RunID          string     `json:"run_id"`
@@ -34,16 +34,13 @@ type QueueGroupHolder struct {
 	Cost           int        `json:"cost"`
 }
 
-// QueueGroupWaiter retains the controller's position and coalescing selection.
+// QueueGroupWaiter retains the admission owner's arrival and queue position.
 type QueueGroupWaiter struct {
 	BlockingReason string    `json:"blocking_reason,omitempty"`
 	RunID          string    `json:"run_id"`
 	JobID          string    `json:"job_id,omitempty"`
 	ArrivedAt      time.Time `json:"arrived_at"`
 	Policy         string    `json:"policy"`
-	CacheKeyHash   string    `json:"cache_key_hash,omitempty"`
-	LeaderRunID    string    `json:"leader_run_id,omitempty"`
-	LeaderJobID    string    `json:"leader_job_id,omitempty"`
 	Cost           int       `json:"cost"`
 	Position       int       `json:"position"`
 }
