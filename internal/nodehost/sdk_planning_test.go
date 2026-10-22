@@ -116,7 +116,7 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 				case nodeproto.OpHello:
 					return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}, Features: []string{}}, nil
 				case nodeproto.OpDescribe:
-					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{}}}}, nil
+					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Extra: true, Args: []nodeproto.ArgumentDescription{}}}}, nil
 				}
 				return nil, nil
 			}

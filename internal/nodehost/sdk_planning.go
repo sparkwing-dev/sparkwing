@@ -66,6 +66,16 @@ type SDKPlanner struct {
 // Prepare describes the selected entry and resolves its requested arguments
 // and defaults. It starts no plan process on a cache hit.
 func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput) (PreparedPlanning, error) {
+	return p.prepare(ctx, input, planning, false)
+}
+
+// Describe inspects declarations before invocation arguments have been supplied.
+func (p SDKPlanner) Describe(ctx context.Context, input PlanningProcessInput) (nodeproto.PipelineDescription, error) {
+	prepared, err := p.prepare(ctx, input, PlanningInput{}, true)
+	return prepared.Description, err
+}
+
+func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput, declarationsOnly bool) (PreparedPlanning, error) {
 	if p.Start == nil || p.EnsureEngine == nil || p.Masker == nil || p.Log == nil {
 		return PreparedPlanning{}, errors.New("SDK planning requires process, engine, masking and run-log adapters")
 	}
@@ -118,7 +128,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		}
 		var err error
 		var complete bool
-		prepared, complete, err = p.describe(raw, input)
+		prepared, complete, err = p.describe(raw, input, declarationsOnly)
 		if err != nil {
 			return err
 		}
@@ -132,6 +142,9 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	}
 	if prepared.Description.Error != nil {
 		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, true)
+	}
+	if declarationsOnly {
+		return prepared, nil
 	}
 	input.Args = maps.Clone(prepared.Args)
 	if p.Environment != nil && !planning.Disabled {

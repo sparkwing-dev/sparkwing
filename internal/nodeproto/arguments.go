@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// NormalizeArgument canonicalizes a raw argument before validation and secret registration.
-func NormalizeArgument(kind, value string) string {
+func normalizeArgument(kind, value string) string {
 	if kind != "[]string" {
 		return value
 	}
@@ -26,7 +25,7 @@ func NormalizeArgument(kind, value string) string {
 
 // ValidateArgument checks a supplied value and returns its canonical representation.
 func ValidateArgument(arg ArgumentDescription, value string) (string, error) {
-	value = NormalizeArgument(arg.Type, value)
+	value = normalizeArgument(arg.Type, value)
 	var err error
 	switch arg.Type {
 	case "string", "[]string":
@@ -105,6 +104,15 @@ func ValidateArgumentDeclarations(args []ArgumentDescription) error {
 
 // ResolveArguments applies declared defaults and validates host preparation inputs.
 func ResolveArguments(description PipelineDescription, raw map[string]string) (map[string]string, error) {
+	return resolveArguments(description, raw, true)
+}
+
+// ArgumentDefaults prepares declared defaults for inspection before invocation values exist.
+func ArgumentDefaults(description PipelineDescription) (map[string]string, error) {
+	return resolveArguments(description, nil, false)
+}
+
+func resolveArguments(description PipelineDescription, raw map[string]string, requireInputs bool) (map[string]string, error) {
 	out := maps.Clone(raw)
 	if out == nil {
 		out = map[string]string{}
@@ -117,7 +125,7 @@ func ResolveArguments(description PipelineDescription, raw map[string]string) (m
 			value, present = *arg.Default, true
 		}
 		if !present {
-			if arg.Required {
+			if arg.Required && requireInputs {
 				return nil, fmt.Errorf("argument --%s is required", arg.Name)
 			}
 			continue

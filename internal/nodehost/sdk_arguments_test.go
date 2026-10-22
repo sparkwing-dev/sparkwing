@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -47,7 +47,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 		}
 	}
 	for _, pipeline := range []string{"secret-empty", "secret-duplicate"} {
-		_, _, err := (SDKPlanner{}).describe(tsDoc, PlanningProcessInput{Entrypoint: pipeline})
+		_, _, err := (SDKPlanner{}).describe(tsDoc, PlanningProcessInput{Entrypoint: pipeline}, false)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError || failure.Message != "SDK describe has invalid secret declarations" {
 			t.Fatalf("TypeScript host secret error = %v", err)
@@ -81,7 +81,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			for sdk, raw := range documents {
 				planner := SDKPlanner{Masks: NewMaskRegistry(secrets.NewMasker())}
-				_, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: test.pipeline, Args: test.args})
+				_, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: test.pipeline, Args: test.args}, false)
 				var failure *apierr.Error
 				if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != test.message {
 					t.Fatalf("%s host error = %v; want invalid_args: %s", sdk, err, test.message)
@@ -91,11 +91,15 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 	}
 	for sdk, raw := range documents {
 		planner := SDKPlanner{Masks: NewMaskRegistry(secrets.NewMasker())}
+		metadata, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "args"}, true)
+		if err != nil || !reflect.DeepEqual(metadata.Args, map[string]string{"list": "dev,prod"}) {
+			t.Fatalf("%s declaration inspection required invocation values or lost defaults: %v, %v", sdk, metadata.Args, err)
+		}
 		for _, test := range []struct{ args, want map[string]string }{
 			{map[string]string{"text": "yes"}, map[string]string{"text": "yes", "list": "dev,prod"}},
 			{map[string]string{"text": "yes", "list": " prod, , dev ", "float": "1.5", "duration": "-0", "empty": ""}, map[string]string{"text": "yes", "list": "prod,dev", "float": "1.5", "duration": "-0", "empty": ""}},
 		} {
-			prepared, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "args", Args: test.args})
+			prepared, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "args", Args: test.args}, false)
 			if err != nil || !reflect.DeepEqual(prepared.Args, test.want) {
 				t.Fatalf("%s host arguments = %v, %v; want %v", sdk, prepared.Args, err, test.want)
 			}
@@ -109,7 +113,7 @@ func TestHostRefusesInvalidSecretDeclarationsAfterDescribe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = (SDKPlanner{}).describe(raw, PlanningProcessInput{Entrypoint: "pipeline"})
+		_, _, err = (SDKPlanner{}).describe(raw, PlanningProcessInput{Entrypoint: "pipeline"}, false)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
 			t.Fatalf("secret declarations accepted: %v", err)

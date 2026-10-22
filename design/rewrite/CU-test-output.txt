@@ -43,3 +43,37 @@ Integration handoffs:
 - Generated-only argument declarations are absent from PlanDoc/JobSpec. Completing host defaults/required/enum handling for them requires a protocol decision; the user question is pending.
 
 Independent correctness review covered the cleanup cuts and SDK changes. Review fixes added shared argument and annotation validation to sparkwingtest, moved secret declarations to shared host preparation, and made stale hook content/version/executability fail status.
+
+CU continuation - verification after lead test failures (2026-10-21)
+Base: df37c6d44; bw-3095-rewrite is already an ancestor of HEAD. No conflicts.
+No Git mutations or commits. All temporary work was under /tmp/sw-astra-CU.
+Commands use GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache
+TMPDIR=/tmp/sw-astra-CU/root, with go -C /home/bombuntu/.xwing/envs/1087/sparkwing.
+
+Reproduced red, then green: TestCheckoutPlanning,
+TestOwnerHostReadsAcquiredProjectForSharedPlanning, and
+TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable.
+PASS normal and rewrite_integration:
+- internal/nodehost -run '^(TestCheckoutPlanning|TestOwnerHostReadsAcquiredProjectForSharedPlanning|TestHostArgumentRulesAgreeForBothSDKs|TestHostAnnotationRulesAgreeForBothSDKs|TestHostRefusesInvalidSecretDeclarationsAfterDescribe|TestSDKPlanning)'
+- cmd/sparkwing -run '^(TestPlan|TestPipelineAlias|TestPipelineDescribe|TestPipelineInspection|TestInspectionAcquiresSelectedCodeAndEngine|TestTriggerInspectionUsesRetainedBuildPolicy|FuzzPlanInspection)'
+- internal/engine/sdkinstall -run '^TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable$'
+- Acceptance worker: focused Go SDK job-arguments, recovery-chains and plan-error-masking.
+PASS: internal/source/gitcmd, internal/nodeproto, internal/bincache,
+pkg/cachecontrol, internal/githooks, sparkwing, sparkwing/sparkwingtest,
+internal/doccheck; go build -o /dev/null ./cmd/...; bin/sync-docs.sh --check;
+git diff --check; guardcheck (all allow-lists match).
+Targeted independent review found no concrete defects.
+
+Describe now inspects metadata/defaults without requiring invocation values.
+Prepare still checks required and unknown values through the same resolver.
+Deleted the hook-proof-only gitcmd.HookWorktree helper and its inventory row.
+Shrank bincache/githooks/objectguard unexport counts. normalizeArgument is private
+because its previous export had no consumer; masking can export it when used.
+The earlier NormalizeArgument handoff above is superseded by this note.
+
+Lead follow-ups: generated-only argument schemas remain absent from describe and
+PlanDoc/JobSpec; choose their wire contract before finishing B1. Excluded masking
+fixtures still need updates: diagnostics.test.ts:98 expects SDK invalid_args;
+accepted_masks_streams_unix_test.go:203 describes no token but supplies one.
+Full/native/socket/PostgreSQL suites remain with the lead. Candidate installation
+was unavailable: xwing env context refused its session-index write (read-only).

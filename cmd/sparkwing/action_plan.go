@@ -210,8 +210,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 }
 
 func (p pipelineInspection) describe(ctx context.Context) (nodeproto.PipelineDescription, error) {
-	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
-	schema := prepared.Description
+	schema, err := p.planner.Describe(ctx, p.input)
 	schema.Name = p.input.Run.Pipeline
 	return schema, err
 }

@@ -97,7 +97,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 			return plan, err
 		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: entrypoint, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Type: "string", Default: &defaultArg}, {Name: "secret", Type: "string", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
+			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: entrypoint, Extra: true, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Type: "string", Default: &defaultArg}, {Name: "secret", Type: "string", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
 			processes = append(processes, process)
 			return process, nil
 		},

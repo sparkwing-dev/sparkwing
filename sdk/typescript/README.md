@@ -44,7 +44,8 @@ remain unset. Explicit zero remains zero, including an
 indefinite approval timeout. Argument values stay strings, including `int64`.
 The host validates arguments after describe and before planning. Empty defaults
 mean no default. Required arguments with non-empty defaults are refused. NaN and
-infinity are refused. Errors come from host preparation as `invalid_args`.
+infinity are refused. Help and describe inspect declarations without requiring
+invocation values. Errors come from host preparation as `invalid_args`.
 Duration arguments use Go syntax such as `1h30m`, including `0`, `+0` and `-0`.
 String-array arguments use comma splitting, trimming and empty-item removal in
 both the raw argument map and typed values. Enum checks apply to each list item.

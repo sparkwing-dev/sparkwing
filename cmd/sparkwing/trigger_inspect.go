@@ -65,13 +65,13 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 			return err
 		},
 	}
-	prepared, err := planner.Prepare(ctx, nodehost.PlanningProcessInput{
+	description, err := planner.Describe(ctx, nodehost.PlanningProcessInput{
 		Entry: entry, Entrypoint: selection.source.Entrypoint, Environment: environment, Args: map[string]string{},
 		Run:    nodeproto.RunContext{RunID: rand.Text(), Pipeline: selection.pipeline},
 		Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-	}, nodehost.PlanningInput{})
+	})
 	if err != nil {
 		return nil, err
 	}
-	return []nodeproto.PipelineDescription{prepared.Description}, nil
+	return []nodeproto.PipelineDescription{description}, nil
 }

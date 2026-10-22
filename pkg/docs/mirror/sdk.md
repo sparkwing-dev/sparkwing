@@ -66,8 +66,9 @@ for credentials.
 The SDK describes registered inputs, defaults, help, risks and secret names to
 the host. A discovery error refuses only that pipeline and reports its sanitized
 cause when invoked. Other pipelines retain their own complete secret declarations.
-A pipeline cannot run when its declarations are incomplete. Describe uses zero values
-without requiring execution-only arguments and does not execute generators.
+A pipeline cannot run when its declarations are incomplete. Help and describe
+validate declarations and defaults without requiring invocation values. Describe
+uses zero values and does not execute generators.
 
 The host validates arguments after describe and before planning. Empty defaults mean
 no default; a required argument cannot also have a non-empty default. Numeric and
