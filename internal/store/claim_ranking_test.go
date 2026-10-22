@@ -403,14 +403,26 @@ func TestRankingAnExpiredBetterPollCausesNoWait(t *testing.T) {
 	}
 }
 
-func TestRankingConsumingTheLastFreeSlotReleasesOtherJobs(t *testing.T) {
-	f := rankingFixture(t, true)
-	f.At(time.Second)
-	f.PollWithSlots(t, f.Actions, 1)
-	wantNone(t, f, f.Self, capability.UnitPlan)
-	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Actions, Kinds: []capability.UnitKind{capability.UnitPlan}})
-	if err != nil || claim.Kind != capability.UnitPlan {
-		t.Fatalf("claim the better tier's last slot: %+v %v", claim, err)
+func TestRankingPlanAwardUsesRemainingPollCapacity(t *testing.T) {
+	for name, slots := range map[string]int{"last slot": 1, "spare slot": 2} {
+		t.Run(name, func(t *testing.T) {
+			f := rankingFixture(t, true)
+			f.At(time.Second)
+			f.PollWithSlots(t, f.Self, slots)
+			wantNone(t, f, f.Launcher, capability.UnitPlan)
+			claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Self, Kinds: []capability.UnitKind{capability.UnitPlan}})
+			if err != nil || claim.Kind != capability.UnitPlan {
+				t.Fatalf("claim the better tier's plan: %+v %v", claim, err)
+			}
+			if slots == 1 {
+				wantAward(t, f, f.Launcher, capability.UnitNode, "job")
+				return
+			}
+			wantNone(t, f, f.Launcher, capability.UnitNode)
+			claim, err = f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Self, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"sparkwing-4cpu"}})
+			if err != nil || claim.NodeID != "job" {
+				t.Fatalf("claim the job with the remaining slot: %+v %v", claim, err)
+			}
+		})
 	}
-	wantAward(t, f, f.Self, capability.UnitNode, "job")
 }

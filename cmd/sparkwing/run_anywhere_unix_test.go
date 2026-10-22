@@ -26,9 +26,9 @@ import (
 
 var runAnywhereKinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
 
-func runAnywherePoll(t *testing.T, f cloudDispatch, raw string) *controllerwire.ClaimedUnit {
+func runAnywherePoll(t *testing.T, f cloudDispatch, raw string, freeSlots int) *controllerwire.ClaimedUnit {
 	t.Helper()
-	response, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: runAnywhereKinds, OS: "linux", Arch: "amd64"})
+	response, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: runAnywhereKinds, OS: "linux", Arch: "amd64", FreeSlots: &freeSlots})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func runAnywhereComplete(t *testing.T, f cloudDispatch, unit *controllerwire.Cla
 func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing.T) {
 	f := cloudDispatchTrigger(t)
 	builder := cloudDispatchMachine(t, f, "builder")
-	if runAnywherePoll(t, f, builder) != nil {
+	if runAnywherePoll(t, f, builder, 1) != nil {
 		t.Fatal("runner found work before the run existed")
 	}
 	created, err := f.member.CreateRun(t.Context(), f.request)
@@ -98,7 +98,7 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
 		t.Fatalf("launcher took the plan while a better-ranked runner was live: %v %v", launched, err)
 	}
-	plan := runAnywherePoll(t, f, builder)
+	plan := runAnywherePoll(t, f, builder, 2)
 	if plan == nil || plan.Unit != capability.UnitPlan || plan.Delivery != capability.DeliveryDirect || plan.RunID != created.RunID {
 		t.Fatalf("runner plan award: %+v", plan)
 	}
@@ -106,7 +106,7 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
 		t.Fatalf("launcher took the job while a better-ranked runner was live: %v %v", launched, err)
 	}
-	job := runAnywherePoll(t, f, builder)
+	job := runAnywherePoll(t, f, builder, 1)
 	if job == nil || job.Unit != capability.UnitNode || job.JobID != "verify" {
 		t.Fatalf("runner job award: %+v", job)
 	}
@@ -159,7 +159,7 @@ func TestTeamAdminRanksCloudFirstFromTheCLI(t *testing.T) {
 		t.Fatalf("ranking after the CLI change: %+v %v", current, err)
 	}
 	builder := cloudDispatchMachine(t, f, "builder")
-	runAnywherePoll(t, f, builder)
+	runAnywherePoll(t, f, builder, 1)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
 		t.Fatal(err)
