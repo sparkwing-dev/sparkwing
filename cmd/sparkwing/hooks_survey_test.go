@@ -40,7 +40,7 @@ func TestRenderHooksSurvey_CountsAndNamesTheUngatedRepos(t *testing.T) {
 	if !strings.Contains(got, "2 of 3 repo(s) do not run a gate of their own") {
 		t.Errorf("output = %q, want the ungated count", got)
 	}
-	for _, want := range []string{"overwing", "pulsewing", "/config/git/hooks", "no gate is installed"} {
+	for _, want := range []string{"overwing", "pulsewing", "/config/git/hooks", "the hooks are missing or not current"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output = %q, want it to mention %q", got, want)
 		}

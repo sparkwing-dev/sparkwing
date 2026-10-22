@@ -233,7 +233,7 @@ func TestStatusHooks_FailsWhenTheConfigNoLongerLoads(t *testing.T) {
 }
 
 func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) {
-	for _, mode := range []string{"content", "version", "obsolete", "current", "notifier-content", "notifier-version"} {
+	for _, mode := range []string{"content", "version", "obsolete", "current", "notifier-content", "notifier-version", "notifier-read", "gate-read", "backup"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newChainFixture(t)
 			f.asProcessEnv(t)
@@ -263,6 +263,19 @@ func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) 
 					notify = strings.Replace(notify, "(format 1)", "(format 0)", 1)
 				}
 				writeExec(t, filepath.Join(f.repo, ".git", "hooks", "post-commit"), notify)
+			case "notifier-read", "gate-read":
+				unreadable := filepath.Join(f.repo, ".git", "hooks", "post-commit")
+				if mode == "gate-read" {
+					unreadable = path
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Mkdir(unreadable, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			case "backup":
+				writeExec(t, path+".bak", body)
 			case "obsolete":
 				writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), noTriggerProject)
 			}
@@ -270,7 +283,26 @@ func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) 
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("surveyFleet = %+v, %v", rows, err)
 			}
-			wantGated := mode == "current" || strings.HasPrefix(mode, "notifier-")
+			wantGated := mode == "current" || mode == "backup" || strings.HasPrefix(mode, "notifier-")
+			if rows[0].Err != nil || rows[0].ConfigError != "" {
+				t.Errorf("hook failure became a repository configuration error: %+v", rows[0])
+			}
+			if mode == "notifier-read" {
+				found := false
+				for _, h := range rows[0].Hooks {
+					if h.Name == "post-commit" {
+						found = h.Error != "" && !h.Required
+					}
+				}
+				if !found {
+					t.Error("optional notifier read error missing from observations")
+				}
+			}
+			for _, h := range rows[0].Hooks {
+				if h.Name == "pre-commit.bak" {
+					t.Errorf("backup entered hook observations: %+v", h)
+				}
+			}
 			if rows[0].Gated() != wantGated {
 				t.Fatalf("Gated = %v, want %v: %+v", rows[0].Gated(), wantGated, rows[0])
 			}

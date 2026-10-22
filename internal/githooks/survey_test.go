@@ -342,7 +342,7 @@ func TestRepoGatesSummary_NamesTheBorrowedGateAndTheMissingOneTogether(t *testin
 		State:     gateBorrowed,
 	}
 	got := r.Summary()
-	for _, want := range []string{"pre-commit", "/code/sparkwing/.git/hooks", "pre-push", "no gate is installed"} {
+	for _, want := range []string{"pre-commit", "/code/sparkwing/.git/hooks", "pre-push", "the hooks are missing or not current"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Summary = %q, want it to name %q", got, want)
 		}
@@ -367,8 +367,8 @@ func TestRepoGatesSummary_NamesTheRedirectForAShadowedGate(t *testing.T) {
 
 func TestRepoGatesSummary_SaysNothingIsInstalledWhenNothingIs(t *testing.T) {
 	r := RepoGates{Repo: "/code/pulsewing", Missing: []string{"pre-commit"}, State: GateUninstalled}
-	if got := r.Summary(); !strings.Contains(got, "no gate is installed") {
-		t.Errorf("Summary = %q, want it to say no gate is installed", got)
+	if got := r.Summary(); !strings.Contains(got, "the hooks are missing or not current") {
+		t.Errorf("Summary = %q, want it to say the hooks are missing or not current", got)
 	}
 }
 

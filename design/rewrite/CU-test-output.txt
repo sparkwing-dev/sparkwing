@@ -298,3 +298,24 @@ with the lead. Xwing candidate inspection cannot write its session-index lock.
 Final PASS: full guardcheck (architecture, spawn and unused-export counts) matches
 all allow-lists. Tagged TestProtocol also passes. No owned test processes remain.
 No local Git identity/core.worktree overrides were found. Scratch removed.
+
+CU cuc continuation - base c212b263a (2026-10-22).
+Integration 35b4de88b is already an ancestor. Clean start, no conflicts.
+No Git mutations or commits. The harness owns staging and landing.
+
+Fixed the three findings in cuc-review-1792661856-final.md within the existing
+per-hook observation owner. Hook read errors stay on observations. Only required
+observations revoke gating; repository errors cover configuration/path discovery.
+Survey, shadow detection and global forwarding share one Git hook-name registry.
+Backups are ignored. Docs and mirrors distinguish presence from currentness.
+RED before fix: optional post-commit directory revoked gating; pre-commit.bak
+was treated as obsolete and broke every verdict. Both regressions now pass.
+Required-hook read errors and deleted global forwarders remain broken.
+
+PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache,
+TMPDIR=/tmp/sw-astra-CU/root: full internal/githooks and internal/doccheck;
+focused hook/status/fleet/doctor regressions, normal and rewrite_integration;
+command compilation; guardcheck --fast; changed-line lint (0 issues);
+docs mirror, changelog and whitespace checks. No new mechanisms added.
+Full/heavy/PostgreSQL/socket checks remain with the lead. Candidate installation
+is unavailable: Xwing context cannot create its read-only session-index lock.

@@ -150,6 +150,13 @@ func (r RepoGates) Summary() string {
 	if r.ConfigError != "" {
 		parts = append(parts, r.ConfigError)
 	}
+	for _, h := range r.Hooks {
+		if h.Error != "" {
+			parts = append(parts, h.Error)
+		} else if h.Required && !h.Current() && !h.Borrowed {
+			parts = append(parts, h.Name+" is missing or differs from expected content/format")
+		}
+	}
 	if !r.declaresBlocking() {
 		parts = append(parts, undeclaredGateSummary(r.Fires()))
 	}
@@ -162,7 +169,7 @@ func (r RepoGates) Summary() string {
 			strings.Join(r.Shadowed, ", "), r.ActiveDir, r.Scope))
 	}
 	if len(r.Missing) > 0 {
-		parts = append(parts, fmt.Sprintf("pipelines declare %s but no gate is installed", strings.Join(r.Missing, ", ")))
+		parts = append(parts, fmt.Sprintf("pipelines declare %s but the hooks are missing or not current", strings.Join(r.Missing, ", ")))
 	}
 	if len(parts) == 0 {
 		return fmt.Sprintf("%s: %s", r.Repo, r.State)
@@ -186,10 +193,9 @@ func (r RepoGates) Remedy() string {
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
-	if r.ConfigError != "" {
-		return fmt.Sprintf("repair the reported hooks, then sparkwing -C %s pipeline hooks install", r.Repo)
+	if r.State == GateBroken {
+		return fmt.Sprintf("remove obsolete managed hooks or repair the reported hooks, then sparkwing -C %s pipeline hooks install", r.Repo)
 	}
-
 	if !r.declaresBlocking() {
 		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
@@ -223,12 +229,12 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		return broken(repoRoot, err)
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		if IsHookName(e.Name()) {
 			names = append(names, e.Name())
 		}
 	}
 	slices.Sort(names)
-	var failed []string
+	failed := false
 	for _, name := range slices.Compact(names) {
 		spec, wanted := specs[name]
 		h := HookObservation{
@@ -241,6 +247,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		switch {
 		case errors.Is(readErr, os.ErrNotExist):
 		case readErr != nil:
+			h.Present = true
 			h.Error = fmt.Sprintf("read %s: %v", path, readErr)
 		default:
 			h.Present, h.Body = true, string(body)
@@ -257,6 +264,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		if !wanted && !h.Managed && h.Error == "" {
 			continue
 		}
+		h.Required = h.Required || (h.Managed && !wanted)
 		row.Hooks = append(row.Hooks, h)
 		if h.Declared {
 			row.Declared = append(row.Declared, name)
@@ -279,21 +287,12 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 				row.Missing = append(row.Missing, name)
 			}
 		}
-		if h.Error != "" {
-			row.Err = errors.Join(row.Err, errors.New(h.Error))
+		if h.Required && !h.Current() && !h.Borrowed {
+			failed = true
 		}
-		if h.Error != "" || (h.Required && !h.Current() && !h.Borrowed) || (h.Managed && !wanted) {
-			failed = append(failed, name)
-		}
-	}
-	if row.Err != nil {
-		row.ConfigError = row.Err.Error()
-	}
-	if row.ConfigError == "" && len(failed) > 0 {
-		row.ConfigError = "hooks missing, not executable, or different from expected content/format: " + strings.Join(failed, ", ") + "; remove obsolete managed hooks, then run sparkwing pipeline hooks install"
 	}
 	switch {
-	case row.ConfigError != "":
+	case row.ConfigError != "" || failed:
 		row.State = GateBroken
 	case len(row.Borrowed) > 0:
 		row.State = gateBorrowed

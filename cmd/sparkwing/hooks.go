@@ -261,20 +261,6 @@ func prepareHookInstall(git githooks.Git, repoRoot, hooksDir string, unforwarded
 	return plan, false
 }
 
-var gitHookNames = map[string]bool{
-	"applypatch-msg": true, "pre-applypatch": true, "post-applypatch": true,
-	"pre-commit": true, "pre-merge-commit": true, "prepare-commit-msg": true,
-	"commit-msg": true, "post-commit": true, "pre-rebase": true,
-	"post-checkout": true, "post-merge": true, "pre-push": true,
-	"pre-receive": true, "update": true, "proc-receive": true,
-	"post-receive": true, "post-update": true, "reference-transaction": true,
-	"push-to-checkout": true, "pre-auto-gc": true, "post-rewrite": true,
-	"sendemail-validate": true, "fsmonitor-watchman": true,
-	"p4-changelist": true, "p4-prepare-changelist": true,
-	"p4-post-changelist": true, "p4-pre-submit": true,
-	"post-index-change": true,
-}
-
 func chainableGlobalHooks(git githooks.Git, hooksDir string) map[string]bool {
 	dir := githooks.GlobalPath(git)
 	names := map[string]bool{}
@@ -286,7 +272,7 @@ func chainableGlobalHooks(git githooks.Git, hooksDir string) map[string]bool {
 		return names
 	}
 	for _, e := range entries {
-		if !gitHookNames[e.Name()] {
+		if !githooks.IsHookName(e.Name()) {
 			continue
 		}
 		info, err := os.Stat(filepath.Join(dir, e.Name()))
@@ -360,8 +346,8 @@ func armHooks(git githooks.Git, repoRoot, hooksDir string, hooksToRun map[string
 		return false, survey.Err
 	}
 	if len(survey.Installed) == 0 {
-		if survey.ConfigError != "" {
-			return false, errors.New(survey.ConfigError)
+		if survey.State == githooks.GateBroken {
+			return false, errors.New(survey.Summary())
 		}
 		return false, nil
 	}
@@ -374,8 +360,8 @@ func armHooks(git githooks.Git, repoRoot, hooksDir string, hooksToRun map[string
 			hooksDir, plan.active)
 	}
 	survey = githooks.Survey(git, repoRoot, expectedHooks)
-	if survey.ConfigError != "" {
-		return false, errors.New(survey.ConfigError)
+	if survey.State == githooks.GateBroken {
+		return false, errors.New(survey.Summary())
 	}
 	gated := survey.Gated()
 	if len(gates) > 0 && !gated {
@@ -544,6 +530,9 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 	survey := githooks.Survey(git, repoRoot, expectedHooks)
 	var hooks []managedHookStatus
 	for _, h := range survey.Hooks {
+		if h.Error != "" {
+			fmt.Fprintln(os.Stderr, "warning: "+h.Error)
+		}
 		if !h.Managed {
 			continue
 		}

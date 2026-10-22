@@ -479,7 +479,7 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
 		}
 	})
 	if !strings.Contains(out, "pre-commit -> lint") ||
-		!strings.Contains(out, "pipelines declare pre-push but no gate is installed") ||
+		!strings.Contains(out, "pipelines declare pre-push but the hooks are missing or not current") ||
 		!strings.Contains(out, "sparkwing -C "+repo+" pipeline hooks install") {
 		t.Fatalf("status did not identify and remedy the missing declared hook:\n%s", out)
 	}

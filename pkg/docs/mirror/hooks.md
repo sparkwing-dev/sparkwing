@@ -272,9 +272,10 @@ Each repository gets one state:
 | --- | --- |
 | `armed` | git runs the repository's own gate for every hook it declares |
 | `shadowed` | gates are installed and `core.hooksPath` sends git elsewhere, so none fire |
-| `uninstalled` | a declared hook was never written |
+| `uninstalled` | an optional declared hook is missing or not current |
 | `borrowed` | git runs a gate for a declared hook out of another repository's hook directory |
 | `undeclared` | no pipeline asks for a hook, so there is nothing to arm |
+| `broken` | a required hook is missing or not current, or repository configuration cannot be read |
 
 The state answers what git does with the hooks a repository declares. Whether
 the repository runs a gate is a second question, and it is the one an operator
@@ -287,12 +288,13 @@ accepting ungated work. The pretty STATE column prints `no-gate` rather than
 The remedy there is a declared gate, not an install: an install writes the
 hooks the pipelines ask for, and that repository asks for none.
 
-Each declared hook lands in exactly one of `firing`, `borrowed`, `shadowed` and
-`missing`, so a hook is never reported as both installed and missing. The
-one-word state takes the worst of them, and `borrowed` is the worst: a shadowed
-or uninstalled repository is honest about accepting ungated commits, while a
-borrowed gate refuses them under a state word that used to read as no gate at
-all.
+`installed` records managed hooks present on disk. Each declared hook also falls
+into `firing`, `borrowed`, `shadowed` or `missing`. Here `missing` includes hooks
+whose content, version or executability differs from what is expected, so an
+installed hook can also be missing a current installation. Per-hook read errors
+stay in the observations. Optional notifier errors do not revoke gating.
+Repository configuration and path errors make the survey broken. Discovery
+ignores filenames Git does not execute as hooks, including `pre-commit.bak`.
 
 `borrowed` counts as ungated even though commits really are refused. Nothing in
 the repository declares the file that runs, so an uninstall in the repository
