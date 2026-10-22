@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -74,6 +75,11 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	execution.Store, execution.Masker = config.Store, config.Masks.masker
 	execution.Start, execution.EnsureEngine = processes.Start, config.Source.Engines.Ensure
 	execution.Validation = validation
+	execution.memoEnvironment = func(ctx context.Context, input NodeInput) (procenv.Env, error) {
+		env, err := processes.Session.Environments.job(ctx, procenv.StepTool, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
+		return env, err
+	}
+
 	executor, err := NewNodeExecutor(execution)
 	if err != nil {
 		return nil, nil, nil, err

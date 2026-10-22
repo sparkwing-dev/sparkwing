@@ -2,8 +2,6 @@ package sparkwing
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -17,13 +15,18 @@ func Main() {
 	os.Exit(sdkserve.Main(sdkserve.Config{SDKVersion: sdkVersion(), Operations: sdkOperations{}}))
 }
 
-// MemoValue separates job-result reuse from dependency file caches.
-type MemoValue string
+// MemoValue is an author value the executing host hashes as canonical JSON.
+type MemoValue = any
 
-// NoMemo bypasses reuse without treating an empty key as valid.
-const NoMemo MemoValue = "memo:none"
+type memoBypass bool
 
-// MemoKeyFn evaluates author-owned inputs before the host scopes their key.
+// NoMemo bypasses result reuse.
+const NoMemo memoBypass = true
+
+// MemoInput declares built-in inputs for evaluation by the executing host.
+type MemoInput = nodeproto.MemoInput
+
+// MemoKeyFn returns a JSON value or NoMemo. The host computes its key.
 type MemoKeyFn func(context.Context) (MemoValue, error)
 
 // MemoOption keeps unset TTL distinct from an explicit duration.
@@ -32,18 +35,14 @@ type (
 	memoOptions struct{ ttl *time.Duration }
 )
 
-// MemoKey hashes ordered inputs; callers resolve references before hashing.
+// MemoKey collects ordered literal parts for the host to hash.
 func MemoKey(parts ...any) MemoValue {
 	for _, p := range parts {
-		if v, ok := p.(MemoValue); ok && v == NoMemo {
+		if v, ok := p.(memoBypass); ok && v == NoMemo {
 			return NoMemo
 		}
 	}
-	raw, err := json.Marshal(parts)
-	if err != nil {
-		panic(fmt.Errorf("sparkwing: MemoKey: %w", err))
-	}
-	return MemoValue(fmt.Sprintf("%x", sha256.Sum256(raw)))
+	return append([]any{}, parts...)
 }
 
 // MemoTTL declares retention subject to the host's ceiling at plan acceptance.
@@ -51,12 +50,23 @@ func MemoTTL(d time.Duration) MemoOption {
 	return func(o *memoOptions) { o.ttl = &d }
 }
 
-// Memo declares result reuse; missing or corrupt cached bytes produce a miss.
+// Memo declares result reuse from a MemoInput recipe or a MemoKeyFn callback.
+// Missing or corrupt cached bytes produce a miss.
 // The key runs after SkipIf on the executing host under the job's actual award,
 // inside its acquired concurrency slot. A hit settles the job as Memoized and
 // releases its groups without running its body.
-func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode {
-	n.memoKey = key
+func (n *JobNode) Memo(key any, opts ...MemoOption) *JobNode {
+	n.memoKey, n.memoInput = nil, nil
+	switch value := key.(type) {
+	case MemoInput:
+		n.memoInput = &value
+	case MemoKeyFn:
+		n.memoKey = value
+	case func(context.Context) (MemoValue, error):
+		n.memoKey = value
+	default:
+		panic("sparkwing: Memo requires an input recipe or value callback")
+	}
 	n.memoOptions = memoOptions{}
 	for _, o := range opts {
 		if o != nil {
@@ -67,7 +77,7 @@ func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode {
 }
 
 // Memo applies one reuse policy to each static or generated group member.
-func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup {
+func (g *JobGroup) Memo(key any, opts ...MemoOption) *JobGroup {
 	for _, n := range g.Members() {
 		n.Memo(key, opts...)
 	}

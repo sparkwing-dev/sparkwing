@@ -12,7 +12,7 @@ func TestEvalValueKinds(t *testing.T) {
 		invalid []string
 	}{
 		{"skip_if", []string{`true`, `false`}, []string{`null`, `"true"`, `1`, `{}`}},
-		{"memo_key", []string{`"key"`, `null`}, []string{`""`, `true`, `[]`, `{}`}},
+		{"memo_key", []string{`"key"`, `null`, `true`, `[]`, `{}`}, []string{`""`}},
 		{"before_run", []string{`null`}, []string{`false`, `""`, `[]`, `{}`}},
 		{"after_run", []string{`null`}, []string{`false`, `""`, `[]`, `{}`}},
 		{"verify", []string{`null`}, []string{`false`, `""`, `[]`, `{}`}},

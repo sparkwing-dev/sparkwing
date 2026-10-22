@@ -1,4 +1,4 @@
-package inputs
+package nodehost
 
 import (
 	"errors"
@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 )
 
 func createTestRepository(t *testing.T, files map[string]string) string {
@@ -57,8 +59,8 @@ func TestRepoFiles_StableAcrossReruns(t *testing.T) {
 		"README.md":    "# hi",
 	})
 	withWorkDir(t, dir, func() {
-		a := resolvedKey(t, RepoFiles())
-		b := resolvedKey(t, RepoFiles())
+		a := resolvedKey(t, inputs.RepoFiles())
+		b := resolvedKey(t, inputs.RepoFiles())
 		if a != b || a == "" {
 			t.Fatalf("RepoFiles should be deterministic: a=%q b=%q", a, b)
 		}
@@ -70,13 +72,13 @@ func TestRepoFiles_BustsOnSourceEdit(t *testing.T) {
 		"src/foo.tsx": "export const x = 1;\n",
 	})
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, RepoFiles())
+		before := resolvedKey(t, inputs.RepoFiles())
 
 		writeAll(t, dir, map[string]string{
 			"src/foo.tsx": "export const x = 2;\n",
 		})
 
-		after := resolvedKey(t, RepoFiles())
+		after := resolvedKey(t, inputs.RepoFiles())
 		if before == after {
 			t.Fatalf("RepoFiles must bust on working-tree edit: %q == %q", before, after)
 		}
@@ -89,7 +91,7 @@ func TestRepoFiles_IgnoreSkipsDocChanges(t *testing.T) {
 		"README.md":   "# hi",
 	})
 	withWorkDir(t, dir, func() {
-		fn := RepoFiles(Ignore("*.md"))
+		fn := inputs.RepoFiles(inputs.Ignore("*.md"))
 		before := resolvedKey(t, fn)
 
 		writeAll(t, dir, map[string]string{
@@ -98,7 +100,7 @@ func TestRepoFiles_IgnoreSkipsDocChanges(t *testing.T) {
 
 		after := resolvedKey(t, fn)
 		if before != after {
-			t.Fatalf("Ignore(*.md) should keep hash stable on README edit: %q vs %q", before, after)
+			t.Fatalf("inputs.Ignore(*.md) should keep hash stable on README edit: %q vs %q", before, after)
 		}
 	})
 }
@@ -109,7 +111,7 @@ func TestRepoFiles_IgnoreStillBustsOnNonIgnoredChanges(t *testing.T) {
 		"README.md":   "# hi",
 	})
 	withWorkDir(t, dir, func() {
-		fn := RepoFiles(Ignore("*.md"))
+		fn := inputs.RepoFiles(inputs.Ignore("*.md"))
 		before := resolvedKey(t, fn)
 
 		writeAll(t, dir, map[string]string{
@@ -118,7 +120,7 @@ func TestRepoFiles_IgnoreStillBustsOnNonIgnoredChanges(t *testing.T) {
 
 		after := resolvedKey(t, fn)
 		if before == after {
-			t.Fatalf("Ignore(*.md) must bust when non-ignored file edits: %q == %q", before, after)
+			t.Fatalf("inputs.Ignore(*.md) must bust when non-ignored file edits: %q == %q", before, after)
 		}
 	})
 }
@@ -128,13 +130,13 @@ func TestRepoFiles_NewFileBusts(t *testing.T) {
 		"src/foo.tsx": "v1",
 	})
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, RepoFiles())
+		before := resolvedKey(t, inputs.RepoFiles())
 
 		writeAll(t, dir, map[string]string{"src/bar.tsx": "v1"})
 		gitIn(t, dir, "add", ".")
 		gitIn(t, dir, "commit", "--quiet", "-m", "add bar")
 
-		after := resolvedKey(t, RepoFiles())
+		after := resolvedKey(t, inputs.RepoFiles())
 		if before == after {
 			t.Fatalf("adding a tracked file must bust hash")
 		}
@@ -150,7 +152,7 @@ func TestRepoFiles_ReportsMissingTrackedFile(t *testing.T) {
 		if err := os.Remove(filepath.Join(dir, "b.txt")); err != nil {
 			t.Fatal(err)
 		}
-		key, err := RepoFiles()(t.Context())
+		key, err := resolveTestMemo(t, inputs.RepoFiles())
 		if key != "" || !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("missing tracked file = (%q, %v)", key, err)
 		}
@@ -164,7 +166,7 @@ func TestFiles_OnlyMatchingPathsContribute(t *testing.T) {
 		"README.md":    "# hi",
 	})
 	withWorkDir(t, dir, func() {
-		fn := Files("src/**", "package.json")
+		fn := inputs.Files("src/**", "package.json")
 		before := resolvedKey(t, fn)
 
 		writeAll(t, dir, map[string]string{"README.md": "# changed"})
@@ -182,7 +184,7 @@ func TestFiles_EditWithinGlobBusts(t *testing.T) {
 		"README.md":   "# hi",
 	})
 	withWorkDir(t, dir, func() {
-		fn := Files("src/**")
+		fn := inputs.Files("src/**")
 		before := resolvedKey(t, fn)
 		writeAll(t, dir, map[string]string{"src/foo.tsx": "v2"})
 		after := resolvedKey(t, fn)
@@ -202,7 +204,7 @@ func TestRepoFiles_HashCoversWholeTreeFromSubdirWorkDir(t *testing.T) {
 	subdir := filepath.Join(dir, "sub", ".sparkwing")
 
 	withWorkDir(t, subdir, func() {
-		before := resolvedKey(t, RepoFiles())
+		before := resolvedKey(t, inputs.RepoFiles())
 		if before == "" {
 			t.Fatal("empty hash from subdirectory workdir")
 		}
@@ -212,7 +214,7 @@ func TestRepoFiles_HashCoversWholeTreeFromSubdirWorkDir(t *testing.T) {
 			t.Fatalf("rewrite install.sh: %v", err)
 		}
 
-		after := resolvedKey(t, RepoFiles())
+		after := resolvedKey(t, inputs.RepoFiles())
 		if before == after {
 			t.Fatalf("hash unchanged after editing public/install.sh outside the workdir: %q",
 				before)
@@ -223,7 +225,7 @@ func TestRepoFiles_HashCoversWholeTreeFromSubdirWorkDir(t *testing.T) {
 func TestCompose_FoldsRepoFilesWithEnv(t *testing.T) {
 	dir := createTestRepository(t, map[string]string{"x.txt": "v1"})
 	withWorkDir(t, dir, func() {
-		fn := Compose(RepoFiles(), Env("MY_VAR"))
+		fn := inputs.Compose(inputs.RepoFiles(), inputs.Env("MY_VAR"))
 
 		t.Setenv("MY_VAR", "a")
 		a := resolvedKey(t, fn)
@@ -238,8 +240,8 @@ func TestCompose_FoldsRepoFilesWithEnv(t *testing.T) {
 func TestCompose_FoldsRepoFilesWithConst(t *testing.T) {
 	dir := createTestRepository(t, map[string]string{"x.txt": "v1"})
 	withWorkDir(t, dir, func() {
-		a := resolvedKey(t, Compose(RepoFiles(), Const("v1")))
-		b := resolvedKey(t, Compose(RepoFiles(), Const("v2")))
+		a := resolvedKey(t, inputs.Compose(inputs.RepoFiles(), inputs.Const("v1")))
+		b := resolvedKey(t, inputs.Compose(inputs.RepoFiles(), inputs.Const("v2")))
 		if a == b {
 			t.Fatalf("Const bump must change composed key: %q == %q", a, b)
 		}
@@ -252,8 +254,8 @@ func TestTree_StableAcrossReruns(t *testing.T) {
 		"sibling/sub/b.md": "beta",
 	})
 	withWorkDir(t, dir, func() {
-		a := resolvedKey(t, Tree("sibling"))
-		b := resolvedKey(t, Tree("sibling"))
+		a := resolvedKey(t, inputs.Tree("sibling"))
+		b := resolvedKey(t, inputs.Tree("sibling"))
 		if a == "" || a != b {
 			t.Fatalf("Tree should be stable across calls: %q vs %q", a, b)
 		}
@@ -265,11 +267,11 @@ func TestTree_BustsOnEdit(t *testing.T) {
 		"sibling/a.md": "alpha",
 	})
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, Tree("sibling"))
+		before := resolvedKey(t, inputs.Tree("sibling"))
 		if err := os.WriteFile(filepath.Join(dir, "sibling/a.md"), []byte("beta"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		after := resolvedKey(t, Tree("sibling"))
+		after := resolvedKey(t, inputs.Tree("sibling"))
 		if before == after {
 			t.Fatalf("Tree should bust on file edit: %q", before)
 		}
@@ -285,11 +287,11 @@ func TestTree_BustsOnGitignoredFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, Tree("sibling"))
+		before := resolvedKey(t, inputs.Tree("sibling"))
 		if err := os.WriteFile(filepath.Join(dir, "sibling/ignored.md"), []byte("v2"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		after := resolvedKey(t, Tree("sibling"))
+		after := resolvedKey(t, inputs.Tree("sibling"))
 		if before == after {
 			t.Fatalf("Tree must hash gitignored files: %q", before)
 		}
@@ -301,7 +303,7 @@ func TestTree_ReportsMissingRoot(t *testing.T) {
 		"a": "x",
 	})
 	withWorkDir(t, dir, func() {
-		key, err := Tree("nonexistent-dir")(t.Context())
+		key, err := resolveTestMemo(t, inputs.Tree("nonexistent-dir"))
 		if key != "" || !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("missing tree = (%q, %v)", key, err)
 		}
@@ -313,11 +315,11 @@ func TestTree_NewFileBusts(t *testing.T) {
 		"sibling/a.md": "alpha",
 	})
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, Tree("sibling"))
+		before := resolvedKey(t, inputs.Tree("sibling"))
 		if err := os.WriteFile(filepath.Join(dir, "sibling/b.md"), []byte("new"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		after := resolvedKey(t, Tree("sibling"))
+		after := resolvedKey(t, inputs.Tree("sibling"))
 		if before == after {
 			t.Fatalf("Tree should bust when a new file appears: %q", before)
 		}
@@ -332,9 +334,9 @@ func TestTreeDoesNotFollowSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, Tree("tree"))
+		before := resolvedKey(t, inputs.Tree("tree"))
 		writeAll(t, outside, map[string]string{"outside.txt": "second"})
-		if after := resolvedKey(t, Tree("tree")); before != after {
+		if after := resolvedKey(t, inputs.Tree("tree")); before != after {
 			t.Fatalf("symlink target changed tree key: %q, %q", before, after)
 		}
 	})
@@ -346,10 +348,10 @@ func TestTreeRejectsSymlinkRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkDir(t, dir, func() {
-		if key, err := Tree("linked")(t.Context()); key != "" || err == nil {
+		if key, err := resolveTestMemo(t, inputs.Tree("linked")); key != "" || err == nil {
 			t.Fatalf("symlink root = (%q, %v)", key, err)
 		}
-		if key, err := Tree("linked/sub")(t.Context()); key != "" || err == nil {
+		if key, err := resolveTestMemo(t, inputs.Tree("linked/sub")); key != "" || err == nil {
 			t.Fatalf("symlink ancestor = (%q, %v)", key, err)
 		}
 	})
@@ -365,9 +367,9 @@ func TestRepoFilesHashesTrackedSymlinkWithoutFollowingTarget(t *testing.T) {
 	}
 	gitIn(t, dir, "add", "output-link")
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, RepoFiles())
+		before := resolvedKey(t, inputs.RepoFiles())
 		writeAll(t, outside, map[string]string{"output.txt": "second"})
-		if after := resolvedKey(t, RepoFiles()); before != after {
+		if after := resolvedKey(t, inputs.RepoFiles()); before != after {
 			t.Fatalf("symlink target changed tracked key: %q, %q", before, after)
 		}
 	})
@@ -376,10 +378,10 @@ func TestRepoFilesHashesTrackedSymlinkWithoutFollowingTarget(t *testing.T) {
 func TestRepoFilesFramesPathsAndContents(t *testing.T) {
 	dir := createTestRepository(t, map[string]string{"a": "x\x00b\x00y"})
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, RepoFiles())
+		before := resolvedKey(t, inputs.RepoFiles())
 		writeAll(t, dir, map[string]string{"a": "x", "b": "y"})
 		gitIn(t, dir, "add", "b")
-		if after := resolvedKey(t, RepoFiles()); before == after {
+		if after := resolvedKey(t, inputs.RepoFiles()); before == after {
 			t.Fatalf("different tracked file sets share a key: %q", before)
 		}
 	})
@@ -388,14 +390,14 @@ func TestRepoFilesFramesPathsAndContents(t *testing.T) {
 func TestRepoFilesIncludesSymlinkType(t *testing.T) {
 	dir := createTestRepository(t, map[string]string{"a": "target"})
 	withWorkDir(t, dir, func() {
-		before := resolvedKey(t, RepoFiles())
+		before := resolvedKey(t, inputs.RepoFiles())
 		if err := os.Remove(filepath.Join(dir, "a")); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink("target", filepath.Join(dir, "a")); err != nil {
 			t.Fatal(err)
 		}
-		if after := resolvedKey(t, RepoFiles()); before == after {
+		if after := resolvedKey(t, inputs.RepoFiles()); before == after {
 			t.Fatalf("regular file and symlink share a key: %q", before)
 		}
 	})

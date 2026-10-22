@@ -310,7 +310,8 @@ for _, member := range matrix.Members() {
 
 A key callback returns `(MemoValue, error)`. Return errors when inputs
 cannot be read; return `sparkwing.NoMemo, nil` to bypass memoization.
-Errors, panics, empty keys, and resolution deadlines fail before dispatch.
+The executing host hashes the returned JSON value. Errors, panics, empty
+callback values, and resolution deadlines fail before the body runs.
 Use `.Cache()` to restore dependency directories before executing a job.
 
 ## Configuring generated jobs

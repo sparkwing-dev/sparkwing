@@ -40,6 +40,22 @@ linters:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/orchestrator
               desc: "Thin binaries and the dashboard support packages must not import internal/orchestrator. Extract the symbol to its own leaf package first."
 
+        memo-inputs-declarations:
+          list-mode: strict
+          files:
+            - "**/sparkwing/inputs/*.go"
+            - "!$test"
+          allow:
+            - github.com/sparkwing-dev/sparkwing/sparkwing$
+
+        memo-key-host-only:
+          list-mode: lax
+          files:
+            - "**/sparkwing/sdk_contract.go"
+          deny:
+            - pkg: crypto
+              desc: "Memo callbacks return values; the executing host owns memo hashing."
+
         # The SDK is every package under the module's sparkwing/ directory. A
         # **/sparkwing/** glob would also match a checkout whose root is named
         # sparkwing, so the scope is the tree minus the other top-level trees.

@@ -239,7 +239,7 @@ func TestExecutorPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 	}
 }
 
-func TestExecutorPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
+func TestExecutorPolicyMemoKeyHashesJSONOrBypassesNull(t *testing.T) {
 	for _, raw := range []string{`"key"`, `null`, `""`, `42`, `{}`, `false`, `failed_null`} {
 		t.Run(raw, func(t *testing.T) {
 			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
@@ -265,8 +265,8 @@ func TestExecutorPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
 			}
 			host, spec, job := executorPolicyHost(t, deps, in)
 			key, err := executorPolicyMemoKey(t.Context(), host, in, spec, job)
-			valid := raw == `"key"` || raw == `null`
-			if (err == nil) != valid || raw == `"key"` && key != "key" || raw != `"key"` && key != "" {
+			valid := raw != `""` && raw != `failed_null`
+			if (err == nil) != valid || valid && raw != `null` && key == "" || (!valid || raw == `null`) && key != "" {
 				t.Fatalf("key = %q, error = %v", key, err)
 			}
 			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 {

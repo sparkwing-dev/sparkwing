@@ -115,12 +115,14 @@ func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {
 	if n.noProgressSet {
 		s.NoProgressTimeoutMS = milliseconds(n.noProgressTimeout)
 	}
-	if n.memoKey != nil {
-		s.Memo = &nodeproto.MemoSpec{}
+	if n.memoKey != nil || n.memoInput != nil {
+		s.Memo = &nodeproto.MemoSpec{Input: n.memoInput}
 		if n.memoOptions.ttl != nil {
 			s.Memo.TTLMS = milliseconds(*n.memoOptions.ttl)
 		}
-		s.Closures.MemoKey = closureID(n.id, "memo", 0)
+		if n.memoKey != nil {
+			s.Closures.MemoKey = closureID(n.id, "memo", 0)
+		}
 	}
 	if n.concurrency != nil {
 		s.Concurrency = []nodeproto.ConcurrencySpec{concurrencyDocument(n.concurrency.group, n.concurrency.cost)}

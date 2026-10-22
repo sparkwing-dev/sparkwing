@@ -185,7 +185,7 @@ func (g *JobGroup) ContinueOnError() *JobGroup
 func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
-func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup
+func (g *JobGroup) Memo(key any, opts ...MemoOption) *JobGroup
 func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup
@@ -213,7 +213,7 @@ func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode
 func (n *JobNode) Generate(fn GenerateFn) *Generator
 func (n *JobNode) ID() string
 func (n *JobNode) Inline() *JobNode
-func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode
+func (n *JobNode) Memo(key any, opts ...MemoOption) *JobNode
 func (n *JobNode) Needs(deps ...Dep) *JobNode
 func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode
 func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode
@@ -248,11 +248,12 @@ type Logger interface {
 func Main()
 func Mask(ctx context.Context, value string) error
 func MaxAge(d time.Duration) RefOption
+type MemoInput = nodeproto.MemoInput
 func MemoKey(parts ...any) MemoValue
 type MemoKeyFn func(context.Context) (MemoValue, error)
 type MemoOption func(*memoOptions)
 func MemoTTL(d time.Duration) MemoOption
-type MemoValue string
+type MemoValue = any
 const Memoized Outcome = "memoized"
 func MemoryGB(n float64) ResourceHint
 func MustSecret(ctx context.Context, name string) string
@@ -263,7 +264,7 @@ func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
 func NewPlan() *Plan
 func NewWork() *Work
 type NoInputs struct{}
-const NoMemo MemoValue = "memo:none"
+const NoMemo memoBypass = true
 func Npm() DirCache
 func OIDCToken(ctx context.Context, audience string) (string, error)
 type OnLimit string

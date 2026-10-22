@@ -11,7 +11,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/cleanup`](sdk-cleanup.md) -- Package cleanup lets a sparks library guarantee that a resource it starts -- a container, a cluster, a release -- is torn down if the step's node dies before the library's own cleanup runs.
 - [`sparkwing/docker`](sdk-docker.md) -- Package docker is the sparkwing SDK's Docker-shelling helper layer: build, push, login, and deterministic tag computation.
 - [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
-- [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs builds memo keys from files, environment variables, and constants.
+- [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs declares memo inputs for evaluation by the executing host.
 - [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: start sidecars for a function, wait for readiness, and clean up services whose startup succeeded on return, error, panic, or context cancellation.
 - [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies a fake protocol host without a controller or store.
 
@@ -523,7 +523,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup` -- Env applies the same startup/body distinction to all members.
 - `func (g *JobGroup) Inline() *JobGroup` -- Inline places every member on the dispatcher's host.
 - `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's jobs in declaration order.
-- `func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup` -- Memo applies one reuse policy to each static or generated group member.
+- `func (g *JobGroup) Memo(key any, opts ...MemoOption) *JobGroup` -- Memo applies one reuse policy to each static or generated group member.
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup` -- NeedsGenerated carries the same expansion barrier to every group member.
@@ -561,7 +561,7 @@ type JobNode struct {
 - `func (n *JobNode) Generate(fn GenerateFn) *Generator` -- Generate declares an expansion after source success or memo reuse; the host owns acceptance.
 - `func (n *JobNode) ID() string`
 - `func (n *JobNode) Inline() *JobNode` -- Inline places the node on the dispatcher's host.
-- `func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode` -- Memo declares result reuse; missing or corrupt cached bytes produce a miss.
+- `func (n *JobNode) Memo(key any, opts ...MemoOption) *JobNode` -- Memo declares result reuse from a MemoInput recipe or a MemoKeyFn callback.
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
 - `func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode` -- NeedsGenerated waits for expansion settlement and all generated prerequisites.
 - `func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode` -- NeedsIfPresent ignores absent dependencies but preserves failure ordering for present jobs.
@@ -621,9 +621,18 @@ type Logger interface {
 ```
 
 
+### type MemoInput
+
+MemoInput declares built-in inputs for evaluation by the executing host.
+
+```
+type MemoInput = nodeproto.MemoInput
+```
+
+
 ### type MemoKeyFn
 
-MemoKeyFn evaluates author-owned inputs before the host scopes their key.
+MemoKeyFn returns a JSON value or NoMemo.
 
 ```
 type MemoKeyFn func(context.Context) (MemoValue, error)
@@ -642,17 +651,13 @@ type MemoOption func(*memoOptions)
 
 ### type MemoValue
 
-MemoValue separates job-result reuse from dependency file caches.
+MemoValue is an author value the executing host hashes as canonical JSON.
 
 ```
-type MemoValue string
+type MemoValue = any
 ```
 
-```
-const NoMemo MemoValue = "memo:none"
-```
-
-- `func MemoKey(parts ...any) MemoValue` -- MemoKey hashes ordered inputs; callers resolve references before hashing.
+- `func MemoKey(parts ...any) MemoValue` -- MemoKey collects ordered literal parts for the host to hash.
 
 ### type NoInputs
 
@@ -1152,6 +1157,10 @@ type Workable interface {
 
 ```
 const ExitNotStarted = -1
+```
+
+```
+const NoMemo memoBypass = true
 ```
 
 ## Variables

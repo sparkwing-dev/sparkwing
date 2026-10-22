@@ -175,6 +175,15 @@ the job output. Failure policy is `fail_fast` or `collect_all`.
 a `verify` ID and a `memo_key` ID. These identify code without serializing it.
 Approvals support skip conditions and separate recovery jobs.
 
+`memo.input` carries a typed recipe instead of `closures.memo_key`. Exactly one
+is required when `memo` is present. Recipe kinds are `files` and `repo_files`
+(with `patterns`), `tree` (with `root`), `env` (with `names`), `parts` (with ordered
+JSON `parts`), and `compose` (with nested `inputs`). The executing host evaluates
+recipes against its checkout and effective job environment under admission.
+Callbacks return values for the same host canonical JSON hash. Both paths use a
+versioned memo namespace, independent of SDK language. See [Caching](caching.md)
+for path matching and filesystem behavior.
+
 `env` maps names to `{value, startup?}`. Body values take effect after planning,
 before execution. `startup: true` and the engine's fixed interpreter variable
 list apply before process startup. Startup values must leave declarations
@@ -238,7 +247,7 @@ recovery uses a separate disruption allowance.
 | Kind | Successful `value` |
 |---|---|
 | `skip_if` | Boolean |
-| `memo_key` | Nonempty string, or null to bypass reuse |
+| `memo_key` | JSON value, or null to bypass reuse. Empty strings fail |
 | `before_run`, `after_run`, `verify` | Null |
 | `generate` | Array of flat job declarations |
 

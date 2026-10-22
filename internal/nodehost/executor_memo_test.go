@@ -44,7 +44,8 @@ func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, 
 func TestExecutorMemoCopiesVerifiedHitToAwardedAttempt(t *testing.T) {
 	host, input, spec, job, session, backend := executorMemoFixture(t, []byte(`{"value":3}`))
 	hash, result, err := host.memo(t.Context(), session, input, job, spec)
-	wantHash, _ := runspec.CanonicalHash("key")
+	wantKey, _ := memoValueKey("key")
+	wantHash := runspec.Hash(wantKey)
 	want := blob.ResultRecordKey(input.Storage.Authority.Attempt.Value, "repo", input.Storage.Authority.Ref.Scope, "ci", blob.KindOutput)
 	if err != nil || hash != wantHash || result == nil || result.Outcome != store.NodeMemoized || result.OutputRecord == nil || *result.OutputRecord != want {
 		t.Fatalf("hash=%s result=%+v error=%v", hash, result, err)

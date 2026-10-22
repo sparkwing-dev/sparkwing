@@ -34,6 +34,7 @@ test("public root exposes the declared SDK without runtime plumbing or removed a
     "memoKey",
     "noMemo",
     "npm",
+    "parts",
     "path",
     "readFile",
     "refTo",
