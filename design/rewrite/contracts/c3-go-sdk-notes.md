@@ -125,13 +125,18 @@ Incomplete discovery withholds author diagnostics through subsequent planning.
 Directly constructed test plans register argument declarations before execution.
 Test-host step/eval outputs containing a secret are withheld like production.
 Stored secrets, supplied secret args and selected nonempty defaults follow the
-four-character refusal. Secrets containing `***` are accepted. Empty defaults
-carry no value. Unselected defaults do not refuse a run. Invalid derived proxy parts are skipped.
+four-character refusal. Secrets containing `***` are accepted. Empty supplied
+arguments and defaults carry no value. Unselected defaults do not refuse
+a run. Their valid raw values and list items register while short items are
+skipped. Invalid derived proxy parts are skipped.
 Runs without version 1 host registrations cannot resume and must be started again.
 
 Fake-host records use the host masking module. It masks serialized JSON attributes, validates the result including duplicate keys, and withholds the whole attribute payload on failure. Text streams are masked before line splitting. Pipeline code run without a host is unmasked.
 
-SDK planning errors redact longer secret inputs before their prefixes, including defaults, so input field order cannot expose a suffix.
+Host planning diagnostics use the shared matcher for overlapping secret values
+and defaults. Private declarations drive execution lookup and argument parsing.
+Help and cached descriptions use the separate presentation type, which withholds
+all unclassified text after incomplete discovery.
 
 ## Public symbol inventory
 

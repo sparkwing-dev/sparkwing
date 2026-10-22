@@ -24,6 +24,7 @@ type planningLogs struct {
 	mu             sync.Mutex
 	masker         *secrets.Masker
 	sink           func(context.Context, nodeproto.FrameLog) error
+	fail           func(error)
 	known, debug   bool
 	buffer         []planningOutput
 	presenter      *secrets.LogStreams
@@ -143,7 +144,13 @@ func (l *planningLogs) emit(ctx context.Context, output planningOutput) error {
 
 func (l *planningLogs) idle(ctx context.Context) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	defer func() {
+		err, fail := l.err, l.fail
+		l.mu.Unlock()
+		if err != nil && fail != nil {
+			fail(err)
+		}
+	}()
 	l.timer = nil
 	if !l.known || l.closed || l.err != nil || l.presenter == nil {
 		return
@@ -154,3 +161,22 @@ func (l *planningLogs) idle(ctx context.Context) {
 		}
 	}
 }
+
+func (l *planningLogs) writer(ctx context.Context, level string) *planningLogWriter {
+	return &planningLogWriter{logs: l, ctx: ctx, level: level}
+}
+
+type planningLogWriter struct {
+	logs  *planningLogs
+	ctx   context.Context
+	level string
+}
+
+func (w *planningLogWriter) Write(p []byte) (int, error) {
+	if err := w.logs.text(w.ctx, w.level, string(p), false); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *planningLogWriter) close() error { return w.logs.text(w.ctx, w.level, "", true) }

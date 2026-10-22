@@ -276,7 +276,7 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 		t.Fatalf("undeclared secret file reached executor checkout: %v", err)
 	}
 	description, err := repos.Describe(t.Context(), pipelineentry.Command(entry.Command), entry.Directory)
-	if err != nil || len(description.Pipelines) != 1 || description.Pipelines[0].Short != "edited SDK" || len(description.Pipelines[0].Secrets) != 1 {
+	if err != nil || len(description.Declarations().Pipelines) != 1 || description.Declarations().Pipelines[0].Short != "edited SDK" || len(description.Declarations().Pipelines[0].Secrets) != 1 {
 		t.Fatalf("uploaded edited SDK did not execute: %+v %v", description, err)
 	}
 }

@@ -216,6 +216,24 @@ func (p pipelineInspection) describe(ctx context.Context) (nodeproto.PipelineDes
 	return schema, err
 }
 
+func (p pipelineInspection) presentation(ctx context.Context) (runspec.PipelinePresentation, error) {
+	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
+	if err != nil {
+		return runspec.PipelinePresentation{}, err
+	}
+	public := prepared.Declarations.Presentation()
+	for i, private := range prepared.Declarations.Declarations().Pipelines {
+		if private.Name == p.input.Entrypoint {
+			schema := public.Pipelines[i]
+			if schema.Name != "" {
+				schema.Name = p.planner.Masker.Mask(p.input.Run.Pipeline)
+			}
+			return schema, nil
+		}
+	}
+	return runspec.PipelinePresentation{}, errors.New("pipeline presentation unavailable")
+}
+
 type planned struct {
 	pipeline string
 	args     map[string]string
@@ -224,16 +242,18 @@ type planned struct {
 
 func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline string, args []string) (planned, error) {
 	out := planned{pipeline: pipeline}
-	schema, err := entry.describe(ctx)
+	prepared, err := entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
 	if err != nil {
 		return out, planError(pipeline, err)
 	}
+	schema := prepared.Description
+	schema.Name = entry.input.Run.Pipeline
 	resolvedArgs, err := parsePipelineArgs(schema, args)
 	if err != nil {
-		return out, planError(pipeline, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()})
+		return out, planError(pipeline, prepared.Declarations.Error(&apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}))
 	}
 	entry.input.Args = resolvedArgs
-	prepared, err := entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
+	prepared, err = entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
 	if err != nil {
 		return out, planError(pipeline, err)
 	}

@@ -53,8 +53,10 @@ func NewDeclarationGate(doc nodeproto.DescribeDoc, masker *secrets.Masker) (*Dec
 			args[argument.Name] = true
 			// Unselected defaults protect discovery output but cannot refuse another pipeline.
 			if argument.Secret && argument.Default != nil && *argument.Default != "" {
-				if registered, err := RegisterArguments([]nodeproto.ArgumentDescription{argument}, nil, nil, masker); err == nil {
-					g.defaults = append(g.defaults, registered.Registration.Defaults...)
+				for _, value := range secretCandidates(*argument.Default, argument.Type == "[]string") {
+					if err := masker.Register(value); err == nil {
+						g.defaults = append(g.defaults, SecretValue{Raw: value})
+					}
 				}
 			}
 		}
@@ -150,10 +152,28 @@ func (g *DeclarationGate) Error(err error) error {
 	return &apierr.Error{Code: apierr.SDKError, Message: g.masker.Mask(err.Error())}
 }
 
-// Presentation returns a discovery document safe for CLI display and caching.
-// Defaults and enums are authoring hints; execution resolves the original declarations.
-func (g *DeclarationGate) Presentation() nodeproto.DescribeDoc {
-	doc := nodeproto.DescribeDoc{Pipelines: make([]nodeproto.PipelineDescription, len(g.doc.Pipelines))}
+// PipelinePresentation is sanitized metadata for display, never execution routing.
+type PipelinePresentation nodeproto.PipelineDescription
+
+// DescribePresentation contains public discovery metadata safe for display and caching.
+type DescribePresentation struct {
+	Pipelines []PipelinePresentation `json:"pipelines"`
+}
+
+// Declarations returns private metadata for pipeline lookup and argument parsing.
+func (g *DeclarationGate) Declarations() nodeproto.DescribeDoc {
+	doc := nodeproto.DescribeDoc{Pipelines: slices.Clone(g.doc.Pipelines)}
+	for i := range doc.Pipelines {
+		if doc.Pipelines[i].Error != nil {
+			doc.Pipelines[i].Error = g.Error(doc.Pipelines[i].Error).(*apierr.Error)
+		}
+	}
+	return doc
+}
+
+// Presentation withholds all author text until every declaration is known.
+func (g *DeclarationGate) Presentation() DescribePresentation {
+	doc := DescribePresentation{Pipelines: make([]PipelinePresentation, len(g.doc.Pipelines))}
 	for i, source := range g.doc.Pipelines {
 		pipeline := source
 		pipeline.Name = g.masker.Mask(source.Name)
@@ -162,54 +182,48 @@ func (g *DeclarationGate) Presentation() nodeproto.DescribeDoc {
 			pipeline.Error = g.Error(source.Error).(*apierr.Error)
 		}
 		if !g.Complete() {
-			pipeline.Help, pipeline.Short = "", ""
-			pipeline.Examples, pipeline.EnvVars, pipeline.Risks, pipeline.RisksByStep, pipeline.Secrets = nil, nil, nil, nil, nil
-		} else {
-			pipeline.Help, pipeline.Short = g.masker.Mask(source.Help), g.masker.Mask(source.Short)
-			pipeline.Examples = slices.Clone(source.Examples)
-			for j := range pipeline.Examples {
-				pipeline.Examples[j].Command = g.masker.Mask(pipeline.Examples[j].Command)
-				pipeline.Examples[j].Comment = g.masker.Mask(pipeline.Examples[j].Comment)
-			}
-			pipeline.EnvVars = slices.Clone(source.EnvVars)
-			for j := range pipeline.EnvVars {
-				env := &pipeline.EnvVars[j]
-				env.Name, env.Description = g.masker.Mask(env.Name), g.masker.Mask(env.Description)
-				env.Default = maskDefault(g.masker, env.Default)
-			}
-			pipeline.Risks = maskStrings(g.masker, source.Risks)
-			pipeline.RisksByStep = slices.Clone(source.RisksByStep)
-			for j := range pipeline.RisksByStep {
-				risk := &pipeline.RisksByStep[j]
-				risk.JobID, risk.StepID = g.masker.Mask(risk.JobID), g.masker.Mask(risk.StepID)
-				risk.Labels = maskStrings(g.masker, risk.Labels)
-			}
-			pipeline.Secrets = slices.Clone(source.Secrets)
-			for j := range pipeline.Secrets {
-				pipeline.Secrets[j].Name = g.masker.Mask(pipeline.Secrets[j].Name)
-			}
+			doc.Pipelines[i] = PipelinePresentation{Args: []nodeproto.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.SDKError, Message: "pipeline discovery incomplete (details withheld: secrets not yet known)"}}
+			continue
+		}
+		pipeline.Help, pipeline.Short = g.masker.Mask(source.Help), g.masker.Mask(source.Short)
+		pipeline.Examples = slices.Clone(source.Examples)
+		for j := range pipeline.Examples {
+			pipeline.Examples[j].Command = g.masker.Mask(pipeline.Examples[j].Command)
+			pipeline.Examples[j].Comment = g.masker.Mask(pipeline.Examples[j].Comment)
+		}
+		pipeline.EnvVars = slices.Clone(source.EnvVars)
+		for j := range pipeline.EnvVars {
+			env := &pipeline.EnvVars[j]
+			env.Name, env.Description = g.masker.Mask(env.Name), g.masker.Mask(env.Description)
+			env.Default = maskDefault(g.masker, env.Default)
+		}
+		pipeline.Risks = maskStrings(g.masker, source.Risks)
+		pipeline.RisksByStep = slices.Clone(source.RisksByStep)
+		for j := range pipeline.RisksByStep {
+			risk := &pipeline.RisksByStep[j]
+			risk.JobID, risk.StepID = g.masker.Mask(risk.JobID), g.masker.Mask(risk.StepID)
+			risk.Labels = maskStrings(g.masker, risk.Labels)
+		}
+		pipeline.Secrets = slices.Clone(source.Secrets)
+		for j := range pipeline.Secrets {
+			pipeline.Secrets[j].Name = g.masker.Mask(pipeline.Secrets[j].Name)
 		}
 		for j := range pipeline.Args {
 			argument := &pipeline.Args[j]
 			argument.Type = g.masker.Mask(argument.Type)
-			if !g.Complete() && !slices.Contains([]string{"string", "bool", "int", "int64", "float64", "duration", "[]string"}, argument.Type) {
-				argument.Type = "string"
-			}
 			argument.Name, argument.Short, argument.JobID = g.masker.Mask(argument.Name), g.masker.Mask(argument.Short), g.masker.Mask(argument.JobID)
-			argument.Description, argument.Default, argument.Enum = "", nil, nil
-			if g.Complete() {
-				argument.Description = g.masker.Mask(source.Args[j].Description)
-				argument.Default = maskDefault(g.masker, source.Args[j].Default)
-				if argument.Secret && source.Args[j].Default != nil && *source.Args[j].Default != "" {
-					hidden := "***"
-					argument.Default = &hidden
-				}
-				if !argument.Secret {
-					argument.Enum = maskStrings(g.masker, source.Args[j].Enum)
-				}
+			argument.Description = g.masker.Mask(source.Args[j].Description)
+			argument.Default = maskDefault(g.masker, source.Args[j].Default)
+			argument.Enum = nil
+			if argument.Secret && source.Args[j].Default != nil && *source.Args[j].Default != "" {
+				hidden := "***"
+				argument.Default = &hidden
+			}
+			if !argument.Secret {
+				argument.Enum = maskStrings(g.masker, source.Args[j].Enum)
 			}
 		}
-		doc.Pipelines[i] = pipeline
+		doc.Pipelines[i] = PipelinePresentation(pipeline)
 	}
 	return doc
 }

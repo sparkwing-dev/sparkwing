@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -293,5 +294,40 @@ func TestNativeHostRegistersServicesAgainstLiveProcessAuthority(t *testing.T) {
 	_, err = callService(t, config.Router.(*serviceRegistrar), authorized, "/node/v1/masks", `{"value":"native-service-secret"}`)
 	if err != nil || config.Masks.masker.Mask("native-service-secret") != "***" {
 		t.Fatal("registered handler lost the native process service registry:", err)
+	}
+}
+
+func TestNativeHostIssuedMaskSurvivesReplanAndRunStep(t *testing.T) {
+	config, input, _, _ := nativeHostFixture(t)
+	config.ValidatePlan = nodeproto.ValidatePlan
+	config.Validation.Placement = nodeproto.PlacementLocal
+	_, claimed, _, err := NewNativeHost(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Masks.initializeSeal(input.Accepted); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Masks.Accept(input.Accepted.Plan, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Masks.registerIssued("build"); err != nil {
+		t.Fatal(err)
+	}
+	executor := claimed.Executor.(*nodeExecutor)
+	process := &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success"}}
+	executor.deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) { return process, nil }
+	executor.deps.Bind = func(context.Context, NodeInput) (ProcessGrant, error) {
+		return ProcessGrant{Binding: input.RouteBinding, Revoke: func() error { return nil }}, nil
+	}
+	input.Entry = &source.Entry{Engine: input.Engine}
+	if err := executor.Execute(t.Context(), input); err != nil {
+		t.Fatalf("issued value invalidated accepted execution: %v", err)
+	}
+	if !slices.ContainsFunc(process.requests, func(request nodeproto.Request) bool { return request.Op == nodeproto.OpRunStep }) {
+		t.Fatal("accepted step did not run")
+	}
+	if config.Masks.masker.Mask("build") != "***" {
+		t.Fatal("issued value lost its presentation mask")
 	}
 }

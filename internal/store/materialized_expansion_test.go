@@ -53,7 +53,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	}
 	actor := request.Actor
 	actor.Authority.ID, actor.CapabilityPrefix = issued.Capability.Prefix, issued.Capability.Prefix
-	accepted, err := tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Source: request.Ref, SourceGeneration: 0, Actor: actor, Body: []byte(`{"jobs":[]}`)})
+	accepted, err := tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Source: request.Ref, SourceGeneration: 0, Actor: actor, Registration: runspec.SecretRegistration{Version: 1}, Body: []byte(`{"jobs":[]}`)})
 	if err != nil || accepted.State != ExpansionAccepted || accepted.SourceGeneration != 0 {
 		t.Fatalf("accept materialized expansion=%+v error=%v", accepted, err)
 	}

@@ -239,4 +239,7 @@ func TestMaskRegistryIssuedValueMayMatchAcceptedIdentifier(t *testing.T) {
 	if m.Mask("private-token") != "***" {
 		t.Fatal("issued value was released without registration")
 	}
+	if err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build-private-token"}}}, func() error { return nil }); err != nil {
+		t.Fatalf("issued value refused repeat acceptance: %v", err)
+	}
 }

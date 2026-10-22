@@ -2,12 +2,33 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestExpansionRequiresExplicitVersionedRegistration(t *testing.T) {
+	for _, version := range []int{0, 2} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			tenant, request := successfulExpansionFixture(t)
+			request.Registration = runspec.SecretRegistration{Version: version}
+			_, err := tenant.AcceptExpansion(t.Context(), request)
+			var problem *apierr.Error
+			if !errors.As(err, &problem) || problem.Code != apierr.PlanInvalid || !strings.Contains(problem.Message, "version 1 secret registration") {
+				t.Fatalf("unversioned expansion was not refused: %v", err)
+			}
+			row, err := tenant.ReadNode(t.Context(), request.Source)
+			if err != nil || row.Expansion != ExpansionExpected {
+				t.Fatalf("refusal changed expansion state: %+v, %v", row, err)
+			}
+		})
+	}
+}
 
 func TestExpansionRegistrationPersistsOutsideGeneratedPlanAndBindsReplay(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)

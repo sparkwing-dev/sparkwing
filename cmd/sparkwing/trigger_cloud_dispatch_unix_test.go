@@ -161,7 +161,7 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 	cloud.finish(t)
 	cloud.complete(t, cloud.launch(t, capability.UnitNode, "source"))
 	evaluated := cloud.launch(t, capability.UnitEval, "source")
-	expansion, err := json.Marshal(controllerwire.ExpansionSubmission{SourceGeneration: evaluated.SourceGeneration, Body: json.RawMessage(`{"jobs":[{"id":"generated","groups":["expand"],"steps":[{"id":"run"}]}]}`)})
+	expansion, err := json.Marshal(controllerwire.ExpansionSubmission{SourceGeneration: evaluated.SourceGeneration, Registration: runspec.SecretRegistration{Version: 1}, Body: json.RawMessage(`{"jobs":[{"id":"generated","groups":["expand"],"steps":[{"id":"run"}]}]}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

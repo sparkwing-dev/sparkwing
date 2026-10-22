@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -39,15 +39,7 @@ func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName st
 		}
 		return schema, nil
 	}
-	names := make([]string, 0, len(schemas))
-	for _, schema := range schemas {
-		names = append(names, schema.Name)
-	}
-	msg := fmt.Sprintf("unknown pipeline %q", pipelineName)
-	if suggestion := sparkwingruntime.SuggestClosest(pipelineName, names); suggestion != "" {
-		msg += fmt.Sprintf("; did you mean %q?", suggestion)
-	}
-	return nodeproto.PipelineDescription{}, fmt.Errorf("%s", msg)
+	return nodeproto.PipelineDescription{}, fmt.Errorf("SDK describe does not declare the requested pipeline")
 }
 
 func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map[string]string, error) {
@@ -74,6 +66,7 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 		if eq := strings.IndexByte(name, '='); eq >= 0 {
 			name, value, hasValue = name[:eq], name[eq+1:], true
 		}
+		flagName := name
 		arg, found := byName[name]
 		if dashes == "-" {
 			arg, found = byShort[name]
@@ -89,7 +82,7 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 		}
 		if !hasValue {
 			if i+1 >= len(args) {
-				return nil, fmt.Errorf("flag --%s expects a value", name)
+				return nil, fmt.Errorf("flag %s%s expects a value", dashes, flagName)
 			}
 			i++
 			value = args[i]
@@ -104,9 +97,9 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 					continue
 				}
 				if arg.Secret {
-					return nil, fmt.Errorf("flag --%s: invalid secret value", name)
+					return nil, fmt.Errorf("flag %s%s: invalid secret value", dashes, flagName)
 				}
-				return nil, fmt.Errorf("flag --%s: %q is not one of %s", name, item, strings.Join(arg.Enum, ", "))
+				return nil, fmt.Errorf("flag %s%s: value is not a declared enum choice", dashes, flagName)
 			}
 		}
 		out[name] = value
@@ -114,7 +107,7 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 	return out, nil
 }
 
-func printPipelineHelp(w io.Writer, schema nodeproto.PipelineDescription) {
+func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {
 	if schema.Help != "" {
 		fmt.Fprintf(w, "DESCRIPTION\n  %s\n\n", schema.Help)
 	}

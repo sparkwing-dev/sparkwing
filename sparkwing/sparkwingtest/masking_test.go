@@ -41,16 +41,11 @@ func TestTestHostMaskingConformance(t *testing.T) {
 func FuzzTestHostDiagnosticSinks(f *testing.F) {
 	f.Add("list,element")
 	f.Add("quoted-\"-秘密")
+	f.Add("***")
 	f.Fuzz(func(t *testing.T, input string) {
 		secret := "private-" + strings.ToValidUTF8(input, "�") + "-value"
 		host := newHost(Options{}).(*host)
 		defer host.Close()
-		if strings.Contains(secret, "***") {
-			if err := host.Mask(t.Context(), secret); err == nil {
-				t.Fatal("marker value accepted")
-			}
-			return
-		}
 		if err := host.Mask(t.Context(), secret); err != nil {
 			t.Fatal(err)
 		}

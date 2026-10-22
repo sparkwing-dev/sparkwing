@@ -364,21 +364,27 @@ The host registers accepted secret arguments, defaults and normalized list items
 before execution. Stored secrets and OIDC tokens are registered before release.
 Stored secrets, supplied secret arguments and nonempty secret defaults of the
 selected pipeline need at least four characters. Secrets containing `***` are accepted.
-This includes each nonempty list item. An empty default is no value.
+This includes each nonempty list item. An empty supplied argument or default
+is no value.
 Use a plain config variable for values that fail this rule. Defaults belonging
-to unselected pipelines do not refuse a run. Derived proxy credential parts
+to unselected pipelines do not refuse a run. Valid values and list items still
+register, while short items are skipped. Derived proxy credential parts
 that fail the rule are skipped.
 Stdout and stderr are masked before line splitting. Describe and generator output
 waits for declarations. Failed discovery withholds that output, including CLI
 help diagnostics and test-host planning output. Generator failures persist a
 fixed error with details withheld. Controller comments and run displays include
-accepted generator classifications.
+accepted generator classifications. CLI lookup, flag parsing and routing use
+private declarations. Help and the describe cache use a separate presentation
+type, with all unclassified text withheld after incomplete discovery.
 
 The stream matcher publishes complete safe lines within the current write.
 It holds only suffixes that could complete a registered spelling. Safe partial
 lines flush after 25 ms of idle output. Prefixes that could complete a secret
 stay private until more input or EOF. A stored secret read is masked even when
-its value occurs in an accepted job identifier.
+its value occurs in an accepted job identifier, including subsequent steps.
+Size and idle flushes preserve complete UTF-8 boundaries. Output delivery
+failures stop the session even when a timer triggers the flush.
 
 A pipeline implements `Secrets() any` to declare a typed secrets struct. Fields
 use `sw:"NAME,required"` or `sw:"NAME,optional"`. Required is the default.

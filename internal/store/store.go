@@ -472,7 +472,7 @@ func (op *Operator) runOwnerTx(ctx context.Context, tx *storeTx, runID string) (
 }
 
 const runColumns = `runs.team,runs.id,runs.number,runs.pipeline,runs.status,runs.trigger_source,runs.git_branch,runs.git_sha,
- runs.request_json,runs.spec_json,runs.plan_json,runs.error,runs.created_at,runs.started_at,runs.finished_at,
+ runs.request_json,runs.plan_json,runs.error,runs.created_at,runs.started_at,runs.finished_at,
  runs.parent_run_id,runs.repo_display,runs.retry_of,
  COALESCE((SELECT retry.id FROM runs retry WHERE retry.team=runs.team AND retry.retry_of=runs.id ORDER BY retry.created_at DESC,retry.id DESC LIMIT 1),''),
  runs.lineage_json,runs.replay_of_run_id,runs.replay_of_node_id,runs.annotation_count,runs.top_annotation,runs.annotations_json,runs.admission,` + runAttentionColumn
@@ -711,13 +711,13 @@ type rowScanner interface {
 
 func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	var r Run
-	var request, spec, lineage, annotations []byte
+	var request, lineage, annotations []byte
 	var created int64
 	var started, finished sql.NullInt64
 	var parent sql.NullString
 	destinations := []any{
 		&r.team, &r.ID, &r.Number, &r.Pipeline, &r.Status, &r.TriggerSource, &r.GitBranch, &r.GitSHA,
-		&request, &spec, &r.PlanSnapshot, &r.Error, &created, &started, &finished, &parent, &r.DeclaredRepo, &r.RetryOf, &r.RetriedAs,
+		&request, &r.PlanSnapshot, &r.Error, &created, &started, &finished, &parent, &r.DeclaredRepo, &r.RetryOf, &r.RetriedAs,
 		&lineage, &r.ReplayOfRunID, &r.ReplayOfNodeID, &r.AnnotationCount, &r.TopAnnotation, &annotations, &r.Admission, &r.NeedsAttention,
 	}
 	if err := rs.Scan(append(destinations, tail...)...); err != nil {

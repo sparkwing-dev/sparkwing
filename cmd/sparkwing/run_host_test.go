@@ -365,9 +365,9 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 		t.Fatal(err)
 	}
 	return localRunPreparation{
-		identity:  clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
-		described: []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
-		git:       award.Request.Request.Git, source: runspec.Source{Ref: award.Request.Request.Source.Ref, Entrypoint: "CI"}, environment: env,
+		identity:     clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
+		declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
+		git:          award.Request.Request.Git, source: runspec.Source{Ref: award.Request.Request.Source.Ref, Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
 	}
 }
@@ -445,18 +445,21 @@ func TestLocalPreparationRiskRefusalPrecedesIntake(t *testing.T) {
 		runtime, err := resolve(ctx, opts)
 		runtime.prepare = func(context.Context, string, runFlags) (localRunPreparation, error) {
 			input := localTestPreparation(t, award)
-			input.described[0].Risks = []string{"prod"}
+			doc := input.declarations.Declarations()
+			doc.Pipelines[0].Risks = []string{"prod"}
+			input.declarations = declarationFixture(t, doc.Pipelines)
 			return input, nil
 		}
 		return runtime, err
 	}
 	err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
-	var blocked *riskBlockedError
-	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) || !reflect.DeepEqual(calls, []string{"resolve", "close"}) {
+	if err == nil || !strings.Contains(err.Error(), "requires --sw-allow-risk prod") || !reflect.DeepEqual(calls, []string{"resolve", "close"}) {
 		t.Fatalf("risk refusal=%v calls=%v", err, calls)
 	}
 	input := localTestPreparation(t, award)
-	input.described[0].Risks = []string{"prod"}
+	doc := input.declarations.Declarations()
+	doc.Pipelines[0].Risks = []string{"prod"}
+	input.declarations = declarationFixture(t, doc.Pipelines)
 	request, err := prepareLocalRunRequest(t.Context(), input, runFlags{allow: []string{"prod"}}, []string{"--password", "private-value"})
 	if err != nil || !reflect.DeepEqual(request.Request.Options.AllowRisk.Value, []string{"prod"}) {
 		t.Fatalf("risk authorization did not seal: %+v %v", request.Request.Options.AllowRisk, err)
@@ -890,5 +893,28 @@ func TestLocalOwnerClaimRejectsDifferentIntakePurposes(t *testing.T) {
 		if _, err := localRunInput(award.RunID, sealed.Hash, award); err == nil {
 			t.Fatal("local execution accepted a different intake purpose")
 		}
+	}
+}
+
+func TestLocalPreparationGatesDeclarationErrors(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprint(complete), func(t *testing.T) {
+			private := "legitimate-private-token"
+			input := localTestPreparation(t, localTestAward(t))
+			pipelines := []nodeproto.PipelineDescription{
+				{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{private}}}, RisksByStep: []nodeproto.StepRisks{{JobID: private, StepID: private, Labels: []string{"prod"}}}},
+				{Name: "sibling", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &private}}},
+			}
+			if !complete {
+				pipelines[1].Error = &apierr.Error{Code: apierr.SDKError, Message: private}
+			}
+			input.declarations = declarationFixture(t, pipelines)
+			for _, args := range [][]string{{"--region", "invalid"}, {}} {
+				_, err := prepareLocalRunRequest(t.Context(), input, runFlags{}, args)
+				if err == nil || strings.Contains(err.Error(), private) || (!complete && !strings.Contains(err.Error(), "details withheld")) {
+					t.Fatalf("private declaration escaped: %v", err)
+				}
+			}
+		})
 	}
 }

@@ -11,17 +11,21 @@ import (
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
 type MaskRegistry struct {
-	mu          sync.Mutex
-	masker      *secrets.Masker
-	identifiers map[string]string
+	mu     sync.Mutex
+	masker *secrets.Masker
+	// Issued credentials sanitize presentation without changing accepted topology.
+	identifierMasks *secrets.Masker
+	identifiers     map[string]string
 }
 
 // NewMaskRegistry uses the same masker that host logs and returned errors use.
 func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
-	return &MaskRegistry{masker: masker, identifiers: map[string]string{}}
+	identifierMasks := secrets.NewMasker()
+	identifierMasks.Merge(masker)
+	return &MaskRegistry{masker: masker, identifierMasks: identifierMasks, identifiers: map[string]string{}}
 }
 
-// ContainsSecret implements the shared plan validator's matcher, including short values.
+// ContainsSecret reports every presentation mask, including issued credentials.
 func (r *MaskRegistry) ContainsSecret(identifier string) bool {
 	return r.masker.ContainsSecret(identifier)
 }
@@ -57,6 +61,7 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 		}
 	}
 	r.masker.Merge(candidate)
+	r.identifierMasks.Merge(candidate)
 	return nil
 }
 
@@ -70,7 +75,7 @@ func (r *MaskRegistry) Accept(plan nodeproto.PlanDoc, commit func() error) error
 	}
 	identifiers := map[string]string{}
 	if err := nodeproto.VisitPlanIdentifiers(plan, func(identifier, path string) error {
-		if r.ContainsSecret(identifier) {
+		if r.identifierMasks.ContainsSecret(identifier) {
 			return identifierMaskError(path)
 		}
 		identifiers[identifier] = path

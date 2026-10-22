@@ -21,18 +21,19 @@ import (
 )
 
 type host struct {
-	opts       Options
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
-	work       sync.WaitGroup
-	masker     *secrets.Masker
-	presenters map[string]*secrets.LogStreams
-	records    []sparkwing.LogRecord
-	plans      []json.RawMessage
-	settled    map[stepStateKey][]string
-	args       map[string]string
-	initErr    error
+	opts            Options
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	work            sync.WaitGroup
+	masker          *secrets.Masker
+	identifierMasks *secrets.Masker
+	presenters      map[string]*secrets.LogStreams
+	records         []sparkwing.LogRecord
+	plans           []json.RawMessage
+	settled         map[stepStateKey][]string
+	args            map[string]string
+	initErr         error
 }
 
 type pendingLog struct {
@@ -95,12 +96,13 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 		h.discardGate(discoveryGate)
 		return nodeproto.PlanDoc{}, fmt.Errorf("pipeline discovery failed")
 	}
-	declarations, err := runspec.NewDeclarationGate(described, h.masker)
+	declarations, err := runspec.NewDeclarationGate(described, h.identifierMasks)
 	if err != nil {
 		h.discardGate(discoveryGate)
 		return nodeproto.PlanDoc{}, err
 	}
 	selected, err := declarations.Resolve(name, args, nil)
+	h.masker.Merge(h.identifierMasks)
 	if err != nil {
 		h.discardGate(discoveryGate)
 		return nodeproto.PlanDoc{}, err
@@ -269,7 +271,8 @@ func (h *host) output(ctx context.Context, raw json.RawMessage) json.RawMessage 
 func (h *host) registerGenerated(arguments []nodeproto.ArgumentDescription) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	selected, err := runspec.RegisterArguments(arguments, h.args, nil, h.masker)
+	selected, err := runspec.RegisterArguments(arguments, h.args, nil, h.identifierMasks)
+	h.masker.Merge(h.identifierMasks)
 	if err != nil {
 		return err
 	}
@@ -494,6 +497,7 @@ func (h *host) Mask(ctx context.Context, value string) error {
 		}
 	}
 	h.masker.Merge(candidate)
+	h.identifierMasks.Merge(candidate)
 	return nil
 }
 
@@ -512,7 +516,7 @@ func (h *host) remember(p *sparkwing.Plan) error {
 func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: h.masker})
+	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: h.identifierMasks})
 	if err == nil && (len(h.plans) == 0 || !bytes.Equal(raw, h.plans[len(h.plans)-1])) {
 		h.plans = append(h.plans, raw)
 	}
@@ -600,14 +604,15 @@ func newHost(opts Options) Host {
 	opts.Outputs = outputs
 	opts.Runner.Labels = append([]string(nil), opts.Runner.Labels...)
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &host{opts: opts, ctx: ctx, cancel: cancel, masker: secrets.NewMasker()}
+	h := &host{opts: opts, ctx: ctx, cancel: cancel, masker: secrets.NewMasker(), identifierMasks: secrets.NewMasker()}
 	for _, v := range opts.Secrets {
 		if v.Masked {
-			if err := h.masker.Register(v.Value); err != nil {
+			if err := h.identifierMasks.Register(v.Value); err != nil {
 				h.initErr = err
 			}
 		}
 	}
+	h.masker.Merge(h.identifierMasks)
 	return h
 }
 

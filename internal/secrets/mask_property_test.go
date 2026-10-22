@@ -181,3 +181,44 @@ func TestStreamReplacementClosureProperty(t *testing.T) {
 		}
 	}
 }
+
+func FuzzStreamReplacementClosure(f *testing.F) {
+	for _, seed := range []string{"aaaa", "ababxxxx", "ab**", `quoted\u0022value`, "lower%2fvalue", "***"} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) == 0 || len(data) > 1024 {
+			t.Skip()
+		}
+		value := "private-" + strings.ToValidUTF8(string(data), "?")
+		// Decision 49 permits marker-containing secrets without replacement closure.
+		if strings.Contains(value, "***") {
+			t.Skip()
+		}
+		m := newTestMasker(value, "ab**", "xxxx", "aaaa", "*xyz")
+		stream := m.Stream()
+		input := string(data) + value + escapeEveryRune(value) + strings.Repeat("ab", int(data[0])) + "xxxxxyz"
+		var output strings.Builder
+		at := 0
+		for len(input) > 0 {
+			n := min(1+int(data[at%len(data)])%31, len(input))
+			output.WriteString(stream.Mask(input[:n]))
+			input = input[n:]
+			at++
+		}
+		if err := m.Register("issued-private-value"); err != nil {
+			t.Fatal(err)
+		}
+		output.WriteString(stream.Mask("issued-private-value"))
+		output.WriteString(stream.Flush())
+		view := output.String()
+		for range 3 {
+			for _, pattern := range m.Values() {
+				if strings.Contains(view, pattern) {
+					t.Fatalf("registered spelling %q survived in %q", pattern, output.String())
+				}
+			}
+			view = jsonDecodedView(view)
+		}
+	})
+}

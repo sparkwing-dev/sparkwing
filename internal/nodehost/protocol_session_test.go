@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -435,6 +436,8 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "partial_output":
+			fmt.Fprint(os.Stdout, "starting")
 		case "log_policy":
 			send(nodeproto.FrameLog{Level: "debug", Message: "debug detail"})
 			send(nodeproto.FrameLog{Level: "info", Message: "normal detail"})
@@ -862,5 +865,29 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestProtocolSessionIdleSinkFailureStopsAuthor(t *testing.T) {
+	for _, registered := range []bool{false, true} {
+		t.Run(fmt.Sprint(registered), func(t *testing.T) {
+			failure := errors.New("log sink failed")
+			session := protocolTestSession(t, "partial_output", func(cfg *ProtocolSessionConfig) {
+				if registered {
+					cfg.Masks = NewMaskRegistry(secrets.NewMasker())
+				}
+				cfg.Log = func(context.Context, nodeproto.FrameLog) error { return failure }
+			})
+			protocolTestHello(t, session)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			_, err := session.Request(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: "job", Step: "body", Attempt: 1})
+			if !errors.Is(err, failure) {
+				t.Fatalf("idle flush did not fail the live request: %v", err)
+			}
+			if err := session.Close(); !errors.Is(err, failure) || session.cmd.ProcessState == nil {
+				t.Fatalf("idle sink failure did not join the author: %v", err)
+			}
+		})
 	}
 }

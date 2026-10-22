@@ -40,8 +40,8 @@ printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"n
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Pipelines) != 1 || doc.Pipelines[0].Name != "demo" || len(doc.Pipelines[0].Args) != 1 || !doc.Pipelines[0].Args[0].Required {
-		t.Fatalf("pipelines = %+v", doc.Pipelines)
+	if len(doc.Declarations().Pipelines) != 1 || doc.Declarations().Pipelines[0].Name != "demo" || len(doc.Declarations().Pipelines[0].Args) != 1 || !doc.Declarations().Pipelines[0].Args[0].Required {
+		t.Fatalf("pipelines = %+v", doc.Declarations().Pipelines)
 	}
 	raw, err := os.ReadFile(requests)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestResolverDescribesOverTheProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(pipelineNames(schemas), ","); got != "build,deploy" {
+	if got := strings.Join(pipelineNames(schemas.Presentation().Pipelines), ","); got != "build,deploy" {
 		t.Fatalf("names = %s", got)
 	}
 	bad, _ := fakeSDK(t, `exit 1`)
@@ -200,7 +200,7 @@ func TestDescribeWithholdsUnknownDiscoveryDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(doc)
+	raw, _ := json.Marshal(doc.Presentation())
 	if strings.Contains(string(raw), "unknown-private-default") || !strings.Contains(string(raw), "details withheld") {
 		t.Fatalf("unsafe discovery projection: %s", raw)
 	}
@@ -212,8 +212,8 @@ func TestDescribePresentationMasksDefaultsAndAuthorText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(doc)
-	if strings.Contains(string(raw), "private-default") || doc.Pipelines[0].Args[0].Default == nil || *doc.Pipelines[0].Args[0].Default != "***" {
+	raw, _ := json.Marshal(doc.Presentation())
+	if strings.Contains(string(raw), "private-default") || doc.Presentation().Pipelines[0].Args[0].Default == nil || *doc.Presentation().Pipelines[0].Args[0].Default != "***" {
 		t.Fatalf("unsafe discovery projection: %s", raw)
 	}
 }

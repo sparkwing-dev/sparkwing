@@ -18,23 +18,14 @@ func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistra
 	var values []string
 	seen := make(map[string]bool)
 	add := func(raw string, list bool) error {
-		if list {
-			for _, item := range argvalue.List(raw) {
-				if err := secrets.Validate(item); err != nil {
-					return err
-				}
-				if !seen[item] {
-					values = append(values, item)
-					seen[item] = true
-				}
+		for _, value := range secretCandidates(raw, list) {
+			if err := secrets.Validate(value); err != nil {
+				return err
 			}
-		}
-		if err := secrets.Validate(raw); err != nil {
-			return err
-		}
-		if !seen[raw] {
-			values = append(values, raw)
-			seen[raw] = true
+			if !seen[value] {
+				values = append(values, value)
+				seen[value] = true
+			}
 		}
 		return nil
 	}
@@ -86,4 +77,15 @@ func GeneratedRegistration(request Request, resolved Resolved, arguments []nodep
 		}
 	}
 	return BuildSecretRegistration(Request{}, Resolved{SecretRegistration: projection})
+}
+
+func secretCandidates(raw string, list bool) []string {
+	if raw == "" {
+		return nil
+	}
+	var values []string
+	if list {
+		values = argvalue.List(raw)
+	}
+	return append(values, raw)
 }

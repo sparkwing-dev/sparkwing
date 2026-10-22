@@ -28,7 +28,7 @@ func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing
 				t.Fatal(err)
 			}
 			if cached {
-				if err := storeDescribe(dir, "unrelated-source", nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{}}}}); err != nil {
+				if err := storeDescribe(dir, "unrelated-source", presentationFixture(nodeproto.PipelineDescription{Name: "Deploy", Args: []nodeproto.ArgumentDescription{}})); err != nil {
 					t.Fatal(err)
 				}
 			}

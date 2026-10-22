@@ -34,8 +34,15 @@ func (s *TextStream) Push(chunk string, eof bool) []string {
 		s.held = after
 	}
 	if (eof || len(s.held) >= 1<<20) && s.held != "" {
-		lines = append(lines, s.held)
-		s.held = ""
+		text := s.held
+		if !eof {
+			text = s.Idle()
+		} else {
+			s.held = ""
+		}
+		if text != "" {
+			lines = append(lines, text)
+		}
 	}
 	return lines
 }

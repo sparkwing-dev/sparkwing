@@ -65,7 +65,7 @@ func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 		if evaluation.Generation != 0 || runspec.NodeID(evaluation.NodeID) != row.Ref.NodeID || evaluation.SpecHash != row.SpecHash || observed.Generation != 0 {
 			t.Fatal("eval replaced the source identity with its lease or a work attempt")
 		}
-		return json.RawMessage(`{"jobs":[]}`), runspec.SecretRegistration{}, nil, nil
+		return json.RawMessage(`{"jobs":[]}`), runspec.SecretRegistration{Version: 1}, nil, nil
 	}
 	if err := host.Evaluate(t.Context(), input, string(row.Ref.NodeID), int64(row.Generation), fence); err != nil {
 		t.Fatal(err)

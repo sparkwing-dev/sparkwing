@@ -67,8 +67,8 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.described[0].Help != "submitted index" {
-		t.Fatalf("inspection read %q", prepared.described[0].Help)
+	if prepared.declarations.Declarations().Pipelines[0].Help != "submitted index" {
+		t.Fatalf("inspection read %q", prepared.declarations.Declarations().Pipelines[0].Help)
 	}
 	request, err := prepareLocalRunRequest(t.Context(), prepared, flags, args)
 	if err != nil {

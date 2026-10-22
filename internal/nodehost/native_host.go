@@ -64,7 +64,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	processes.Session.Environments.Base = config.Source.Base
 	processes.Session.Environments.Snapshots = config.Snapshots
 	validation := config.Validation
-	validation.Secrets = config.Masks
+	validation.Secrets = config.Masks.identifierMasks
 	functions := (PlanningFunctions{Validate: config.ValidatePlan, Hash: config.CanonicalHash}).defaults()
 	execution := config.Executor
 	if execution.ReadOutput == nil {

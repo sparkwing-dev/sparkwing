@@ -1301,7 +1301,9 @@ control.
 The expansion HTTP decoder accepts `registration` and forwards it unchanged to
 acceptance. Expansion submissions and accepted owner snapshots carry it beside
 the generated plan body. It is a `runspec.SecretRegistration`, never a member
-projection. The store validates its normalized values, binds body and registration
+projection. Every successful submission explicitly supplies version 1, including
+an empty registration. Absence and unsupported versions are refused before
+normalization. The store validates normalized values, binds body and registration
 to one acceptance digest, and returns the original private projection on replay.
 `BodyHash` still hashes only the generated plan body for SDK replay. Missing or
 changed registration refuses acceptance or reconstruction. Public plan JSON and

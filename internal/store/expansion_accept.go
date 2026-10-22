@@ -38,6 +38,9 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		result.hash, err = stateHash(request.Failure)
 		return result, err
 	}
+	if request.Registration.Version != 1 {
+		return result, authorityError(apierr.PlanInvalid, "expansion requires an explicit version 1 secret registration")
+	}
 	priorJobs := map[string]bool{}
 	for _, existing := range snapshot.Expansions {
 		if existing.Source != request.Source {

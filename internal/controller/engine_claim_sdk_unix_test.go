@@ -51,7 +51,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plain describe: %v", err)
 	}
-	pipeline, found := doc.Pipeline("Example")
+	pipeline, found := doc.Declarations().Pipeline("Example")
 	if !found || pipeline.Args == nil || len(pipeline.Args) != 0 {
 		t.Fatal("repository example must declare an empty arguments array")
 	}

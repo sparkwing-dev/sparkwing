@@ -199,8 +199,16 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	if cfg.ValidateRequest == nil {
 		cfg.ValidateRequest = nodeproto.Request.Validate
 	}
-	if cfg.output == nil && cfg.Masks != nil && cfg.Log != nil {
-		logs := &planningLogs{known: true, debug: cfg.Debug, masker: cfg.Masks.masker, sink: cfg.Log}
+	if cfg.output == nil {
+		var masker *secrets.Masker
+		if cfg.Masks != nil {
+			masker = cfg.Masks.masker
+		}
+		sink := cfg.Log
+		if sink == nil {
+			sink = func(context.Context, nodeproto.FrameLog) error { return nil }
+		}
+		logs := &planningLogs{known: true, debug: cfg.Debug, masker: masker, sink: sink}
 		cfg.output, cfg.Log = logs, logs.write
 	}
 	var parent, child []*os.File
@@ -230,6 +238,9 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	}
 	logCtx, stopLogs := context.WithCancel(context.WithoutCancel(ctx))
 	s := &ProtocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx)}
+	cfg.output.mu.Lock()
+	cfg.output.fail = s.failProtocol
+	cfg.output.mu.Unlock()
 	s.streams.Add(3)
 	go s.readProtocolFrames(parent[1])
 	go s.readProtocolText(parent[2], "info")
@@ -492,27 +503,15 @@ func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	defer s.streams.Done()
 	defer file.Close()
 	buffer := make([]byte, 32<<10)
-	var writer *LineWriter
-	if s.cfg.output == nil {
-		var masker *secrets.Masker
-		if s.cfg.Masks != nil {
-			masker = s.cfg.Masks.masker
-		}
-		writer = &LineWriter{sink: protocolTextSink{s: s}, level: level, stream: masker.Stream()}
-	}
 	for {
 		n, err := file.Read(buffer)
 		if n > 0 {
 			if s.cfg.Activity.Progress != nil {
 				s.cfg.Activity.Progress()
 			}
-			if s.cfg.output != nil {
-				if writeErr := s.cfg.output.text(s.logCtx, level, string(buffer[:n]), false); writeErr != nil {
-					s.failProtocol(writeErr)
-					return
-				}
-			} else {
-				_, _ = writer.Write(buffer[:n])
+			if writeErr := s.cfg.output.text(s.logCtx, level, string(buffer[:n]), false); writeErr != nil {
+				s.failProtocol(writeErr)
+				return
 			}
 		}
 		if err != nil {
@@ -523,12 +522,8 @@ func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 			break
 		}
 	}
-	if s.cfg.output != nil {
-		if err := s.cfg.output.text(s.logCtx, level, "", true); err != nil {
-			s.failProtocol(err)
-		}
-	} else {
-		writer.Flush()
+	if err := s.cfg.output.text(s.logCtx, level, "", true); err != nil {
+		s.failProtocol(err)
 	}
 }
 
@@ -653,9 +648,3 @@ func protocolSessionError(code apierr.Code, message string) error {
 }
 
 var _ ExecutorProcess = (*ProtocolSession)(nil)
-
-type protocolTextSink struct{ s *ProtocolSession }
-
-func (w protocolTextSink) Text(level, text string) {
-	w.s.emitProtocolLog(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: text})
-}

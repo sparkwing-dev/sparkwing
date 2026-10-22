@@ -192,7 +192,7 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	}
 	fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: children})
-		return raw, runspec.SecretRegistration{}, nil, err
+		return raw, runspec.SecretRegistration{Version: 1}, nil, err
 	}
 	fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if input.NodeID == "summary" {

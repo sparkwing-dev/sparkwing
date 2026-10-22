@@ -52,22 +52,22 @@ func (s *Session) Call(req nodeproto.Request, result any) error {
 }
 
 // Describe sends describe after the session's protocol handshake.
-func (s *Session) Describe() (nodeproto.DescribeDoc, error) {
+func (s *Session) Describe() (*runspec.DeclarationGate, error) {
 	var doc nodeproto.DescribeDoc
 	err := s.Call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc)
 	if err != nil {
-		return doc, err
+		return nil, err
 	}
 	s.gate, err = runspec.NewDeclarationGate(doc, s.masker)
 	if err != nil {
-		return nodeproto.DescribeDoc{}, err
+		return nil, err
 	}
-	return s.gate.Presentation(), nil
+	return s.gate, nil
 }
 
 // Describe starts the pipeline entry in dir and returns its describe reply.
-func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (nodeproto.DescribeDoc, error) {
-	var doc nodeproto.DescribeDoc
+func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (*runspec.DeclarationGate, error) {
+	var doc *runspec.DeclarationGate
 	err := Converse(ctx, entry, dir, func(s *Session) (err error) {
 		doc, err = s.Describe()
 		return err

@@ -104,7 +104,7 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 	})
 	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: retryGeneratedJobs()})
-		return body, runspec.SecretRegistration{}, nil, err
+		return body, runspec.SecretRegistration{Version: 1}, nil, err
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

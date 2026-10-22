@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 )
 
 func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	p := Pipeline{
-		PipelineDescription: nodeproto.PipelineDescription{
+		PipelinePresentation: runspec.PipelinePresentation{
 			Name:  "cluster-down",
 			Risks: []string{"destructive", "prod"},
 			RisksByStep: []nodeproto.StepRisks{
@@ -41,7 +42,7 @@ func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 }
 
 func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
-	p := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: "hello"}}
+	p := Pipeline{PipelinePresentation: runspec.PipelinePresentation{Name: "hello"}}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -61,7 +62,7 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 			{JobID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}
-	a := Pipeline{PipelineDescription: dp}
+	a := Pipeline{PipelinePresentation: runspec.PipelinePresentation(dp)}
 
 	if a.Name != dp.Name {
 		t.Errorf("Name = %q, want %q", a.Name, dp.Name)
@@ -92,9 +93,9 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 
 func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	catalog := []Pipeline{
-		{PipelineDescription: nodeproto.PipelineDescription{Name: "cluster-up"}},
-		{PipelineDescription: nodeproto.PipelineDescription{Name: "cluster-down"}},
-		{PipelineDescription: nodeproto.PipelineDescription{Name: "hello"}},
+		{PipelinePresentation: runspec.PipelinePresentation{Name: "cluster-up"}},
+		{PipelinePresentation: runspec.PipelinePresentation{Name: "cluster-down"}},
+		{PipelinePresentation: runspec.PipelinePresentation{Name: "hello"}},
 	}
 	name := "claster-up"
 
@@ -121,8 +122,8 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 
 func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
 	catalog := []Pipeline{
-		{PipelineDescription: nodeproto.PipelineDescription{Name: "cluster-up"}},
-		{PipelineDescription: nodeproto.PipelineDescription{Name: "hello"}},
+		{PipelinePresentation: runspec.PipelinePresentation{Name: "cluster-up"}},
+		{PipelinePresentation: runspec.PipelinePresentation{Name: "hello"}},
 	}
 	candidates := make([]string, 0, len(catalog))
 	for _, p := range catalog {

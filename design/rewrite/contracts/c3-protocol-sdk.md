@@ -1205,16 +1205,17 @@ remain in force while a claimed job waits for machine admission.
 contain no masker and perform no automatic Mask RPCs. Explicit `Mask` remains
 synchronous. Without a host, pipeline execution is unmasked.
 
-The accepted run seals `Resolved.SecretRegistration`, including every discovered
-valid discovered secret default, list argument kinds, raw/effective values and normalized list
+The accepted run seals `Resolved.SecretRegistration`, including valid discovered
+secret defaults, list argument kinds, raw/effective values and normalized list
 items. Go argument parsing and projection use `argvalue.List`. TypeScript uses
 the same comma split, Unicode White_Space trim and empty-item omission contract.
-All registrations precede author execution. Lazily issued values are registered
+Known registrations precede author execution. Lazily issued values are registered
 before release. Refuse fewer than four characters in customer-stored
 secrets, supplied secret args and selected nonempty defaults, including individual
-list items. Refusals direct authors to a plain config variable. Empty defaults
-carry no value. Unselected defaults do not refuse a run. Unsafe derived proxy
-parts are skipped. Issued values do not revalidate accepted job identifiers.
+list items. Refusals direct authors to a plain config variable. Empty supplied
+arguments and defaults carry no value. Unselected defaults do not refuse a run.
+Their valid values and list items register while short items are skipped. Unsafe
+derived proxy parts are skipped. Issued values do not revalidate accepted job identifiers.
 
 Stdout/stderr bytes enter the stream masker before line splitting. Decode protocol
 frames before sanitizing payloads and constructing trusted envelopes. Attribute
@@ -1228,16 +1229,24 @@ before invoking the callback, registers its declared values on success and only
 then releases output. Failed discovery withholds output and author error details.
 Accepted expansions retain their private registration projection for reconstruction.
 CLI discovery, production and the test host consume one declaration gate.
-CLI discovery stores a safe presentation projection. Directly constructed test
-plans use the same argument projection before callbacks run. The test host
+CLI lookup, flag parsing and routing use private declarations. Only help, cache
+and display consume the separate presentation type. Incomplete discovery
+withholds all unclassified presentation text, including names, shorts and job IDs.
+Directly constructed test plans use the same argument projection before callbacks run. The test host
 withholds secret-bearing step/eval outputs. Controller control text and public
 run presentation load accepted expansion registrations inside their owners.
 
 A compiled multi-pattern matcher retains only viable suffixes across writes,
-including escaped spellings and replacement-marker edges. Safe partial lines
-flush after 25 ms of idle output. Incomplete pattern prefixes stay private until
-more input or EOF. Runs sealed without version 1 host masking registrations are
-refused before launch with a request to start a new run. No migration is provided.
+including escaped spellings and replacement-marker edges. Pending raw bytes are
+bounded by the longest spelling. Completed redaction ranges emit immediately.
+Closure runs at most four passes, then replaces the remaining ambiguous payload
+as a whole. Registration adds sparse automata without rebuilding earlier ones.
+Decision 49 accepts stream/batch differences when replacement markers form a
+secret containing `***`. Safe partial lines flush after 25 ms of idle output. Incomplete pattern prefixes stay private until
+more input or EOF. Size and idle flushes end on UTF-8 boundaries. Every delivery
+failure reaches the session failure owner, including asynchronous flushes. Runs
+sealed without version 1 host masking registrations are refused before launch
+with a request to start a new run. No migration is provided.
 
 SDK command helpers forward each child stdout/stderr stream through `FrameLog`
 `stream`, base64 `stream_data`, and `stream_end` fields. They never split those

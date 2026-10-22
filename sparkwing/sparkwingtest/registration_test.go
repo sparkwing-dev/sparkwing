@@ -231,6 +231,9 @@ func TestIssuedTokenDoesNotRefuseAcceptedIdentifier(t *testing.T) {
 	if got := h.masker.Mask(token); got != "***" {
 		t.Fatalf("issued token unregistered: %q", got)
 	}
+	if _, err := h.RunStep(t.Context(), plan, token+"-job", "run"); err != nil {
+		t.Fatalf("issued token refused accepted step: %v", err)
+	}
 }
 
 type incompleteDiscoveryPipeline struct{}

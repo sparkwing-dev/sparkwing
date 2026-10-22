@@ -17,11 +17,12 @@ import (
 )
 
 type Masker struct {
-	mu       sync.RWMutex
-	raw      map[string]struct{}
-	values   []string
-	known    map[string]struct{}
-	compiled *compiledMatcher
+	mu            sync.RWMutex
+	raw           map[string]struct{}
+	values        []string
+	known         map[string]struct{}
+	compiled      *compiledMatcher
+	compiledCount int
 }
 
 func NewMasker() *Masker { return &Masker{} }
@@ -70,7 +71,6 @@ func (m *Masker) add(value string) {
 	}
 	m.known[value] = struct{}{}
 	m.values = append(m.values, value)
-	m.compiled = nil
 }
 
 // Merge copies raw registrations and patterns without re-encoding derived patterns.
@@ -342,6 +342,7 @@ type Stream struct {
 	m        *Masker
 	pending  string
 	rendered string
+	covered  int
 }
 
 func (m *Masker) Stream() *Stream { return &Stream{m: m} }
@@ -356,34 +357,71 @@ func (s *Stream) Mask(chunk string) string {
 	}
 	matcher := s.m.matcher()
 	spans, cut := matcher.scan(s.pending, true)
-	// A matching range that overlaps an unfinished match stays intact.
-	for _, sp := range spans {
-		if sp.lo < cut && cut < sp.hi {
-			cut = sp.lo
-		}
+	if s.covered > 0 {
+		spans = append([]span{{0, s.covered}}, spans...)
 	}
 	if cut == 0 {
 		return ""
 	}
 	text := s.pending[:cut]
-	s.pending = s.pending[cut:]
-	if len(spans) == 0 && s.rendered == "" {
+	covered := 0
+	var complete []span
+	for _, sp := range spans {
+		if sp.lo < cut {
+			complete = append(complete, span{sp.lo, min(cut, sp.hi)})
+		}
+		if sp.lo < cut && sp.hi > cut {
+			covered = max(covered, sp.hi-cut)
+		}
+	}
+	// Copy the unfinished suffix so a small tail cannot retain a large write.
+	s.pending = strings.Clone(s.pending[cut:])
+	if len(complete) > 0 {
+		complete = mergeSpans(complete)
+		if s.covered > 0 && complete[0].lo == 0 {
+			offset := complete[0].hi
+			text = text[offset:]
+			complete = complete[1:]
+			for i := range complete {
+				complete[i].lo -= offset
+				complete[i].hi -= offset
+			}
+		}
+		if len(complete) > 0 {
+			text = replaceSpans(text, complete, "***")
+		}
+	}
+	s.covered = covered
+	if len(spans) == 0 && s.rendered == "" && !matcher.markerSuffix {
 		return text
 	}
 	// Re-scan after replacements because marker edges can create another match.
-	s.rendered = matcher.mask(s.rendered + matcher.mask(text))
+	s.rendered = matcher.mask(s.rendered + text)
 	_, emit := matcher.scan(s.rendered, true)
+	if matcher.markerSuffix && emit > 0 {
+		prefix := s.rendered[:emit] + "***"
+		if matcher.mask(prefix) != prefix {
+			// A future redaction could consume this prefix indefinitely. Redact
+			// the ambiguous emission now instead of retaining an unbounded chain.
+			s.rendered = matcher.mask("***" + s.rendered[emit:])
+			_, emit = matcher.scan(s.rendered, true)
+		}
+	}
 	out := s.rendered[:emit]
-	s.rendered = s.rendered[emit:]
+	s.rendered = strings.Clone(s.rendered[emit:])
 	return out
 }
 
 // Flush releases the final masked tail at EOF.
 func (s *Stream) Flush() string {
-	out := s.rendered + s.pending
+	tail := s.pending
+	if s.covered > 0 {
+		tail = tail[s.covered:]
+	}
+	out := s.rendered + tail
 	if s.m != nil {
 		out = s.m.Mask(out)
 	}
-	s.rendered, s.pending = "", ""
+	s.rendered, s.pending, s.covered = "", "", 0
 	return out
 }

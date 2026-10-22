@@ -44,6 +44,7 @@ func successfulExpansionFixture(t *testing.T) (*Tenant, ExpansionSubmission) {
 	t.Helper()
 	tenant, _, request := expansionFixture(t)
 	request.Failure = nil
+	request.Registration = runspec.SecretRegistration{Version: 1}
 	request.Body = []byte(`{"jobs":[{"id":"generated","groups":["group"],"deps":["job"]}]}`)
 	tenant.s.plans = fakePlanContracts{
 		validate: func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {

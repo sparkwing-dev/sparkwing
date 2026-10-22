@@ -42,6 +42,7 @@ type PlanningProcessInput struct {
 type PreparedPlanning struct {
 	SecretRegistration runspec.SecretRegistration
 	Description        nodeproto.PipelineDescription
+	Declarations       *runspec.DeclarationGate
 	Args               map[string]string
 	SecretArgs         []string
 	Input              PlanningInput

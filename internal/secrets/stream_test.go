@@ -435,3 +435,87 @@ func BenchmarkStreamLivePEMLineByLine(b *testing.B) {
 		streamBenchmarkSink = stream.Mask(line)
 	}
 }
+
+func TestStreamOverlapKeepsOnlyUnfinishedSuffix(t *testing.T) {
+	stream := newTestMasker("aaaa").Stream()
+	var output strings.Builder
+	for range 64 {
+		output.WriteString(stream.Mask(strings.Repeat("a", 1<<15)))
+		if len(stream.pending) > 3 {
+			t.Fatalf("retained %d raw bytes", len(stream.pending))
+		}
+	}
+	output.WriteString(stream.Mask(" public\n"))
+	output.WriteString(stream.Flush())
+	if got := output.String(); got != "*** public\n" {
+		t.Fatalf("overlap output = %q", got)
+	}
+}
+
+func TestMaskBoundsReplacementClosure(t *testing.T) {
+	m := newTestMasker("ab**", "xxxx")
+	input := strings.Repeat("ab", 1<<15) + "xxxx"
+	if got := m.Mask(input); got != "***" {
+		t.Fatalf("ambiguous payload = %q", got)
+	}
+}
+
+func TestSizeLineFlushPreservesIncompleteUTF8(t *testing.T) {
+	lines := NewMasker().Stream().Lines()
+	prefix := strings.Repeat("x", (1<<20)-1)
+	got := lines.Push(prefix+"\xce", false)
+	if len(got) != 1 || got[0] != prefix {
+		t.Fatalf("size flush emitted %d chunks", len(got))
+	}
+	got = lines.Push("\xbb\n", false)
+	if len(got) != 1 || got[0] != "λ" {
+		t.Fatalf("UTF-8 continuation = %q", got)
+	}
+}
+
+func BenchmarkMaskClosureChain(b *testing.B) {
+	for _, size := range []int{1 << 14, 1 << 16, 1 << 18} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			m := newTestMasker("ab**", "xxxx")
+			input := strings.Repeat("ab", size) + "xxxx"
+			m.matcher()
+			b.SetBytes(int64(len(input)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				streamBenchmarkSink = m.Mask(input)
+			}
+		})
+	}
+}
+
+func BenchmarkStreamOverlapAAAA(b *testing.B) {
+	m := newTestMasker("aaaa")
+	stream := m.Stream()
+	input := strings.Repeat("a", 1<<15)
+	m.matcher()
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		streamBenchmarkSink = stream.Mask(input)
+	}
+}
+
+func TestStreamBoundsReplacementClosureChain(t *testing.T) {
+	m := newTestMasker("ab**", "xxxx")
+	for _, width := range []int{1, 2, 3, 128, 1024} {
+		stream := m.Stream()
+		input := strings.Repeat("ab", 128) + "xxxx"
+		var output strings.Builder
+		for len(input) > 0 {
+			n := min(width, len(input))
+			output.WriteString(stream.Mask(input[:n]))
+			input = input[n:]
+		}
+		output.WriteString(stream.Flush())
+		if got := output.String(); strings.Contains(got, "ab**") || strings.Contains(got, "xxxx") {
+			t.Fatalf("width %d: replacement chain escaped in %q", width, got)
+		}
+	}
+}

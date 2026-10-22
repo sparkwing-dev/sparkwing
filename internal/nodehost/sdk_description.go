@@ -22,7 +22,7 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 	if err != nil {
 		return PreparedPlanning{}, false, gate.Error(err)
 	}
-	prepared := PreparedPlanning{Description: arguments.Description, Args: arguments.Args, SecretArgs: arguments.SecretArgs, SecretRegistration: arguments.Registration}
+	prepared := PreparedPlanning{Declarations: gate, Description: arguments.Description, Args: arguments.Args, SecretArgs: arguments.SecretArgs, SecretRegistration: arguments.Registration}
 
 	return prepared, gate.Complete(), nil
 }

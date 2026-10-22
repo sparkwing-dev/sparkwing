@@ -55,7 +55,7 @@ func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInpu
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := f.State.AcceptExpansion(t.Context(), store.ExpansionSubmission{Source: row.Ref, SourceGeneration: source.Generation, Actor: actor, Body: body})
+	accepted, err := f.State.AcceptExpansion(t.Context(), store.ExpansionSubmission{Source: row.Ref, SourceGeneration: source.Generation, Actor: actor, Body: body, Registration: runspec.SecretRegistration{Version: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 					jobs = append(jobs, nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 				}
 				body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
-				return body, runspec.SecretRegistration{}, nil, err
+				return body, runspec.SecretRegistration{Version: 1}, nil, err
 			}
 			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

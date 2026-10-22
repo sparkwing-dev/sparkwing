@@ -5,125 +5,163 @@ import (
 	"strings"
 )
 
-// Immutable automata are shared by every stream and rebuilt only after registration.
+// Immutable per-registration automata let issued values extend a registry without
+// rebuilding patterns already shared by active streams.
 type compiledMatcher struct {
+	groups       []*patternMatcher
+	markerSuffix bool
+}
+
+type patternMatcher struct {
 	exact   automaton
 	percent automaton
 }
 
+type matchNode struct {
+	child, sibling, fail, match, depth int32
+	letter                             byte
+}
+
 type automaton struct {
-	classes  [256]int
-	width    int
-	next     []int
-	depth    []int
-	match    []int
-	fail     []int
-	links    []int
-	patterns [][]string
-	prefixes [][]string
-	length   []int
-	fold     bool
+	root        [256]int32
+	nodes       []matchNode
+	patterns    map[int32][]string
+	prefixes    map[int32][]string
+	samples     []int32
+	values      []string
+	fold        bool
+	onlyStart   byte
+	singleStart bool
 }
 
 func (m *Masker) matcher() *compiledMatcher {
 	m.mu.RLock()
 	compiled := m.compiled
+	current := m.compiledCount == len(m.values)
 	m.mu.RUnlock()
-	if compiled != nil {
+	if compiled != nil && current {
 		return compiled
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.compiled == nil {
-		var percent []string
-		for _, value := range m.values {
-			if strings.Contains(value, "%") {
-				percent = append(percent, value)
-			}
+	if m.compiled == nil || m.compiledCount != len(m.values) {
+		var groups []*patternMatcher
+		if m.compiled != nil {
+			groups = slices.Clone(m.compiled.groups)
 		}
-		m.compiled = &compiledMatcher{exact: compilePatterns(m.values, false), percent: compilePatterns(percent, true)}
+		patterns := m.values[m.compiledCount:]
+		if len(patterns) > 0 {
+			var exact, percent []string
+			for _, value := range patterns {
+				if strings.Contains(value, "%") {
+					percent = append(percent, value)
+				} else {
+					exact = append(exact, value)
+				}
+			}
+			groups = append(groups, &patternMatcher{exact: compilePatterns(exact, false), percent: compilePatterns(percent, true)})
+		}
+		markerSuffix := m.compiled != nil && m.compiled.markerSuffix
+		for _, pattern := range patterns {
+			markerSuffix = markerSuffix || strings.HasSuffix(pattern, "*")
+		}
+		m.compiled = &compiledMatcher{groups: groups, markerSuffix: markerSuffix}
+		m.compiledCount = len(m.values)
 	}
 	return m.compiled
 }
 
-// Alphabet compression keeps a dense Aho-Corasick transition table compact.
-func compilePatterns(patterns []string, fold bool) automaton {
-	type node struct {
-		edges              map[byte]int
-		fail, depth, match int
-		patterns           []string
-		prefixes           []string
+func (a *automaton) child(at int32, c byte) int32 {
+	if at == 0 {
+		return a.root[c]
 	}
-	nodes := []node{{edges: map[byte]int{}}}
-	a := automaton{width: 1, fold: fold}
+	for next := a.nodes[at].child; next != 0; next = a.nodes[next].sibling {
+		if a.nodes[next].letter == c {
+			return next
+		}
+	}
+	return 0
+}
+
+func compilePatterns(patterns []string, fold bool) automaton {
+	size := 1
 	for _, pattern := range patterns {
-		at := 0
+		size += len(pattern)
+	}
+	a := automaton{nodes: make([]matchNode, 1, size), fold: fold}
+	if fold {
+		a.patterns = make(map[int32][]string)
+		a.samples = make([]int32, 1, size)
+		a.values = patterns
+	}
+	for patternID, pattern := range patterns {
+		var at int32
 		for i := range len(pattern) {
 			c := pattern[i]
 			if fold {
 				c = foldHex(c)
 			}
-			if a.classes[c] == 0 {
-				a.classes[c] = a.width
-				a.width++
-			}
-			next, ok := nodes[at].edges[c]
-			if !ok {
-				next = len(nodes)
-				nodes = append(nodes, node{edges: map[byte]int{}, depth: nodes[at].depth + 1})
-				nodes[at].edges[c] = next
+			next := a.child(at, c)
+			if next == 0 {
+				next = int32(len(a.nodes))
+				a.nodes = append(a.nodes, matchNode{letter: c, depth: a.nodes[at].depth + 1, sibling: a.nodes[at].child})
+				a.nodes[at].child = next
+				if fold {
+					a.samples = append(a.samples, 0)
+				}
+				if at == 0 {
+					a.root[c] = next
+				}
 			}
 			at = next
-			if fold && !slices.Contains(nodes[at].prefixes, pattern[:i+1]) {
-				nodes[at].prefixes = append(nodes[at].prefixes, pattern[:i+1])
+			if fold {
+				if a.samples[at] == 0 {
+					a.samples[at] = int32(patternID + 1)
+				} else if original := patterns[a.samples[at]-1][:i+1]; original != pattern[:i+1] && !slices.Contains(a.prefixes[at], pattern[:i+1]) {
+					if a.prefixes == nil {
+						a.prefixes = make(map[int32][]string)
+					}
+					a.prefixes[at] = append(a.prefixes[at], pattern[:i+1])
+				}
 			}
 		}
-		nodes[at].match = len(pattern)
+		a.nodes[at].match = int32(len(pattern))
 		if fold {
-			nodes[at].patterns = append(nodes[at].patterns, pattern)
+			a.patterns[at] = append(a.patterns[at], pattern)
 		}
 	}
-	a.next = make([]int, len(nodes)*a.width)
-	a.depth = make([]int, len(nodes))
-	a.match = make([]int, len(nodes))
-	a.fail = make([]int, len(nodes))
-	a.links = make([]int, len(nodes))
-	a.length = make([]int, len(nodes))
-	if fold {
-		a.patterns = make([][]string, len(nodes))
-		a.prefixes = make([][]string, len(nodes))
-	}
-	queue := []int{0}
+	queue := make([]int32, 1, len(a.nodes))
 	for head := 0; head < len(queue); head++ {
 		at := queue[head]
-		n := &nodes[at]
-		a.depth[at], a.match[at] = n.depth, max(n.match, nodes[n.fail].match)
-		if len(n.edges) == 0 {
-			a.depth[at] = a.depth[n.fail]
-		}
-		n.match = a.match[at]
-		a.fail[at], a.length[at] = n.fail, n.depth
-		if fold {
-			a.patterns[at] = n.patterns
-			if len(n.edges) > 0 {
-				a.prefixes[at] = n.prefixes
+		a.nodes[at].match = max(a.nodes[at].match, a.nodes[a.nodes[at].fail].match)
+		for next := a.nodes[at].child; next != 0; next = a.nodes[next].sibling {
+			if at != 0 {
+				fail := a.nodes[at].fail
+				for {
+					if target := a.child(fail, a.nodes[next].letter); target != 0 {
+						a.nodes[next].fail = target
+						break
+					}
+					if fail == 0 {
+						break
+					}
+					fail = a.nodes[fail].fail
+				}
 			}
-			a.links[at] = n.fail
-			if len(nodes[n.fail].patterns) == 0 {
-				a.links[at] = a.links[n.fail]
-			}
+			queue = append(queue, next)
 		}
-		if at != 0 {
-			copy(a.next[at*a.width:(at+1)*a.width], a.next[n.fail*a.width:(n.fail+1)*a.width])
+	}
+	starts := 0
+	for c, node := range a.root {
+		if node != 0 {
+			starts++
+			a.onlyStart = byte(c)
 		}
-		for c, child := range n.edges {
-			nodes[child].fail = a.next[n.fail*a.width+a.classes[c]]
-			if at == 0 {
-				nodes[child].fail = 0
-			}
-			a.next[at*a.width+a.classes[c]] = child
-			queue = append(queue, child)
-		}
+	}
+	a.singleStart = starts == 1
+	a.nodes = slices.Clone(a.nodes)
+	if fold {
+		a.samples = slices.Clone(a.samples)
 	}
 	return a
 }
@@ -149,11 +187,11 @@ func percentEqual(text, pattern string) bool {
 	return true
 }
 
-func (a *automaton) matched(text string, at, end int) int {
+func (a *automaton) matched(text string, at int32, end int) int {
 	if !a.fold {
-		return a.match[at]
+		return int(a.nodes[at].match)
 	}
-	for state := at; state != 0; state = a.links[state] {
+	for state := at; state != 0; state = a.nodes[state].fail {
 		for _, pattern := range a.patterns[state] {
 			if percentEqual(text[end-len(pattern):end], pattern) {
 				return len(pattern)
@@ -163,14 +201,23 @@ func (a *automaton) matched(text string, at, end int) int {
 	return 0
 }
 
-func (a *automaton) tail(text string, at int) int {
+func (a *automaton) tail(text string, at int32) int {
 	if !a.fold {
-		return len(text) - a.depth[at]
+		for at != 0 && a.nodes[at].child == 0 {
+			at = a.nodes[at].fail
+		}
+		return len(text) - int(a.nodes[at].depth)
 	}
-	for state := at; state != 0; state = a.fail[state] {
+	for state := at; state != 0; state = a.nodes[state].fail {
+		if a.nodes[state].child == 0 {
+			continue
+		}
+		if percentEqual(text[len(text)-int(a.nodes[state].depth):], a.values[a.samples[state]-1][:a.nodes[state].depth]) {
+			return len(text) - int(a.nodes[state].depth)
+		}
 		for _, prefix := range a.prefixes[state] {
-			if percentEqual(text[len(text)-a.length[state]:], prefix) {
-				return len(text) - a.length[state]
+			if percentEqual(text[len(text)-int(a.nodes[state].depth):], prefix) {
+				return len(text) - int(a.nodes[state].depth)
 			}
 		}
 	}
@@ -178,17 +225,35 @@ func (a *automaton) tail(text string, at int) int {
 }
 
 func (a *automaton) scan(text string, spans []span, units []span) ([]span, int) {
-	at := 0
+	if len(a.nodes) == 1 || a.singleStart && (!a.fold || a.onlyStart < 'A' || a.onlyStart > 'F') && strings.IndexByte(text, a.onlyStart) < 0 {
+		return spans, len(text)
+	}
+	var at int32
+	start := len(spans)
 	for i := range len(text) {
 		c := text[i]
 		if a.fold {
 			c = foldHex(c)
 		}
-		at = a.next[at*a.width+a.classes[c]]
+		for {
+			if next := a.child(at, c); next != 0 {
+				at = next
+				break
+			}
+			if at == 0 {
+				break
+			}
+			at = a.nodes[at].fail
+		}
 		if length := a.matched(text, at, i+1); length > 0 {
 			sp := span{i + 1 - length, i + 1}
 			if units != nil {
 				sp = span{units[sp.lo].lo, units[sp.hi-1].hi}
+			}
+			for len(spans) > start && sp.lo < spans[len(spans)-1].hi {
+				previous := spans[len(spans)-1]
+				sp.lo, sp.hi = min(previous.lo, sp.lo), max(previous.hi, sp.hi)
+				spans = spans[:len(spans)-1]
 			}
 			spans = append(spans, sp)
 		}
@@ -196,9 +261,9 @@ func (a *automaton) scan(text string, spans []span, units []span) ([]span, int) 
 	return spans, a.tail(text, at)
 }
 
-func (m *compiledMatcher) view(text string, units []span, spans []span) ([]span, int) {
+func (m *patternMatcher) view(text string, units []span, spans []span) ([]span, int) {
 	spans, cut := m.exact.scan(text, spans, units)
-	if m.percent.width > 1 && strings.IndexByte(text, '%') >= 0 {
+	if len(m.percent.nodes) > 1 {
 		var percentCut int
 		spans, percentCut = m.percent.scan(text, spans, units)
 		cut = min(cut, percentCut)
@@ -214,8 +279,8 @@ func (m *compiledMatcher) view(text string, units []span, spans []span) ([]span,
 }
 
 // scan also maps prefixes in two JSON escape views back to their raw byte boundary.
-func (m *compiledMatcher) scan(text string, partial bool) ([]span, int) {
-	if m.exact.width == 1 {
+func (m *patternMatcher) scan(text string, partial bool) ([]span, int) {
+	if len(m.exact.nodes) == 1 && len(m.percent.nodes) == 1 {
 		return nil, len(text)
 	}
 	found, cut := m.view(text, nil, nil)
@@ -241,9 +306,24 @@ func (m *compiledMatcher) scan(text string, partial bool) ([]span, int) {
 			cut = min(cut, escapedCut)
 		}
 	}
+	return found, cut
+}
+
+func (m *compiledMatcher) scan(text string, partial bool) ([]span, int) {
+	var found []span
+	cut := len(text)
+	for _, group := range m.groups {
+		spans, end := group.scan(text, partial)
+		found = append(found, spans...)
+		cut = min(cut, end)
+	}
 	if len(found) == 0 {
 		return nil, cut
 	}
+	return mergeSpans(found), cut
+}
+
+func mergeSpans(found []span) []span {
 	slices.SortFunc(found, func(a, b span) int { return a.lo - b.lo })
 	merged := found[:1]
 	for _, sp := range found[1:] {
@@ -254,7 +334,7 @@ func (m *compiledMatcher) scan(text string, partial bool) ([]span, int) {
 			merged = append(merged, sp)
 		}
 	}
-	return merged, cut
+	return merged
 }
 
 // A partial escape is kept by the same decoder that handles complete escapes.
@@ -287,11 +367,17 @@ func partialJSONEscape(text string) bool {
 }
 
 func (m *compiledMatcher) mask(text string) string {
-	for {
+	// Marker edges can recreate a pattern. Bound closure work even for a chain
+	// such as repeated "ab" followed by a match for "ab**".
+	for range 4 {
 		spans, _ := m.scan(text, false)
 		if len(spans) == 0 {
 			return text
 		}
 		text = replaceSpans(text, spans, "***")
 	}
+	if spans, _ := m.scan(text, false); len(spans) > 0 {
+		return "***"
+	}
+	return text
 }
