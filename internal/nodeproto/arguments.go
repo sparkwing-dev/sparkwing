@@ -159,17 +159,24 @@ func PrepareJobArguments(arguments []ArgumentDescription, raw map[string]string)
 // ValidateJobArgumentNamespace keeps late declarations in the discovered flag namespace.
 func ValidateJobArgumentNamespace(static []ArgumentDescription, jobs []JobSpec) error {
 	arguments := slices.Clone(static)
+	var jobArguments []ArgumentDescription
 	for _, job := range jobs {
-		if err := ValidateArgumentDeclarations(job.Arguments); err != nil {
-			return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
-		}
+		jobArguments = append(jobArguments, job.Arguments...)
 		for _, argument := range job.Arguments {
 			if !slices.ContainsFunc(static, func(known ArgumentDescription) bool {
-				return known.JobID == job.ID && reflect.DeepEqual(known, argument)
+				if known.JobID == "" {
+					return false
+				}
+				// Discovery uses zero inputs, so invocation inputs can change job IDs.
+				known.JobID = argument.JobID
+				return reflect.DeepEqual(known, argument)
 			}) {
 				arguments = append(arguments, argument)
 			}
 		}
+	}
+	if err := ValidateArgumentDeclarations(jobArguments); err != nil {
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 	}
 	if err := ValidateArgumentDeclarations(arguments); err != nil {
 		return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}

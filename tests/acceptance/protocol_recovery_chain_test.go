@@ -136,7 +136,15 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 			if result.Error != nil || !reflect.DeepEqual(result.Value, fake) {
 				t.Errorf("process expansion = %+v, want %s", result, fake)
 			}
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1, Settled: []string{}})
+			var generated []nodeproto.JobSpec
+			if err := json.Unmarshal(result.Value, &generated); err != nil {
+				t.Fatal(err)
+			}
+			args, err := nodeproto.PrepareJobArguments(generated[2].Arguments, tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Args: args, Attempt: 1, Settled: []string{}})
 			reply := protocolProbeReply(t, process, "body")
 			var body nodeproto.RunResult
 			decodeProtocolProbe(t, reply, &body)

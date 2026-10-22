@@ -86,6 +86,7 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 			value = args[i]
 		}
 		if found {
+			arg.Name = flagName
 			normalized, err := nodeproto.ValidateArgument(arg, value)
 			if err != nil {
 				return nil, err

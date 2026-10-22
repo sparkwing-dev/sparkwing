@@ -1281,8 +1281,10 @@ those values from the accepted run snapshot. Supplied flags declared only by a
 generator require the pipeline's extra-flag bag. The accepted run seals static
 `Resolved.ArgumentDeclarations`. The host validates these together with persisted
 and new generated declarations, so long and short flag names remain unique across
-the pipeline. Each job prepares its defaults against the immutable accepted
-argument values.
+the pipeline. Invocation inputs can change a described job's ID. Its argument
+declaration must still match the discovered declaration except for that ID, and
+two invocation jobs cannot claim the same flag. Each job prepares its defaults
+against the immutable accepted argument values.
 
 The host sends prepared values in `args` on `run_step` and `eval` requests for
 jobs with argument declarations, including generator replay. SDKs decode these

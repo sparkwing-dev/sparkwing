@@ -148,3 +148,24 @@ PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache:
   guardcheck -fast and git diff --check.
 Full suites, PostgreSQL, full architecture/lint and socket-dependent coverage
 remain with the lead. Scratch /tmp/sw-astra-CU was removed after verification.
+
+CU continuation 8 - base 5bd583c20; integration is already an ancestor of HEAD.
+Reproduced all five failures in the lead's CU-tests.md before editing.
+Fixed namespace validation for job IDs changed by invocation inputs, while keeping
+declaration equality and invocation-wide long/short uniqueness. The new namespace
+test failed before the fix. CLI enum/type errors now use the supplied flag name.
+Updated stale required-argument, accepted-spec and generated-execution fixtures.
+Independent correctness review found no issues or new mechanisms.
+
+PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache:
+- Full internal/nodeproto, internal/argvalue, internal/runspec, sparkwing,
+  sparkwing/sparkwingtest and internal/doccheck package tests.
+- Focused CLI alias/argument/help/plan tests, host SDK/argument/annotation/replay
+  tests, FuzzGeneratorReplayPreservesEveryAcceptedDeclaration seeds and
+  TestSealedSecretsStayMaskedInNativeSDKStreams.
+- All TestProtocol acceptance cases, normal and rewrite_integration.
+- Focused rewrite_integration nodeproto/nodehost/CLI regressions.
+- go build -o /dev/null ./cmd/..., guardcheck -fast, docs mirror, diff whitespace.
+NOT RUN: full suites and PostgreSQL remain with lead. pkg/docs socket tests
+cannot execute here (httptest listener refused: operation not permitted).
+No commits or Git metadata changes. No scratch directory remains.

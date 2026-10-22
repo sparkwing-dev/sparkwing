@@ -149,7 +149,7 @@ func TestPlanErrorsNameTheirCause(t *testing.T) {
 	}{
 		"invalid_args": {
 			plan:    fixturePlan,
-			want:    `demo: invalid arguments: describe failed: invalid_args (details withheld: secrets not yet known)`,
+			want:    `demo: invalid arguments: argument --env is required`,
 			invalid: true,
 		},
 		"unknown flag": {
