@@ -1016,3 +1016,18 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-21 Korey decision 48: masking is a host feature
 
 - Ratifies decision 43's consequence: pipeline code run without a Sparkwing host (a pipeline binary or SDK invoked directly) gets no secret masking, as it gets no concurrency or other host-provided guarantees. Every supported run path (sparkwing run, runners, Cloud, sparkwingtest) goes through the host. Documented as a host feature, matching GitHub Actions, where masking happens in the runner's log stream.
+
+## 2026-10-21 Korey decision 49: only the length rule refuses a secret
+
+- Amends decision 43. Secrets containing `***` are not refused. The contrived case where masking one secret forms another secret that contains the marker is accepted (rare, low severity); the masking property test excludes marker-containing secrets with a comment explaining why.
+- Ratifies the narrowed length rule: refuse only values a customer stores or supplies that are shorter than 4 characters (stored secrets, supplied secret args and list items, non-empty secret defaults of the selected pipeline). Derived values (proxy credential parts, encodings) shorter than the minimum are skipped for masking, not refused; defaults of unselected pipelines and empty defaults are not validated.
+
+## 2026-10-21 Korey decision 50: overbuilt-code cuts and SDK rules moved to the host
+
+- Cut (rare, cheap, manually recoverable; simplicity/OVERBUILT-SWEEP.md): the unused objectguard measurement coalescer; the cross-controller bucket-measurement lease (decision 29 allows one controller); the self-repairing diagnostic incarnation counter (use a fresh identity); the temporary storage-ceiling thaw policy; physical-space accounting during cache deletion; transactional hook installation with concurrent-edit detection; snapshot-exact `daemon events` continuation cursors. The binary-cache eviction queue becomes a plain bounded scan that deletes oldest entries. `hooks status --prove` (synthetic commit proof) is replaced by a status check comparing installed hooks with the expected content; DELIVERY.md's gates policy is updated to match.
+- Moved to the host (simplicity/SDK-TO-HOST-SWEEP.md): argument defaults, required/unknown checks, validation and normalization (SDKs keep typed shells; one host validator after describe is authoritative); plan validation (TypeScript's independent DAG checker deleted); secret declaration validation; label normalization (claims lane); the annotation range check. Memo input computation moves to the executing host after the admission redesign lands (existing memo caches are invalidated).
+
+## 2026-10-21 Korey decision 51: approvals hold no concurrency slots
+
+- An approval node cannot declare concurrency groups; acceptance refuses the declaration with an error pointing at the job after the approval. Only jobs that execute on a machine take slots.
+- An approval's skip-if runs on the run's coordinator before the approval is requested, holding no capacity; a skip settles as skipped through the one verdict owner. The job after the approval takes its slots normally (decision 42 applies to it).
