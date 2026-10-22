@@ -52,7 +52,16 @@ func TestClaimSeededDisjointLabelsAndFairShare(t *testing.T) {
 			node := fmt.Sprintf("job-%06d", sequence)
 			sequence++
 			execution, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{label}}})
-			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,?,?,'pending',?, ?,?)`, team, run, node, sequence, []byte(`{}`), execution)
+			if err := s.inTx(t.Context(), func(tx *storeTx) error {
+				requirements, err := persistClaimRequirementsTx(t.Context(), tx, Team(team), []string{label})
+				if err != nil {
+					return err
+				}
+				_, err = tx.ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) VALUES (?,?,?,'pending',?,?,?,?)`, team, run, node, sequence, []byte(`{}`), execution, requirements)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
 			pending[team+"/"+node] = label
 		}
 	}

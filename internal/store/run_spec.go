@@ -385,7 +385,11 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if snapshot.execution.Lineage.RetryOf != "" {
 		delivery, replayKey = "", ""
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES (?,?,'pending',?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey)
+	requirements, err := persistClaimRequirementsTx(ctx, tx, team, input.Options.Requires.Value)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key,claim_requirements) VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey, requirements)
 	return err
 }
 
@@ -408,6 +412,13 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 	}
 	if count != 1 {
 		return authorityError(apierr.SpecDrift, "run already has a sealed plan")
+	}
+	requirements, err := persistClaimRequirementsTx(ctx, tx, team, spec.Resolved.Settings.Options.Requires.Value)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE triggers SET claim_requirements=? WHERE team=? AND id=?`, requirements, team, id); err != nil {
+		return err
 	}
 	for _, job := range plan.Jobs {
 		execution, ok := spec.Resolved.Settings.Jobs[job.ID]

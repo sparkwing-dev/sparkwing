@@ -5,22 +5,25 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"modernc.org/sqlite"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func BenchmarkClaimQuery50000(b *testing.B) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
 		b.Run(dialect.String(), func(b *testing.B) {
-			for _, scenario := range []string{"selective", "no-match", "skewed-team"} {
+			for _, scenario := range []string{"selective", "no-match", "skewed-team", "broad", "ranked", "metered"} {
 				b.Run(scenario, func(b *testing.B) { benchmarkClaimQuery(b, dialect, scenario) })
 			}
 		})
@@ -89,30 +92,48 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 			b.Fatal(err)
 		}
 	}
-	exec(`INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)`)
 	request := []byte(`{"request":{"mode":"execute","dispatch":"host","options":{}},"provenance":{"trust":"asserted"}}`)
-	for _, team := range []string{"a", "b"} {
+	if scenario == "ranked" || scenario == "metered" {
+		request = []byte(`{"request":{"mode":"execute","dispatch":"controller","options":{}},"provenance":{"trust":"asserted"}}`)
+	}
+	teams := make([]claimTeamFacts, 200)
+	for i := range teams {
+		team := fmt.Sprintf("team-%03d", i)
+		exec(`INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, team)
 		exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,?,1,'bench','running',?,'request',1,'gh:1','https://github.com/acme/repo','github.com/acme/repo','host','execute',?,'',1,'r30',30)`, team, "run-"+team, request, []byte(`[]`))
+		teams[i] = claimTeamFacts{Team: team, Available: 128, Balance: 1e12}
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
-	statement, err := tx.PrepareContext(ctx, rewritePh(dialect, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,?,?,'pending',1,?,?)`))
+	state := &Store{db: db, dialect: dialect}
+	wrapped := &storeTx{tx: tx, dialect: dialect, store: state, operator: state.AsOperator(), clock: func(context.Context) (time.Time, error) { return time.Unix(1700000000, 0), nil }}
+	keys := make(map[string]string)
+	for _, team := range teams {
+		for _, label := range []string{"eligible", "unavailable"} {
+			key, err := persistClaimRequirementsTx(ctx, wrapped, Team(team.Team), []string{label})
+			if err != nil {
+				b.Fatal(err)
+			}
+			keys[team.Team+"/"+label] = key
+		}
+	}
+	statement, err := tx.PrepareContext(ctx, rewritePh(dialect, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) VALUES (?,?,?,'pending',?, ?,?,?)`))
 	if err != nil {
 		b.Fatal(err)
 	}
 	for i := range 50000 {
-		team := "a"
-		if scenario != "skewed-team" && i%2 == 1 || scenario == "skewed-team" && i == 49999 {
-			team = "b"
+		team := teams[i%len(teams)].Team
+		if scenario == "skewed-team" && i < 49999 {
+			team = teams[0].Team
 		}
 		required := "unavailable"
-		if scenario != "no-match" && i == 49999 {
+		if scenario == "broad" || scenario != "no-match" && i == 49999 {
 			required = "eligible"
 		}
 		body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{required}}})
-		if _, err = statement.ExecContext(ctx, team, "run-"+team, fmt.Sprintf("job-%05d", i), []byte(`{}`), body); err != nil {
+		if _, err = statement.ExecContext(ctx, team, "run-"+team, fmt.Sprintf("job-%05d", i), i+1, []byte(`{}`), body, keys[team+"/"+required]); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -123,23 +144,29 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		b.Fatal(err)
 	}
 	facts := []claimFacts{{Prefix: "benchmark", Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"eligible"}, Tier: TierCloud}}
-	teams := []claimTeamFacts{{Team: "a", Available: 128, Balance: 1e12}, {Team: "b", Available: 128, Balance: 1e12}}
-	q := claimSQL{dialect: dialect}
-	query, err := q.query(facts, teams, DefaultCreditRateTable(DefaultCreditRateMicro), []capability.UnitKind{capability.UnitNode}, UnitDemand{CapabilityPrefix: "benchmark"}, time.Unix(1700000000, 0).UnixNano())
+	if scenario == "metered" {
+		facts[0].Metered = 1
+	}
+	for i := range 999 {
+		facts = append(facts, claimFacts{Prefix: fmt.Sprintf("observer-%04d", i), Team: teams[i%len(teams)].Team, ObservedAt: 1700000000000000000, Trust: "any", Kinds: []string{"node"}, Labels: []string{fmt.Sprintf("other-%04d", i)}, Tier: TierSelfHosted})
+	}
+	template := claimSQL{dialect: dialect, facts: facts, teams: teams, rates: DefaultCreditRateTable(DefaultCreditRateMicro), kinds: []capability.UnitKind{capability.UnitNode}, now: 1700000000000000000}
+	demand := UnitDemand{CapabilityPrefix: "benchmark", Kinds: template.kinds}
+	tx, err = db.BeginTx(ctx, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
-	if dialect == DialectSQLite {
-		query = strings.Replace(query, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`, 1)
-	}
-	query = rewritePh(dialect, query)
+	defer func() { _ = tx.Rollback() }()
+	wrapped.tx = tx
+	var result UnitRef
+	samples := make([]time.Duration, 0, b.N)
 	b.ResetTimer()
 	for range b.N {
-		var team, run, node, kind string
-		var generation int64
-		err = db.QueryRowContext(ctx, query, q.args...).Scan(&team, &run, &node, &generation, &kind)
+		start := time.Now()
+		result, err = searchClaimTx(ctx, wrapped, demand, &template)
+		samples = append(samples, time.Since(start))
 		if scenario == "no-match" {
-			if err != sql.ErrNoRows {
+			if !errors.Is(err, ErrNotFound) {
 				b.Fatalf("no-match: %v", err)
 			}
 		} else if err != nil {
@@ -147,20 +174,78 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		}
 	}
 	b.StopTimer()
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	b.ReportMetric(float64(samples[(len(samples)-1)*95/100].Nanoseconds()), "p95-ns/op")
 	b.ReportMetric(50000, "ready_jobs")
+	b.ReportMetric(200, "teams")
+	b.ReportMetric(1000, "claimants")
+	routeQuery, routeArgs, err := template.routesSQL()
+	if err != nil {
+		b.Fatal(err)
+	}
 	if dialect == DialectSQLite {
-		b.ReportMetric(float64(examined.Load())/float64(b.N), "candidate_visits/op")
+		probeQuery := strings.ReplaceAll(routeQuery, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
+		rows, err := tx.QueryContext(ctx, rewritePh(dialect, probeQuery), routeArgs...)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for rows.Next() {
+			var a, c string
+			var o int64
+			var head sql.NullString
+			if err = rows.Scan(&a, &c, &o, &head); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+			b.Fatal(err)
+		}
+		// Selection rechecks the chosen row in the complete predicate.
+		if result.RunID != "" {
+			q := claimSQL{dialect: dialect}
+			named := demand
+			named.Target = &result
+			query, err := q.query(facts, teams, template.rates, []capability.UnitKind{result.Kind}, named, template.now)
+			if err != nil {
+				b.Fatal(err)
+			}
+			query = strings.ReplaceAll(query, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
+			var team, run, node, kind string
+			var gen int64
+			if err = tx.QueryRowContext(ctx, query, q.args...).Scan(&team, &run, &node, &gen, &kind); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportMetric(float64(examined.Load()), "candidate_visits/op")
 	} else {
 		var raw []byte
-		if err = db.QueryRowContext(ctx, `EXPLAIN (ANALYZE, FORMAT JSON) `+query, q.args...).Scan(&raw); err != nil {
+		if err = tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+rewritePh(dialect, routeQuery), routeArgs...).Scan(&raw); err != nil {
 			b.Fatal(err)
 		}
 		var plans []map[string]any
 		if err = json.Unmarshal(raw, &plans); err != nil {
 			b.Fatal(err)
 		}
-		b.ReportMetric(claimPlanVisits(plans[0]["Plan"].(map[string]any)), "candidate_visits/op")
-		b.Logf("EXPLAIN ANALYZE: %s", raw)
+		visits := claimPlanVisits(plans[0]["Plan"].(map[string]any))
+		b.Logf("route EXPLAIN ANALYZE: %s", raw)
+		if result.RunID != "" {
+			q := claimSQL{dialect: dialect}
+			named := demand
+			named.Target = &result
+			query, err := q.query(facts, teams, template.rates, []capability.UnitKind{result.Kind}, named, template.now)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err = tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+rewritePh(dialect, query), q.args...).Scan(&raw); err != nil {
+				b.Fatal(err)
+			}
+			if err = json.Unmarshal(raw, &plans); err != nil {
+				b.Fatal(err)
+			}
+			visits += claimPlanVisits(plans[0]["Plan"].(map[string]any))
+			b.Logf("predicate EXPLAIN ANALYZE: %s", raw)
+		}
+		b.ReportMetric(visits, "candidate_visits/op")
 	}
 }
 

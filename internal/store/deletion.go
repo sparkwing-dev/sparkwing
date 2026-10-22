@@ -504,12 +504,12 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 	})
 }
 
-// safety: runs goes last so the rows that reference a run are removed by
-// their own statements rather than by a cascade from a very large delete.
+// Run dependents go first to avoid a large cascade; requirement sets follow
+// the work rows that reference them.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	tables := append([]string{"capabilities", "sessions", "payment_events"}, tenantTables...)
 	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
-	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
+	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" || t == "claim_requirements" }), "quota_admission", "runs", "claim_requirements") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}

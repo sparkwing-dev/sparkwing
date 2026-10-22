@@ -586,7 +586,11 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) erro
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,seq) VALUES (?,?,?,'pending',?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, []byte(row.Spec), row.SpecHash, execution, row.Expansion, team, row.Ref.RunID)
+	requirements, err := persistClaimRequirementsTx(ctx, tx, team, row.Execution.Requires.Value)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,claim_requirements,seq) VALUES (?,?,?,'pending',?,?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, []byte(row.Spec), row.SpecHash, execution, row.Expansion, requirements, team, row.Ref.RunID)
 	return err
 }
 

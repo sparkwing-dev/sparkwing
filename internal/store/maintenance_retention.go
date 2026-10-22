@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -134,6 +135,7 @@ ORDER BY r.finished_at,r.team,r.id LIMIT ?`, cutoff.UnixNano(), limit)
 		return 0, 0, err
 	}
 	var count, released int64
+	var teams []Team
 	for _, run := range runs {
 		res, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE team = ? AND id = ? AND finished_at < ? AND NOT EXISTS (SELECT 1 FROM pipeline_success_pins p WHERE p.team = runs.team AND p.run_id = runs.id) AND NOT EXISTS (SELECT 1 FROM run_effects e WHERE e.team = runs.team AND e.run_id = runs.id AND e.delivered_rev < e.desired_rev)`, run.team, run.id, cutoff.UnixNano())
 		if err != nil {
@@ -145,6 +147,15 @@ ORDER BY r.finished_at,r.team,r.id LIMIT ?`, cutoff.UnixNano(), limit)
 		}
 		count += n
 		released += n * run.bytes
+		if n > 0 && !slices.Contains(teams, run.team) {
+			teams = append(teams, run.team)
+		}
+	}
+	slices.Sort(teams)
+	for _, team := range teams {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM claim_requirements WHERE team=? AND id NOT IN (SELECT claim_requirements FROM nodes WHERE team=? UNION SELECT claim_requirements FROM triggers WHERE team=?)`, team, team, team); err != nil {
+			return 0, 0, err
+		}
 	}
 	return count, released, nil
 }

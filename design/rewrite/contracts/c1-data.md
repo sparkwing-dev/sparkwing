@@ -826,6 +826,11 @@ The native scenario catalog is unchanged.
 Every named, queued, personal, burst, self-hosted, pool and Cloud claim uses one
 SQL eligibility predicate. It includes readiness, current grants and bindings,
 repository access, trust, all selector terms, exclusions, placement and funding.
+Selector terms and alternatives are normalized once when work is sealed. Ready
+source indexes are keyed by team, requirement set, arrival and identity. Label
+lookups select matching requirement sets, and a transaction-local merge checks
+each route's head with the shared predicate. Rejected heads advance only that
+transaction's route. Named rechecks seek the complete team and unit key.
 There is no persisted scan state. Ordering uses each team's last committed award
 ordinal, then arrival and stable identity. Only an awarded claim advances that
 ordinal. Queue arbitration serializes asks and awards. Claims take the controller
@@ -833,6 +838,9 @@ lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration after a ledger lock poisons the transaction before acquiring the queue
 lock. Award rechecks SQL eligibility and reserves the unit and funding atomically.
 A committed ask can still hold the award for its preferred claimant.
+Requirement references prevent retention from removing a set still used by work.
+Run retention removes unreferenced sets and their terms. Work without ranking,
+burst placement or preferences omits those relations from its SQL plan.
 Private owner placement projections use that same SQL predicate before readiness.
 They write no asks, awards, reservations or fair-share ordinals. Readiness is
 rechecked when the owner asks to execute.
@@ -4282,7 +4290,7 @@ Runs, nodes and triggers store a generated `drain_deadline_at` from their first
 `cancel_requested_at` plus five minutes. The database derives it in the same
 write, including concurrency supersession. Cancellation clamps existing work and
 slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
-bounds. The schema baseline is version 21.
+bounds. The schema baseline is version 22.
 The shared capacity writer applies the bound to each holder and waiter,
 including controller reconciliation.
 Node capacity follows the later live claim or owner lease; plan capacity follows
