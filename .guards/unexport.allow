@@ -4,7 +4,6 @@
 # .guards/README.md.
 # The package move accepts the existing exports in controller, storage and store
 # once. These counts measure declarations newly within internal/, not added code.
-internal/acceptance	13
 internal/admission	10
 internal/agentconfig	1
 internal/api	1

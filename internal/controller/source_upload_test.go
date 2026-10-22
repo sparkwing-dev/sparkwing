@@ -35,8 +35,8 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fixture *serverFixture
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: []byte(strings.Repeat("k", 32)), Now: func() time.Time { return teststore.Now(fixture.store) }})
+	// Signed-transfer issuance uses wall time, so verification must use it too.
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,6 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, cl
 		}
 	})
 	s, session := credentialSessionServerWith(t, func(s *Server) { s.WithSecretsCipher(cipher).WithDataObjects(objects) }, opts...)
-	fixture = s
 	h := s.Handler()
 	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.write","runs.read","runs.control"]}`, false)
 	var credential credentialResponse
