@@ -347,11 +347,18 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 				host, spec, _ := executorPolicyHost(t, deps, in)
 				spec.Resolved.Settings.Options.NoMemo.Value = true
 				in.Accepted.Spec, _ = json.Marshal(spec)
+				st.accepted = &in.Accepted
 				err := host.Execute(ctx, in)
 				if err == nil || strings.Contains(err.Error(), "private") || mode == "cancel" && !errors.Is(err, lease.ErrLeaseLost) {
 					t.Fatalf("memo failure = %v", err)
 				}
+				if len(*processes) != 1 {
+					t.Fatalf("memo process count = %d, error = %v", len(*processes), err)
+				}
 				if mode != "cancel" {
+					if len(st.changes) != 2 || st.changes[0].Cause != store.CauseStart || st.changes[1].Cause != store.CauseReport {
+						t.Fatalf("memo failure did not start and settle the job: %+v", st.changes)
+					}
 					result := st.changes[len(st.changes)-1].Extra.Result
 					if result == nil || result.Outcome != store.NodeFailed || strings.Contains(result.MaskedError, "private") {
 						t.Fatalf("memo failure became a successful result: %+v", result)
