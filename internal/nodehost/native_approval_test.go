@@ -25,7 +25,6 @@ import (
 
 func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 	job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}
-	job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "approval", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 	f := newStoreHostFixture(t, plan)
 	ctx := t.Context()
@@ -94,7 +93,7 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testing.T) {
 	for _, mode := range []string{"open", "skip", "fail"} {
 		t.Run(mode, func(t *testing.T) {
-			job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "approval", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}}
+			job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}
 			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -151,8 +150,10 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 				t.Fatal("approval evaluator acquired compute")
 				return nil, nil
 			})}
-			if _, err := f.Store.AsOperator().RenewUnit(ctx, award.Award.CapabilityPrefix, true); err != nil { t.Fatalf("eval renewal: %v", err) }
- if err := f.Host.Evaluate(ctx, input, "gate", 0, *principal.Capability.Binding.Expansion); err != nil {
+			if _, err := f.Store.AsOperator().RenewUnit(ctx, award.Award.CapabilityPrefix, true); err != nil {
+				t.Fatalf("eval renewal: %v", err)
+			}
+			if err := f.Host.Evaluate(ctx, input, "gate", 0, *principal.Capability.Binding.Expansion); err != nil {
 				t.Fatal(err)
 			}
 			row := capacityRow(t, f, "gate")

@@ -273,7 +273,8 @@ const (
 // SkipPredicate is a function evaluated after upstream dependencies complete.
 // Executable-job predicates run on the executing host under the actual job
 // award, inside its acquired concurrency slot. A true result skips the body
-// and releases the job's groups. Approval predicates gate the human wait.
+// and releases the job's groups. Approval predicates run on the run's coordinator
+// before the human wait, holding no capacity.
 //
 // Predicates must be cheap and side-effect-free because their budget is short.
 // Long-running logic belongs in a dedicated job feeding typed output via Ref.

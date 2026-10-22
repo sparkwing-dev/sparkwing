@@ -230,6 +230,7 @@ type ApprovalConfig struct {
 }
 
 // Approval exposes only declarative gate behavior because gates execute no job hooks.
+// Gates cannot declare concurrency groups. Put groups on the job after the approval.
 type Approval struct {
 	id   string
 	node *JobNode
@@ -390,7 +391,8 @@ func (p *Plan) Checkout(config Checkout) *Plan {
 	return p
 }
 
-// SkipIf conditions gate admission without running executable before/after hooks.
+// SkipIf runs on the run's coordinator before requesting approval, holding no
+// concurrency capacity. A true predicate settles the gate as skipped.
 func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval {
 	a.node.SkipIf(predicate, opts...)
 	return a

@@ -3,12 +3,12 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"strings"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -19,7 +19,7 @@ import (
 
 func approvalEvaluationFixture(t *testing.T) (*Tenant, controllerwire.NodeRef, UnitClaim) {
 	t.Helper()
-	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "unused", Scope: new("global"), Capacity: new(1), Cost: new(1)}}}, {ID: "next", Needs: []string{"gate"}}}})
+	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}, {ID: "next", Needs: []string{"gate"}}}})
 	root := authorityRoot("approval-evaluator", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)

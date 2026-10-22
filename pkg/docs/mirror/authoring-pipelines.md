@@ -223,6 +223,11 @@ A skipped job satisfies `Needs`, so dependent jobs can still run. If skipping
 preparation must also skip its dependents, apply the predicate to those jobs
 or to a `JobGroup` containing them.
 
+An approval's `SkipIf` runs on the run's coordinator before requesting approval,
+holding no capacity. A true predicate marks the approval skipped and satisfies
+its dependencies. Approvals cannot declare concurrency groups. Put the group on
+the job after the approval so that job takes its slot on its executing host.
+
 To gate the whole pipeline instead of one job, use a `guards:` block (see
 below).
 

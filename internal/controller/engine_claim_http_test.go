@@ -336,8 +336,8 @@ func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
 }
 
 func TestEngineClaimHTTPCommitsRunnerObservations(t *testing.T) {
-	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	now := teststore.Now(e.Store)
+	now := time.Now().UTC()
+	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, teststore.WithClock(func() time.Time { return now }))
 	body := `{"runner_version":"v1","kinds":["node"],"available_cores":1,"labels":["tool:git","name=impostor","class=cloud","pool=forged"]}`
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 200)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")

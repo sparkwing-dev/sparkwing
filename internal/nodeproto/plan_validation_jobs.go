@@ -135,6 +135,9 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 	}
 	if len(job.Concurrency) > 0 {
+		if job.Approval != nil {
+			return planInvalid(path+".concurrency", fmt.Sprintf("approval %q cannot declare concurrency groups; put them on the job after the approval", job.ID))
+		}
 		if err := v.feature(CapabilityJobConcurrency, path+".concurrency"); err != nil {
 			return err
 		}

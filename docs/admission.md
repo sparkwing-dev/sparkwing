@@ -13,8 +13,11 @@ permit, including jobs without concurrency groups.
 An executable job evaluates `SkipIf` and memo first on its executing host, under
 that permit. The coordinator acquires no job groups for evaluation. A job that
 skips still waits for its slot and briefly occupies a machine, then settles skip
-and releases its groups. Approval-only predicates use fenced evaluation permission
-without job groups or compute. Their typed skip or failure settles in the store.
+and releases its groups. Approvals cannot declare concurrency groups. Acceptance
+refuses them with an error pointing at the job after the approval. An approval's
+`SkipIf` runs on the run's coordinator before requesting approval, holding no
+capacity. A true predicate settles as skipped through the same verdict owner.
+The store never runs SDK code.
 
 Recovery reconciles released work immediately. If plan capacity has lapsed,
 running jobs finish and their results settle while the run waits to reacquire.

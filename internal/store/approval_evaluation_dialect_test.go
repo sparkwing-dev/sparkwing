@@ -1,9 +1,12 @@
 package store_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -12,6 +15,32 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+func TestApprovalConcurrencyRefusedInEachDialect(t *testing.T) {
+	for _, dialect := range []struct {
+		name   string
+		target func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			s := dialect.target(t).Open(t, store.WithPolicies(sealStorePolicies))
+			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+				doc.Jobs = []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "deploy"}}}}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tenant.AcceptPlan(t.Context(), plan)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid || !strings.Contains(failure.Message, "gate") || !strings.Contains(failure.Message, "job after the approval") {
+				t.Fatalf("approval groups accepted or lost guidance: %v", err)
+			}
+			snapshot, err := tenant.ReadSnapshot(t.Context(), plan.RunID)
+			if err != nil || snapshot.Run.Spec != nil || len(snapshot.Nodes) != 0 {
+				t.Fatalf("refused approval persisted plan or jobs: %+v %v", snapshot, err)
+			}
+		})
+	}
+}
 
 func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 	for _, dialect := range []struct {

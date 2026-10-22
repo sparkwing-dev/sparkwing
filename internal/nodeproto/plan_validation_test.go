@@ -130,11 +130,32 @@ func TestValidatePlanValuesAndCapabilities(t *testing.T) {
 	for _, placement := range []Placement{PlacementLocal, PlacementLocalTriggered, PlacementRunnerHosted, PlacementLauncher, PlacementHere, PlacementGitHubActions} {
 		context := planContext()
 		context.Placement = placement
-		checkPlan(t, `{"jobs":[{"id":"a","approval":{},"closures":{"skip_if":["condition"]},"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}]}`, context, "")
+		checkPlan(t, `{"jobs":[{"id":"a","approval":{},"closures":{"skip_if":["condition"]}},{"id":"next","deps":["a"],"steps":[{"id":"run"}],"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}]}`, context, "")
 	}
 	context := planContext()
 	context.Placement = "unknown"
 	checkPlan(t, `{"jobs":[]}`, context, apierr.PlanInvalid)
+}
+
+func TestApprovalConcurrencyRefusedAtAcceptance(t *testing.T) {
+	for _, placement := range []Placement{PlacementLocal, PlacementLocalTriggered, PlacementRunnerHosted, PlacementLauncher, PlacementHere, PlacementGitHubActions} {
+		for _, expansion := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/expansion=%t", placement, expansion), func(t *testing.T) {
+				context := planContext()
+				context.Placement = placement
+				if expansion {
+					context.Expansion, context.SourceJob = true, "source"
+					context.ExistingJobs = []JobSpec{{ID: "source", Steps: []StepSpec{{ID: "run"}}, Closures: ClosureSpec{Generate: []string{"children"}}}}
+				}
+				raw := json.RawMessage(`{"jobs":[{"id":"gate","approval":{},"groups":["children"],"concurrency":[{"group":"deploy"}]}]}`)
+				_, err := ValidatePlan(raw, context)
+				failure, ok := err.(*apierr.Error)
+				if !ok || failure.Code != apierr.PlanInvalid || !strings.Contains(failure.Message, "gate") || !strings.Contains(failure.Message, "job after the approval") {
+					t.Fatalf("approval concurrency did not direct author to executable job: %v", err)
+				}
+			})
+		}
+	}
 }
 
 func TestPlanCapabilityLaunchParity(t *testing.T) {

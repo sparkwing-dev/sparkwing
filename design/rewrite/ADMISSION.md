@@ -27,11 +27,13 @@ the terminal outcome through the existing state machine and verdict owner.
 Owners return the committed finish verdict, including cancellation committed
 after their final scheduling snapshot.
 
-Approval-only predicates have no execution host. Store admission releases a
-fenced evaluation without job groups or compute. An owner evaluator, or an
-awarded evaluation unit for controller-owned runs, executes the SDK callback.
-The store commits skip, failure or opening the approval through one source-fenced
-boundary. A true predicate stays skipped. Expansions use the same release boundary.
+Approvals cannot declare concurrency groups. Acceptance refuses them and points
+at the job after the approval. An approval's SkipIf runs on the run's coordinator
+before requesting approval, holding no capacity. An owner evaluator, or an
+evaluation unit acting for a controller coordinator, executes the SDK callback.
+The store never runs SDK code. It commits skip, failure or approval opening
+through one fenced verdict boundary. A true predicate stays skipped. Expansions
+use the same release boundary.
 
 Acquisition, renewal and queue precedence use claim **or** owner liveness, bounded
 by the capacity lease and cancellation deadline. Acquisition and maintenance discard holders and waiters when neither source

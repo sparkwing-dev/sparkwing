@@ -15,12 +15,15 @@ new releases wait for lapsed plan capacity. Retained reservation identity and on
 arrival sequence belong to run/job, independent of owner generation. Claim or owner
 liveness preserves a retained arrival. An expired reservation cannot revive.
 
-Approval predicates have no execution host, groups or compute. Store admission
-releases their SDK evaluation under an owner or evaluation-unit fence. The store
-commits typed skip, failure or approval opening through that exact source boundary.
-Controller-owned predicates use evaluation units. Expansions use the same release
-permission and retain their own source fence. Completion follows the existing
-state machine, `Decide` and `runVerdictTx`.
+Approvals cannot declare concurrency groups. Initial and expansion acceptance
+refuse them with an error naming the approval and pointing at the job after it.
+An approval's SkipIf runs on the run's coordinator before requesting approval,
+holding no capacity. Store admission releases that SDK evaluation under an owner
+or evaluation-unit fence. The store never runs SDK code. It commits typed skip,
+failure or approval opening through that exact source boundary. Controller-owned
+predicates use evaluation units acting for the coordinator. Expansions use the
+same release permission and retain their own source fence. Completion follows
+the existing state machine, `Decide` and `runVerdictTx`.
 
 `StartGate` asks for a decision and then optional machine compute. It owns no
 logical semaphore. Burst uses a provisional award, logical admission, then a
