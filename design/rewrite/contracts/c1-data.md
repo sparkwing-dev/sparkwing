@@ -4236,6 +4236,12 @@ creates and locks each group entry before locking its holders. A first arrival
 that found no entry follows the same order after inserting or losing an insert
 race. Lease bounds use the transaction clock after that lock is held.
 
+Concurrent admission tests enter through accepted declarations and authenticated
+awards. Per-key accounting fixtures cannot model this boundary: reaping discards
+the work's whole group set under the admission owner. Barrier snapshots check
+complete sets, capacity, live-waiter FIFO and settlement while admission, execution
+and maintenance race on both store dialects.
+
 Schema baseline 17 adds `admission_work`. Run/job identity and arrival survive
 owner handoff. Its generation and holder bind a start permit to the actual award.
 Every start requires a permit, including jobs without groups. Process delegation

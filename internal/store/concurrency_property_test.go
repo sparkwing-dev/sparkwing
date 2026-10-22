@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -254,36 +253,6 @@ func runSequentialPropertySuite(t *testing.T, newStore func(*testing.T) *store.S
 	}
 }
 
-func runConcurrentPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
-	s := newStore(t)
-	for _, id := range []string{"r0", "r1", "r2", "r3", "r4"} {
-		createLiveRunT(t, s, id)
-	}
-	ctx := ctxT(t)
-	const goroutines = 8
-	errCh := make(chan error, goroutines)
-	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
-		seed := int64(100 + g)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			rng := rand.New(rand.NewSource(seed))
-			for i := 0; i < fuzzOps(150); i++ {
-				if err := concurrencyFuzzOp(t, ctx, s, rng); err != nil {
-					errCh <- fmt.Errorf("goroutine seed %d op %d: %w", seed, i, err)
-					return
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		t.Fatal(err)
-	}
-}
-
 func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
@@ -291,19 +260,8 @@ func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
 	runSequentialPropertySuite(t, func(t *testing.T) *store.Store { return storetest.OpenSQLite(t) })
 }
 
-func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
-	}
-	runConcurrentPropertySuite(t, func(t *testing.T) *store.Store { return storetest.OpenSQLite(t) })
-}
-
 func TestConcurrency_PropertyRandomOpsHoldInvariants_Postgres(t *testing.T) {
 	runSequentialPropertySuite(t, storetest.OpenPostgres)
-}
-
-func TestConcurrency_PropertyConcurrentOpsHoldInvariants_Postgres(t *testing.T) {
-	runConcurrentPropertySuite(t, storetest.OpenPostgres)
 }
 
 func TestConcurrency_PropertyFIFOPromotionOrder(t *testing.T) {

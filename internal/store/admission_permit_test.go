@@ -125,7 +125,7 @@ func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture) (store.Capaci
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := f.claimOwner(ctx, intake.RunID, "admission-blocker")
+	owner, err := f.claimOwner(ctx, intake.RunID, "admission-blocker-"+intake.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

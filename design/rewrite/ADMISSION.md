@@ -63,3 +63,6 @@ Mutation regressions reject coordinator predicates, recovery-entry gating,
 lost handoff arrivals, claim-first liveness, changed approval outcomes, memo
 refusals treated as misses and publication before success. The grant-owner guard
 rejects a second allocator. Both store dialects use the same fixtures.
+Concurrent workers use accepted plans and real awards to race admission, execution,
+settlement and whole-set reaping. Round barriers check complete reservations,
+capacity, live-waiter FIFO and eventual settlement without reading across writes.
