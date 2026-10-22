@@ -372,25 +372,25 @@ func TestStreamHoldsOnlyViablePrefix(t *testing.T) {
 }
 
 func TestIdleLineFlushPreservesUnknownSecretTail(t *testing.T) {
-	lines := newTestMasker("private-token").Stream().Lines()
-	if got := lines.Push("visible pri", false); len(got) != 0 {
+	lines := newTestMasker("private-token").lines()
+	if got := lines.push("visible pri", false); len(got) != 0 {
 		t.Fatal(got)
 	}
-	if got := lines.Idle(); got != "visible " {
+	if got := lines.idle(); got != "visible " {
 		t.Fatalf("idle = %q", got)
 	}
-	if got := lines.Push("vate-token\n", false); len(got) != 1 || got[0] != "***" {
+	if got := lines.push("vate-token\n", false); len(got) != 1 || got[0] != "***" {
 		t.Fatalf("continuation = %q", got)
 	}
 }
 
 func TestIdleLineFlushPreservesIncompleteUTF8(t *testing.T) {
-	lines := NewMasker().Stream().Lines()
-	lines.Push("safe \xe7", false)
-	if got := lines.Idle(); got != "safe " {
+	lines := NewMasker().lines()
+	lines.push("safe \xe7", false)
+	if got := lines.idle(); got != "safe " {
 		t.Fatalf("idle = %q", got)
 	}
-	if got := lines.Push("\xa7\x98\n", false); len(got) != 1 || got[0] != "秘" {
+	if got := lines.push("\xa7\x98\n", false); len(got) != 1 || got[0] != "秘" {
 		t.Fatalf("UTF-8 continuation = %q", got)
 	}
 }
@@ -461,13 +461,13 @@ func TestMaskBoundsReplacementClosure(t *testing.T) {
 }
 
 func TestSizeLineFlushPreservesIncompleteUTF8(t *testing.T) {
-	lines := NewMasker().Stream().Lines()
+	lines := NewMasker().lines()
 	prefix := strings.Repeat("x", (1<<20)-1)
-	got := lines.Push(prefix+"\xce", false)
+	got := lines.push(prefix+"\xce", false)
 	if len(got) != 1 || got[0] != prefix {
 		t.Fatalf("size flush emitted %d chunks", len(got))
 	}
-	got = lines.Push("\xbb\n", false)
+	got = lines.push("\xbb\n", false)
 	if len(got) != 1 || got[0] != "λ" {
 		t.Fatalf("UTF-8 continuation = %q", got)
 	}

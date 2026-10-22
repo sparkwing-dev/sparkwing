@@ -47,7 +47,7 @@ internal/limits	113
 internal/localsecrets	8
 internal/logpretty	6
 internal/logutil	2
-internal/nodehost	61
+internal/nodehost	60
 internal/nodeproto	43
 internal/objectguard	50
 internal/oidcissuer	8
@@ -71,7 +71,7 @@ internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
 internal/runspec	4
-internal/secrets	2
+internal/secrets	1
 internal/secretsource	2
 internal/sessionledger	8
 internal/settings	55

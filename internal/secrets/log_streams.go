@@ -9,17 +9,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-// TextStream preserves byte boundaries until masking is complete.
-type TextStream struct {
+type textStream struct {
 	stream *Stream
 	held   string
 }
 
-func (s *Stream) Lines() *TextStream { return &TextStream{stream: s} }
+func (m *Masker) lines() *textStream { return &textStream{stream: m.Stream()} }
 
-func (m *Masker) lines() *TextStream { return &TextStream{stream: m.Stream()} }
-
-func (s *TextStream) Push(chunk string, eof bool) []string {
+func (s *textStream) push(chunk string, eof bool) []string {
 	s.held += s.stream.Mask(chunk)
 	if eof {
 		s.held += s.stream.Flush()
@@ -36,7 +33,7 @@ func (s *TextStream) Push(chunk string, eof bool) []string {
 	if (eof || len(s.held) >= 1<<20) && s.held != "" {
 		text := s.held
 		if !eof {
-			text = s.Idle()
+			text = s.idle()
 		} else {
 			s.held = ""
 		}
@@ -47,9 +44,9 @@ func (s *TextStream) Push(chunk string, eof bool) []string {
 	return lines
 }
 
-// Idle releases an incomplete line only after its bytes have cleared masking.
+// idle releases an incomplete line only after its bytes have cleared masking.
 // A suffix that might complete a secret remains in the underlying Stream.
-func (s *TextStream) Idle() string {
+func (s *textStream) idle() string {
 	cut := len(s.held)
 	for at := max(0, cut-utf8.UTFMax+1); at < len(s.held); at++ {
 		if utf8.RuneStart(s.held[at]) && !utf8.FullRuneInString(s.held[at:]) {
@@ -70,7 +67,7 @@ type LogStreams struct {
 }
 
 type logStream struct {
-	lines *TextStream
+	lines *textStream
 	frame nodeproto.FrameLog
 }
 
@@ -105,7 +102,7 @@ func (s *LogStreams) Text(key string, frame nodeproto.FrameLog, chunk string, eo
 	if frame.TS != "" {
 		stream.frame.TS = frame.TS
 	}
-	lines := stream.lines.Push(chunk, eof)
+	lines := stream.lines.push(chunk, eof)
 	frames := make([]nodeproto.FrameLog, 0, len(lines))
 	for _, line := range lines {
 		record := stream.frame
@@ -140,7 +137,7 @@ func (s *LogStreams) Buffered() bool {
 func (s *LogStreams) Idle() []nodeproto.FrameLog {
 	var frames []nodeproto.FrameLog
 	for _, stream := range s.streams {
-		if text := stream.lines.Idle(); text != "" {
+		if text := stream.lines.idle(); text != "" {
 			frame := stream.frame
 			frame.Message = text
 			frames = append(frames, s.masker.Log(frame))

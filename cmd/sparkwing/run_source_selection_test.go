@@ -183,7 +183,11 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 				}
 			}()
 			inspected, err := inspectTriggerSource(t.Context(), preparedTriggerSource{pipeline: "deploy-prod", git: sealed.Request.Git, source: sealed.Request.Source}, os.Environ(), options)
-			if err != nil || len(inspected.Declarations().Pipelines) != 1 || inspected.Declarations().Pipelines[0].Help != codeRevisionForTest(tc.pipelineSHA, head)+"/"+tc.execution {
+			if err != nil {
+				t.Fatal(err)
+			}
+			pipeline, ok := inspected.Declarations().Pipeline(tc.entry)
+			if !ok || pipeline.Help != codeRevisionForTest(tc.pipelineSHA, head)+"/"+tc.execution {
 				t.Fatalf("inspection did not use hosting acquisition: %+v %v", inspected, err)
 			}
 			processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
