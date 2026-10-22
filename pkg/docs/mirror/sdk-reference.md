@@ -495,7 +495,7 @@ type HelpProvider interface {
 
 ### type InputError
 
-InputError is what a Registration's Invoke returns when args fail the declared flags of the pipeline or of a job's WithArgs: a missing required flag, a value of the wrong type or outside its enum, or a flag nothing declares.
+InputError reports a typed decoding failure in pipeline Inputs or a job's WithArgs.
 
 ```
 type InputError struct {

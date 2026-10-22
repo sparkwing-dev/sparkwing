@@ -42,11 +42,9 @@ var (
 	registry = map[string]*registration{}
 )
 
-// InputError is what a Registration's Invoke returns when args fail the
-// declared flags of the pipeline or of a job's [WithArgs]: a missing required
-// flag, a value of the wrong type or outside its enum, or a flag nothing
-// declares. Any other Invoke error comes from the pipeline's Plan. Tell them
-// apart with errors.As:
+// InputError reports a typed decoding failure in pipeline Inputs or a job's
+// [WithArgs]. The host validates arguments before invoking the SDK.
+// Use errors.As to distinguish decoding failures from errors in Plan:
 //
 //	var inErr *sparkwing.InputError
 //	if errors.As(err, &inErr) { ... }

@@ -155,7 +155,7 @@ var commandSynopses = map[string]string{
 	"sparkwing cache":                               "Inspect or trim the compiled pipeline binary cache",
 	"sparkwing cache explain":                       "Show a pipeline's cache key and the inputs behind it",
 	"sparkwing cache info":                          "Print cache dir, size, ceilings, and recent entries",
-	"sparkwing cache prune":                         "Evict least recently used binaries down to the ceilings",
+	"sparkwing cache prune":                         "Prune oldest cached binaries down to the ceilings",
 	"sparkwing cache warm":                          "Prepare the local pipeline cache and dependencies",
 	"sparkwing commands":                            "Search the command index or export the CLI reference",
 	"sparkwing completion":                          "Emit a shell completion script",
