@@ -11,15 +11,6 @@ import (
 	"time"
 )
 
-func TestCacheDiscoveryRejectsEffectivelyUnboundedCallerLimits(t *testing.T) {
-	if got := boundedCacheDiscoveryLimit(math.MaxInt); got != maxCacheDiscoveryEntries {
-		t.Fatalf("boundedCacheDiscoveryLimit(MaxInt) = %d, want %d", got, maxCacheDiscoveryEntries)
-	}
-	if got := boundedCacheDiscoveryLimit(7); got != 7 {
-		t.Fatalf("boundedCacheDiscoveryLimit(7) = %d, want 7", got)
-	}
-}
-
 const seededRecordBytes = 64
 
 func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
@@ -40,7 +31,6 @@ func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
 	if err := os.Chtimes(filepath.Dir(entry.binaryPath()), modTime, modTime); err != nil {
 		t.Fatal(err)
 	}
-
 }
 
 func testEntry(t *testing.T, root, key string) Entry {
@@ -405,7 +395,6 @@ func TestConcurrentMaterializationPublishesOnce(t *testing.T) {
 	if published != 1 {
 		t.Fatalf("publishers = %d, want 1", published)
 	}
-
 }
 
 func TestStatusMeasuresCurrentCacheLiveness(t *testing.T) {

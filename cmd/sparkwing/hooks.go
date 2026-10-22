@@ -670,7 +670,7 @@ func expectedHooks(git githooks.Git, repoRoot, hooksDir string) (map[string]stri
 
 func hookExecutable(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+	return err == nil && info.Mode().IsRegular() && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0)
 }
 
 func checkExpectedHooks(git githooks.Git, survey *githooks.RepoGates) {
@@ -757,7 +757,7 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 	var ungated, lapsed []githooks.RepoGates
 	for _, r := range rows {
 		switch {
-		case !r.RunsBlockingGate():
+		case r.State == githooks.GateBroken || !r.RunsBlockingGate():
 			ungated = append(ungated, r)
 		case len(r.NotFiring()) > 0 || len(r.Borrowed) > 0:
 			lapsed = append(lapsed, r)

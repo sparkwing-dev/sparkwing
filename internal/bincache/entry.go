@@ -25,10 +25,7 @@ const (
 
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
-var (
-	removeCacheEntry = os.RemoveAll
-	cacheNow         = time.Now
-)
+var removeCacheEntry = os.RemoveAll
 
 type Entry struct {
 	root string
@@ -252,7 +249,7 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if err := os.Rename(stage, e.entryDir()); err != nil {
 		return nil, false, err
 	}
-	usedAt := cacheNow()
+	usedAt := time.Now()
 	_ = os.Chtimes(e.entryDir(), usedAt, usedAt)
 	if err := cacheLeaseReady(lease); err != nil {
 		return nil, false, err
@@ -569,13 +566,6 @@ func candidateKeyExists(candidates []cacheCandidate, key string) bool {
 		}
 	}
 	return false
-}
-
-func boundedCacheDiscoveryLimit(limit int) int {
-	if limit > maxCacheDiscoveryEntries {
-		return maxCacheDiscoveryEntries
-	}
-	return limit
 }
 
 func treeSizeContext(ctx context.Context, root string) (int64, error) {

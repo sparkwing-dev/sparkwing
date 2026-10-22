@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -790,7 +791,11 @@ func TestHooksStatus_ComparesExpectedContentAndFormat(t *testing.T) {
 }
 
 func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
-	for _, mode := range []string{"missing", "unmanaged", "not-executable", "content", "version"} {
+	modes := []string{"missing", "unmanaged", "content", "version"}
+	if runtime.GOOS != "windows" {
+		modes = append(modes, "not-executable")
+	}
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			repo := gateRepo(t)
 			git := &fakeGit{}
@@ -820,6 +825,15 @@ func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
 			})
 			if strings.Contains(output, `"state":"armed"`) {
 				t.Fatalf("stale gate reported as armed: %s", output)
+			}
+			survey := githooks.Survey(git.run, repo, []string{"pre-commit", "post-commit"})
+			checkExpectedHooks(git.run, &survey)
+			var fleet bytes.Buffer
+			if err := renderHooksSurvey(&fleet, []githooks.RepoGates{survey}, "pretty"); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(fleet.String(), "every declared gate fires") || !strings.Contains(fleet.String(), "pipeline hooks install") {
+				t.Fatalf("stale fleet gate needs a reinstall remedy: %s", fleet.String())
 			}
 		})
 	}

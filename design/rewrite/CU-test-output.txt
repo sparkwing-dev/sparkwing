@@ -93,3 +93,12 @@ Pending B1: generator replies carry only JobSpec[], with no argument schemas;
 Go binds generated arguments before replying. Recommend JobSpec declarations
 plus host-prepared values on execution requests. Alternative: require generated
 arguments to be declared statically. Await the lead's wire-contract decision.
+
+CU continuation 4 - base 63d6dd6d0; integration remains an ancestor, no conflicts.
+Removed unused cache discovery helper/test and clock wrapper. Fixed Windows hook
+executability and stale fleet success footer; fleet regression failed before fix.
+PASS normal/tagged: bincache, cachecontrol, hook status/survey, host Go/TS argument,
+secret and annotation conformance. PASS doccheck, guardcheck, diff check. Review clean.
+Deferred native/full/PostgreSQL checks and excluded masking fixture updates to lead.
+Xwing candidate inspection still refuses its session-index write (read-only).
+Generated-only argument wire contract remains pending; no commits or Git mutations.
