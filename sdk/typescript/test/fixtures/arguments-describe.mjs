@@ -19,7 +19,17 @@ const declarations = {
  "enum-default": [{name:"value",type:"string",enum:["one"],default:"two"}],
  "float-default": [{name:"value",type:"float64",default:"NaN"}],
 };
-if (process.argv.includes("--generated")) {
+if (process.argv.includes("--conditional")) {
+ const definition = definePipeline({name:"conditional",args:[{name:"enable",type:"bool"}],plan(p,run){
+  p.job("source",()=>null);
+  if (run.args.enable === "true") p.job("conditional",()=>null).withArgs({name:"token",type:"string",secret:true,default:"conditional-secret-default"});
+ }});
+ const run = {args:{},git:{},runner:{},id:"r",pipeline:"conditional"};
+ const description = await describe(run);
+ const plan = new Plan();
+ await definition.plan(plan,{...run,args:{enable:"true"}});
+ process.stdout.write(JSON.stringify({description,plan:plan.toDoc()}));
+} else if (process.argv.includes("--generated")) {
  const jobs = {};
  for (const [name,args] of Object.entries(declarations)) {
   const plan = new Plan();

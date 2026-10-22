@@ -231,3 +231,63 @@ func TestStatusHooks_FailsWhenTheConfigNoLongerLoads(t *testing.T) {
 		t.Errorf("status should still name the stale hook on disk:\n%s", out)
 	}
 }
+
+func TestHooksVerdicts_CheckBlockingContentDespiteMissingNotifier(t *testing.T) {
+	for _, mode := range []string{"content", "version", "obsolete", "current"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newChainFixture(t)
+			f.asProcessEnv(t)
+			writeExec(t, filepath.Join(f.binDir, "go"), "#!/bin/sh\nprintf 'auto\\ngo1.26.9\\noff\\n'\n")
+			writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), gateProject+`  - name: notify
+    entrypoint: Notify
+    on:
+      post_commit: {}
+`)
+			f.registerRepos(t, f.repo)
+			installInto(t, f.tryGit, f.repo)
+			if err := os.Remove(filepath.Join(f.repo, ".git", "hooks", "post-commit")); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(f.repo, ".git", "hooks", "pre-commit")
+			body := readRepoFile(t, path)
+			switch mode {
+			case "content":
+				writeRepoFile(t, path, strings.Replace(body, "#!/bin/sh\n", "#!/bin/sh\nexit 0\n", 1))
+			case "version":
+				writeRepoFile(t, path, strings.Replace(body, "(format 1)", "(format 0)", 1))
+			case "obsolete":
+				writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), noTriggerProject)
+			}
+			rows, err := surveyFleet(f.tryGit)
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("surveyFleet = %+v, %v", rows, err)
+			}
+			wantGated := mode == "current"
+			if rows[0].Gated() != wantGated {
+				t.Fatalf("Gated = %v, want %v: %+v", rows[0].Gated(), wantGated, rows[0])
+			}
+			if !wantGated && rows[0].State != githooks.GateBroken {
+				t.Fatalf("state = %s, want broken", rows[0].State)
+			}
+			out := captureStdout(t, func() {
+				if err := statusHooks(f.tryGit, f.repo, "json"); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if strings.Contains(out, `"state":"broken"`) == wantGated {
+				t.Fatalf("single-repo status disagrees with fleet: %s", out)
+			}
+			report := inspectDoctorMachine(t.Context())
+			if report.GatesSurveyError != "" || report.GatesSurveyed != 1 || (len(report.UngatedRepos) == 0) != wantGated {
+				t.Fatalf("doctor disagrees with fleet: %+v", report)
+			}
+			var fleet strings.Builder
+			if err := renderHooksSurvey(&fleet, rows, "pretty"); err != nil {
+				t.Fatal(err)
+			}
+			if !wantGated && strings.Contains(fleet.String(), "refuse a commit") {
+				t.Fatalf("fleet claims the stale blocking hook enforces commits: %s", fleet.String())
+			}
+		})
+	}
+}

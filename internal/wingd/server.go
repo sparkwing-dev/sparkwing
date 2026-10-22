@@ -205,7 +205,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	incarnation := rand.Uint64()
+	incarnation := uint64(rand.Int64())
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)
 	defer d.journal.Close()

@@ -104,6 +104,7 @@ func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
 		tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
 		tenant.s.plans = nil
 		request.Seal.Resolved.Args["secret"] = secret
+		request.Seal.Resolved.ArgumentDeclarations = []nodeproto.ArgumentDescription{{Name: "secret", Type: "string", Secret: true, Default: &secret}}
 		request.Seal.Resolved.SecretArgs = []string{"message", "secret"}
 		for _, job := range []nodeproto.JobSpec{
 			{ID: "job-" + secret, Steps: []nodeproto.StepSpec{{ID: "body"}}},

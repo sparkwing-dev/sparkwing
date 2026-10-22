@@ -26,8 +26,10 @@ func (preparationPipeline) Plan(_ context.Context, plan *sparkwing.Plan, in prep
 	sparkwing.Job(plan, name, func(context.Context) error { return nil })
 	return nil
 }
+
 func init() {
 	sparkwing.Register[preparationInputs]("sparkwingtest-preparation", func() sparkwing.Pipeline[preparationInputs] { return preparationPipeline{} })
+	sparkwing.Register[conditionalInputs]("sparkwingtest-conditional-arguments", func() sparkwing.Pipeline[conditionalInputs] { return conditionalPipeline{} })
 }
 
 func TestHostPreparesArguments(t *testing.T) {
@@ -80,9 +82,34 @@ type secondGeneratedInputs struct {
 }
 type generatedInputsJob[T any] struct{ sparkwing.WithArgs[T] }
 
+type conditionalInputs struct {
+	Enable bool `flag:"enable"`
+}
+type conditionalSecret struct {
+	Token string `flag:"token" secret:"true" default:"conditional-secret-default"`
+}
+type conditionalPipeline struct{}
+
+func (conditionalPipeline) Plan(_ context.Context, plan *sparkwing.Plan, args conditionalInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "source", func(context.Context) error { return nil })
+	if args.Enable {
+		sparkwing.Job(plan, "conditional", &generatedInputsJob[conditionalSecret]{})
+	}
+	return nil
+}
+
+func TestHostRefusesUndiscoveredInitialArguments(t *testing.T) {
+	host := sparkwingtest.New(sparkwingtest.Options{})
+	defer host.Close()
+	if _, err := host.Plan(t.Context(), "sparkwingtest-conditional-arguments", map[string]string{"enable": "true"}); err == nil || err.Error() != "initial plan argument declarations differ from SDK describe" {
+		t.Fatalf("conditional plan error = %v", err)
+	}
+}
+
 func (j *generatedInputsJob[T]) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) error { _ = j.Args(ctx); return nil }), nil
 }
+
 func TestGeneratedDefaultsStayWithTheirJob(t *testing.T) {
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	defer host.Close()

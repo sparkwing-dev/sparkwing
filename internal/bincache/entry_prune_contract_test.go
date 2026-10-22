@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
+	"time"
 )
 
 func TestPruneCoordinatorBusyDoesNotFabricateEntrySkip(t *testing.T) {
@@ -49,8 +51,32 @@ func TestPruneExaminedEntriesAreExactlyClassified(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
+	active := testEntry(t, root, "11111111-11111111")
+	busy := testEntry(t, root, "22222222-22222222")
+	reclaimable := testEntry(t, root, "33333333-33333333")
+	for _, entry := range []Entry{active, busy, reclaimable} {
+		seedEntry(t, entry, "binary", time.Unix(1, 0))
+	}
+	lease, found, err := active.Acquire(context.Background())
+	if err != nil || !found {
+		t.Fatalf("Acquire = (%v, %v), want a seeded entry", found, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	writer, err := busy.openLock("writer", cacheLockExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := errors.Join(cacheUnlock(writer), writer.Close()); err != nil {
+			t.Error(err)
+		}
+	})
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: math.MaxInt64, MaxEntries: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +92,12 @@ func TestPruneExaminedEntriesAreExactlyClassified(t *testing.T) {
 	classified := 0.0
 	for _, name := range []string{"reclaimed_entries", "active_skipped_entries", "busy_skipped_entries"} {
 		value, _ := fields[name].(float64)
+		if value != 1 {
+			t.Errorf("%s = %v, want 1: %s", name, value, raw)
+		}
 		classified += value
 	}
-	if examined != classified {
+	if examined != 3 || examined != classified {
 		t.Fatalf("examined_entries = %v, classified entries = %v: %s", examined, classified, raw)
 	}
 	if fields["work_bound_exhausted"] != false {

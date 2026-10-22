@@ -60,6 +60,9 @@ enums and name collisions before execution. Generated jobs carry declarations
 with their job specification. The host prepares their values from the accepted
 run snapshot after generation and sends them for typed decoding before execution.
 Use the pipeline extra-flag map for supplied flags that only a generator declares.
+Initial jobs must use argument declarations discovered by zero-input describe,
+even when invocation inputs change job IDs. New declarations belong in generated
+jobs, whose secrets the host registers before execution.
 
 Secret flag values are masked in logs and diagnostics. Input masking does not
 remove those values from stored invocation arguments, so use declared secrets

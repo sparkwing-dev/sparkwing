@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"reflect"
 	"slices"
 
@@ -111,6 +112,9 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if plan.Jobs == nil {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "plan requires an explicit jobs array")
 	}
+	if err := nodeproto.ValidateInitialJobArguments(input.Resolved.ArgumentDeclarations, plan.Jobs); err != nil {
+		return runspec.Spec{}, nil, err
+	}
 	resolved, err := tx.store.intakeServices().ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: input.Declarations, Plan: plan, Context: settings.Context{Local: RequestPlacement(run.Request.Request) == nodeproto.PlacementLocal}})
 	if err != nil {
 		return runspec.Spec{}, nil, err
@@ -151,10 +155,26 @@ func validateResolvedIntake(input *runspec.SealInput) error {
 		}
 	}
 	slices.Sort(input.Resolved.SecretArgs)
-	for name, value := range request.RequestedArgs {
-		if resolved, exists := input.Resolved.Args[name]; !exists || resolved != value {
-			return authorityError(apierr.SpecDrift, "resolved argument changed an intake value")
+	if err := nodeproto.ValidateArgumentDeclarations(input.Resolved.ArgumentDeclarations); err != nil {
+		return authorityError(apierr.InvalidArgs, err.Error())
+	}
+	layerArgs := func(layer runspec.CheckoutLayer) map[string]string {
+		args := map[string]string{}
+		for name, value := range layer.Args.Value {
+			args[name] = value.Value
 		}
+		return args
+	}
+	raw, _, err := settings.Args(settings.Inputs{Sealed: settings.Values{Args: request.RequestedArgs}, Defaults: settings.Values{Args: layerArgs(input.Declarations.Defaults)}, Pipeline: settings.Values{Args: layerArgs(input.Declarations.Pipeline)}, Context: settings.Context{Submitter: true}})
+	if err != nil {
+		return err
+	}
+	args, err := nodeproto.ResolveArguments(nodeproto.PipelineDescription{Args: input.Resolved.ArgumentDeclarations, Extra: true}, raw)
+	if err != nil {
+		return authorityError(apierr.InvalidArgs, err.Error())
+	}
+	if !maps.Equal(args, input.Resolved.Args) {
+		return authorityError(apierr.SpecDrift, "resolved arguments differ from declared inputs")
 	}
 	if !reflect.DeepEqual(request.Env, input.Resolved.Env) {
 		return authorityError(apierr.SpecDrift, "resolved environment changed the intake snapshot")

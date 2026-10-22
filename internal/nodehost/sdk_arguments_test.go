@@ -61,6 +61,56 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 			}
 		}
 	}
+	for sdk, command := range map[string]*exec.Cmd{
+		"go":         exec.CommandContext(t.Context(), binary, "--conditional"),
+		"typescript": exec.CommandContext(t.Context(), node, "../../sdk/typescript/test/fixtures/arguments-describe.mjs", "--conditional"),
+	} {
+		t.Run("undiscovered-secret/"+sdk, func(t *testing.T) {
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("conditional declarations: %v: %s", err, output)
+			}
+			var conditional struct {
+				Description json.RawMessage   `json:"description"`
+				Plan        nodeproto.PlanDoc `json:"plan"`
+			}
+			if err := json.Unmarshal(output, &conditional); err != nil {
+				t.Fatal(err)
+			}
+			planner, input, fixture, _ := sdkPlanningFixture(t)
+			input.Entrypoint = "conditional"
+			input.Args = map[string]string{"enable": "true"}
+			start := planner.Start
+			planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+				process, err := start(ctx, input, log)
+				if err != nil {
+					return nil, err
+				}
+				p := process.(*executorProcess)
+				answer := p.answer
+				p.plan = conditional.Plan
+				p.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+					if request.Op == nodeproto.OpDescribe {
+						return conditional.Description, nil
+					}
+					if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
+						t.Fatal("undiscovered arguments reached execution")
+					}
+					return answer(ctx, request)
+				}
+				return p, nil
+			}
+			prepared, err := planner.Prepare(t.Context(), input, fixture.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = PlanInitial(t.Context(), prepared.Input, prepared.Functions)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != "initial plan argument declarations differ from SDK describe" {
+				t.Fatalf("conditional plan host error = %v", err)
+			}
+		})
+	}
 	for _, pipeline := range []string{"secret-empty", "secret-duplicate"} {
 		_, _, err := (SDKPlanner{Masker: secrets.NewMasker()}).describe(tsDoc, PlanningProcessInput{Entrypoint: pipeline}, false)
 		var failure *apierr.Error

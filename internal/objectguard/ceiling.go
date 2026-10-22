@@ -261,8 +261,6 @@ func (c *Ceiling) Observe(u Usage) {
 	c.evaluateLocked()
 }
 
-// safety: the freeze is taken from whichever ceiling the totals crossed first,
-// so the error names the ceiling an operator has to act on.
 func (c *Ceiling) evaluateLocked() {
 	reason, observed, over := c.overLocked()
 	if !over {

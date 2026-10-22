@@ -156,21 +156,40 @@ func PrepareJobArguments(arguments []ArgumentDescription, raw map[string]string)
 	return args, nil
 }
 
-// ValidateJobArgumentNamespace keeps late declarations in the discovered flag namespace.
+// ValidateInitialJobArguments refuses declarations absent from discovery.
+func ValidateInitialJobArguments(static []ArgumentDescription, jobs []JobSpec) error {
+	if err := ValidateJobArgumentNamespace(static, jobs); err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		for _, argument := range job.Arguments {
+			if !discoveredJobArgument(static, argument) {
+				return &apierr.Error{Code: apierr.InvalidArgs, Message: "initial plan argument declarations differ from SDK describe"}
+			}
+		}
+	}
+	return nil
+}
+
+func discoveredJobArgument(static []ArgumentDescription, argument ArgumentDescription) bool {
+	return slices.ContainsFunc(static, func(known ArgumentDescription) bool {
+		if known.JobID == "" {
+			return false
+		}
+		// Discovery uses zero inputs, so invocation inputs can change job IDs.
+		known.JobID = argument.JobID
+		return reflect.DeepEqual(known, argument)
+	})
+}
+
+// ValidateJobArgumentNamespace keeps expansion declarations in the discovered flag namespace.
 func ValidateJobArgumentNamespace(static []ArgumentDescription, jobs []JobSpec) error {
 	arguments := slices.Clone(static)
 	var jobArguments []ArgumentDescription
 	for _, job := range jobs {
 		jobArguments = append(jobArguments, job.Arguments...)
 		for _, argument := range job.Arguments {
-			if !slices.ContainsFunc(static, func(known ArgumentDescription) bool {
-				if known.JobID == "" {
-					return false
-				}
-				// Discovery uses zero inputs, so invocation inputs can change job IDs.
-				known.JobID = argument.JobID
-				return reflect.DeepEqual(known, argument)
-			}) {
+			if !discoveredJobArgument(static, argument) {
 				arguments = append(arguments, argument)
 			}
 		}

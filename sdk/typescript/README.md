@@ -56,6 +56,9 @@ declarations in their job specification. The host validates and prepares values
 from the accepted run snapshot after generation, then sends them with execution
 requests. Enable `extra` for supplied flags that only a generator declares. Annotation locations are validated
 by the host service; TypeScript retains transport type checks.
+Initial jobs may only use argument declarations discovered by zero-input describe,
+with job IDs allowed to change. The gated expansion path registers secrets for new
+generated declarations before execution.
 
 `Context` provides lazy secrets and plain variables, typed outputs, references,
 annotations, summaries, acknowledged masking, OIDC, child runs and cleanup.

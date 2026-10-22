@@ -102,7 +102,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		validation.Secrets = p.Masker
 		plan, err := validate(raw, validation)
 		if err == nil {
-			err = nodeproto.ValidateJobArgumentNamespace(argumentDeclarations, plan.Jobs)
+			err = nodeproto.ValidateInitialJobArguments(argumentDeclarations, plan.Jobs)
 		}
 		if err != nil {
 			return nodeproto.PlanDoc{}, p.planningError(context.Background(), err, declarationsKnown)

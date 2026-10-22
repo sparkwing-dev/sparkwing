@@ -184,7 +184,9 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		if err != nil {
 			return false, err
 		}
-		return githooks.Survey(git, repoRoot, declared).Gated(), errors.New("installation rejected; prior hooks and core.hooksPath remain unchanged")
+		survey := githooks.Survey(git, repoRoot, declared)
+		checkExpectedHooks(git, &survey)
+		return survey.Gated(), errors.New("installation rejected; prior hooks and core.hooksPath remain unchanged")
 	}
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return false, err
@@ -674,7 +676,7 @@ func hookExecutable(path string) bool {
 }
 
 func checkExpectedHooks(git githooks.Git, survey *githooks.RepoGates) {
-	if survey.State != githooks.GateArmed {
+	if survey.State == githooks.GateBroken {
 		return
 	}
 	expected, err := expectedHooks(git, survey.Repo, survey.HooksDir)
@@ -688,11 +690,14 @@ func checkExpectedHooks(git githooks.Git, survey *githooks.RepoGates) {
 	for _, name := range slices.Compact(names) {
 		path := filepath.Join(survey.HooksDir, name)
 		body, err := os.ReadFile(path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
 			survey.State, survey.ConfigError = githooks.GateBroken, fmt.Sprintf("read %s: %v", path, err)
 			return
 		}
-		if err != nil || string(body) != expected[name] || !hookExecutable(path) {
+		if string(body) != expected[name] || !hookExecutable(path) {
 			stale = append(stale, name)
 		}
 	}

@@ -65,6 +65,24 @@ func (*generatedJob[T]) Work(w *sw.Work) (*sw.WorkStep, error) {
 
 type generatedPipe[T any] struct{}
 
+type conditionalInputs struct {
+	Enable bool `flag:"enable"`
+}
+
+type conditionalSecret struct {
+	Token string `flag:"token" secret:"true" default:"conditional-secret-default"`
+}
+
+type conditionalPipe struct{}
+
+func (conditionalPipe) Plan(_ context.Context, p *sw.Plan, args conditionalInputs, _ sw.RunContext) error {
+	sw.Job(p, "source", func(context.Context) error { return nil })
+	if args.Enable {
+		sw.Job(p, "conditional", &generatedJob[conditionalSecret]{})
+	}
+	return nil
+}
+
 func (generatedPipe[T]) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunContext) error {
 	sw.Job(p, "source", func(context.Context) error { return nil }).Generate(func(_ context.Context, expansion *sw.Plan) error {
 		sw.Job(expansion, "child", &generatedJob[T]{})
@@ -72,6 +90,7 @@ func (generatedPipe[T]) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.
 	})
 	return nil
 }
+
 func register[T any](name string) {
 	if len(os.Args) > 1 {
 		sw.Register[sw.NoInputs](name, func() sw.Pipeline[sw.NoInputs] { return generatedPipe[T]{} })
@@ -79,7 +98,23 @@ func register[T any](name string) {
 		sw.Register[T](name, func() sw.Pipeline[T] { return pipe[T]{} })
 	}
 }
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--conditional" {
+		sw.Register[conditionalInputs]("conditional", func() sw.Pipeline[conditionalInputs] { return conditionalPipe{} })
+		doc, err := sdkserve.DefaultOperations.Describe(context.Background())
+		if err != nil {
+			panic(err)
+		}
+		_, plan, err := sdkserve.DefaultOperations.Plan(context.Background(), "conditional", map[string]string{"enable": "true"}, nodeproto.RunContext{Pipeline: "conditional"})
+		if err != nil {
+			panic(err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"description": doc, "plan": plan}); err != nil {
+			panic(err)
+		}
+		return
+	}
 	register[inputs]("args")
 	register[requiredDefault]("required-default")
 	register[enumType]("enum-type")

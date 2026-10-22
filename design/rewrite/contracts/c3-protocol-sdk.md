@@ -1283,8 +1283,13 @@ generator require the pipeline's extra-flag bag. The accepted run seals static
 and new generated declarations, so long and short flag names remain unique across
 the pipeline. Invocation inputs can change a described job's ID. Its argument
 declaration must still match the discovered declaration except for that ID, and
-two invocation jobs cannot claim the same flag. Each job prepares its defaults
-against the immutable accepted argument values.
+two invocation jobs cannot claim the same flag. Initial plans refuse undiscovered
+argument declarations, including conditional jobs with secret defaults. Only the
+gated expansion path may add declarations, and it registers their secrets before
+execution. Each job prepares its defaults against the immutable accepted argument
+values. The second seal resolves raw request arguments through those sealed static
+declarations and checks the canonical values. Raw request bytes retain request
+identity even when list normalization changes their execution representation.
 
 The host sends prepared values in `args` on `run_step` and `eval` requests for
 jobs with argument declarations, including generator replay. SDKs decode these

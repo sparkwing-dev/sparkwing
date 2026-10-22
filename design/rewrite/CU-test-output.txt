@@ -169,3 +169,67 @@ PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache:
 NOT RUN: full suites and PostgreSQL remain with lead. pkg/docs socket tests
 cannot execute here (httptest listener refused: operation not permitted).
 No commits or Git metadata changes. No scratch directory remains.
+
+CU review continuation - base 81b074a06 (2026-10-22).
+Integration d646f001e is already an ancestor; no conflicts or missing merge.
+No git mutations or commits. Scratch stays under /tmp/sw-astra-CU.
+
+Fixed all seven findings in cua-review-1792652627-final.md:
+- Initial SDK plans and store acceptance refuse undiscovered argument declarations;
+  job ID changes remain allowed. The same guard applies to sparkwingtest.
+  Gated expansion retains late declarations and registration before execution.
+- Second seal uses shared settings precedence and argument resolution over raw
+  intake and sealed checkout declarations; request bytes and hash remain raw.
+- Blocking hook content/version checks no longer depend on aggregate survey state.
+  Single status, fleet, doctor and Gated agree, even with missing notifiers or
+  after the final hook declaration disappears.
+- Daemon identities fit the CLI range; C4 reflects bounded events output; stale
+  ceiling commentary is removed; cache accounting test observes three real entries.
+
+RED before fix:
+- TestInitialJobArgumentsRefuseUndiscoveredDeclarations accepted the secret default.
+- TestHostArgumentRulesAgreeForBothSDKs/undiscovered-secret/{go,typescript}
+  returned no host error for actual SDK conditional plans.
+- TestPlanSealPreservesRawListInputsAcrossSubmissionSources/{api,schedule,child}
+  failed with resolved argument changed an intake value.
+- Hook verdict regressions accepted changed content/version with a missing notifier
+  and missed an obsolete hook after the last declaration disappeared.
+
+PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache,
+TMPDIR=/tmp/sw-astra-CU/root (or the worker's scratch subdirectory):
+- Full internal/nodeproto/... internal/argvalue internal/runspec sparkwing
+  sparkwing/sparkwingtest internal/doccheck package tests.
+- Focused nodehost TestHostArgumentRulesAgreeForBothSDKs, TestHostAnnotationRulesAgreeForBothSDKs,
+  TestSDKPlanning*, TestSealedSecretsStayMaskedInNativeSDKStreams; tagged equivalents.
+- Store second-seal regressions, checkout argument precedence, invalid argument
+  refusals, broader Plan|Acceptance selection; focused tagged equivalents.
+- Focused hook status/fleet/doctor and githooks tests, normal and tagged.
+- Focused real cache-entry classification, ceiling and CLI grammar tests,
+  normal and tagged; wingd compile check.
+- TestProtocol acceptance normal; tagged evidence follows below.
+- Full TypeScript npm test: 20/20 files pass.
+- go build -o /dev/null ./cmd/..., guardcheck -fast, changelog check,
+  docs mirror check and git diff --check.
+
+NOT RUN: full/heavy suites, PostgreSQL and socket-dependent checks remain with lead.
+Full objectguard tests cannot bind httptest sockets in this sandbox; ceiling tests pass.
+Xwing candidate context cannot create its session-index lock (read-only filesystem),
+so candidate installation/runtime exercise is unavailable. Local config has no
+user.name/user.email/core.worktree overrides after tests. No production services used.
+
+Final review correction: canonical second-seal comparison now checks the complete
+argument map, refusing resolved-only injected values. Added injected regression
+failed before the fix; independent reviewer reproduced red then green with a Go
+overlay on the frozen snapshot. Updated the secret-identifier property fixture
+to declare its secret default rather than inventing a resolved-only value.
+The injected regression's expected classification was corrected from invalid_args
+to spec_drift after the first post-fix run; broader Plan|Acceptance now passes.
+Independent ordinary correctness review found no remaining source issues.
+PASS: TestProtocol normal and rewrite_integration; final tagged store regressions
+and command build/fast guard results are recorded by the final session report.
+
+Final PASS: tagged store TestPlanSeal* and TestAcceptedPlanIdentifierSecretsProperty,
+final TestProtocol normal/tagged, final command compilation, guardcheck -fast,
+gofmt and whitespace checks. The diagnostic rg search for the obsolete drift
+message had no matches (exit 1); it was not a build or guard failure.
+Scratch /tmp/sw-astra-CU removed at session end. The harness owns commits.

@@ -135,6 +135,10 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 		h.discardGate(planGate)
 		return doc, err
 	}
+	if err := nodeproto.ValidateInitialJobArguments(selected.Description.Args, doc.Jobs); err != nil {
+		h.discardGate(planGate)
+		return nodeproto.PlanDoc{}, err
+	}
 	accepted, err := h.accept(raw)
 	if err != nil {
 		h.discardGate(planGate)
