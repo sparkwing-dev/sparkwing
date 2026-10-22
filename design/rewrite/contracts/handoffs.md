@@ -1031,3 +1031,8 @@ separate operations; no database transaction stays open across a provider call.
 
 - An approval node cannot declare concurrency groups; acceptance refuses the declaration with an error pointing at the job after the approval. Only jobs that execute on a machine take slots.
 - An approval's skip-if runs on the run's coordinator before the approval is requested, holding no capacity; a skip settles as skipped through the one verdict owner. The job after the approval takes its slots normally (decision 42 applies to it).
+
+## 2026-10-22 Korey decision 52: claim ranking and preferences are holds on the job
+
+- Claim ranking (here, personal, github-actions, self-hosted, cloud) is enforced by holding a ready job, not by per-job asks. A job that names no runner is held for the best-ranked tier that has a live claimant of the same team which matches the job's labels and currently has a free slot; lower tiers skip it until that claimant takes it or the 5-second ranking window ends, after which any eligible claimant may take it. A busy or offline better tier causes no wait. The unit_asks table and per-poll ask writes are deleted; a claim is one indexed lookup.
+- Choosing a runner for a job stays: Prefers orders placement for that job and its holds still apply. Choosing a job for a runner is removed: a claimant takes the next eligible job by fair share and arrival, with no per-runner preference scoring.
