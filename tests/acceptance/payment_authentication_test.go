@@ -35,11 +35,8 @@ type paymentLedger struct {
 	unrecord bool
 }
 
-func (l *paymentLedger) RecordsPaymentParent(context.Context, capability.PaymentRoute) (capability.PaymentParentState, error) {
-	if l.unrecord {
-		return capability.PaymentParentMissing, nil
-	}
-	return capability.PaymentParentRecorded, nil
+func (l *paymentLedger) RecordsPaymentParent(context.Context, capability.PaymentRoute) (bool, error) {
+	return !l.unrecord, nil
 }
 
 func (l *paymentLedger) SettlePayment(_ context.Context, proof capability.VerifiedPaymentEvent) (store.PaymentSettlement, error) {

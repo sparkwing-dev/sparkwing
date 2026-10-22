@@ -878,13 +878,6 @@ CREATE TABLE billing_pages (
     UNIQUE(team,account_id,request_key)
 );
 
--- Provider identity hashes survive tenant deletion so provider replay can be acknowledged.
-CREATE TABLE payment_closures (
-    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
-    provider_digest TEXT NOT NULL CHECK(length(provider_digest)=64),
-    PRIMARY KEY(payment_mode,provider_digest)
-);
-
 CREATE TABLE payment_correlations (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     provider_id TEXT NOT NULL CHECK(provider_id <> ''),
@@ -1083,7 +1076,6 @@ CREATE TABLE payment_setups (
     last4 TEXT NOT NULL,
     created_at BIGINT NOT NULL CHECK(created_at > 0),
     applied BIGINT NOT NULL DEFAULT 0 CHECK(applied IN (0,1)),
-    detached INTEGER NOT NULL DEFAULT 0 CHECK(detached IN (0,1)),
     PRIMARY KEY(payment_mode,intent_id)
 );
 

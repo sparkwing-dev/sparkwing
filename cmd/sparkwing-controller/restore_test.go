@@ -52,17 +52,14 @@ func TestRestoreCommandRequiresExistingStoreAndAlwaysRotates(t *testing.T) {
 	if err != nil || again == rotated {
 		t.Fatalf("preparation trusted a pending state restored from a backup: %v", err)
 	}
-	if err := invoke("acknowledge"); err == nil {
-		t.Fatal("restore skipped required reconciliation")
-	}
-	if err := invoke("reconcile"); err != nil {
-		t.Fatal(err)
+	if err := invoke("reconcile"); err == nil {
+		t.Fatal("removed reconcile command was accepted")
 	}
 	if err := invoke("acknowledge"); err != nil {
 		t.Fatal(err)
 	}
 	var state store.RestoreState
-	if err := json.Unmarshal(out.Bytes(), &state); err != nil || state.Pending || !state.Reconciled || state.AcknowledgedAt == 0 {
+	if err := json.Unmarshal(out.Bytes(), &state); err != nil || state.Pending || state.AcknowledgedAt == 0 {
 		t.Fatalf("finished restore = %+v, %v", state, err)
 	}
 }

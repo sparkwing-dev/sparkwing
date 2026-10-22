@@ -98,11 +98,6 @@ provider access. Every non-checkout object must match the configured mode and
 carry a positive event creation time. Required references accept provider IDs
 or expanded objects. Card setup reads the payment method using the configured
 private API key and checks the exact method, customer, mode and card shape.
-An unattached method (`customer:null`) preserves historical setup evidence with
-`MethodDetached=true`; it cannot become a usable refill card. Pull recovery
-orders setups by `setup_intent.succeeded` event time or retained completion
-evidence. Missing completion evidence refuses a successful sweep after monetary
-recovery. Object creation time never substitutes for completion time.
 Paid-card and warning events read the charge and check its exact payment-intent
 relation and mode before taking a fingerprint. Reads use fixed HTTPS Stripe
 collections, path-safe IDs, no redirects and the existing one-MiB JSON budget.

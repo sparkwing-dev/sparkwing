@@ -509,18 +509,6 @@ refund, warning and dispute outcomes. Provider correlation and the payment mode
 derive the payer. Settlement, ledger mutations and the event receipt commit
 in one transaction.
 
-`payment_setups.created_at` records provider completion time, recovered from
-`setup_intent.succeeded` events or retained settlement evidence. Object creation
-time never selects the saved card. `detached` records current method usability
-independently of historical setup success. A detached latest selection clears
-the saved card while preserving its completion watermark. Missing completion
-evidence blocks successful restore reconciliation after monetary recovery.
-
-`RecordsPaymentParent` distinguishes recorded, purged and missing parents.
-Purge commits `payment_closures` with parent erasure. These operator-owned rows
-contain only payment mode and provider identity hashes, so provider replay can
-ignore erased teams while missing restored correlations still fail closed.
-
 `payment_refunds` retains refund, lost-dispute and warning reversal obligations
 by payment mode, kind and provider object. A pending payment has no verified
 paid outcome yet, even if a failed outcome closed its reservation. A refused

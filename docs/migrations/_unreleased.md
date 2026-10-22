@@ -2,43 +2,13 @@
 
 ## Declared restore and credential epochs
 
-Before this change, restoring a database could revive a revoked bearer token
-or dashboard session, lose payments made after the backup, and replay schedule
-catch-up. Restore is now an explicit offline operation. The store baseline
-moves to version 17 and persists the credential epoch on bearer and session
-authority. The live epoch is kept outside the database in `credential-epoch`.
+The external `credential-epoch` fences bearer tokens and dashboard sessions.
+Restore preparation rotates it and holds schedules until operator acknowledgment,
+which discards catch-up through its timestamp. The epoch directory must be
+writable and persistent; `--credential-epoch-dir` selects it when credentials
+are read-only. Helm uses a dedicated retained PVC independent of database storage.
 
-There is no automatic schema upgrade. Back up durable state and keep its
-matching binary. To roll back, use that binary with its matching database or
-restore its matching backup into a separate database. A newer store must not
-be deleted to satisfy an older binary. Only disposable installs should
-recreate their database at baseline 17; recreation loses runs, credits,
-secrets and credentials. See [backup, restore and upgrade](../backup-restore.md).
-
-For a restore at a matching schema, stop the controller and follow
-[the restore procedure](../backup-restore.md#restore):
-
-1. Preserve the latest live `credential-epoch` instead of restoring an old
-   copy. Its directory must be writable and persistent. Set
-   `--credential-epoch-dir` on startup and every restore command when
-   credentials are read-only. The Helm chart mounts a dedicated retained
-   PVC at `/var/lib/sparkwing/credential-epoch`, independent of `/data`.
-2. Run `sparkwing-controller restore prepare`. Every invocation rotates the
-   epoch and invalidates all earlier bearer tokens and dashboard sessions.
-3. Run `sparkwing-controller restore reconcile`. Provider facts settle through
-   the normal idempotent payment path before acknowledgment is allowed. A failed
-   or interrupted resweep invalidates the earlier success and requires a retry.
-4. Inspect restored state, then run `sparkwing-controller restore acknowledge`.
-   This discards schedule instants through the acknowledgment time.
-5. Supply a fresh `bootstrap-admin-token` seed before startup. Reissue runner
-   and user credentials after the final preparation. Users sign in again.
-
-Provider metadata carries routing identity and cannot recreate a Checkout
-reservation created after the backup. If that reservation is missing,
-reconciliation fails and needs operator repair; no supported reservation-repair
-API exists. Provider reconciliation also cannot recover usage spent after the
-backup. Compare that interval with retained usage records before resuming
-Cloud work. These limits also apply to a scratch restore drill.
+Recovery is manual; follow the operator runbook kept outside this repository.
 
 ## Cloud billing is prepaid
 

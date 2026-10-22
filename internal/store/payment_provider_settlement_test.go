@@ -482,13 +482,13 @@ func TestRecordsPaymentParentResolvesOnlyCommittedObjects(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		route capability.PaymentRoute
-		want  capability.PaymentParentState
+		want  bool
 	}{
-		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: session}, capability.PaymentParentRecorded},
-		{capability.PaymentRoute{Mode: capability.PaymentTest, PaymentID: "payment"}, capability.PaymentParentRecorded},
-		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_setup_page"}, capability.PaymentParentRecorded},
-		{capability.PaymentRoute{Mode: capability.PaymentLive, PaymentID: "payment"}, capability.PaymentParentMissing},
-		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_foreign", PaymentID: "pi_foreign", ObjectID: "re_foreign"}, capability.PaymentParentMissing},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: session}, true},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, PaymentID: "payment"}, true},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_setup_page"}, true},
+		{capability.PaymentRoute{Mode: capability.PaymentLive, PaymentID: "payment"}, false},
+		{capability.PaymentRoute{Mode: capability.PaymentTest, CheckoutID: "cs_foreign", PaymentID: "pi_foreign", ObjectID: "re_foreign"}, false},
 	} {
 		got, err := s.AsOperator().RecordsPaymentParent(t.Context(), tc.route)
 		if err != nil || got != tc.want {

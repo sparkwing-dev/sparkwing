@@ -111,11 +111,10 @@ func (a *paymentAuthenticator) cardSetup(ctx context.Context, object paymentObje
 	if err != nil {
 		return err
 	}
-	if method.Customer != "" && string(method.Customer) != event.CustomerID || method.Type != "card" || method.Card.Fingerprint == "" || method.Card.Brand == "" || len(method.Card.Last4) != 4 || strings.IndexFunc(method.Card.Last4, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+	if string(method.Customer) != event.CustomerID || method.Type != "card" || method.Card.Fingerprint == "" || method.Card.Brand == "" || len(method.Card.Last4) != 4 || strings.IndexFunc(method.Card.Last4, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
 		return invalidPaymentEvent()
 	}
 	event.Fingerprint, event.Brand, event.Last4 = method.Card.Fingerprint, method.Card.Brand, method.Card.Last4
-	event.MethodDetached = method.Customer == ""
 	return nil
 }
 

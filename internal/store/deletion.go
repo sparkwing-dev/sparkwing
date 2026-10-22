@@ -89,20 +89,6 @@ type AccountDeletion struct {
 	RevokedPrefixes []string
 }
 
-// RequestTeamDeletion queues a team for deletion on the operator's word,
-// with no membership check, for a deletion request that arrived by mail.
-func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team) (TeamDeletion, []string, error) {
-	t := &Tenant{s: o.s, team: NormalizeTeam(team)}
-	var result TeamDeletion
-	var revoked []string
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, tx.now(ctx))
-		return err
-	})
-	return result, revoked, err
-}
-
 // Deletion closes existing authority without requiring its former membership to remain live.
 func (op *Operator) discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet, where string, args ...any) lockSet {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,COALESCE(team,'') FROM capabilities WHERE `+where, args...)
@@ -507,13 +493,8 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 // safety: runs goes last so the rows that reference a run are removed by
 // their own statements rather than by a cascade from a very large delete.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
-	if err := o.closePurgedPayments(ctx, team); err != nil {
-		return err
-	}
 	tables := append([]string{"capabilities", "sessions", "payment_events"}, tenantTables...)
-	tables = slices.DeleteFunc(tables, func(t string) bool {
-		return t == "credit_grants" || t == "credit_charges" || t == "credit_checkouts" || t == "payment_correlations" || t == "payment_events"
-	})
+	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
 	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
@@ -528,51 +509,13 @@ func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	})
 }
 
-// Closure evidence and parent erasure share one transaction so an interrupted purge remains classifiable.
-func (o *Operator) closePurgedPayments(ctx context.Context, team Team) error {
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT payment_mode,session_id FROM credit_checkouts WHERE team=?
-   UNION SELECT payment_mode,payment_id FROM credit_checkouts WHERE team=? AND payment_id<>''
-   UNION SELECT payment_mode,provider_id FROM payment_correlations WHERE team=?`, team, team, team)
-		if err != nil {
-			return err
-		}
-		type identity struct {
-			mode capability.PaymentMode
-			id   string
-		}
-		var identities []identity
-		for rows.Next() {
-			var item identity
-			if err := rows.Scan(&item.mode, &item.id); err != nil {
-				return errors.Join(err, rows.Close())
-			}
-			identities = append(identities, item)
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
-		}
-		for _, item := range identities {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO payment_closures(payment_mode,provider_digest) VALUES (?,?) ON CONFLICT DO NOTHING`, item.mode, paymentClosureDigest(item.id)); err != nil {
-				return err
-			}
-		}
-		for _, table := range []string{"payment_events", "payment_correlations", "credit_checkouts"} {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE team=?`, team); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 // PurgeTeam removes every row a team owns in every tenant-owned table, then
 // its registry row, and marks its deletion done with a recheck due at
 // now+recheckAfter. holder must hold the deletion's lease; see
-// [Operator.ClaimTeamDeletion]. Bulk tenant tables are purged separately because
-// a large team's rows may not fit one transaction. Payment parents and their
-// redacted closure evidence commit together. An interrupted purge remains
-// pending and the next attempt finishes it.
+// [Operator.ClaimTeamDeletion]. Each table is its own statement rather than
+// one transaction, because a large team's rows may not fit one; a purge
+// that stops part-way leaves the deletion pending and the next one finishes
+// it.
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, recheckAfter time.Duration) error {
 	team = NormalizeTeam(team)
 	if err := o.requireLease(ctx, team, holder, TeamDeletionPending); err != nil {

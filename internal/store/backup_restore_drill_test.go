@@ -223,10 +223,8 @@ func assertSameInstall(t *testing.T, want, got installFingerprint) {
 	}
 }
 
-// TestBackupRestoreDrill runs the procedure in docs/backup-restore.md end
-// to end, so the page cannot drift away from what works. Each subtest
-// populates one of every record class a controller holds, backs the store
-// up the way the page says to, restores it somewhere else, and compares
+// TestBackupRestoreDrill populates each durable record class, backs the store
+// up, restores it somewhere else, and compares
 // what the two stores serve: runs, nodes, secret values opened under the
 // backed-up key, the credit ledger and API tokens.
 //

@@ -72,9 +72,8 @@ the controller restricts the directory to `0700` before using it. If
 `volumePermissions.enabled=false`, provision the volume with that ownership.
 
 Retain this PVC across pod replacement, uninstall, and database restores.
-Attach it to the offline restore pod and pass the same `--credential-epoch-dir`
-to every [restore command](../../docs/backup-restore.md#restore). Restore
-preparation rotates its epoch. Never roll this volume back with the database.
+Never roll this volume back with the database. Recovery is manual; follow the
+operator runbook kept outside this repository.
 
 Secrets are mounted as files under `/etc/sparkwing/credentials`. They never become
 controller or launcher arguments or environment values. Create them in the release

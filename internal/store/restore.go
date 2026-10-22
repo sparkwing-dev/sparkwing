@@ -7,20 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const restoreStateKey = "restore.state"
 
-// ErrRestorePending holds schedule execution until reconciliation and operator acknowledgement.
-var ErrRestorePending = errors.New("store: restored schedules are held; run restore reconcile, then restore acknowledge")
+// ErrRestorePending holds schedule execution until operator acknowledgement.
+var ErrRestorePending = errors.New("store: restored schedules are held; run restore acknowledge")
 
 // RestoreState survives restart while a restored deployment is being verified.
 type RestoreState struct {
 	Epoch          string `json:"epoch"`
 	Pending        bool   `json:"pending"`
-	Reconciled     bool   `json:"reconciled"`
 	AcknowledgedAt int64  `json:"acknowledged_at,omitempty"`
 }
 
@@ -61,7 +58,7 @@ func (s *Store) ensureCredentialEpoch(ctx context.Context, epoch string, prepare
 	})
 }
 
-// RestoreStatus reports whether schedules are held and the provider sweep completed.
+// RestoreStatus reports whether restored schedules are held.
 func (o *Operator) RestoreStatus(ctx context.Context) (RestoreState, error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -96,39 +93,6 @@ func writeRestoreStateTx(ctx context.Context, tx *storeTx, state RestoreState) e
 	return err
 }
 
-// ReconcileRestore records a successful provider pull without holding a transaction across network calls.
-func (o *Operator) ReconcileRestore(ctx context.Context, pull func(context.Context) error) error {
-	state, err := inTxResult(ctx, o.s, func(tx *storeTx) (RestoreState, error) {
-		state, err := restoreStateTx(ctx, tx)
-		if err != nil {
-			return state, err
-		}
-		if !state.Pending || pull == nil {
-			return state, errors.New("restore reconciliation requires a prepared restore and a provider sweep")
-		}
-		// A failed or interrupted resweep must invalidate an earlier success.
-		state.Reconciled = false
-		return state, writeRestoreStateTx(ctx, tx, state)
-	})
-	if err != nil {
-		return err
-	}
-	if err := pull(ctx); err != nil {
-		return err
-	}
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		current, err := restoreStateTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if !current.Pending || current.Epoch != state.Epoch {
-			return errors.New("restore changed during provider reconciliation")
-		}
-		current.Reconciled = true
-		return writeRestoreStateTx(ctx, tx, current)
-	})
-}
-
 // AcknowledgeRestore discards schedule catch-up through database time and resumes future instants.
 // Repeating acknowledgement leaves the first boundary unchanged.
 func (o *Operator) AcknowledgeRestore(ctx context.Context) error {
@@ -136,9 +100,6 @@ func (o *Operator) AcknowledgeRestore(ctx context.Context) error {
 		state, err := restoreStateTx(ctx, tx)
 		if err != nil || !state.Pending {
 			return err
-		}
-		if !state.Reconciled {
-			return errors.New("restore requires successful provider reconciliation before schedules can resume")
 		}
 		now := tx.now(ctx).UnixNano()
 		if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET cursor_at=`+o.s.greatest()+`(cursor_at,?),next_due_at=NULL,updated_at=?`, now, now); err != nil {
@@ -158,21 +119,4 @@ func checkRestoreScheduleTx(ctx context.Context, tx *storeTx, due time.Time) err
 		return ErrRestorePending
 	}
 	return nil
-}
-
-// RestorePaymentMode uses the restored database's mode rather than accepting a replacement from an operator flag.
-func (o *Operator) RestorePaymentMode(ctx context.Context) (capability.PaymentMode, error) {
-	var body []byte
-	err := o.s.queryRow(ctx, `SELECT value FROM settings WHERE key='payment_mode'`).Scan(&body)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	var mode capability.PaymentMode
-	if json.Unmarshal(body, &mode) != nil || mode != capability.PaymentLive && mode != capability.PaymentTest {
-		return "", errors.New("restore payment mode is invalid")
-	}
-	return mode, nil
 }

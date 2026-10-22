@@ -102,7 +102,7 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 }
 
 // safety: a refill's request is fixed when it opens, so every retry sends Stripe the same one under its key. Its
-// payment id is recorded before the confirm call charges the card, and verified webhook or provider-pull settlement grants credit; a
+// payment id is recorded before the confirm call charges the card, and only the signed webhook grants credit; a
 // crash before the id is recorded leaves a refill the next pass retries. A recorded payment is reconciled first;
 // charging still requires current permission, and cancellation retains the reservation record.
 func (s *Server) refillPass(ctx context.Context) {

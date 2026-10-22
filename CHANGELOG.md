@@ -20,11 +20,9 @@ unlock.
 
 ## [Unreleased]
 
-- **controller:** Helm persists credential epochs on a dedicated retained volume. Startup, admin and restore share `--credential-epoch-dir`; epoch files use the trusted credential-file checks. Payment recovery survives team purge and detached historical cards, preserves card completion order, and reports outcomes through webhook alerting and owner mail.
+- **controller:** Helm persists credential epochs on a dedicated retained volume. Startup, admin and restore share `--credential-epoch-dir`; epoch files use the trusted credential-file checks.
 
-- **controller:** A failed or interrupted restore reconciliation retry blocks schedule acknowledgment until a new provider sweep succeeds
-
-- **controller (Breaking):** Schema baseline 20 includes persisted credential epochs and declared restore preparation, provider payment reconciliation and schedule acknowledgment. An external credential epoch invalidates all earlier bearer tokens and dashboard sessions after restore; operators supply a fresh bootstrap seed and reissue credentials. Schedule acknowledgment discards catch-up through its timestamp. Schema mismatch errors distinguish upgrade from rollback and preserve newer stores. See [migration](docs/migrations/_unreleased.md#declared-restore-and-credential-epochs).
+- **controller (Breaking):** Schema baseline 20 includes persisted credential epochs and declared restore preparation and schedule acknowledgment. An external credential epoch invalidates all earlier bearer tokens and dashboard sessions after restore; operators supply a fresh bootstrap seed and reissue credentials. Schedule acknowledgment discards catch-up through its timestamp. Schema mismatch errors distinguish upgrade from rollback and preserve newer stores. See [migration](docs/migrations/_unreleased.md#declared-restore-and-credential-epochs).
 - **auth:** GitHub Actions runner credentials use the store clock for their one-hour lifetime, so controller clock skew cannot make an otherwise valid exchange fail.
 
 - **go api:** Add `secretname.ErrMissing` as the shared missing-secret error. `sparkwing.ErrSecretMissing` keeps the same error identity.

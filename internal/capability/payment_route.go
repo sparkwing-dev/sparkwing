@@ -25,18 +25,9 @@ type PaymentRoute struct {
 	PaymentID  string
 }
 
-// PaymentParentState distinguishes a committed billing parent from one erased by tenant purge.
-type PaymentParentState uint8
-
-const (
-	PaymentParentMissing PaymentParentState = iota
-	PaymentParentRecorded
-	PaymentParentPurged
-)
-
-// PaymentRecords resolves provider identities before a payment can reach settlement.
+// PaymentRecords answers whether this deployment committed the parent object an event concerns.
 type PaymentRecords interface {
-	RecordsPaymentParent(context.Context, PaymentRoute) (PaymentParentState, error)
+	RecordsPaymentParent(context.Context, PaymentRoute) (bool, error)
 }
 
 // PaymentScope is the deployment a verifier settles for and the records that resolve unstamped events.
@@ -87,17 +78,14 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEvent
 		return route, false, paymentProviderUnavailable()
 	}
 	stamp := head.Metadata.get(paymentDeploymentMetadata)
-	state, err := scope.Records.RecordsPaymentParent(ctx, route)
-	recorded := state == PaymentParentRecorded
+	recorded, err := scope.Records.RecordsPaymentParent(ctx, route)
 	switch {
 	case err != nil:
 		return route, false, err
 	case stamp != "" && stamp != scope.Deployment && recorded:
-		return route, false, &apierr.Error{
-			Code: apierr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
-			Details: map[string]any{"reason": PaymentOwnershipReason, "object": head.ID, "stamp": stamp},
-		}
-	case state == PaymentParentPurged, stamp != "" && stamp != scope.Deployment:
+		return route, false, &apierr.Error{Code: apierr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
+			Details: map[string]any{"reason": PaymentOwnershipReason, "object": head.ID, "stamp": stamp}}
+	case stamp != "" && stamp != scope.Deployment:
 		return route, false, nil
 	}
 	purpose := head.Metadata.get(paymentPurposeMetadata)

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -266,7 +265,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		if e.CustomerID == "" || e.MethodID == "" || e.Fingerprint == "" {
 			return result, ErrInvalidInput
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO payment_setups(payment_mode,intent_id,customer_id,payment_method,fingerprint,brand,last4,created_at,detached) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(payment_mode,intent_id) DO UPDATE SET detached=excluded.detached, applied=0 WHERE payment_setups.detached<>excluded.detached`, e.Mode, e.ObjectID, e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Created, boolInt(e.MethodDetached))
+		res, err := tx.ExecContext(ctx, `INSERT INTO payment_setups(payment_mode,intent_id,customer_id,payment_method,fingerprint,brand,last4,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(payment_mode,intent_id) DO NOTHING`, e.Mode, e.ObjectID, e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Created)
 		if err == nil {
 			n, rowsErr := res.RowsAffected()
 			result.Replayed = n == 0
@@ -369,27 +368,21 @@ func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capa
 	return result, err
 }
 
-// RecordsPaymentParent resolves committed parents and redacted evidence of tenant purge.
-func (o *Operator) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (capability.PaymentParentState, error) {
-	var state capability.PaymentParentState
+// RecordsPaymentParent reports whether this deployment committed the checkout, refill, page or intent an event concerns.
+func (o *Operator) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error) {
+	var found int
 	err := o.s.queryRow(ctx, `SELECT CASE WHEN
- EXISTS(SELECT 1 FROM payment_closures WHERE payment_mode=? AND provider_digest IN (?,?,?)) THEN ?
- WHEN EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=?))
+ EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=?))
  OR EXISTS(SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?))
- THEN ? ELSE ? END`, r.Mode, paymentClosureDigest(r.CheckoutID), paymentClosureDigest(r.PaymentID), paymentClosureDigest(r.ObjectID), capability.PaymentParentPurged,
-		r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID, capability.PaymentParentRecorded, capability.PaymentParentMissing).Scan(&state)
-	return state, err
-}
-
-func paymentClosureDigest(id string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(id)))
+ THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID).Scan(&found)
+	return found == 1, err
 }
 
 func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, intent string) (Team, error) {
 	var card Card
 	var created int64
-	var applied, detached int
-	err := tx.QueryRowContext(ctx, `SELECT customer_id,payment_method,fingerprint,brand,last4,created_at,applied,detached FROM payment_setups WHERE payment_mode=? AND intent_id=?`, mode, intent).Scan(&card.Customer, &card.PaymentMethod, &card.Fingerprint, &card.Brand, &card.Last4, &created, &applied, &detached)
+	var applied int
+	err := tx.QueryRowContext(ctx, `SELECT customer_id,payment_method,fingerprint,brand,last4,created_at,applied FROM payment_setups WHERE payment_mode=? AND intent_id=?`, mode, intent).Scan(&card.Customer, &card.PaymentMethod, &card.Fingerprint, &card.Brand, &card.Last4, &created, &applied)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -412,28 +405,9 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 		return team, nil
 	}
 	card.AddedAt = time.Unix(created, 0)
-	if detached != 0 {
-		// Preserve the completion watermark so an older usable setup cannot replace this selection.
-		if err := (&Tenant{s: tx.store, team: team}).lockTeamTx(ctx, tx); err != nil {
-			return "", err
-		}
-		_, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer='',card_payment_method='',card_fingerprint='',card_brand='',card_last4='',refill_enabled=0,card_added_at=? WHERE name=? AND card_added_at<=?`, card.AddedAt.UnixNano(), string(team), card.AddedAt.UnixNano())
-		if err != nil {
-			return "", err
-		}
-	} else if err := saveCardTx(ctx, tx, team, card, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, ErrStaleCardSetup) {
+	if err := saveCardTx(ctx, tx, team, card, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, ErrStaleCardSetup) {
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)
 	return team, err
-}
-
-// PaymentSetupCompletion returns the verified completion time retained for a setup.
-func (o *Operator) PaymentSetupCompletion(ctx context.Context, mode capability.PaymentMode, intent string) (int64, error) {
-	var completed int64
-	err := o.s.queryRow(ctx, `SELECT created_at FROM payment_setups WHERE payment_mode=? AND intent_id=?`, mode, intent).Scan(&completed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
-	}
-	return completed, err
 }

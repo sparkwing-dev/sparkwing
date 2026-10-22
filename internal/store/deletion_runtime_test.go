@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -80,7 +81,7 @@ func purgeRows(t *testing.T, s *Store, team Team, target bool) []string {
 	t.Helper()
 	var out []string
 	for _, table := range SchemaTables {
-		if table.Name == "teams" || table.Name == "audit_events" || table.Name == "payment_closures" {
+		if table.Name == "teams" || table.Name == "audit_events" {
 			continue
 		}
 		predicate := ""
@@ -148,4 +149,18 @@ func TestAccountDeletionRelabelsGrantsAcrossTeamsWithoutChangingBalances(t *test
 			t.Fatalf("team %s balance = %d, %v; want %d", tc.team, got, err, tc.balance)
 		}
 	}
+}
+
+// RequestTeamDeletion queues a team for deletion on the operator's word,
+// with no membership check, for a deletion request that arrived by mail.
+func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team) (TeamDeletion, []string, error) {
+	t := &Tenant{s: o.s, team: NormalizeTeam(team)}
+	var result TeamDeletion
+	var revoked []string
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, revoked, err = t.requestTeamDeletionTx(ctx, tx, tx.now(ctx))
+		return err
+	})
+	return result, revoked, err
 }

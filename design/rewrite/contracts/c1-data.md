@@ -970,13 +970,6 @@ The final `schema.sql` implements these local C1 requirements. Payment receipts
 are operator-owned because an unbound warning has no team. A team purge removes
 its bound receipts and correlations while retaining unbound warnings.
 
-Tenant purge also retains operator-owned `payment_closures`, containing only
-payment mode and SHA256 provider identity hashes. Closure insertion and parent
-erasure commit together. Provider ownership distinguishes purged parents from
-missing restored correlations before reading card details or settling money.
-Setup evidence persists provider completion time and current detachment
-separately; detachment never prevents recovery of monetary consequences.
-
 - `payment_events` keeps its existing columns and `(payment_mode,event_id)` key.
   Its kind check admits all `capability.PaymentEventKind` values. `checkout_id`
   becomes nullable for non-checkout events, and `team` becomes nullable only for

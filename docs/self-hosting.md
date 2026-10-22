@@ -176,11 +176,12 @@ file checks above to the epoch. The Helm chart always mounts a dedicated,
 retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
 flag, including when `/data` uses `emptyDir`. Preserve the latest epoch when
 restoring a database. Retain its volume independently of database backups.
-Use the [declared restore procedure](backup-restore.md#restore) to rotate it,
-reconcile payments and acknowledge schedule suppression. All earlier bearer
+Declared restore preparation rotates the epoch and holds schedules until
+operator acknowledgment. All earlier bearer
 tokens and dashboard sessions are invalidated. Supply a fresh
 `bootstrap-admin-token` seed before restarting, then reissue runner and user
-credentials.
+credentials. Payment recovery is manual; follow the operator runbook kept
+outside this repository.
 
 ### Client addresses behind proxies
 
@@ -305,10 +306,8 @@ can seed acquisition, which still verifies the sealed commit.
 
 ### Backups and upgrades
 
-[Backup, restore, and upgrade](backup-restore.md) covers both database
-shapes: what a restore needs beside the database, how to prove a backup
-is good before relying on it, and what rollback means at each stage of a
-controller upgrade.
+[Backup, restore, and upgrade](backup-restore.md) records schema compatibility.
+Recovery is manual; follow the operator runbook kept outside this repository.
 
 ## Add workstation capacity
 

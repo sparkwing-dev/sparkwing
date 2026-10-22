@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -103,50 +102,3 @@ func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ 
 }
 
 var _ PaymentSettler = (*store.Operator)(nil)
-
-// ReconcilePayments pulls provider-owned facts through the same settlement transaction
-// as webhooks. Restore must complete this sweep before acknowledging recovered state.
-func (s *Server) ReconcilePayments(ctx context.Context) error {
-	verifier, deployment, ledger := s.paymentVerifier, s.paymentDeployment, s.paymentLedger
-	puller, ok := verifier.(capability.PaymentPuller)
-	if !ok || ledger == nil || strings.TrimSpace(deployment) == "" {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "payment reconciliation is not configured"}
-	}
-	return puller.PullPayments(ctx, capability.PaymentScope{Deployment: strings.ToLower(strings.TrimSpace(deployment)), Records: ledger}, func(proof capability.VerifiedPaymentEvent) error {
-		event := proof.Event()
-		recorded, err := ledger.RecordsPaymentParent(ctx, capability.PaymentRoute{Mode: event.Mode, Kind: event.Kind, ObjectID: event.ObjectID, CheckoutID: event.CheckoutID, PaymentID: event.PaymentID})
-		if err != nil {
-			return err
-		}
-		if recorded == capability.PaymentParentPurged {
-			return nil
-		}
-		if recorded != capability.PaymentParentRecorded {
-			return &apierr.Error{Code: apierr.Conflict, Message: "provider payment has no restored team correlation; repair its reservation before acknowledging restore"}
-		}
-		settled, err := ledger.SettlePayment(ctx, proof)
-		if err != nil {
-			return err
-		}
-		s.reportPaymentSettlement(ctx, settled)
-		return nil
-	})
-}
-
-func (s *Server) runPaymentReconciliation(ctx context.Context) {
-	if s.paymentVerifier == nil || s.paymentLedger == nil {
-		return
-	}
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for {
-		if err := s.ReconcilePayments(ctx); err != nil && ctx.Err() == nil {
-			s.logger.Error("payment provider reconciliation failed; next sweep retries", "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
