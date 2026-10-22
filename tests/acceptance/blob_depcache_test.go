@@ -33,7 +33,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	_, identity, err := seedDepcacheBoundary(t, ctx, s, now)
+	_, identity, err := seedDepcacheBoundary(t, ctx, s)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("failed archive read replaced destination: %v", err)
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", now.UnixNano(), identity.CapabilityRef); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", teststore.Now(s).UnixNano(), identity.CapabilityRef); err != nil {
 		return err
 	}
 	if _, err := binding.Signer.Commit(ctx, settlement); err == nil {
@@ -206,8 +206,8 @@ func checkDepcacheScopes(ctx context.Context, data depcacheblob.Data, key, desti
 	return nil
 }
 
-func seedDepcacheBoundary(t testing.TB, ctx context.Context, s *store.Store, now time.Time) (blob.Authority, blob.UploadIdentity, error) {
-	commit, err := seedStoreLogBoundary(ctx, teststore.SQL(t, s), now)
+func seedDepcacheBoundary(t testing.TB, ctx context.Context, s *store.Store) (blob.Authority, blob.UploadIdentity, error) {
+	commit, err := seedStoreLogBoundary(ctx, teststore.SQL(t, s), teststore.Now(s))
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}

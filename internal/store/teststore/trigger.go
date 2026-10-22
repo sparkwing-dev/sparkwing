@@ -23,7 +23,7 @@ func SeedTriggerClaim(s *store.Store, ctx context.Context, team store.Team, run 
 	if s.Dialect() == store.DialectPostgres {
 		query = `UPDATE triggers SET status='claimed',claimed_by=$1,capability_prefix=$2,generation=$3,lease_expires_at=$4,claimed_at=$5,started_at=$6,finished_at=NULL WHERE team=$7 AND id=$8`
 	}
-	result, err := Exec(ctx, s, query, actor.Holder, actor.CapabilityPrefix, actor.Generation, until.UnixNano(), time.Now().UnixNano(), start, team, run)
+	result, err := Exec(ctx, s, query, actor.Holder, actor.CapabilityPrefix, actor.Generation, until.UnixNano(), Now(s).UnixNano(), start, team, run)
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func SeedTriggerWithRun(s *store.Store, ctx context.Context, team store.Team, v 
 	}
 	now := v.CreatedAt
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = Now(s)
 	}
 	query := `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES (?,?,?,'trigger',?,?,?,?,?,?)`
 	if s.Dialect() == store.DialectPostgres {

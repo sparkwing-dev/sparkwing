@@ -632,7 +632,9 @@ GitHub Actions enrollment uses `GET` and `POST /api/v1/runners/github` and
 `DELETE /api/v1/runners/github/{repository}`. The dashboard uses these paths.
 Each repository, workflow run and run attempt can exchange its GitHub identity
 once. Run the Sparkwing runner in one job per attempt. Actions credentials cannot
-be rotated. A new workflow attempt receives its own credential.
+be rotated. A new workflow attempt receives its own credential. The issuer
+bounds its expiry to one hour from the store transaction clock and at most
+one hour after the verified GitHub token expires.
 Runner metering uses the console-only
 `POST /api/v1/operator/runners/{runner}/metered`, selecting an enrolled root's
 capability prefix.

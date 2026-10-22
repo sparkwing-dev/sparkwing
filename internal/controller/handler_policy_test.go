@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// safety: migrated handlers consume authorization; a second check can disagree with route policy.
+// safety: handlers consume route authorization; a second check can disagree with route policy.
 func TestAuthorizedHandlersDoNotAuthorize(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {

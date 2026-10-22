@@ -36,7 +36,7 @@ func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) 
 
 func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {
 	t.Helper()
-	now := time.Now().UTC()
+	now := teststore.Now(st)
 	if err := teststore.SeedRun(st, t.Context(), store.Team(team), store.Run{ID: run, Pipeline: "build", Status: "pending", CreatedAt: now, RepoURL: remote, GitBranch: ref, GitSHA: sha}); err != nil {
 		t.Fatal(err)
 	}

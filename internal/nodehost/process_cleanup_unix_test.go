@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func TestProcessCleanupsReportFailuresAndContinueInReverseOrder(t *testing.T) {
@@ -21,7 +23,7 @@ func TestProcessCleanupsReportFailuresAndContinueInReverseOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	scope := CleanupScope{Dir: t.TempDir(), Env: []string{}}
+	scope := CleanupScope{Dir: t.TempDir(), Env: procenv.Env{}}
 	if err := cleanups.Run(t.Context(), scope); err == nil || strings.Contains(err.Error(), "private-argument") {
 		t.Fatalf("cleanup failure became success or exposed arguments: %v", err)
 	}

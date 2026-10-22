@@ -53,7 +53,7 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 				t.Fatalf("hold committed without durable job cancellation: %+v %v", node, err)
 			}
 			var drain int64
-			if err := s.db.QueryRow(`SELECT drain_deadline_at FROM billing_awards WHERE team='a' AND settled_at IS NULL`).Scan(&drain); err != nil || drain != now.Add(SliceSeconds*time.Second).UnixNano() {
+			if err := s.db.QueryRow(`SELECT drain_deadline_at FROM billing_awards WHERE team='a' AND settled_at IS NULL`).Scan(&drain); err != nil || drain != now.Add(60*time.Second).UnixNano() {
 				t.Fatalf("hold drain=%d, want store-time slice: %v", drain, err)
 			}
 			*now = now.Add(10 * time.Second)

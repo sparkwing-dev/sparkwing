@@ -131,7 +131,7 @@ func TestEngineClaimHTTPDeliversPrivateAwardOnce(t *testing.T) {
 func TestEngineClaimHTTPLocalFirstUsesPersistedPoll(t *testing.T) {
 	e, _, fallback := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	preferred := engineHTTPRoot(t, e, "a", "preferred", []capability.Grant{capability.NodesClaim})
-	now := time.Now().UnixNano()
+	now := teststore.Now(e.Store).UnixNano()
 	engineSQL(t, e.Store, `UPDATE nodes SET ready_at=?,execution_json=?`, now, []byte(`{"requires":{"set":true,"value":["ready"]}}`))
 	h := e.Server.WithEngineController(e.EngineController).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
 	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"],"available_cores":1}`
@@ -337,7 +337,7 @@ func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
 
 func TestEngineClaimHTTPCommitsRunnerObservations(t *testing.T) {
 	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	before := time.Now()
+	now := teststore.Now(e.Store)
 	body := `{"runner_version":"v1","kinds":["node"],"available_cores":1,"labels":["tool:git","name=impostor","class=cloud","pool=forged"]}`
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 200)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
@@ -352,7 +352,7 @@ func TestEngineClaimHTTPCommitsRunnerObservations(t *testing.T) {
 		if runner.CapabilityPrefix != "root" {
 			continue
 		}
-		if runner.Name != "root" || runner.Profile.Class != "agent" || len(runner.Profile.ReservedPools) != 0 || !reflect.DeepEqual(runner.Profile.Labels, []string{"tool:git"}) || runner.LastSeen.Before(before) || runner.LastSeen.After(time.Now()) {
+		if runner.Name != "root" || runner.Profile.Class != "agent" || len(runner.Profile.ReservedPools) != 0 || !reflect.DeepEqual(runner.Profile.Labels, []string{"tool:git"}) || !runner.LastSeen.Equal(now) {
 			t.Fatalf("poll changed enrollment or lost its observation: %+v", runner)
 		}
 		return

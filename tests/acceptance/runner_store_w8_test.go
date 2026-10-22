@@ -132,7 +132,7 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 	if kind == capability.UnitNode {
 		plan = []byte(`{"jobs":[{"id":"job"}]}`)
 	}
-	now := time.Now().UTC()
+	now := teststore.Now(s)
 	for _, statement := range []struct {
 		query string
 		args  []any

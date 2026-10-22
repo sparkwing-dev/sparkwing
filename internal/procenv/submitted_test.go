@@ -72,7 +72,7 @@ func TestAcceptedSubmittedNameAlreadySetByHostReachesPipeline(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
-				env, err := Build(kind, base, Runtime{})
+				env, err := buildEntries(kind, base, Runtime{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -120,7 +120,7 @@ func TestSubmittedNamesSurviveOnlyInsideTheOperatorAllowList(t *testing.T) {
 			continue
 		}
 		for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
-			environment, err := Build(kind, base, Runtime{})
+			environment, err := buildEntries(kind, base, Runtime{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,12 +159,12 @@ func TestSubmittedGoToolchainAndNetworkNamesAreRefused(t *testing.T) {
 }
 
 func TestRemoteInstallsIgnoreTheHostGoEnvFile(t *testing.T) {
-	remote, err := Build(Install, Base{Masker: secrets.NewMasker()}, Runtime{})
+	remote, err := buildEntries(Install, Base{Masker: secrets.NewMasker()}, Runtime{})
 	if err != nil || !slices.Contains(remote, "GOENV=off") {
 		t.Fatalf("remote install environment %v: %v", remote, err)
 	}
 	for _, base := range []Base{{Local: true}, {OwnerMachine: true, Masker: secrets.NewMasker()}} {
-		owned, err := Build(Install, base, Runtime{})
+		owned, err := buildEntries(Install, base, Runtime{})
 		if err != nil || slices.Contains(owned, "GOENV=off") {
 			t.Fatalf("an owner's install lost its go env file: %v %v", owned, err)
 		}
@@ -191,7 +191,7 @@ func TestSubmittedValuesNeverRedirectTheRunnersOwnState(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range []Kind{Install, Plan, Attempt, Eval} {
-		env, err := Build(kind, base, Runtime{})
+		env, err := buildEntries(kind, base, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}

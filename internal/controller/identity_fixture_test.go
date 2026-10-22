@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,6 +44,7 @@ type identityFixture struct {
 	admin    string
 	srv      *controller.Server
 	lastPage string
+	clock    *atomic.Int64
 }
 
 type fixtureOpts struct {
@@ -62,7 +64,9 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	iss := googletest.New(t)
 	gh := githubtest.New(t)
 	var srv *controller.Server
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	clock := new(atomic.Int64)
+	clock.Store(time.Now().UTC().UnixNano())
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, deploymenttest.Cloud(t, "https://controller.test"), o.logger).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
@@ -78,15 +82,17 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
+	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(teststore.Now(st), 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv}
+	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv, clock: clock}
 }
+
+func (f *identityFixture) advance(d time.Duration) { f.clock.Add(int64(d)) }
 
 func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	f.t.Helper()

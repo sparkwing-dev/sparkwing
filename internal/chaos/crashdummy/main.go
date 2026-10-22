@@ -16,6 +16,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -324,7 +325,7 @@ func (h *holder) spawnChildren(token string) {
 		if err != nil {
 			return
 		}
-		cmd := exec.Command(self, "hold",
+		cmd := procenv.HostCommand(self, "hold",
 			"--home", h.hf.home,
 			"--run", h.hf.run+"-c"+strconv.Itoa(i),
 			"--parent-token", token,
@@ -359,7 +360,7 @@ func (h *holder) daemonSpawner() func(home, version string) error {
 		if v == "" {
 			v = h.hf.version
 		}
-		cmd := exec.Command(self, "daemon",
+		cmd := procenv.HostCommand(self, "daemon",
 			"--home", home,
 			"--version", v,
 			"--grace-ms", strconv.Itoa(h.hf.daemonGrace),

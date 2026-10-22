@@ -43,9 +43,9 @@ func Binary(path string) Command { return Command{path} }
 func Node(node, entry string) Command { return Command{node, entry} }
 
 // Exec returns the command that starts the SDK process.
-func (c Command) Exec() *exec.Cmd {
+func (c Command) Exec(environment procenv.Env) *exec.Cmd {
 	// #nosec G204 -- the pipeline entry the host resolved, run as argv without a shell.
-	return exec.Command(c[0], append(slices.Clone(c[1:]), ProtocolArg)...)
+	return procenv.Command(environment, c[0], append(slices.Clone(c[1:]), ProtocolArg)...)
 }
 
 // safety: each reader decodes only the fields it needs, so a valid manifest
@@ -143,11 +143,11 @@ func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string, o
 	if err != nil {
 		return err
 	}
-	cmd, err := NPMCommand(ctx, runtime.GOOS, exec.LookPath, "ci", "--no-audit", "--no-fund")
+	cmd, err := NPMCommand(ctx, environment, runtime.GOOS, exec.LookPath, "ci", "--no-audit", "--no-fund")
 	if err != nil {
 		return fmt.Errorf("install the TypeScript pipeline's dependencies: %w", err)
 	}
-	cmd.Dir, cmd.Env = sparkwingDir, environment
+	cmd.Dir = sparkwingDir
 	masked := &installOutput{out: out, stream: masker.Stream()}
 	cmd.Stdout, cmd.Stderr = masked, masked
 	if err := errors.Join(cmd.Run(), masked.flush()); err != nil {

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -94,10 +93,7 @@ func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims g
 	if err != nil {
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
-	expires := time.Now().UTC().Truncate(time.Millisecond).Add(limits.GitHubRunnerCredentialTTL)
-	if ceiling := claims.ExpiresAt.Add(limits.GitHubRunnerCredentialTTL); !claims.ExpiresAt.IsZero() && ceiling.Before(expires) {
-		expires = ceiling
-	}
+	expires := claims.ExpiresAt.Add(limits.GitHubRunnerCredentialTTL)
 	registration := "github:" + strconv.FormatInt(claims.RepositoryID, 10) + ":" + strconv.FormatInt(claims.RepositoryOwnerID, 10)
 	return capability.ProvisionSpec{
 		Kind: capability.ProvisionActions, Team: string(team), RegistrationID: registration,

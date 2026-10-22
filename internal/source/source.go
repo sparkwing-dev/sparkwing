@@ -65,7 +65,7 @@ type Options struct {
 	// InstallSDK defaults to the verified selected engine's InstallSDK method.
 	InstallSDK func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)
 	// BuildEnvironment defaults to procenv.Build; adapters may supply the shared policy implementation.
-	BuildEnvironment func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	BuildEnvironment func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error)
 	// BundleTransport supplies signed-object transfers; the source client always refuses redirects.
 	// Nil uses the standard HTTP transport.
 	BundleTransport http.RoundTripper

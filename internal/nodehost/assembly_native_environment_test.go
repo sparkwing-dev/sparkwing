@@ -31,16 +31,16 @@ func TestRemotePreparationKeepsTheHostToolEnvironmentWithoutLocalSecrets(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	install, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: prepared, Masker: base.Masker}, procenv.Runtime{})
+	install, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: slices.Collect(prepared.Values()), Masker: base.Masker}, procenv.Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"HOME=/home/dev", "PATH=/usr/local/go/bin:/usr/bin", "GOCACHE=/home/dev/.cache/go-build"} {
-		if !slices.Contains(install, want) {
+		if !slices.Contains(slices.Collect(install.Values()), want) {
 			t.Errorf("SDK install environment lacks %s: %v", want, install)
 		}
 	}
-	if strings.Contains(strings.Join(install, "\n"), "local-only-password") {
+	if strings.Contains(strings.Join(slices.Collect(install.Values()), "\n"), "local-only-password") {
 		t.Fatalf("SDK install environment carries a configured local secret: %v", install)
 	}
 	if !base.Masker.ContainsSecret(secret) {

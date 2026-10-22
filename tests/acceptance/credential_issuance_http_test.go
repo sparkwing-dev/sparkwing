@@ -21,6 +21,7 @@ type credentialIssuer struct {
 	provisions  []capability.ProvisionSpec
 	delegations []capability.DelegateSpec
 	err         error
+	expires     *time.Time
 }
 
 func (f *credentialIssuer) ProvisionCapability(_ context.Context, spec capability.ProvisionSpec) (capability.Issued, error) {
@@ -33,7 +34,10 @@ func (f *credentialIssuer) DelegateCapability(_ context.Context, spec capability
 	return f.result("team", spec.Grants, spec.ExpiresAt), f.err
 }
 
-func (*credentialIssuer) result(team string, grants []capability.Grant, expires *time.Time) capability.Issued {
+func (f *credentialIssuer) result(team string, grants []capability.Grant, expires *time.Time) capability.Issued {
+	if f.expires != nil {
+		expires = f.expires
+	}
 	return capability.Issued{Raw: "one-time-private-bearer", Capability: capability.Capability{Prefix: "new-prefix", Team: team, Grants: grants, ExpiresAt: expires}}
 }
 

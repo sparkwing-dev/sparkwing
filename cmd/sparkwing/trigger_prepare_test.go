@@ -37,11 +37,11 @@ func triggerPreparationInput(repo string) triggerSourceInput {
 	return triggerSourceInput{
 		checkout: repo, pipeline: "deploy-prod", environment: os.Environ(),
 		githubID: func(context.Context, string) (int64, error) { return 17, nil },
-		buildEnv: func(kind procenv.Kind, base procenv.Base, runtime procenv.Runtime) ([]string, error) {
+		buildEnv: func(kind procenv.Kind, base procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 			if kind != procenv.Git || !base.Local || len(base.Captured) == 0 || !reflect.DeepEqual(runtime, procenv.Runtime{}) {
 				panic("invalid Git environment projection")
 			}
-			return []string{"PATH=" + os.Getenv("PATH"), "HOME=" + repo}, nil
+			return procenv.Build(kind, procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + repo}}, runtime)
 		},
 	}
 }
@@ -315,11 +315,11 @@ func TestPrepareTriggerRequestSubmitsThroughTheFinalController(t *testing.T) {
 
 func TestPrepareTriggerSourcePropagatesEnvironmentFailure(t *testing.T) {
 	failed := errors.New("environment failed")
-	input := triggerSourceInput{checkout: "/missing", pipeline: "deploy-prod", buildEnv: func(kind procenv.Kind, base procenv.Base, runtime procenv.Runtime) ([]string, error) {
+	input := triggerSourceInput{checkout: "/missing", pipeline: "deploy-prod", buildEnv: func(kind procenv.Kind, base procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 		if kind != procenv.Git || !base.Local || len(base.Ambient) != 0 || !reflect.DeepEqual(runtime, procenv.Runtime{}) {
 			t.Fatal("discovery changed the Git process boundary")
 		}
-		return nil, failed
+		return procenv.Env{}, failed
 	}}
 	if _, err := prepareTriggerSource(t.Context(), input); !errors.Is(err, failed) {
 		t.Fatalf("environment failure lost: %v", err)

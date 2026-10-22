@@ -93,6 +93,8 @@ func TestActionsIssuanceHTTPUsesVerifiedOrigin(t *testing.T) {
 	for _, event := range []string{"push", "workflow_dispatch", "schedule"} {
 		t.Run(event, func(t *testing.T) {
 			f := newActionsExchangeFixture(t)
+			issuedExpiry := time.Unix(f.claims["exp"].(int64), 0).Add(15 * time.Minute)
+			f.issuer.expires = &issuedExpiry
 			f.claims["event_name"] = event
 			w := f.request(t, "POST", f.token(t), "team", nil)
 			var result struct {
@@ -111,7 +113,7 @@ func TestActionsIssuanceHTTPUsesVerifiedOrigin(t *testing.T) {
 			if spec.Kind != capability.ProvisionActions || spec.Team != "team" || spec.Subject.Kind != capability.SubjectMachine || spec.Subject.ID == "" || spec.RegistrationID == "" || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 || !reflect.DeepEqual(spec.Repositories, []string{"gh:42"}) || !reflect.DeepEqual(spec.Binding, want) || !reflect.DeepEqual(spec.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 				t.Fatalf("spec=%+v", spec)
 			}
-			if spec.ExpiresAt == nil || spec.ExpiresAt.Unix() != result.ExpiresAt || spec.ExpiresAt.Before(time.Now()) || spec.ExpiresAt.After(time.Now().Add(time.Hour)) || w.Header().Get("Cache-Control") != "no-store" {
+			if spec.ExpiresAt == nil || !spec.ExpiresAt.Equal(time.Unix(f.claims["exp"].(int64), 0).Add(time.Hour)) || result.ExpiresAt != issuedExpiry.Unix() || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("expiry/headers=%v %v", spec.ExpiresAt, w.Header())
 			}
 		})

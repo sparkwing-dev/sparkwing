@@ -60,7 +60,7 @@ func TestGitHubEnrollmentHTTPUsesDefaultTransactions(t *testing.T) {
 	}
 	child, err := f.store.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
 		Parent: root.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim},
-		Binding: root.Capability.Binding, Repositories: root.Capability.Repositories, ExpiresAt: new(time.Now().Add(time.Minute)),
+		Binding: root.Capability.Binding, Repositories: root.Capability.Repositories, ExpiresAt: new(teststore.Now(f.store).Add(time.Minute)),
 	})
 	if err != nil {
 		t.Fatal(err)

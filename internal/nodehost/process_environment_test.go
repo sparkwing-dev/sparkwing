@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 					t.Fatalf("job env = %+v", values)
 				}
 				return procenv.JobEnv{Startup: values[1:], Body: values[:1]}, nil
-			}, Build: func(gotKind procenv.Kind, gotBase procenv.Base, runtime procenv.Runtime) ([]string, error) {
+			}, Build: func(gotKind procenv.Kind, gotBase procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 				called = true
 				if gotKind != kind || !reflect.DeepEqual(gotBase, base) {
 					t.Fatal("environment policy lost process kind or captured inputs")
@@ -53,10 +54,10 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 				if !reflect.DeepEqual(runtime, want) {
 					t.Fatalf("runtime = %+v", runtime)
 				}
-				return []string{"BUILT=policy"}, nil
+				return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: []string{"BUILT=policy"}}, procenv.Runtime{})
 			}}
 			env, err := policy.job(t.Context(), kind, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
-			if err != nil || !called || !reflect.DeepEqual(env, []string{"BUILT=policy"}) {
+			if err != nil || !called || !reflect.DeepEqual(slices.Collect(env.Values()), []string{"BUILT=policy"}) {
 				t.Fatalf("environment = %v, error = %v", env, err)
 			}
 		})
@@ -65,11 +66,11 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 
 func TestSDKPlanningEnvironmentHasNoJobStartup(t *testing.T) {
 	input := PlanningProcessInput{Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci", DryRun: true, Git: &nodeproto.Git{SHA: "sha", Branch: "topic", Repo: "repo"}, Trigger: &nodeproto.Trigger{Source: "github_actions"}}, Runner: nodeproto.RunnerIdentity{Name: "actions", Type: "agent", Labels: []string{"linux"}}}
-	policy := SDKEnvironment{Build: func(kind procenv.Kind, _ procenv.Base, runtime procenv.Runtime) ([]string, error) {
+	policy := SDKEnvironment{Build: func(kind procenv.Kind, _ procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 		if kind != procenv.Plan || runtime.RunID != "run" || runtime.JobID != "" || !runtime.DryRun || runtime.Commit != "sha" || runtime.Branch != "topic" || runtime.Repo != "repo" || runtime.TriggerSource != "github_actions" || runtime.Runner.Name != "actions" || len(runtime.Startup) != 0 {
 			t.Fatalf("planning environment = %+v", runtime)
 		}
-		return []string{}, nil
+		return procenv.Env{}, nil
 	}}
 	if _, err := policy.planning(t.Context(), input); err != nil {
 		t.Fatal(err)
@@ -87,9 +88,9 @@ func TestSDKEnvironmentRefusesMissingOrChangedPersistedIdentity(t *testing.T) {
 					return procenv.JobEnv{}, refused
 				}
 				return procenv.JobEnv{}, nil
-			}, Build: func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) {
+			}, Build: func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) {
 				called = true
-				return []string{"PARTIAL=unsafe"}, refused
+				return testProcessEnv(t, "PARTIAL=unsafe"), refused
 			}}
 			switch mode {
 			case "missing_store":
@@ -114,7 +115,7 @@ func TestSDKEnvironmentRefusesMissingOrChangedPersistedIdentity(t *testing.T) {
 				input.Accepted.RunID = "other"
 			}
 			env, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner)
-			if err == nil || len(env) != 0 || called != (mode == "build") {
+			if err == nil || len(slices.Collect(env.Values())) != 0 || called != (mode == "build") {
 				t.Fatalf("environment = %v, built = %v, error = %v", env, called, err)
 			}
 			if (mode == "split" || mode == "read" || mode == "build") && !errors.Is(err, refused) {
@@ -132,8 +133,8 @@ type environmentReadError struct {
 func sdkTestEnvironment(st EvaluationStore) SDKEnvironment {
 	return SDKEnvironment{
 		Store: st, Base: procenv.Base{Captured: []string{"GORACE=atexit_sleep_ms=0"}},
-		Build: func(_ procenv.Kind, base procenv.Base, _ procenv.Runtime) ([]string, error) {
-			return base.Captured, nil
+		Build: func(_ procenv.Kind, base procenv.Base, _ procenv.Runtime) (procenv.Env, error) {
+			return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: base.Captured}, procenv.Runtime{})
 		}, Split: func(values []procenv.Assignment) (procenv.JobEnv, error) {
 			if len(values) != 0 {
 				return procenv.JobEnv{}, errors.New("fixture did not specify job environment policy")
@@ -145,4 +146,13 @@ func sdkTestEnvironment(st EvaluationStore) SDKEnvironment {
 
 func (s environmentReadError) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
 	return store.NodeRow{}, s.err
+}
+
+func testProcessEnv(t testing.TB, values ...string) procenv.Env {
+	t.Helper()
+	env, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: values}, procenv.Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
 }

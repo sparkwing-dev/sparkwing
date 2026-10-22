@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
 	"github.com/sparkwing-dev/sparkwing/internal/jwks/jwkstest"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
@@ -99,34 +98,44 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 }
 
 func TestActionsExpiryFitsStoreClockProperty(t *testing.T) {
-	property := func(input uint32) bool {
-		clock := &testClock{}
-		e, _ := engineRuntimeStore(t, clock.option())
-		engineSQL(t, e.Store, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES ('a',42,7,'acme/repo','member',1,'gh:42')`)
-		server := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil)))
-		var databaseNow time.Time
-		clock.pin(func() time.Time { return databaseNow })
-
-		spec, err := server.actionsProvision(t.Context(), "a", githuboidc.Claims{RepositoryID: 42, RepositoryOwnerID: 7, Ref: "refs/heads/main", SHA: fmt.Sprintf("%040x", input), RunID: fmt.Sprint(input), RunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"})
-		if err != nil {
-			t.Log(err)
-			return false
-		}
-		databaseNow = spec.ExpiresAt.Add(-limits.GitHubRunnerCredentialTTL).Truncate(time.Millisecond).Add(time.Duration(input%1000) * time.Millisecond)
-		issued, err := e.Store.AsOperator().ProvisionCapability(t.Context(), spec)
-		if err != nil || issued.Capability.ExpiresAt == nil || issued.Capability.ExpiresAt.After(databaseNow.Add(limits.GitHubRunnerCredentialTTL)) {
-			t.Logf("valid Actions lifetime refused or exceeded: %v", err)
-			return false
-		}
-		spec.ExpiresAt = new(databaseNow.Add(limits.GitHubRunnerCredentialTTL + time.Nanosecond))
-		_, err = e.Store.AsOperator().ProvisionCapability(t.Context(), spec)
-		var refused *apierr.Error
-		return errors.As(err, &refused) && refused.Code == apierr.Forbidden
-	}
-	if !property(0) {
-		t.Fatal("controller expiry exceeds SQLite's current millisecond")
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
-		t.Fatal(err)
+	for _, year := range []int{2020, 2030} {
+		t.Run(fmt.Sprint(year), func(t *testing.T) {
+			databaseNow := time.Date(year, time.January, 1, 12, 0, 0, 123456789, time.UTC)
+			e, _ := engineRuntimeStore(t, teststore.WithClock(func() time.Time { return databaseNow }))
+			engineSQL(t, e.Store, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES ('a',42,7,'acme/repo','member',1,'gh:42')`)
+			server := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			property := func(input uint32) bool {
+				defer func() { databaseNow = databaseNow.Add(time.Hour) }()
+				// Token validity is checked before issuance, which can wait on the store.
+				tokenExpiry := databaseNow.Add(time.Duration(int64(input%7200)-3600) * time.Second)
+				spec, err := server.actionsProvision(t.Context(), "a", githuboidc.Claims{RepositoryID: 42, RepositoryOwnerID: 7, Ref: "refs/heads/main", SHA: fmt.Sprintf("%040x", input), RunID: fmt.Sprint(input), RunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main", ExpiresAt: tokenExpiry})
+				if err != nil {
+					t.Log(err)
+					return false
+				}
+				issued, err := e.Store.AsOperator().ProvisionCapability(t.Context(), spec)
+				want := databaseNow.Add(time.Hour)
+				if ceiling := tokenExpiry.Add(time.Hour); ceiling.Before(want) {
+					want = ceiling
+				}
+				if !want.After(databaseNow) {
+					var refused *apierr.Error
+					return errors.As(err, &refused) && refused.Code == apierr.Forbidden
+				}
+				if err != nil || issued.Capability.ExpiresAt == nil || !issued.Capability.ExpiresAt.Equal(want) || !issued.Capability.IssuedAt.Equal(databaseNow) {
+					t.Logf("Actions lifetime: %+v, %v; want %s", issued.Capability, err, want)
+					return false
+				}
+				return true
+			}
+			for _, input := range []uint32{0, 1, 3599, 3600, 7199} {
+				if !property(input) {
+					t.Fatalf("Actions expiry differs from its store clock for %d", input)
+				}
+			}
+			if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

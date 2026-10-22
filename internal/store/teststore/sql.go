@@ -32,13 +32,10 @@ type poolKey struct {
 }
 
 // OpenExisting opens path with store.Open and records it for SQL. Use it
-// to reopen or migrate a database a test already created. Unless WithClock is
+// to reopen a compatible database a test already created. Unless WithClock is
 // supplied, time advances by the monotonic interval since opening the fixture.
 func OpenExisting(path string, opts ...store.Option) (*store.Store, error) {
-	// Wall-clock corrections must not move a fixture behind its own issued authority.
-	started := time.Now()
-	opts = append([]store.Option{WithClock(func() time.Time { return started.Add(time.Since(started)) })}, opts...)
-	st, err := store.Open(path, opts...)
+	st, err := store.Open(path, fixtureOptions(opts)...)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +45,7 @@ func OpenExisting(path string, opts ...store.Option) (*store.Store, error) {
 
 // OpenPostgres opens dsn with store.OpenPostgres and records it for SQL.
 func OpenPostgres(ctx context.Context, dsn string, opts ...store.Option) (*store.Store, error) {
-	st, err := store.OpenPostgres(ctx, dsn, opts...)
+	st, err := store.OpenPostgres(ctx, dsn, fixtureOptions(opts)...)
 	if err != nil {
 		return nil, err
 	}

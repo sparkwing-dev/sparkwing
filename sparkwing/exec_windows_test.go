@@ -46,7 +46,7 @@ func TestExec_WindowsLongBashProgram(t *testing.T) {
 
 func TestExec_WindowsBashProgramPreservesStdin(t *testing.T) {
 	shell := filepath.Join(windowsGitBashRoot(t), "usr", "bin", "bash.exe")
-	command := commandContext(context.Background(), shell, "-c", `read -r value; printf '%s' "$value"`)
+	command := commandContext(context.Background(), os.Environ(), shell, "-c", `read -r value; printf '%s' "$value"`)
 	command.Stdin = strings.NewReader("input with spaces\n")
 	configureProcessGroup(context.Background(), command, nil)
 	output, err := command.Output()
@@ -78,7 +78,7 @@ func windowsGitBashRoot(t *testing.T) string {
 }
 
 func TestExec_WindowsBashProgramRejectsOversizedEnvironmentValue(t *testing.T) {
-	command := commandContext(context.Background(), "bash", "-c", strings.Repeat("x", 32768))
+	command := commandContext(context.Background(), os.Environ(), "bash", "-c", strings.Repeat("x", 32768))
 	configureProcessGroup(context.Background(), command, nil)
 	if err := command.Start(); err == nil || !strings.Contains(err.Error(), "exceeds environment limit") {
 		t.Fatalf("oversized program start error = %v", err)
@@ -87,7 +87,7 @@ func TestExec_WindowsBashProgramRejectsOversizedEnvironmentValue(t *testing.T) {
 
 func TestExec_WindowsBashProgramPreservesExitCode(t *testing.T) {
 	shell := filepath.Join(windowsGitBashRoot(t), "usr", "bin", "bash.exe")
-	command := commandContext(context.Background(), shell, "-c", "exit 7")
+	command := commandContext(context.Background(), os.Environ(), shell, "-c", "exit 7")
 	configureProcessGroup(context.Background(), command, nil)
 	var exit *exec.ExitError
 	if err := command.Run(); !errors.As(err, &exit) || exit.ExitCode() != 7 {

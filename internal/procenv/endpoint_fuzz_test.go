@@ -56,9 +56,9 @@ func FuzzConsumerCredentialsMasked(f *testing.F) {
 					if mode == "step" {
 						kind = StepTool
 					}
-					runtime.AttemptEnv = []string{entry}
+					runtime.AttemptEnv = Env{values: []string{entry}}
 				}
-				env, err := Build(kind, base, runtime)
+				env, err := buildEntries(kind, base, runtime)
 				if err != nil || !slices.Contains(env, entry) {
 					t.Fatalf("%s/%s changed endpoint: %v", name, mode, err)
 				}
@@ -83,7 +83,7 @@ func TestGoProxyDelimitersKeepPublicAuthorityVisible(t *testing.T) {
 	for _, separator := range []string{",", "|"} {
 		value := "reader:safe@private-tail" + separator + "suffix@next.example/@scope?other=@public"
 		masker := secrets.NewMasker()
-		_, err := Build(Install, Base{Local: true, Captured: []string{"GOPROXY=" + value}, Masker: masker}, Runtime{})
+		_, err := buildEntries(Install, Base{Local: true, Captured: []string{"GOPROXY=" + value}, Masker: masker}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestInvalidEndpointAuthorityDiagnosticsContainOnlyTheName(t *testing.T) {
 		"https://reader:private-password\n@host.example",
 		"https://reader:private-password@%",
 	} {
-		_, err := Build(Install, Base{Local: true, Captured: []string{"npm_config_registry=" + value}, Masker: secrets.NewMasker()}, Runtime{})
+		_, err := buildEntries(Install, Base{Local: true, Captured: []string{"npm_config_registry=" + value}, Masker: secrets.NewMasker()}, Runtime{})
 		if err == nil || err.Error() != `invalid proxy URL in "npm_config_registry"` {
 			t.Fatalf("invalid endpoint diagnostic = %v", err)
 		}
@@ -114,7 +114,7 @@ func TestEndpointPathCannotSupplyAnAuthority(t *testing.T) {
 		"proxy.example?next=https://fake-user:fake-pass@public.example",
 	} {
 		masker := secrets.NewMasker()
-		_, err := Build(Install, Base{Local: true, Captured: []string{"npm_config_registry=" + endpoint}, Masker: masker}, Runtime{})
+		_, err := buildEntries(Install, Base{Local: true, Captured: []string{"npm_config_registry=" + endpoint}, Masker: masker}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +133,7 @@ func TestEmptyEndpointCredentialFieldsKeepPublicPunctuation(t *testing.T) {
 	} {
 		endpoint := "https://" + tc.userinfo + "@proxy.example:443"
 		masker := secrets.NewMasker()
-		_, err := Build(Install, Base{Local: true, Captured: []string{"npm_config_registry=" + endpoint}, Masker: masker}, Runtime{})
+		_, err := buildEntries(Install, Base{Local: true, Captured: []string{"npm_config_registry=" + endpoint}, Masker: masker}, Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func FuzzCredentialTransportExcluded(f *testing.F) {
 		for _, kind := range []Kind{Plan, Attempt, Eval, Install, HostChild} {
 			for _, local := range []bool{false, true} {
 				entry := name + "=" + string(value)
-				env, err := Build(kind, Base{Local: local, Captured: []string{entry}, Ambient: []string{entry}, SubmitEnvAllow: []string{name}}, Runtime{})
+				env, err := buildEntries(kind, Base{Local: local, Captured: []string{entry}, Ambient: []string{entry}, SubmitEnvAllow: []string{name}}, Runtime{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -173,7 +173,7 @@ func TestGoEndpointTokensInPathOrQueryAreMasked(t *testing.T) {
 		{"GOSUMDB", "sum.example+key https://sum.example/token/sum-token-789", "sum-token-789"},
 	} {
 		masker := secrets.NewMasker()
-		if _, err := Build(Install, Base{Local: true, Captured: []string{tc.name + "=" + tc.value}, Masker: masker}, Runtime{}); err != nil {
+		if _, err := buildEntries(Install, Base{Local: true, Captured: []string{tc.name + "=" + tc.value}, Masker: masker}, Runtime{}); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(masker.Mask(tc.value), tc.secret) {

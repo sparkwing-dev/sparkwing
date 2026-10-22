@@ -49,7 +49,7 @@ func TestCleanupsBackgroundChildDoesNotOutliveIt(t *testing.T) {
 	pidFile := filepath.Join(dir, "child.pid")
 	mustRegisterCleanup(t, cleanups, "sh", "-c", stubbornChild+"exit 0", "sh", pidFile, cleanupPipe(t, dir, "hold").Name())
 	var log bytes.Buffer
-	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); err != nil {
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); err != nil {
 		t.Fatal(err)
 	}
 	requireChildGone(t, pidFile)
@@ -91,7 +91,7 @@ func TestCancelledCleanupTakesItsBackgroundChildWithIt(t *testing.T) {
 		cancel()
 	}()
 	var log bytes.Buffer
-	if err := cleanups.Run(ctx, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); !errors.Is(err, context.Canceled) {
+	if err := cleanups.Run(ctx, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cleanup cancellation error=%v", err)
 	}
 	if err := <-read; err != nil {
@@ -111,7 +111,7 @@ func TestCleanupIsKilledAtItsDeadline(t *testing.T) {
 	var log bytes.Buffer
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
-	if err := cleanups.Run(ctx, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); !errors.Is(err, context.DeadlineExceeded) {
+	if err := cleanups.Run(ctx, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("cleanup deadline error=%v", err)
 	}
 	if out := log.String(); !strings.Contains(out, "cleanup sh failed: timed out") || strings.Contains(out, "s3cret-arg") {

@@ -139,7 +139,7 @@ func TestSessionPolicyHTTPLifetimeProperty(t *testing.T) {
 	h := f.server.WithSessionMaxLifetime(maximum).Handler()
 	property := func(age uint8, header bool) bool {
 		elapsed := (time.Duration(age%96) - 24) * time.Hour
-		created := time.Now().Truncate(time.Millisecond).Add(-elapsed)
+		created := teststore.Now(f.store).Add(-elapsed)
 		if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?`, created.UnixNano()); err != nil {
 			t.Fatal(err)
 		}
@@ -157,6 +157,13 @@ func TestSessionPolicyHTTPLifetimeProperty(t *testing.T) {
 			status = 401
 		}
 		return w.Code == status && before == after && expiry == renewed && !strings.Contains(w.Body.String(), f.raw)
+	}
+	for _, age := range []uint8{24, 72} {
+		for _, header := range []bool{false, true} {
+			if !property(age, header) {
+				t.Fatalf("session lifetime boundary: age=%d header=%v", age, header)
+			}
+		}
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 96}); err != nil {
 		t.Fatal(err)
@@ -177,7 +184,7 @@ func TestSessionFlowHTTPLifetimeCases(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newSessionFlow(t)
-			now := time.Now().UTC()
+			now := teststore.Now(f.store)
 			created := now.Add(-test.age)
 			if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE sessions SET created_at=?,expires_at=?`, created.UnixNano(), now.Add(test.expiry).UnixNano()); err != nil {
 				t.Fatal(err)

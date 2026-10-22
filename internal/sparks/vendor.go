@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/mod/modfile"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 const VendoredDirName = "sparks"
@@ -110,9 +111,9 @@ type modDownloadJSON struct {
 // picked. It runs `go mod download` with sparkwingDir as the working directory,
 // so the pipeline module's own proxy and private settings apply.
 func DownloadModule(ctx context.Context, sparkwingDir, modulePath, version string) (dir, resolved string, err error) {
-	cmd := exec.CommandContext(ctx, goBin(), "mod", "download", "-json", modulePath+"@"+version)
+	cmd := procenv.ControlCommandContext(ctx, os.Environ(), goBin(), "mod", "download", "-json", modulePath+"@"+version)
 	cmd.Dir = sparkwingDir
-	cmd.Env = os.Environ()
+
 	out, runErr := cmd.Output()
 	if len(out) == 0 && runErr != nil {
 		return "", "", fmt.Errorf("sparks: go mod download %s@%s: %w", modulePath, version, runErr)
@@ -216,9 +217,9 @@ func addReplaceDirective(goModPath string, rawGoMod []byte, modulePath, relRepla
 }
 
 func goModTidy(ctx context.Context, sparkwingDir string) error {
-	cmd := exec.CommandContext(ctx, goBin(), "mod", "tidy")
+	cmd := procenv.ControlCommandContext(ctx, os.Environ(), goBin(), "mod", "tidy")
 	cmd.Dir = sparkwingDir
-	cmd.Env = os.Environ()
+
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("sparks: go mod tidy: %w: %s", err, string(out))
 	}

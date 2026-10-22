@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -162,7 +163,7 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: GoSDK, Environment: environment, Masker: masker})
+		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: GoSDK, Environment: slices.Collect(environment.Values()), Masker: masker})
 		if err == nil || strings.Contains(err.Error(), secret) {
 			t.Fatalf("registered install secret survived at seed %d", seed)
 		}
