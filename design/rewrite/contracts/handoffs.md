@@ -1012,3 +1012,7 @@ separate operations; no database transaction stays open across a provider call.
 - Amends decision 46. Automated restore reconciliation is removed: no pull-based settlement path, card-order recovery, purge closure evidence or periodic Stripe sweep (Stripe retries webhooks for 3 days and the durable inbox catches them). After a restore an operator compares Stripe with the ledger and applies any missing payment, refund or dispute with the existing operator tools, following a runbook kept outside the repository. A small read-only "provider objects since <time> and whether the ledger has them" report may stay if it is small.
 - Kept automatic: the credential epoch (revoked credentials stay revoked) and the post-restore schedule hold.
 - Principle: a rare, low-severity failure that is easy to recover by hand gets a runbook, not a system. Code volume must match the problem's frequency and severity.
+
+## 2026-10-21 Korey decision 48: masking is a host feature
+
+- Ratifies decision 43's consequence: pipeline code run without a Sparkwing host (a pipeline binary or SDK invoked directly) gets no secret masking, as it gets no concurrency or other host-provided guarantees. Every supported run path (sparkwing run, runners, Cloud, sparkwingtest) goes through the host. Documented as a host feature, matching GitHub Actions, where masking happens in the runner's log stream.
