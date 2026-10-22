@@ -224,6 +224,19 @@ func TestPlanInspectionMasksSecretArgumentsAndErrors(t *testing.T) {
 	}
 }
 
+func TestInspectionHelpReportsIncompleteDiscovery(t *testing.T) {
+	describe := `"ok":true,"result":{"pipelines":[{"name":"deploy","args":[{"name":"target","type":"string","required":true}]},{"name":"broken","args":[],"error":{"code":"sdk_error","message":"unknown-private-value"}}]}}`
+	bin, _ := fakePlanSDK(t, describe, fixturePlan, fixtureEval)
+	inspection, err := inspectionCommand(pipelineentry.Binary(bin), t.TempDir(), "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = inspection.presentation(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "pipeline discovery incomplete (details withheld: secrets not yet known)") || strings.Contains(err.Error(), "unknown-private-value") {
+		t.Fatalf("help diagnostic = %v", err)
+	}
+}
+
 func FuzzPlanInspectionDoesNotDisplaySecrets(f *testing.F) {
 	f.Add([]byte("token"), false)
 	f.Add([]byte("quotes\"\n"), true)

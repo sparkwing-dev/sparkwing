@@ -25,7 +25,7 @@ func (c retryController) Retry(ctx context.Context, id string, input controllerw
 }
 
 func retryResponse(id string) controllerwire.CreateRunResponse {
-	return controllerwire.CreateRunResponse{RunID: id, Number: 413, Request: runspec.SealedRequest{RunID: "original-run"}}
+	return controllerwire.CreateRunResponse{RunID: id, Number: 413, Inputs: runspec.Display{Pipeline: "deploy"}}
 }
 
 func TestRetryCommandSelectsModeAndControllerBeforeIntake(t *testing.T) {
@@ -169,7 +169,7 @@ func (retryBrokenWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe
 
 func TestRetryRejectsMalformedReceipt(t *testing.T) {
 	for _, result := range []controllerwire.CreateRunResponse{
-		{}, {RunID: "r", Number: 1}, {RunID: "r", Number: 0, Request: runspec.SealedRequest{RunID: "r"}},
+		{}, {RunID: "r", Number: 1}, {RunID: "r", Number: 0}, {Number: 1},
 	} {
 		c := retryController{retry: func(context.Context, string, controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
 			return result, nil
@@ -182,11 +182,11 @@ func TestRetryRejectsMalformedReceipt(t *testing.T) {
 	}
 }
 
-func TestRetryReceiptKeepsOriginalSealedIdentity(t *testing.T) {
+func TestRetryReceiptPreservesAllocatedIdentity(t *testing.T) {
 	response := retryResponse("new-retry")
-	response.Request.Hash = "original-seal"
-	response.Request.Request.Lineage.RetryOf = "earlier-source"
-	response.Request.Request.Actor = runspec.Actor{Kind: "account", ID: "original-actor"}
+
+	response.Inputs.Lineage.RetryOf = "earlier-source"
+	response.Inputs.Actor = runspec.Actor{Kind: "account", ID: "original-actor"}
 	before := response
 	got, err := retryReceipt("latest-source", response)
 	if err != nil || got.SourceRunID != "latest-source" || got.RunID != "new-retry" || !reflect.DeepEqual(response, before) {
@@ -197,7 +197,7 @@ func TestRetryReceiptKeepsOriginalSealedIdentity(t *testing.T) {
 func TestRetryHereHandoffReceivesPrivateReceiptOnce(t *testing.T) {
 	response := retryResponse("here-retry")
 	response.HereBearer = "one-time-private-bearer"
-	response.Request.Request.Options.Runner.Value.Kind = runspec.RunnerHere
+	response.Here = true
 	claimed := 0
 	c := retryConnection{
 		Controller: retryController{retry: func(context.Context, string, controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
@@ -228,9 +228,9 @@ func FuzzRetryReceiptsExcludeExecutionInputs(f *testing.F) {
 	f.Add("private-retry-credential", "private-argument-value", true)
 	f.Fuzz(func(t *testing.T, bearer, argument string, here bool) {
 		result := retryResponse("retry-run")
-		result.Request.Request.RequestedArgs = map[string]string{"password": argument}
+		result.Inputs.RequestedArgs = map[string]string{"password": argument}
 		if here {
-			result.Request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+			result.Here = true
 			result.HereBearer = bearer
 		}
 		render := func(response controllerwire.CreateRunResponse) (string, string) {
@@ -250,7 +250,7 @@ func FuzzRetryReceiptsExcludeExecutionInputs(f *testing.F) {
 		}
 		out, diagnostic := render(result)
 		baseline := result
-		baseline.Request.Request.RequestedArgs = map[string]string{"password": "baseline"}
+		baseline.Inputs.RequestedArgs = map[string]string{"password": "baseline"}
 		if here {
 			baseline.HereBearer = "baseline-bearer"
 		}

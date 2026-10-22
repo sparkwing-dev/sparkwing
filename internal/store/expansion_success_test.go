@@ -44,6 +44,7 @@ func successfulExpansionFixture(t *testing.T) (*Tenant, ExpansionSubmission) {
 	t.Helper()
 	tenant, _, request := expansionFixture(t)
 	request.Failure = nil
+	request.Registration = runspec.SecretRegistration{Version: 1}
 	request.Body = []byte(`{"jobs":[{"id":"generated","groups":["group"],"deps":["job"]}]}`)
 	tenant.s.plans = fakePlanContracts{
 		validate: func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
@@ -194,6 +195,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			var spec runspec.Spec
+			spec.Request.RunID = string(request.Source.RunID)
 			spec.Request.Request.Pipeline = "p"
 			spec.Request.Provenance = assertedProvenance(t, "p", "", "")
 			spec.Request.AllowedPools = []string{"prod"}
@@ -218,13 +220,13 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 					if mode == "decrypt_error" {
 						return "", errors.New("private diagnostic")
 					}
-					return "42", nil
+					return "4242", nil
 				})
 			}
 			contracts := tenant.s.plans.(fakePlanContracts)
 			validate := contracts.validate
 			contracts.validate = func(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				if !ctx.Secrets.ContainsSecret("job-42") {
+				if !ctx.Secrets.ContainsSecret("job-4242") {
 					t.Fatal("stored secret not registered")
 				}
 				return validate(raw, ctx)

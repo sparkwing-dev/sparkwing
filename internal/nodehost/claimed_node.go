@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -35,7 +36,7 @@ type ClaimedNodeHost struct {
 	Source    source.Options
 	Acquire   func(context.Context, source.Spec, source.Options) (*source.Entry, error)
 	Executor  NodeHost
-	Mask      func(string) string
+	Masker    *secrets.Masker
 	Masks     *MaskRegistry
 	Admission *LocalAdmission
 }
@@ -43,10 +44,10 @@ type ClaimedNodeHost struct {
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
 // A successful first renewal precedes every source, install and SDK operation.
 func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err error) {
-	if h.Store == nil || h.Executor == nil || h.Mask == nil {
+	if h.Store == nil || h.Executor == nil || h.Masker == nil {
 		return errors.New("claimed node host requires store, executor and masking adapters")
 	}
-	defer func() { err = maskHostError(err, h.Mask) }()
+	defer func() { err = maskHostError(err, h.Masker) }()
 	if input.Entry != nil || input.Accepted.RunID == "" || input.NodeID == "" || input.Authority.CapabilityPrefix == "" || input.Authority.Holder == "" || input.Generation < 1 || input.Attempt < 0 {
 		return errors.New("claimed node host requires an unacquired, accepted award")
 	}
@@ -167,7 +168,7 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 }
 
 func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, failure error) error {
-	return claimSetupFailure(ctx, input, failure, h.Mask, h.Store.TransitionNode)
+	return claimSetupFailure(ctx, input, failure, h.Masker.Mask, h.Store.TransitionNode)
 }
 
 func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (store.Applied, error)) error {

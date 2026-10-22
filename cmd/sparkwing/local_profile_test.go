@@ -55,7 +55,7 @@ func TestProfileCacheConstructionAfterLocalIntake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if admitted.Request.Request.Git.DefaultBranch.Set {
+	if admitted.Inputs.Git.DefaultBranch.Set {
 		t.Fatal("intake promoted requester branch metadata to trusted facts")
 	}
 	config := filepath.Join(t.TempDir(), "config.yaml")
@@ -99,7 +99,7 @@ func TestProfileCacheConstructionAfterLocalIntake(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	cache, closeCache, err := openProfileCache(ctx, os.Environ(), "cloud", admitted.Request.Request.Git, admitted.Request.Request.Source.Location.LocalCheckout)
+	cache, closeCache, err := openProfileCache(ctx, os.Environ(), "cloud", admitted.Inputs.Git, request.Request.Source.Location.LocalCheckout)
 	if err != nil {
 		t.Fatal("queued host could not construct its sealed profile cache:", err)
 	}

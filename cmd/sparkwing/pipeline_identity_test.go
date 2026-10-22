@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -41,7 +42,7 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 	}
 	stage := schema
 	stage.Name = "Deploy"
-	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{schema, stage}}); err != nil {
+	if err := storeDescribe(dir, key, presentationFixture(schema, stage)); err != nil {
 		t.Fatal(err)
 	}
 	return dir, schema
@@ -103,7 +104,7 @@ func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
 		t.Fatalf("aliased arguments: %v %v", args, err)
 	}
 	var out bytes.Buffer
-	printPipelineHelp(&out, schema)
+	printPipelineHelp(&out, runspec.PipelinePresentation(schema))
 	for _, want := range []string{"sparkwing run deploy-prod --region <string> --image <string>", "[from job rollout]", "[secret]"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in help: %s", want, &out)
@@ -132,7 +133,7 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{registered}}); err != nil {
+	if err := storeDescribe(dir, key, presentationFixture(registered)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := boundPipelineSchema([]nodeproto.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"}); err == nil || !strings.Contains(err.Error(), "deploy-prod") {

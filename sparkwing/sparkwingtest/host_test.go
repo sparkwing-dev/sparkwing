@@ -222,14 +222,18 @@ func TestFakeHostEvaluatesGeneratorAndClosesContexts(t *testing.T) {
 func TestFakeHostReportsGeneratorFailure(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	source := sparkwing.Job(plan, "source", fakeProducer{})
-	generated := source.Generate(func(context.Context, *sparkwing.Plan) error {
+	generated := source.Generate(func(ctx context.Context, _ *sparkwing.Plan) error {
+		sparkwing.Info(ctx, "private-before-failed-discovery")
 		return errors.New("expansion failed")
 	})
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	t.Cleanup(func() { _ = host.Close() })
 	if _, err := host.Eval(t.Context(), plan, "source", generated.ID(), nil); err == nil ||
-		!strings.Contains(err.Error(), "expansion failed") {
+		strings.Contains(err.Error(), "expansion failed") {
 		t.Fatalf("generator failure = %v", err)
+	}
+	if got := host.Records(); len(got) != 0 {
+		t.Fatalf("failed discovery released output: %+v", got)
 	}
 }
 

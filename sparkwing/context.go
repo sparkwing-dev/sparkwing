@@ -64,13 +64,16 @@ type PullRequest struct {
 // contain raw ANSI from child processes; envelope fields (Level,
 // Event, JobID, Step) never do.
 type LogRecord struct {
-	TS    time.Time      `json:"ts"`
-	Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
-	JobID string         `json:"job,omitempty"`
-	Step  string         `json:"step,omitempty"`  // active step ID
-	Event string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
-	Msg   string         `json:"msg,omitempty"`
-	Attrs map[string]any `json:"attrs,omitempty"`
+	TS         time.Time      `json:"ts"`
+	Level      string         `json:"level,omitempty"` // "info" | "warn" | "error"
+	JobID      string         `json:"job,omitempty"`
+	Step       string         `json:"step,omitempty"`  // active step ID
+	Event      string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
+	Msg        string         `json:"msg,omitempty"`
+	Attrs      map[string]any `json:"attrs,omitempty"`
+	streamID   string
+	streamData []byte
+	streamEnd  bool
 }
 
 // Logger is the sink for job output. The orchestrator installs a

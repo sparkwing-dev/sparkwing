@@ -86,10 +86,10 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 				t.Fatal(err)
 			}
 			described, err := inspectTriggerSource(t.Context(), selected, os.Environ(), options)
-			if err != nil || len(described) != 1 || described[0].Name != "ci" || described[0].Help != tc.want {
+			if err != nil || len(described.Declarations().Pipelines) != 1 || described.Declarations().Pipelines[0].Name != "ci" || described.Declarations().Pipelines[0].Help != tc.want {
 				t.Fatalf("selected policy inspection: %+v: %v", described, err)
 			}
-			req, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selected, described: described, args: []string{"--region=west", "--password=private-value"}, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}})
+			req, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selected, declarations: described, args: []string{"--region=west", "--password=private-value"}, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,12 +144,12 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 		if err != nil {
 			t.Fatal(err)
 		}
-		var described []nodeproto.PipelineDescription
+		var described *runspec.DeclarationGate
 		output := captureStderr(t, func() { described, err = inspectTriggerSource(t.Context(), selected, captured, options) })
 		if err != nil {
 			output += err.Error()
 		}
-		return err == nil && len(described) == 1 && !strings.Contains(output, secret) && !strings.Contains(output, base64.StdEncoding.EncodeToString([]byte(secret)))
+		return err == nil && len(described.Declarations().Pipelines) == 1 && !strings.Contains(output, secret) && !strings.Contains(output, base64.StdEncoding.EncodeToString([]byte(secret)))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)

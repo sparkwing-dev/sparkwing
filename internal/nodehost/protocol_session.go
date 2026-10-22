@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -29,6 +31,8 @@ import (
 // return when its context ends.
 // Revoke removes route authority before Close joins the process.
 type ProtocolSessionConfig struct {
+	output          *planningLogs
+	Masks           *MaskRegistry
 	Command         []string
 	Directory       string
 	Environment     procenv.Env
@@ -101,6 +105,7 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 	}
 	cfg.Debug = input.Debug
 	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, sdkWorkingDirectory(input.Entry), log
+	cfg.output = input.output
 	if err := context.Cause(ctx); err != nil {
 		return nil, cfg.failedStartup(err)
 	}
@@ -194,6 +199,18 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	if cfg.ValidateRequest == nil {
 		cfg.ValidateRequest = nodeproto.Request.Validate
 	}
+	if cfg.output == nil {
+		var masker *secrets.Masker
+		if cfg.Masks != nil {
+			masker = cfg.Masks.masker
+		}
+		sink := cfg.Log
+		if sink == nil {
+			sink = func(context.Context, nodeproto.FrameLog) error { return nil }
+		}
+		logs := &planningLogs{known: true, debug: cfg.Debug, masker: masker, sink: sink}
+		cfg.output, cfg.Log = logs, logs.write
+	}
 	var parent, child []*os.File
 	for range 4 {
 		r, w, err := os.Pipe()
@@ -221,6 +238,9 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	}
 	logCtx, stopLogs := context.WithCancel(context.WithoutCancel(ctx))
 	s := &ProtocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx)}
+	cfg.output.mu.Lock()
+	cfg.output.fail = s.failProtocol
+	cfg.output.mu.Unlock()
 	s.streams.Add(3)
 	go s.readProtocolFrames(parent[1])
 	go s.readProtocolText(parent[2], "info")
@@ -482,12 +502,28 @@ func protocolScanner(file *os.File) *bufio.Scanner {
 func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	defer s.streams.Done()
 	defer file.Close()
-	scanner := protocolScanner(file)
-	for scanner.Scan() {
-		s.emitProtocolLog(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: scanner.Text()})
+	buffer := make([]byte, 32<<10)
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			if s.cfg.Activity.Progress != nil {
+				s.cfg.Activity.Progress()
+			}
+			if writeErr := s.cfg.output.text(s.logCtx, level, string(buffer[:n]), false); writeErr != nil {
+				s.failProtocol(writeErr)
+				return
+			}
+		}
+		if err != nil {
+			if err != io.EOF && !errors.Is(err, os.ErrClosed) {
+				s.failProtocol(protocolSessionError(apierr.ProtocolError, "read SDK text stream failed"))
+				return
+			}
+			break
+		}
 	}
-	if scanner.Err() != nil && !errors.Is(scanner.Err(), os.ErrClosed) {
-		s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK text stream exceeds its read limit or failed"))
+	if err := s.cfg.output.text(s.logCtx, level, "", true); err != nil {
+		s.failProtocol(err)
 	}
 }
 
@@ -579,6 +615,9 @@ func (s *ProtocolSession) Close() error {
 		err := s.protocolFailure()
 		if errors.Is(err, errProtocolSessionClosed) {
 			err = nil
+		}
+		if s.cfg.output != nil {
+			err = errors.Join(err, s.cfg.output.finish(s.executionCtx))
 		}
 		s.closeErr = errors.Join(revokeErr, err, s.reapErr)
 	})

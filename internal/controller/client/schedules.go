@@ -266,7 +266,7 @@ func confirmsScheduleOverride(got controllerwire.OverrideView, want controllerwi
 			return false
 		}
 	}
-	return want.Args == nil || fields["args"] && maps.Equal(got.Args, *want.Args)
+	return want.Args == nil || fields["args"] && maps.Equal(got.Args.Values(), controllerwire.DisplayScheduleArgs(*want.Args).Values())
 }
 
 func validScheduleHealth(h controllerwire.HealthView) bool {

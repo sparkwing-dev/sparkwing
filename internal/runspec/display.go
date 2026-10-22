@@ -3,6 +3,8 @@ package runspec
 import (
 	"slices"
 	"sort"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func validResolvedClassification(request Request, resolved Resolved) bool {
@@ -78,34 +80,65 @@ func DisplayRequest(s SealedRequest) Display {
 	return d
 }
 
+func displaySecretNames(s Spec) ([]string, bool) {
+	names := append([]string(nil), s.Resolved.SecretArgs...)
+	if !validResolvedClassification(s.Request.Request, s.Resolved) {
+		return names, false
+	}
+	projection, err := BuildSecretRegistration(s.Request.Request, s.Resolved)
+	if err != nil {
+		return names, false
+	}
+	masker := secrets.NewMasker()
+	for _, value := range projection.Values {
+		if err := masker.Register(value); err != nil {
+			return names, false
+		}
+	}
+	for _, args := range []map[string]string{s.Request.Request.RequestedArgs, s.Resolved.Args} {
+		for name, value := range args {
+			if masker.Mask(value) != value && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+	slices.Sort(names)
+	return names, true
+}
+
 // DisplaySpec strips private hashes and masks requested and resolved secret arguments alike.
 func DisplaySpec(s Spec) Display {
 	d := displayBase(s.Request.Request)
-	classified := validResolvedClassification(s.Request.Request, s.Resolved)
-	d.RequestedArgs = redactArgs(s.Request.Request.RequestedArgs, s.Resolved.SecretArgs, classified)
-	d.Args = redactArgs(s.Resolved.Args, s.Resolved.SecretArgs, classified)
+	names, classified := displaySecretNames(s)
+	d.RequestedArgs = redactArgs(s.Request.Request.RequestedArgs, names, classified)
+	d.Args = redactArgs(s.Resolved.Args, names, classified)
 	if classified {
-		d.SecretArgs = append([]string{}, s.Resolved.SecretArgs...)
+		d.SecretArgs = append([]string{}, names...)
 	}
 	if s.Resolved.DefaultBranch.Set {
 		d.Git.DefaultBranch = s.Resolved.DefaultBranch
 	}
 	d.EnvNames = append([]string(nil), s.Resolved.Env.Names...)
-	d.Reproducer = s.Reproducer()
+	d.Reproducer = reproducer(s, names, classified)
 	return d
 }
 
 // Reproducer emits argv, avoiding shell interpretation and every secret argument value.
 func (s Spec) Reproducer() []string {
+	names, classified := displaySecretNames(s)
+	return reproducer(s, names, classified)
+}
+
+func reproducer(s Spec, names []string, classified bool) []string {
 	argv := []string{"sparkwing", "run", s.Request.Request.Pipeline}
-	if !validResolvedClassification(s.Request.Request, s.Resolved) {
+	if !classified {
 		return argv
 	}
 	secrets := map[string]bool{}
-	for _, name := range s.Resolved.SecretArgs {
+	for _, name := range names {
 		secrets[name] = true
 	}
-	names := make([]string, 0, len(s.Resolved.Args))
+	names = make([]string, 0, len(s.Resolved.Args))
 	for name := range s.Resolved.Args {
 		if !secrets[name] {
 			names = append(names, name)

@@ -81,7 +81,7 @@ func (s *RemoteOwnerStore) AcceptExpansion(ctx context.Context, submission store
 	if s.Controller == nil || submission.Source.RunID == "" || submission.Source.NodeID == "" || submission.SourceGeneration < 0 || (len(submission.Body) == 0) == (submission.Failure == nil) {
 		return store.AcceptedExpansion{}, errors.New("expansion requires a bound source and body or failure")
 	}
-	body := controllerwire.ExpansionSubmission{SourceGeneration: int64(submission.SourceGeneration), Body: slices.Clone(submission.Body)}
+	body := controllerwire.ExpansionSubmission{SourceGeneration: int64(submission.SourceGeneration), Body: slices.Clone(submission.Body), Registration: submission.Registration}
 	if submission.Failure != nil {
 		body.Failure = &apierr.Error{Code: submission.Failure.Code, Message: submission.Failure.MaskedError}
 	}

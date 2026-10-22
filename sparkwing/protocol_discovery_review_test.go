@@ -221,7 +221,7 @@ type protocolDiscoveryHelpPanic struct{ failure any }
 
 func (p protocolDiscoveryHelpPanic) Help() string { panic(p.failure) }
 
-func FuzzProtocolDescribeMasksSecretDefaults(f *testing.F) {
+func FuzzStandaloneProtocolDescribeReturnsAuthorError(f *testing.F) {
 	for _, secret := range []string{"", "prefix", "***", "\x00\"\\\n", "é秘密"} {
 		f.Add(secret, "declaration refused")
 	}
@@ -271,8 +271,8 @@ func FuzzProtocolDescribeMasksSecretDefaults(f *testing.F) {
 				}
 				serialized += string(raw)
 			}
-			if strings.Contains(serialized, first) || strings.Contains(serialized, second) {
-				t.Fatalf("%s exposed a declared secret default: %s", kind, serialized)
+			if !strings.Contains(serialized, first) || !strings.Contains(serialized, second) {
+				t.Fatalf("%s lost the author error before host sanitization: %s", kind, serialized)
 			}
 		}
 	})

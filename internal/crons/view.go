@@ -60,13 +60,10 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 		override.Cron = row.Override.Cron
 		override.TZ = row.Override.TZ
 		override.Overlap = row.Override.Overlap
-		override.Args = viewArgs(row.Override.Args)
+		override.Args = controllerwire.DisplayScheduleArgs(row.Override.Args)
 		if row.Override.CatchUp != nil {
 			override.CatchUpNS = int64(*row.Override.CatchUp)
 		}
-	}
-	if override.Args == nil {
-		override.Args = map[string]string{}
 	}
 	return controllerwire.ScheduleView{
 		ID:           row.ID,
@@ -80,7 +77,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 		TZ:           row.TZ,
 		Overlap:      row.Overlap,
 		CatchUpNS:    int64(row.CatchUp),
-		Args:         viewArgs(row.Args),
+		Args:         controllerwire.DisplayScheduleArgs(row.Args),
 		Lock: controllerwire.LockView{
 			Ref:    row.Lock.Ref,
 			Binary: row.Lock.Binary,
@@ -93,7 +90,7 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 			TZ:        row.Effective.TZ,
 			Overlap:   row.Effective.Overlap,
 			CatchUpNS: int64(row.Effective.CatchUp),
-			Args:      viewArgs(row.Effective.Args),
+			Args:      controllerwire.DisplayScheduleArgs(row.Effective.Args),
 		},
 		Paused:      row.Paused,
 		Declared:    row.Declared,
@@ -119,18 +116,9 @@ func NewFireView(fire store.CronFire, runStatus string) controllerwire.FireView 
 		Outcome:    fire.Outcome,
 		RunID:      fire.RunID,
 		Detail:     fire.Detail,
-		Args:       viewArgs(fire.Args),
+		Args:       controllerwire.DisplayScheduleArgs(fire.Args),
 		RunStatus:  runStatus,
 	}
-}
-
-// viewArgs renders an argument set for a reader that indexes it directly, so a
-// schedule with no arguments serves an empty object rather than a null.
-func viewArgs(args map[string]string) map[string]string {
-	if args == nil {
-		return map[string]string{}
-	}
-	return args
 }
 
 // RFC3339 renders an instant in UTC, empty when it is unset.

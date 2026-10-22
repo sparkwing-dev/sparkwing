@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 )
 
 // Pipeline is the canonical pipeline shape: every pipeline declares a
@@ -259,7 +261,7 @@ func walkInputFields(
 				return fmt.Errorf("field %s: enum requires either default:\"...\" or required:\"true\"", f.Name)
 			}
 			if field.Default != "" {
-				if !inEnum(field.Default, field.Enum) && !(kind == kindStringSlice && allInEnum(splitCSV(field.Default), field.Enum)) {
+				if !inEnum(field.Default, field.Enum) && !(kind == kindStringSlice && allInEnum(argvalue.List(field.Default), field.Enum)) {
 					return fmt.Errorf("field %s: default %q not in enum %v", f.Name, field.Default, field.Enum)
 				}
 			}
@@ -407,7 +409,7 @@ func setField(fv reflect.Value, f inputField, raw string) error {
 		}
 		fv.SetInt(int64(d))
 	case kindStringSlice:
-		parts := splitCSV(raw)
+		parts := argvalue.List(raw)
 		out := reflect.MakeSlice(fv.Type(), len(parts), len(parts))
 		for i, p := range parts {
 			out.Index(i).SetString(p)
@@ -454,28 +456,13 @@ func boolTag(s string) bool {
 	return err == nil && v
 }
 
-func splitCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := parts[:0]
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func checkEnum(name string, slice bool, enum []string, raw string) error {
 	if len(enum) == 0 {
 		return nil
 	}
 	values := []string{raw}
 	if slice {
-		values = splitCSV(raw)
+		values = argvalue.List(raw)
 	}
 	for _, v := range values {
 		if !inEnum(v, enum) {

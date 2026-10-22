@@ -25,6 +25,7 @@ func TestNodeExecutorThrowingStepPredicateCannotRunBody(t *testing.T) {
 	}
 	spec.PlanHash = planHash
 	input.Accepted.Spec, _ = json.Marshal(spec)
+	st.accepted = &input.Accepted
 	start := deps.Start
 	bodies := 0
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {

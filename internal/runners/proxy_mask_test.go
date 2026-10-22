@@ -62,8 +62,8 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 		},
 		{
 			name:    "members logged one at a time",
-			value:   "https://a:go-one@one.invalid|https://b:go-two@two.invalid,direct",
-			logged:  []string{"https://a:go-one@one.invalid", "https://b:go-two@two.invalid"},
+			value:   "https://alice:go-one@one.invalid|https://bobby:go-two@two.invalid,direct",
+			logged:  []string{"https://alice:go-one@one.invalid", "https://bobby:go-two@two.invalid"},
 			secrets: []string{"go-one", "go-two"},
 		},
 	} {
@@ -90,7 +90,7 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 
 func TestMaskProxyCredentialsLeavesValuesWithoutACredential(t *testing.T) {
 	m := secrets.NewMasker()
-	if _, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: []string{"GOPROXY=https://proxy.golang.org,direct", "HTTPS_PROXY=https://proxy-user:pw@one.invalid"}, Masker: m}, procenv.Runtime{}); err != nil {
+	if _, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: []string{"GOPROXY=https://proxy.golang.org,direct", "HTTPS_PROXY=https://proxy-user:private-password@one.invalid"}, Masker: m}, procenv.Runtime{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.Mask("fell back to direct via https://proxy.golang.org"); got != "fell back to direct via https://proxy.golang.org" {

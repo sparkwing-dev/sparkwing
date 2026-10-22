@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -230,7 +229,7 @@ type triggerRequestInput struct {
 	reason         string
 	source         preparedTriggerSource
 	settings       settings.Inputs
-	described      []nodeproto.PipelineDescription
+	declarations   *runspec.DeclarationGate
 	args           []string
 }
 
@@ -255,14 +254,17 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 			resultErr = &maskedCLIError{err: resultErr, masker: masker}
 		}
 	}()
+	if input.declarations == nil {
+		return controllerwire.CreateRunRequest{}, errors.New("trigger preparation requires pipeline declarations")
+	}
 	pipeline := input.source.pipeline
-	schema, err := boundPipelineSchema(input.described, clisurface.PipelineIdentity{Name: pipeline, Entrypoint: input.source.source.Entrypoint})
+	schema, err := boundPipelineSchema(input.declarations.Declarations().Pipelines, clisurface.PipelineIdentity{Name: pipeline, Entrypoint: input.source.source.Entrypoint})
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	args, err := parsePipelineArgs(schema, input.args)
 	if err != nil {
-		return controllerwire.CreateRunRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+		return controllerwire.CreateRunRequest{}, input.declarations.Error(&apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()})
 	}
 	input.settings.Context.Origin = runspec.OriginTrigger
 	options, err := settings.ResolveRequest(input.settings)

@@ -57,7 +57,7 @@ func initialTriggerResponse(t testing.TB, request controllerwire.CreateRunReques
 	if err != nil {
 		t.Fatal(err)
 	}
-	return controllerwire.CreateRunResponse{RunID: seal.RunID, Number: 17, Request: seal}
+	return controllerwire.CreateRunResponse{RunID: seal.RunID, Number: 17, Inputs: runspec.DisplayRequest(seal), Here: seal.Request.Options.Runner.Value.Kind == runspec.RunnerHere}
 }
 
 func TestInitialTriggerDetachedUsesFinalIntakeAndSafeReceipt(t *testing.T) {
@@ -131,13 +131,12 @@ func TestInitialTriggerRejectsInvalidReceiptsBeforeHosting(t *testing.T) {
 		func(r *controllerwire.CreateRunResponse) {},
 		func(r *controllerwire.CreateRunResponse) { r.RunID = "" },
 		func(r *controllerwire.CreateRunResponse) { r.Number = 0 },
-		func(r *controllerwire.CreateRunResponse) { r.Request.Hash = "wrong" },
-		func(r *controllerwire.CreateRunResponse) { r.Request.RunID = "original-retry-seal" },
-		func(r *controllerwire.CreateRunResponse) { r.Request.Request.Pipeline = "other" },
+
+		func(r *controllerwire.CreateRunResponse) { r.Inputs.Pipeline = "other" },
 		func(r *controllerwire.CreateRunResponse) { r.Replayed = true; r.HereBearer = "replayed-authority" },
 		func(r *controllerwire.CreateRunResponse) {
 			r.HereBearer = "unexpected-authority"
-			r.Request.Request.Options.Runner.Value.Kind = runspec.RunnerAny
+			r.Here = false
 		},
 	} {
 		request := initialTriggerRequest(true)
@@ -317,7 +316,12 @@ func TestInitialHereHandoffClaimsAndRunsSharedHost(t *testing.T) {
 	response := initialTriggerResponse(t, request)
 	response.HereBearer = "private-initial-bearer"
 	award := hereAward(t)
-	award.RunID, award.Binding.RunID, award.Request = response.RunID, response.RunID, response.Request
+	award.RunID, award.Binding.RunID = response.RunID, response.RunID
+	sealed, err := runspec.SealRequest(request.Request, runspec.IntakeFacts{RunID: response.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	award.Request = sealed
 	credentials := hereCredentials{dir: t.TempDir()}
 	options := client.EngineOptions{URL: "https://controller.example"}
 	var calls []string
@@ -352,7 +356,7 @@ func TestInitialHereHandoffClaimsAndRunsSharedHost(t *testing.T) {
 				return hereHostSession{host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 					calls = append(calls, "host")
 					var sealed runspec.Request
-					if err := json.Unmarshal(input.SealedRequest, &sealed); err != nil || sealed.Pipeline != request.Request.Pipeline || input.RunID != response.RunID || input.RequestHash != string(response.Request.Hash) || input.Accepted != nil || input.Owner.Owner.Holder != award.Binding.Holder {
+					if err := json.Unmarshal(input.SealedRequest, &sealed); err != nil || sealed.Pipeline != request.Request.Pipeline || input.RunID != response.RunID || input.RequestHash != string(award.Request.Hash) || input.Accepted != nil || input.Owner.Owner.Holder != award.Binding.Holder {
 						t.Fatalf("shared host received different inputs: %+v, %v", input, err)
 					}
 					return nodehost.RunCompletion{Outcome: "success"}, nil
@@ -361,7 +365,7 @@ func TestInitialHereHandoffClaimsAndRunsSharedHost(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err := submitTriggeredRun(t.Context(), request, false, "json", &out, triggerSubmission{
+	err = submitTriggeredRun(t.Context(), request, false, "json", &out, triggerSubmission{
 		Controller: controller,
 		here: func(ctx context.Context, receipt controllerwire.CreateRunResponse) error {
 			return handoffHereRun(ctx, options, receipt, deps)

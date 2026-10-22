@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
@@ -103,7 +105,7 @@ func TestNegativeDurationDoesNotBecomeZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secretSet{}}); err == nil {
+	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()}); err == nil {
 		t.Fatal("negative duration became an allowed zero")
 	}
 }

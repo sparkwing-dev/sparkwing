@@ -24,7 +24,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix='owner'`)
 	authorityPersist(t, tenant.s, owner)
 	plan := []byte(`{"jobs":[{"id":"job","closures":{"generate":["group"]}}]}`)
-	spec, err := json.Marshal(runspec.Spec{Version: 1, Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "p", Dispatch: runspec.DispatchHost}, Provenance: assertedProvenance(t, "p", "", "")}})
+	spec, err := json.Marshal(runspec.Spec{Version: 1, Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: runspec.SealedRequest{Version: 1, RunID: "run", Request: runspec.Request{Pipeline: "p", Dispatch: runspec.DispatchHost}, Provenance: assertedProvenance(t, "p", "", "")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	}
 	actor := request.Actor
 	actor.Authority.ID, actor.CapabilityPrefix = issued.Capability.Prefix, issued.Capability.Prefix
-	accepted, err := tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Source: request.Ref, SourceGeneration: 0, Actor: actor, Body: []byte(`{"jobs":[]}`)})
+	accepted, err := tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Source: request.Ref, SourceGeneration: 0, Actor: actor, Registration: runspec.SecretRegistration{Version: 1}, Body: []byte(`{"jobs":[]}`)})
 	if err != nil || accepted.State != ExpansionAccepted || accepted.SourceGeneration != 0 {
 		t.Fatalf("accept materialized expansion=%+v error=%v", accepted, err)
 	}

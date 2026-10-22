@@ -464,7 +464,7 @@ func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted Accepte
 	if h.Expand == nil {
 		return errors.New("run host requires a generator evaluator")
 	}
-	body, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
+	body, registration, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 	if err != nil {
 		return err
 	}
@@ -475,7 +475,7 @@ func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted Accepte
 	if err != nil {
 		return err
 	}
-	return h.commitExpansion(ctx, row, actor, body, failure)
+	return h.commitExpansion(ctx, row, actor, body, registration, failure)
 }
 
 func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.ScheduleDecision) (RunCompletion, error) {

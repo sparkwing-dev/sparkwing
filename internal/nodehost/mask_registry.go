@@ -11,26 +11,42 @@ import (
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
 type MaskRegistry struct {
-	mu          sync.Mutex
-	masker      *secrets.Masker
+	mu     sync.Mutex
+	masker *secrets.Masker
+	// Replay must reproduce accepted topology even after credentials are issued.
+	replayMasks *secrets.Masker
 	identifiers map[string]string
 }
 
 // NewMaskRegistry uses the same masker that host logs and returned errors use.
 func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
-	return &MaskRegistry{masker: masker, identifiers: map[string]string{}}
+	replayMasks := secrets.NewMasker()
+	replayMasks.Merge(masker)
+	return &MaskRegistry{masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
 }
 
-// ContainsSecret implements the shared plan validator's matcher, including short values.
+// ContainsSecret reports every presentation mask, including issued credentials.
 func (r *MaskRegistry) ContainsSecret(identifier string) bool {
-	return (planningSecrets{masker: r.masker}).ContainsSecret(identifier)
+	return r.masker.ContainsSecret(identifier)
 }
 
 // Register refuses collisions before changing any sink; success is synchronous.
 func (r *MaskRegistry) Register(value string) error {
 	candidate := secrets.NewMasker()
-	candidate.Register(value)
+	if err := candidate.Register(value); err != nil {
+		return err
+	}
 	return r.register(candidate)
+}
+
+// registerIssued protects a service value without changing accepted topology.
+func (r *MaskRegistry) registerIssued(value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.masker == nil {
+		return errors.New("mask registration requires a shared masker")
+	}
+	return r.masker.Register(value)
 }
 
 func (r *MaskRegistry) register(candidate *secrets.Masker) error {
@@ -39,19 +55,23 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	if r.masker == nil {
 		return errors.New("mask registration requires a shared masker")
 	}
-	matcher := planningSecrets{masker: candidate}
 	for identifier, path := range r.identifiers {
-		if matcher.ContainsSecret(identifier) {
+		if candidate.ContainsSecret(identifier) {
 			return identifierMaskError(path)
 		}
 	}
 	r.masker.Merge(candidate)
+	r.replayMasks.Merge(candidate)
 	return nil
 }
 
 // Accept checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
 func (r *MaskRegistry) Accept(plan nodeproto.PlanDoc, commit func() error) error {
+	return r.accept(plan, commit, r.masker)
+}
+
+func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, matcher *secrets.Masker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil || commit == nil {
@@ -59,7 +79,7 @@ func (r *MaskRegistry) Accept(plan nodeproto.PlanDoc, commit func() error) error
 	}
 	identifiers := map[string]string{}
 	if err := nodeproto.VisitPlanIdentifiers(plan, func(identifier, path string) error {
-		if r.ContainsSecret(identifier) {
+		if matcher.ContainsSecret(identifier) {
 			return identifierMaskError(path)
 		}
 		identifiers[identifier] = path

@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -206,7 +207,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
 
 	f.State = &hostState{Tenant: tenant}
-	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
 		return database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
 	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }, Layer: func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil

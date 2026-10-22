@@ -53,7 +53,7 @@ func TestSurfaceSchedulesTransport(t *testing.T) {
 					if body["tz"] != "" || body["catch_up"] != "0s" || !reflect.DeepEqual(body["args"], map[string]any{"empty": "", "message": "a=b"}) {
 						t.Fatalf("override presence: %+v", body)
 					}
-					row.Override = controllerwire.OverrideView{Fields: []string{"tz", "catch_up", "args"}, TZ: "", CatchUpNS: 0, Args: map[string]string{"empty": "", "message": "a=b"}}
+					row.Override = controllerwire.OverrideView{Fields: []string{"tz", "catch_up", "args"}, TZ: "", CatchUpNS: 0, Args: controllerwire.DisplayScheduleArgs(map[string]string{"empty": "", "message": "a=b"})}
 					response = controllerwire.ScheduleEnvelope{Schedule: row}
 				case 6:
 					if req.Method != "DELETE" || req.URL.Path != "/api/v1/schedules/s1/override" {

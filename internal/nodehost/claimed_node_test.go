@@ -38,7 +38,7 @@ func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
 	secret := "private-claim-read-credential"
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: secret, Details: map[string]any{"credential": secret}}
 	host.Store = refusedClaimSnapshot{ClaimStore: state, failure: failure}
-	host.Mask = func(value string) string { return strings.ReplaceAll(value, secret, "***") }
+	host.Masker = testMasker(secret)
 	state.renew = func(context.Context) (store.LeaseBeat, error) {
 		t.Error("renewed after the acceptance read failed")
 		return store.LeaseBeat{}, nil
@@ -90,7 +90,7 @@ func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDep
 	entry.SHA, entry.RepoKey = spec.Request.Request.Git.SHA, string(spec.Request.Request.Git.Repository.Key)
 	input.Entry = nil
 	host := ClaimedNodeHost{
-		Store: s, Executor: executor, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Mask: deps.Mask,
+		Store: s, Executor: executor, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: deps.Masker,
 		Acquire: func(_ context.Context, in source.Spec, _ source.Options) (*source.Entry, error) {
 			if in.Engine == nil || *in.Engine != spec.Resolved.Engine || in.SHA != spec.Request.Request.Git.SHA || in.RepoKey != entry.RepoKey {
 				t.Fatal("acquisition lost the accepted source or engine")
@@ -250,4 +250,31 @@ func TestClaimedNodeHostLossDuringAcquisitionDiscardsEntry(t *testing.T) {
 			t.Fatalf("changes=%+v processes=%d beats=%d", s.changes, len(*processes), beats)
 		}
 	})
+}
+
+func TestClaimedExecutionRefusesLegacyMaskingSealBeforeSourceOrProcess(t *testing.T) {
+	for _, entry := range []string{"claim", "executor"} {
+		t.Run(entry, func(t *testing.T) {
+			input, state, host, processes := claimedNodeFixture(t)
+			state.run.Spec.Resolved.SecretRegistration.Version = 0
+			input.Accepted.Spec, _ = json.Marshal(state.run.Spec)
+			host.Masks = nil
+			host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
+				t.Fatal("legacy masking seal acquired source")
+				return nil, nil
+			}
+			var err error
+			if entry == "claim" {
+				err = host.Execute(t.Context(), input)
+			} else {
+				err = host.Executor.Execute(t.Context(), input)
+			}
+			if err == nil || !strings.Contains(err.Error(), "start a new run instead of resuming") {
+				t.Fatalf("expected explicit legacy refusal, got %v", err)
+			}
+			if len(*processes) != 0 || len(state.changes) != 0 {
+				t.Fatal("legacy refusal started execution or changed node state")
+			}
+		})
+	}
 }

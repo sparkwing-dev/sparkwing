@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
@@ -20,7 +18,7 @@ func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
 	}
 
 	t.Setenv("SPARKWING_HOME", home)
-	if err := storeDescribe(t.TempDir(), "schema", nodeproto.DescribeDoc{}); err != nil {
+	if err := storeDescribe(t.TempDir(), "schema", presentationFixture()); err != nil {
 		t.Fatal(err)
 	}
 	describe := describeCachePath("schema")

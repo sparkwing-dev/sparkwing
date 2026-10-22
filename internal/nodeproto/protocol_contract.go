@@ -123,18 +123,23 @@ type RunResult struct {
 
 // EvalResult can carry scalar closure values or generated jobs without changing framing.
 type EvalResult struct {
-	Value json.RawMessage `json:"value"`
-	Error *apierr.Error   `json:"error,omitempty"`
+	Arguments         []ArgumentDescription `json:"arguments,omitempty"`
+	DeclarationsKnown bool                  `json:"declarations_known,omitempty"`
+	Value             json.RawMessage       `json:"value"`
+	Error             *apierr.Error         `json:"error,omitempty"`
 }
 
 // FrameLog has no job field because the host, not pipeline code, assigns log attribution.
 type FrameLog struct {
-	TS      string          `json:"ts"`
-	Level   string          `json:"level,omitempty"`
-	Step    string          `json:"step,omitempty"`
-	Event   string          `json:"event,omitempty"`
-	Message string          `json:"msg,omitempty"`
-	Attrs   json.RawMessage `json:"attrs,omitempty"`
+	Stream     string          `json:"stream,omitempty"`
+	StreamData string          `json:"stream_data,omitempty"`
+	StreamEnd  bool            `json:"stream_end,omitempty"`
+	TS         string          `json:"ts"`
+	Level      string          `json:"level,omitempty"`
+	Step       string          `json:"step,omitempty"`
+	Event      string          `json:"event,omitempty"`
+	Message    string          `json:"msg,omitempty"`
+	Attrs      json.RawMessage `json:"attrs,omitempty"`
 }
 
 // Frame represents either a reply or log record on the isolated frame pipe, never stdout.

@@ -564,6 +564,8 @@ components:
         body: {}
         body_hash:
           type: string
+        registration:
+          $ref: '#/components/schemas/internal.runspec.SecretRegistration'
         source_generation:
           type: integer
         source_job:
@@ -940,20 +942,28 @@ components:
     internal.controllerwire.CreateRunResponse:
       additionalProperties: true
       properties:
+        here:
+          type: boolean
         here_bearer:
           type: string
+        inputs:
+          $ref: '#/components/schemas/internal.runspec.Display'
         number:
           type: integer
         replayed:
           type: boolean
-        request:
-          $ref: '#/components/schemas/internal.runspec.SealedRequest'
+        request_id:
+          type: string
         run_id:
+          type: string
+        write_scope:
           type: string
       required:
         - run_id
         - number
-        - request
+        - inputs
+        - write_scope
+        - here
         - replayed
       type: object
       x-sparkwing-go-type: controllerwire.CreateRunResponse
@@ -1470,11 +1480,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         catch_up_ns:
           type: integer
         cron:
@@ -1677,6 +1686,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.apierr.Error'
             - type: "null"
+        registration:
+          $ref: '#/components/schemas/internal.runspec.SecretRegistration'
         source_generation:
           type: integer
       required:
@@ -1698,11 +1709,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         decided_at:
           type: string
         detail:
@@ -2521,11 +2531,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         catch_up_ns:
           type: integer
         cron:
@@ -3626,11 +3635,10 @@ components:
       additionalProperties: true
       properties:
         args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
+          additionalProperties:
+            const: '***'
+            type: string
+          type: object
         armed_at:
           type: string
         catch_up_ns:
@@ -5634,12 +5642,15 @@ components:
                 type: string
               type: array
             - type: "null"
+        secret_registration:
+          $ref: '#/components/schemas/internal.runspec.SecretRegistration'
         settings:
           $ref: '#/components/schemas/internal.runspec.ExecutionSettings'
       required:
         - engine
         - args
         - secret_args
+        - secret_registration
         - secret_names
         - entrypoint
         - default_branch
@@ -5743,6 +5754,44 @@ components:
         - hash
       type: object
       x-sparkwing-go-type: runspec.SealedRequest
+    internal.runspec.SecretRegistration:
+      additionalProperties: true
+      properties:
+        defaults:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runspec.SecretValue'
+              type: array
+            - type: "null"
+        list_args:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        values:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        version:
+          type: integer
+      required:
+        - version
+      type: object
+      x-sparkwing-go-type: runspec.SecretRegistration
+    internal.runspec.SecretValue:
+      additionalProperties: true
+      properties:
+        list:
+          type: boolean
+        raw:
+          type: string
+      required:
+        - raw
+      type: object
+      x-sparkwing-go-type: runspec.SecretValue
     internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.internal.nodeproto.SourceSpec.:
       additionalProperties: true
       properties:
@@ -6057,6 +6106,8 @@ components:
         Body: {}
         BodyHash:
           type: string
+        Registration:
+          $ref: '#/components/schemas/internal.runspec.SecretRegistration'
         Source:
           $ref: '#/components/schemas/internal.controllerwire.NodeRef'
         SourceGeneration:
@@ -6066,6 +6117,7 @@ components:
         - SourceGeneration
         - Body
         - BodyHash
+        - Registration
       type: object
       x-sparkwing-go-type: store.AcceptedExpansionRow
     internal.store.Actor:

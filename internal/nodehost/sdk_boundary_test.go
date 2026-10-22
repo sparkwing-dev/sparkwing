@@ -49,7 +49,7 @@ func TestLifecycleCleanupCommandsHaveIndependentBudgets(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					_, failure, err := host.Expand(t.Context(), input)
+					_, _, failure, err := host.Expand(t.Context(), input)
 					if err != nil || failure != nil {
 						t.Fatalf("failure=%v error=%v", failure, err)
 					}

@@ -6,8 +6,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
@@ -51,10 +49,9 @@ func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipe
 }
 
 func latestRunPresentation(row RunRow) *Run {
-	display := runspec.DisplayRequest(row.Request)
+	display := row.Display()
 	args := display.RequestedArgs
 	if row.Spec != nil {
-		display = runspec.DisplaySpec(*row.Spec)
 		args = display.Args
 	}
 	run := &Run{

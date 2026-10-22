@@ -15,7 +15,7 @@ func TestScheduleManagerRetainsUpcomingAndEffectiveCadence(t *testing.T) {
 	row := scheduleTestRow()
 	row.Effective.Overlap = "queue"
 	row.Effective.CatchUpNS = int64(2 * time.Hour)
-	row.Effective.Args = map[string]string{"depth": "deep"}
+	row.Effective.Args = controllerwire.DisplayScheduleArgs(map[string]string{"depth": "deep"})
 	second := row
 	second.ID, second.Name, second.Pipeline = "s2", "api/sweep/quick", "sweep"
 	next := "2026-10-15T03:00:00Z"

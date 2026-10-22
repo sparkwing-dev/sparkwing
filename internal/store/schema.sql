@@ -168,6 +168,7 @@ CREATE TABLE nodes (
     execution_json BLOB NOT NULL,
     expansion_digest TEXT NOT NULL DEFAULT '',
     expansion_body BLOB,
+    expansion_registration BLOB,
     expansion_failure BLOB,
     PRIMARY KEY (team, run_id, node_id),
     CHECK((claimed_by IS NULL AND capability_prefix = '' AND lease_expires_at IS NULL) OR (claimed_by IS NOT NULL AND claimed_by <> '' AND capability_prefix <> '' AND lease_expires_at IS NOT NULL AND generation > 0)),

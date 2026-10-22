@@ -34,10 +34,7 @@ func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request, aut
 
 func receiptSnapshot(snapshot store.RunSnapshot) (*store.Run, []*store.Node, error) {
 	row := snapshot.Run
-	display := runspec.DisplayRequest(row.Request)
-	if row.Spec != nil {
-		display = runspec.DisplaySpec(*row.Spec)
-	}
+	display := row.Display()
 	args := display.RequestedArgs
 	if row.Spec != nil {
 		args = display.Args

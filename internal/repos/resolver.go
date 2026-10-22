@@ -8,18 +8,15 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
 
 // DescribeRepo builds the pipeline binary a repository declares, or installs
-// its TypeScript pipeline's dependencies, and returns the schemas the entry
-// emits: each pipeline's name, arguments, and the risk labels its steps
-// declare. A caller that needs only the names, and one that has to weigh what
-// a pipeline declares, read the same entry.
-func DescribeRepo(absPath string) ([]nodeproto.PipelineDescription, error) {
+// its TypeScript pipeline's dependencies, and returns gated discovery.
+func DescribeRepo(absPath string) (*runspec.DeclarationGate, error) {
 	sparkwingDir := filepath.Join(absPath, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
@@ -63,10 +60,10 @@ func PipelineNamesForRepo(absPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pipelineNames(schemas), nil
+	return pipelineNames(schemas.Presentation().Pipelines), nil
 }
 
-func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
+func describeIfBuilt(absPath string) (*runspec.DeclarationGate, bool) {
 	sparkwingDir := filepath.Join(absPath, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, false
@@ -81,7 +78,7 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 			return nil, false
 		}
 		got, err := describePipelines(entry, absPath)
-		return pipelineNames(got), err == nil
+		return got, err == nil
 	}
 	hash, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
@@ -105,22 +102,26 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	return pipelineNames(got), true
+	return got, true
 }
 
 func PipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
-	return pipelineNamesIfBuilt(absPath)
+	doc, ok := describeIfBuilt(absPath)
+	if !ok {
+		return nil, false
+	}
+	return pipelineNames(doc.Presentation().Pipelines), true
 }
 
-func describePipelines(entry pipelineentry.Command, workDir string) ([]nodeproto.PipelineDescription, error) {
+func describePipelines(entry pipelineentry.Command, workDir string) (*runspec.DeclarationGate, error) {
 	doc, err := Describe(context.Background(), entry, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("describe %s: %w", entry[len(entry)-1], err)
 	}
-	return doc.Pipelines, nil
+	return doc, nil
 }
 
-func pipelineNames(schemas []nodeproto.PipelineDescription) []string {
+func pipelineNames(schemas []runspec.PipelinePresentation) []string {
 	names := make([]string, 0, len(schemas))
 	for _, s := range schemas {
 		if s.Name != "" {
@@ -143,14 +144,12 @@ func ResolveRepoForPipelineCached(name string) (string, error) {
 			if c.Worktree != pass {
 				continue
 			}
-			names, ok := pipelineNamesIfBuilt(c.Path)
+			doc, ok := describeIfBuilt(c.Path)
 			if !ok {
 				continue
 			}
-			for _, n := range names {
-				if n == name {
-					return c.Path, nil
-				}
+			if _, found := doc.Declarations().Pipeline(name); found {
+				return c.Path, nil
 			}
 		}
 	}

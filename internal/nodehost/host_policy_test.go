@@ -27,10 +27,10 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			jobHash, _ := expansionHash(job)
 			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
-			spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{Engine: identity}}
+			spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 			rawSpec, _ := json.Marshal(spec)
 			rawJob, _ := json.Marshal(job)
-			st := newExpansionHostStore(store.RunRow{}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
+			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
 			value := json.RawMessage("false")
 			if mode == "skip" {
 				value = json.RawMessage("true")
@@ -59,7 +59,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
 					return nil, errors.New("approval cannot read its own unexecuted output")
 				},
-				Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },
+				Masker: testMasker("private"),
 			})
 			if err != nil {
 				t.Fatal(err)

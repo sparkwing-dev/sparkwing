@@ -43,16 +43,27 @@ func TestMaskerHidesEncodedSecrets(t *testing.T) {
 	}
 }
 
-func TestMaskerEncodedFormsSkipShortAndIdenticalForms(t *testing.T) {
+func TestMaskerRejectsShortSecrets(t *testing.T) {
 	m := NewMasker()
-	m.Register("ab")
-	m.Register("plainalnum")
-	if got := m.Mask("a b ab YWI plainalnum"); got != "a b *** YWI ***" {
+	if err := m.Register("ab"); err == nil {
+		t.Fatal("short value accepted")
+	}
+	if err := m.Register("plainalnum"); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Mask("ab plainalnum"); got != "ab ***" {
 		t.Fatalf("Mask = %q", got)
 	}
-	for _, v := range m.Values() {
-		if len(v) < 4 && v != "ab" {
-			t.Fatalf("short encoded form registered: %q in %q", v, m.Values())
+}
+
+func TestMaskerHidesMixedCasePercentEscapes(t *testing.T) {
+	m := NewMasker()
+	if err := m.Register("my/é-token"); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"my%2f%c3%a9-token", "my%2F%c3%A9-token", "my%2f%C3%a9-token"} {
+		if got := m.Mask(value); got != "***" {
+			t.Fatalf("Mask(%q) = %q", value, got)
 		}
 	}
 }

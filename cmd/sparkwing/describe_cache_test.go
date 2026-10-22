@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 func protocolFixture(t *testing.T, path, counter, pipelines string) {
@@ -113,6 +115,57 @@ func TestDescribeCacheIgnoresDocumentsOfAnotherShape(t *testing.T) {
 		writeRepoFile(t, path, body)
 		if got := readDescribeFile(path); got != nil {
 			t.Errorf("%s: readDescribeFile = %+v, want a miss", name, got)
+		}
+	}
+}
+
+func TestDescribeSeparatesExecutionGrammarFromPublicMetadata(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	sparkwingDir := filepath.Join(t.TempDir(), ".sparkwing")
+	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n")
+	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
+	protocolFixture(t, fixture, counter, `[{"name":"deploy","args":[{"name":"token","type":"string","required":false,"secret":true,"default":"deploy"},{"name":"other","type":"string","required":false,"secret":true,"default":"bool"},{"name":"enabled","type":"bool","required":false}]}]`)
+	gate, err := describeEntry(t.Context(), sparkwingDir, pipelineentry.Binary(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := findPipelineSchema(gate.Declarations().Pipelines, "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := parsePipelineArgs(schema, []string{"--enabled"})
+	if err != nil || args["enabled"] != "true" {
+		t.Fatalf("redaction changed argument grammar: %v %v", args, err)
+	}
+	if err := storeDescribe(sparkwingDir, "public", gate.Presentation()); err != nil {
+		t.Fatal(err)
+	}
+	cached := readDescribeFile(describeCachePath("public"))
+	if len(cached) != 1 || cached[0].Name != "***" || cached[0].Args[2].Type != "***" {
+		t.Fatalf("private routing metadata entered public cache: %+v", cached)
+	}
+	var help bytes.Buffer
+	printPipelineHelp(&help, cached[0])
+	if strings.Contains(help.String(), "deploy") || strings.Contains(help.String(), "bool") {
+		t.Fatalf("private declarations entered help: %s", &help)
+	}
+}
+
+func TestIncompleteDiscoveryCacheWithholdsUnknownNamesAndRoutingHints(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	sparkwingDir := filepath.Join(t.TempDir(), ".sparkwing")
+	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
+	protocolFixture(t, fixture, counter, `[{"name":"unknown-private-name","short":"unknown-private-short","args":[{"name":"unknown-private-arg","short":"unknown-private-alias","type":"string","required":false,"job_id":"unknown-private-job"}]},{"name":"broken","args":[],"error":{"code":"plan_failed","message":"unknown-private-error"}}]`)
+	if err := writeDescribeCache(t.Context(), sparkwingDir, "incomplete", pipelineentry.Binary(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{describeCachePath("incomplete"), byRepoDescribePath(sparkwingDir)} {
+		raw, err := os.ReadFile(path)
+		if err != nil || strings.Contains(string(raw), "unknown-private") || strings.Contains(string(raw), "broken") {
+			t.Fatalf("unclassified presentation cached: %s %v", raw, err)
+		}
+		if !strings.Contains(string(raw), "details withheld") {
+			t.Fatalf("incomplete presentation lacks explanation: %s", raw)
 		}
 	}
 }

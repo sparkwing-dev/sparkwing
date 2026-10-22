@@ -275,10 +275,10 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	}
 	localSecrets, err := resolveBurstSecrets(ctx, runEnvironment.names, prepared.Description.Secrets, held)
 	if err != nil {
-		return localRunPreparation{}, err
+		return localRunPreparation{}, prepared.Declarations.Error(err)
 	}
 	return localRunPreparation{
-		identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
+		identity: identity, declarations: prepared.Declarations,
 		git:         selection.git,
 		source:      selection.source,
 		environment: seal, localSecrets: localSecrets, machine: machine, machineFile: configFile,

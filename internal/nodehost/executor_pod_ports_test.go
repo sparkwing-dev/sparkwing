@@ -95,7 +95,7 @@ func FuzzNodeExecutorMasksOuterAndPublicationFailures(f *testing.F) {
 		masker := secrets.NewMasker()
 		masker.Register(secret)
 		input, state, deps, _ := executorFixture(t)
-		deps.Mask = masker.Mask
+		deps.Masker = masker
 		failure := errors.New(strings.Repeat("h", nodeErrTextHeadBytes-10) + secret + "\n" + strings.Repeat("y", 2*nodeErrTextMaxBytes))
 		if outer {
 			deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
