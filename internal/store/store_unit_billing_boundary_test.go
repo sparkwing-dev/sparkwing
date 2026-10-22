@@ -42,6 +42,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			startedAt := *now
 			tenant := &Tenant{s: s, team: claim.Team}
 			ref := controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
+			admitExecution(t, tenant, actor)
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}

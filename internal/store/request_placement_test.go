@@ -29,7 +29,6 @@ func TestAcceptPlanUsesEveryRequestPlacement(t *testing.T) {
 					in.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 				}
 			})
-			tenant.s.plans = nil
 			acceptance.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"run"}]}]}`)
 			accepted, err := tenant.AcceptPlan(t.Context(), acceptance)
 			if err != nil {

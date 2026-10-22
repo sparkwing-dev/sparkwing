@@ -6,9 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (Applied, error) {
@@ -19,7 +18,7 @@ func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTr
 	if err != nil {
 		return Applied{}, err
 	}
-	if !applied.Replayed {
+	if !applied.Replayed && !applied.Waiting {
 		if err = settleControllerTx(ctx, tx, team, string(change.Ref.RunID), tx.now(ctx)); err != nil {
 			return Applied{}, err
 		}
@@ -63,6 +62,15 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 		if snapshot.Run.FinishedAt != nil {
 			return nil
 		}
+		if snapshot.Run.CancelRequestedAt == nil && snapshot.Run.Spec != nil {
+			result, err := (&Tenant{s: tx.store, team: team}).admitWorkTx(ctx, tx, CapacityBinding{RunID: runID, Generation: int64(actor.Owner.Generation)}, *actor)
+			if err != nil {
+				return err
+			}
+			if result.Kind == AcquireSkipped || result.Kind == AcquireFailed {
+				return settleAdmissionTx(ctx, tx, team, CapacityBinding{RunID: runID}, *actor, result)
+			}
+		}
 		graph, err := snapshot.Scheduling()
 		if err != nil {
 			return err
@@ -73,6 +81,13 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(node.NodeID)}, Actor: *actor}
 			switch node.Kind {
 			case DecisionExpand:
+				permission, err := releaseEvaluationTx(ctx, tx, team, change.Ref, *actor)
+				if err != nil {
+					return err
+				}
+				if permission.Waiting {
+					continue
+				}
 				_, err = tx.ExecContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES (?,?,?,?,'pending',?) ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation, actor.Owner.Generation)
 				if err != nil {
 					return err
@@ -81,6 +96,14 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 			case DecisionReady:
 				change.To, change.Cause = NodeReady, CauseRelease
 			case DecisionApproval:
+				handled, settled, err := scheduleApprovalEvaluationTx(ctx, tx, team, change.Ref, *actor)
+				if err != nil {
+					return err
+				}
+				if handled {
+					changed = changed || settled
+					continue
+				}
 				change.To, change.Cause = NodeApprovalPending, CauseApprovalOpen
 			case DecisionTerminal:
 				change.To, change.Cause = NodeState(node.Outcome), causeDependency
@@ -93,7 +116,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 			if err != nil {
 				return err
 			}
-			changed = changed || !applied.Replayed
+			changed = changed || !applied.Replayed && !applied.Waiting
 		}
 		if decision.Outcome != "" {
 			_, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(runID), To: RunState(decision.Outcome), Actor: *actor, Cause: RunFinish, Reason: decision.Reason})

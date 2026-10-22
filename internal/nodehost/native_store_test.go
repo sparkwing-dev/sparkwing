@@ -5,6 +5,7 @@ package nodehost
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -97,7 +98,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	var award store.ReconciledNode
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
-	f.Host.Layer = nil
+	f.Host.DebugPolicy, f.Host.SkipPolicy = nil, nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 		if award.Node.Ref.NodeID != runspec.NodeID(input.NodeID) || len(award.Bearer) == 0 {
 			return ProcessGrant{}, errors.New("native attempt has no adopted award")
@@ -127,9 +128,9 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		return grant, nil
 	}
 	config := NativeHostConfig{
-		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: f.Host,
+		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: ownerOperationsFixture(f.Host),
 		Masks: NewMaskRegistry(secrets.NewMasker()), Processes: processes, Router: router,
-		Admission:  &LocalAdmission{Daemon: newFakeDaemon()},
+		Admission:  ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source: source.Options{
 			Engines: engines, Target: resolved.Target, SDK: engine.GoSDK, Base: procenv.Base{Local: true},
@@ -141,14 +142,14 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 				return engine.SDKCommand{Directory: root, Command: []string{bin}}, nil
 			},
 		},
-		Planner:  SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-		Executor: ExecutorDependencies{Bind: bind, PublishOutput: outputs.PublishOutput},
-		Evaluation: EvaluationDependencies{
+		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Executor:    ExecutionOperations{Bind: bind, PublishOutput: outputs.PublishOutput},
+		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+			return nil, errors.New("unexpected source output read")
+		},
+		Evaluation: EvaluationOperations{
 			Bind: func(context.Context, EvaluationInput) (ProcessGrant, error) {
 				return ProcessGrant{}, errors.New("unexpected owner evaluation")
-			},
-			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
-				return nil, errors.New("unexpected source output read")
 			},
 		},
 	}
@@ -203,10 +204,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		t.Fatal("native host returned with active compute or delegated authority")
 	}
 	wantLeases := 1
-	if role == "owner" {
-		wantLeases++
-	}
-	if live, granted, released := config.Admission.Daemon.(*fakeDaemon).counts(); live != 0 || granted != wantLeases || released != wantLeases {
+	if live, granted, released := config.Admission.compute.Daemon.(*fakeDaemon).counts(); live != 0 || granted != wantLeases || released != wantLeases {
 		t.Fatalf("admission leases=%d/%d/%d, want 0/%d/%d", live, granted, released, wantLeases, wantLeases)
 	}
 }
@@ -238,7 +236,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 	})}
 	signer := scriptedDataSigner{onUpload: func(ctx context.Context, request blob.UploadIntent) (blob.UploadTicket, error) {
 		ticket, err := f.Tenant.ReserveBlobUpload(ctx, store.UploadReservationRequest{
-			ID: "native-output", Intent: request, ExpiresAt: time.Now().Add(time.Minute),
+			ID: "native-output-" + rand.Text(), Intent: request, ExpiresAt: time.Now().Add(time.Minute),
 		})
 		if err != nil {
 			return blob.UploadTicket{}, err

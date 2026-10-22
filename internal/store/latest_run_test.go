@@ -131,6 +131,7 @@ func TestGetLatestRun_TenantExcludesNewerForeignRun(t *testing.T) {
 func TestGetLatestRun_PrivateInputProjectionProperty(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
 	property := func(value string, phase uint8, accepted bool) bool {
+		value = "secret-" + value
 		request.Request.RequestedArgs = map[string]string{"private": value}
 		request.Request.SecretArgs = runspec.Optional[[]string]{}
 		switch phase % 4 {

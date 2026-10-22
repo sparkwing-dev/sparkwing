@@ -17,20 +17,21 @@ func maintenanceReaper(t *testing.T, s *Store) SingletonLease {
 	return lease
 }
 
-func TestLeasedConcurrencyMaintenancePromotesAfterExpiry(t *testing.T) {
+func TestLeasedConcurrencyMaintenanceSweepsWithoutPromoting(t *testing.T) {
 	tenant, now, _ := capacityFixture(t)
 	s := tenant.s
-	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','expired','run','job',1,?,3)`, now.UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','key','next','run','job',1,?,3,'queue')`, now.Add(time.Hour).UnixNano())
-	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s), ConcurrencyMaintenanceOptions{})
-	if err != nil || len(result.StaleHolders) != 1 || result.Promoted != 1 {
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','next','pending',?,?)`, []byte(`{"id":"next"}`), []byte(`{}`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','expired','run','job',1,?,3)`, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','next','run','next',1,?,0,'queue')`, now.Add(time.Hour).UnixNano())
+	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s))
+	if err != nil || len(result.StaleHolders) != 1 {
 		t.Fatalf("maintenance: %+v, %v", result, err)
 	}
-	state, err := tenant.GetConcurrencyState(t.Context(), "key")
-	if err != nil || len(state.Holders) != 1 || state.Holders[0].HolderID != "next" || len(state.Waiters) != 0 || state.UsedCost != 1 {
-		t.Fatalf("promoted state: %+v, %v", state, err)
+	state, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
+	if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 1 || state.Waiters[0].HolderID != "next" || state.UsedCost != 0 {
+		t.Fatalf("waiting state: %+v, %v", state, err)
 	}
-	again, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s), ConcurrencyMaintenanceOptions{})
+	again, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s))
 	if err != nil || !reflect.DeepEqual(again, ConcurrencyMaintenanceResult{}) {
 		t.Fatalf("second pass: %+v, %v", again, err)
 	}
@@ -60,38 +61,54 @@ func TestLeasedConcurrencyMaintenanceWaiterContinuity(t *testing.T) {
 			case "missing job":
 				nodeID = "missing"
 			}
-			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','key','waiter','run',?,1,?,3,'queue')`, nodeID, until.UnixNano())
-			result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s), ConcurrencyMaintenanceOptions{})
+			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run',?,?,?,3,'queue')`, nodeID, now.UnixNano(), until.UnixNano())
+			result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if scenario == "live" || scenario == "expired owner" || scenario == "expired claim" {
-				if len(result.StaleWaiters) != 0 || result.Promoted != 1 {
+				if len(result.StaleWaiters) != 0 {
 					t.Fatalf("live waiter: %+v", result)
 				}
-			} else if len(result.StaleWaiters) != 1 || result.Promoted != 0 {
+				rewriteSchemaCount(t, s.db, "concurrency_waiters", 1)
+			} else if len(result.StaleWaiters) != 1 {
 				t.Fatalf("abandoned waiter: %+v", result)
+			} else {
+				rewriteSchemaCount(t, s.db, "concurrency_waiters", 0)
 			}
-			rewriteSchemaCount(t, s.db, "concurrency_waiters", 0)
+			rewriteSchemaCount(t, s.db, "concurrency_holders", 0)
 		})
 	}
+}
+
+func TestLeasedConcurrencyMaintenanceReapsHolderWithoutLiveClaimOrOwner(t *testing.T) {
+	tenant, now, _ := capacityFixture(t)
+	s := tenant.s
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','holder','run','job',?,?,3)`, now.UnixNano(), now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE leases SET until=1 WHERE name='controller.owner'`)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=1 WHERE node_id='job'`)
+	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s))
+	if err != nil || len(result.StaleHolders) != 1 {
+		t.Fatalf("unexpired reservation outlived both claim and owner: %+v, %v", result, err)
+	}
+	rewriteSchemaCount(t, s.db, "concurrency_holders", 0)
 }
 
 func TestLeasedConcurrencyMaintenancePreservesBlockedLiveWaiter(t *testing.T) {
 	tenant, now, _ := capacityFixture(t)
 	s := tenant.s
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','other','pending',?,?)`, []byte(`{"id":"other"}`), []byte(`{}`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','holder','run','job',1,?,3)`, now.Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','key','waiter','run','other',1,?,0,'queue')`, now.Add(time.Hour).UnixNano())
-	before, err := tenant.GetConcurrencyState(t.Context(), "key")
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','holder','run','job',1,?,3)`, now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','waiter','run','other',1,?,0,'queue')`, now.Add(time.Hour).UnixNano())
+	before, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s), ConcurrencyMaintenanceOptions{})
+	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s))
 	if err != nil || !reflect.DeepEqual(result, ConcurrencyMaintenanceResult{}) {
 		t.Fatalf("live maintenance: %+v, %v", result, err)
 	}
-	after, err := tenant.GetConcurrencyState(t.Context(), "key")
+	after, err := tenant.GetConcurrencyState(t.Context(), "job:global:key")
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("live waiter changed: %+v -> %+v, %v", before, after, err)
 	}
@@ -101,19 +118,19 @@ func TestLeasedConcurrencyMaintenanceRemovesTerminalWorkInEveryScope(t *testing.
 	tenant, now, _ := capacityFixture(t)
 	s := tenant.s
 	maintenanceRun(t, s, "finished", 2, RunFailed)
-	for _, key := range []string{"run:finished:build", "box:host:build", "global:deploy"} {
+	for _, key := range []string{"run:finished:build", "box:host:build", "job:global:deploy"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a',?,1,1)`, key)
 		rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a',?,'terminal','finished','',1,?)`, key, now.Add(time.Hour).UnixNano())
 		rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,policy) VALUES ('a',?,'terminal','finished','',1,?,'queue')`, key, now.Add(time.Hour).UnixNano())
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','live','run','job',1,?,3)`, now.Add(time.Hour).UnixNano())
-	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s), ConcurrencyMaintenanceOptions{})
-	if err != nil || len(result.StaleHolders) != 3 || len(result.StaleWaiters) != 3 || result.Promoted != 0 {
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','live','run','job',1,?,3)`, now.Add(time.Hour).UnixNano())
+	result, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s))
+	if err != nil || len(result.StaleHolders)+len(result.StaleWaiters) == 0 {
 		t.Fatalf("terminal cleanup: %+v, %v", result, err)
 	}
 	rewriteSchemaCount(t, s.db, "concurrency_holders", 1)
 	rewriteSchemaCount(t, s.db, "concurrency_waiters", 0)
-	if again, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s), ConcurrencyMaintenanceOptions{}); err != nil || !reflect.DeepEqual(again, ConcurrencyMaintenanceResult{}) {
+	if again, err := s.AsOperator().MaintainConcurrency(t.Context(), maintenanceReaper(t, s)); err != nil || !reflect.DeepEqual(again, ConcurrencyMaintenanceResult{}) {
 		t.Fatalf("repeated terminal cleanup: %+v, %v", again, err)
 	}
 }
@@ -121,7 +138,7 @@ func TestLeasedConcurrencyMaintenanceRemovesTerminalWorkInEveryScope(t *testing.
 func TestConcurrencyMaintenanceFenceProperty(t *testing.T) {
 	tenant, now, _ := capacityFixture(t)
 	s := tenant.s
-	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','expired','run','job',1,?,3)`, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','expired','run','job',1,?,3)`, now.UnixNano())
 	lease := maintenanceReaper(t, s)
 	random := rand.New(rand.NewPCG(452, 371))
 	for range 96 {
@@ -134,24 +151,24 @@ func TestConcurrencyMaintenanceFenceProperty(t *testing.T) {
 		case 2:
 			forged.Generation += 1 + random.Int64N(10000)
 		}
-		result, err := s.AsOperator().MaintainConcurrency(t.Context(), forged, ConcurrencyMaintenanceOptions{})
+		result, err := s.AsOperator().MaintainConcurrency(t.Context(), forged)
 		if err == nil || !reflect.DeepEqual(result, ConcurrencyMaintenanceResult{}) {
 			t.Fatalf("forged fence changed state: %+v, %v", result, err)
 		}
 		rewriteSchemaCount(t, s.db, "concurrency_holders", 1)
 	}
 	*now = lease.ExpiresAt
-	if _, err := s.AsOperator().MaintainConcurrency(t.Context(), lease, ConcurrencyMaintenanceOptions{}); err == nil {
+	if _, err := s.AsOperator().MaintainConcurrency(t.Context(), lease); err == nil {
 		t.Fatal("expired reaper swept capacity")
 	}
 	next, err := s.AsOperator().AcquireSingletonLease(t.Context(), lease.Name, "successor", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().MaintainConcurrency(t.Context(), lease, ConcurrencyMaintenanceOptions{}); err == nil {
+	if _, err := s.AsOperator().MaintainConcurrency(t.Context(), lease); err == nil {
 		t.Fatal("former reaper swept capacity after takeover")
 	}
-	if result, err := s.AsOperator().MaintainConcurrency(t.Context(), next, ConcurrencyMaintenanceOptions{}); err != nil || len(result.StaleHolders) != 1 {
+	if result, err := s.AsOperator().MaintainConcurrency(t.Context(), next); err != nil || len(result.StaleHolders) != 1 {
 		t.Fatalf("successor: %+v, %v", result, err)
 	}
 }
@@ -162,14 +179,14 @@ func TestLeasedConcurrencyMaintenanceRollsBackWholePass(t *testing.T) {
 			tenant, now, _ := capacityFixture(t)
 			s := tenant.s
 			lease := maintenanceReaper(t, s)
-			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','expired','run','job',1,?,3)`, now.UnixNano())
-			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','key','expired','run','job',1,?,3,'queue')`, now.UnixNano())
+			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','job:global:key','expired','run','job',1,?,3)`, now.UnixNano())
+			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,lease_expires_at,generation,policy) VALUES ('a','job:global:key','expired','run','job',1,?,3,'queue')`, now.UnixNano())
 			if failure == "statement" {
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_holder_delete BEFORE DELETE ON concurrency_holders BEGIN SELECT RAISE(ABORT,'storage unavailable'); END`)
 			} else {
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER expire_reaper AFTER DELETE ON concurrency_holders BEGIN UPDATE leases SET until=1 WHERE name='controller.reaper'; END`)
 			}
-			result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease, ConcurrencyMaintenanceOptions{})
+			result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease)
 			if err == nil || !reflect.DeepEqual(result, ConcurrencyMaintenanceResult{}) {
 				t.Fatalf("partial result: %+v, %v", result, err)
 			}

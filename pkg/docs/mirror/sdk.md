@@ -269,7 +269,10 @@ The gate itself only declares a decision.
 `Memo` reuses a successful job result. Its callback returns `sw.MemoValue` and an
 error. Build keys with `sw.MemoKey(parts...)`, set retention with
 `sw.MemoTTL(duration)`, and return `sw.NoMemo` to bypass reuse. Empty keys fail.
-The maximum memo TTL is 30 days. Missing or corrupt objects produce a miss.
+The key callback runs after SkipIf on the executing host under the job's actual
+award, inside its concurrency slot. A memo hit releases the job's groups without
+running its body. The maximum memo TTL is 30 days. Missing or corrupt objects
+produce a miss.
 
 ```go
 sw.Job(plan, "build", Build{}).
@@ -348,13 +351,24 @@ Scopes are `sw.ScopeGlobal`, `sw.ScopeRun` and `sw.ScopeBox`. Policies are
 in every Go `ConcurrencyLimit`. Its zero value is an explicit zero and fails
 validation. Omitted scope, membership cost and policy resolve to global scope,
 cost one and queueing. An explicit zero cost also fails validation.
-Reused group definitions must agree on scope, capacity and
-policy. The host computes the scoped key. `QueueTimeout` bounds waiting and
-`CancelTimeout` bounds cancellation of existing holders.
+Reused group definitions at the same level must agree on scope, capacity and
+policy. Plan and job groups have separate namespaces. The same name at both
+levels identifies two budgets. The store derives keys from accepted declarations
+and the actual execution award. Each complete group set grants atomically. A
+queued job holds none of its groups. `QueueTimeout` bounds initial waiting.
+Replaying an already granted admission after that timeout retains its groups.
 
-`plan.Concurrency(group, cost...)` holds a budget for the whole run. Job
-memberships consume capacity around the job. Resource admission remains a
-separate host responsibility.
+After released work loses plan capacity, it keeps running. New releases queue
+without a timeout until the plan reacquires capacity. `CancelOthers` replaces
+logical capacity immediately and requests cooperative cancellation. Disconnected
+work can overlap until cleanup or the five-minute drain deadline.
+
+`plan.Concurrency(group, cost...)` holds a budget for the whole run. Plan groups
+accept global or run scope. Pipeline acceptance refuses a box-scoped plan group
+with an error naming the group and pointing at job-level box scope, because a
+run can execute across several machines. Attach a box-scoped group to jobs to
+limit work on each machine. Job memberships consume capacity around the job.
+Resource admission remains a separate host responsibility.
 
 ## Secrets and masking
 

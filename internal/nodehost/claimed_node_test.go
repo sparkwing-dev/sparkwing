@@ -89,7 +89,7 @@ func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDep
 	entry := input.Entry
 	entry.SHA, entry.RepoKey = spec.Request.Request.Git.SHA, string(spec.Request.Request.Git.Repository.Key)
 	input.Entry = nil
-	host := ClaimedNodeHost{
+	host := ClaimedNodeHost{Admission: ComposeStartGate(s, nil, false),
 		Store: s, Executor: executor, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: deps.Masker,
 		Acquire: func(_ context.Context, in source.Spec, _ source.Options) (*source.Entry, error) {
 			if in.Engine == nil || *in.Engine != spec.Resolved.Engine || in.SHA != spec.Request.Request.Git.SHA || in.RepoKey != entry.RepoKey {

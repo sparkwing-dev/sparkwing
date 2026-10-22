@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -15,52 +14,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
-func TestOwnerHostGuardRefusalBypassesPlanAndCache(t *testing.T) {
+func TestOwnerHostGuardRefusalBypassesPlan(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
 	planning := newPlanningFixture(t)
-	input.PlanCache = planning.cache
-	planning.cache.onLookup = func() { t.Error("refused guard read plan cache") }
-	planning.cache.onPut = func() { t.Error("refused guard wrote plan cache") }
 	host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
-		return OwnerPlanning{Resolved: runspec.Resolved{Guards: runspec.Guards{Unless: []string{"where:local"}, Reason: "refused"}}, Planning: planning.input, Functions: PlanningFunctions{
-			Plan: func(context.Context) (json.RawMessage, error) {
+		return OwnerPlanning{
+			Resolved: runspec.Resolved{Guards: runspec.Guards{Unless: []string{"where:local"}, Reason: "refused"}}, Planning: planning.input, Plan: func(context.Context) (json.RawMessage, error) {
 				t.Error("refused guard invoked SDK plan")
 				return nil, nil
 			},
-			Validate: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				var plan nodeproto.PlanDoc
-				err := json.Unmarshal(raw, &plan)
-				if plan.Jobs == nil || len(plan.Jobs) != 0 {
-					t.Error("guard refusal proposed executable work")
-				}
-				return plan, err
-			},
-			Hash: func(any) (runspec.Hash, error) { return runspec.Hash(strings.Repeat("a", 64)), nil },
-		}}, nil
+		}, nil
 	}
 	if _, err := host.Run(t.Context(), input); err != nil {
 		t.Fatal(err)
 	}
 	if f.accepted.Seal.Resolved.Guards.Reason != "refused" || f.accepted.RunID != "run" {
 		t.Fatal("guard refusal did not pass through acceptance")
-	}
-}
-
-func TestSDKCheckoutPlanningCacheIncludesProject(t *testing.T) {
-	var prior runspec.Hash
-	for _, requires := range []string{"pool=build", "pool=test"} {
-		planner, process, fixture, _ := sdkPlanningFixture(t)
-		planner.CanonicalHash = planningTestHash
-		input := CheckoutPlanningInput{Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build", Team: "team", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:123"}}, Source: runspec.Source{Entrypoint: "build"}}}, Entry: process.Entry, Planning: fixture.input, ProjectFile: "sparkwing.yaml", Project: []byte("defaults:\n  requires: [" + requires + "]\n")}
-		prepared, err := planner.PrepareCheckout(t.Context(), input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		digest := prepared.Planning.Inputs.ProjectDigest
-		if !planCacheDigestValid(digest) || digest == prior || prepared.Planning.Inputs.Team != "team" || prepared.Planning.Inputs.Repository != "gh:123" || prepared.Planning.Inputs.Entrypoint != "build" {
-			t.Fatal("checkout planning reused unrelated project identity or scope")
-		}
-		prior = digest
 	}
 }
 
@@ -97,26 +66,24 @@ func TestCheckoutProjectDiscoveryStopsAtAcquiredRoot(t *testing.T) {
 }
 
 func TestOwnerHostResolvesValidatedPlansBeforeAcceptance(t *testing.T) {
-	for _, cached := range []bool{false, true} {
-		t.Run(map[bool]string{false: "planned", true: "cached"}[cached], func(t *testing.T) {
+	for _, repeated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "planned", true: "repeated"}[repeated], func(t *testing.T) {
 			f, host, input := newOwnerFixture(t, false)
 			planning := newPlanningFixture(t)
 			functions := planning.functions()
-			functions.Hash = func(any) (runspec.Hash, error) { return runspec.Hash(strings.Repeat("a", 64)), nil }
-			if cached {
+			if repeated {
 				if _, err := PlanInitial(t.Context(), planning.input, functions); err != nil {
 					t.Fatal(err)
 				}
 			}
-			input.PlanCache = planning.cache
 			request := &f.snapshot.Run.Request.Request
 			request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
 			request.RequestedArgs = map[string]string{"token": "private"}
 			input.SealedRequest, _ = json.Marshal(request)
 			resolved := false
 			host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
-				return OwnerPlanning{Planning: planning.input, Functions: functions, Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
-					if !reflect.DeepEqual(plan, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test"}}}) {
+				return OwnerPlanning{Planning: planning.input, Plan: functions, Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
+					if !reflect.DeepEqual(plan, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}) {
 						t.Fatal("resolver did not receive the validated plan")
 					}
 					resolved = true

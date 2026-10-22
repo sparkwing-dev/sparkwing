@@ -33,6 +33,7 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 		t.Fatal(err)
 	}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "machine", Generation: 7}}
+	admitExecution(t, &Tenant{s: s, team: "a"}, actor)
 	return s, &Tenant{s: s, team: "a"}, actor, runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7}
 }
 

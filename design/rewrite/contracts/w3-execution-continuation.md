@@ -130,7 +130,7 @@ The directory is removed before the final report.
   all five cases described above.
 - Current-host tests pass, including native SDK step execution, real SDK eval
   failures, owner/evaluator, claim host, process services, cleanup, state follower,
-  planning/cache, constructor and fuzz seeds.
+  planning, constructor and fuzz seeds.
 - The restored orchestrator scope-label and collision seed tests pass.
 - Race checks pass for node executor, owner/evaluator, native eval regressions,
   constructors, fuzz seeds and lifecycle acceptance. A final constructor race
@@ -151,7 +151,7 @@ with their declared drivers and the lead.
 The current-host selection is reproducible with:
 
 ```text
-test -p 4 ./internal/nodehost -run '^(TestNodeExecutor|TestNewNodeInput|TestLegacyEvalFailures|TestParseConcurrencyKey|TestPlanGroupFixture|TestOwner|TestProtocolSession|TestNativeSDK|TestProcessServices|TestProcessCleanups|TestClaimedNodeHost|TestStateFollower|TestLayerOwnership|TestPlanInitial|TestValidatePlanCacheHit|Fuzz)' -count=1 -timeout 3m
+test -p 4 ./internal/nodehost -run '^(TestNodeExecutor|TestNewNodeInput|TestLegacyEvalFailures|TestParseConcurrencyKey|TestPlanGroupFixture|TestOwner|TestProtocolSession|TestNativeSDK|TestProcessServices|TestProcessCleanups|TestClaimedNodeHost|TestStateFollower|TestPlanInitial|Fuzz)' -count=1 -timeout 3m
 test -race -p 4 ./internal/nodehost ./tests/acceptance -run '^(TestNodeExecutor|TestNewNodeInput|TestLegacyEvalFailures|TestOwner|TestLifecycle|Fuzz)' -count=1 -timeout 3m
 ```
 

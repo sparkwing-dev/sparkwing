@@ -73,8 +73,9 @@ func TestProvisionCredentialUsesCurrentIssuer(t *testing.T) {
 	}
 }
 
-func TestFixtureAuthorityDoesNotRaceWallTime(t *testing.T) {
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"))
+func TestFixtureAuthorityExpiresOnlyWhenClockAdvances(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,12 @@ func TestFixtureAuthorityDoesNotRaceWallTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte("fixture-session:default:member"))
-	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}); err != nil {
+	ref := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
 		t.Fatalf("fixture authority expired without advancing its clock: %v", err)
+	}
+	now = snapshot.Now.Add(time.Nanosecond)
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
+		t.Fatal("fixture authority survived advancing to its exact expiry")
 	}
 }

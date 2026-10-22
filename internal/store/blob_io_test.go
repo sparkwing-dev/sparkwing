@@ -81,6 +81,7 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memoManifestRequest(intent, manifest.Digest, members)); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	if got, err := records.LookupRecord(t.Context(), blob.RecordLookup{Authority: intent.Authority, Key: artifacts.Key}); err != nil || len(got.Members) != 1 {
 		t.Fatalf("lookup=%+v,%v", got, err)
 	}
@@ -128,6 +129,7 @@ func TestBlobLookupRereadsARepointedManifest(t *testing.T) {
 			if _, err := records.CommitRecord(t.Context(), memoManifestRequest(intent, digest, fake[digest])); err != nil {
 				t.Fatal(err)
 			}
+			activateMemoFixture(t, s)
 		}
 		records.manifests = probingManifests{fake, func(_ string, read blob.Digest) {
 			if i := slices.Index(digests, read); i+1 < len(digests) && (flapping || i == 0) {

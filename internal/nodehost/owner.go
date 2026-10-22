@@ -28,6 +28,7 @@ type OwnerStore interface {
 	ExpansionStore
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
+	ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
@@ -39,48 +40,43 @@ type OwnerPlanning struct {
 	Declarations runspec.CheckoutDeclarations
 	Resolved     runspec.Resolved
 	Planning     PlanningInput
-	Functions    PlanningFunctions
+	Plan         func(context.Context) (json.RawMessage, error)
 	Resolve      func(nodeproto.PlanDoc) (runspec.Resolved, error)
 }
 
-// OwnerLayerResult either proposes a store transition or an authorized reuse candidate.
-// A transition ends this scheduling pass; a source still needs atomic reconciliation.
+// OwnerLayerResult proposes a store transition that ends this scheduling pass.
 type OwnerLayerResult struct {
 	Transition store.NodeCommand
-	Source     *store.MaterializeSource
 }
 
 // OwnerHost coordinates the frozen lifecycle with source, SDK and placement adapters.
 // Project and Decide default to the shared store functions. Wait must catch up
 // against the snapshot's persisted state sequences before waiting for notification.
-// Layer implements each owner-side policy named by LayerTable; it is required before
+// OwnerPolicy implements one owner decision; it is required before
 // dispatch so an unwired policy cannot silently permit execution.
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
-	bindAdmission  func(*OwnerHost, store.Actor)
-	claimAdmission *LocalAdmission
-	retainRemote   bool
-	Snapshots      CapturedEnvironmentLoader
-	Store          OwnerStore
-	Lease          lease.Keeper
+	executionAdmission StartGate
+	Snapshots          CapturedEnvironmentLoader
+	Store              OwnerStore
+	Lease              lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
-	Renew     func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
-	Computing func(string) bool
-	Source    source.Options
-	Acquire   func(context.Context, RunInput) (*source.Entry, error)
-	Prepare   func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
-	Planner   *SDKPlanner
-	Planning  PlanningInput
-	Project   func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	Decide    func(store.ScheduleSnapshot) store.ScheduleDecision
-	Wait      func(context.Context, store.RunSnapshot) error
-	WaitNode  WaitNodeChange
-	Debug     DebugBoundaryWaiter
-	Layer     func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
-	Local     func(store.NodeRow) bool
-	Admit     func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
-	Around    func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
+	Renew       func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Computing   func(string) bool
+	Source      source.Options
+	Acquire     func(context.Context, RunInput) (*source.Entry, error)
+	Prepare     func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Planner     *SDKPlanner
+	Planning    PlanningInput
+	Project     func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide      func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait        func(context.Context, store.RunSnapshot) error
+	WaitNode    WaitNodeChange
+	Debug       DebugBoundaryWaiter
+	DebugPolicy OwnerPolicy
+	SkipPolicy  OwnerPolicy
+	Local       func(store.NodeRow) bool
 	// AdoptClaim retains the private award for per-attempt process delegation.
 	AdoptClaim     func(context.Context, store.ReconciledNode) error
 	Delegator      OwnerDelegator
@@ -105,9 +101,6 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	h = &bound
 	if h.Masks == nil && h.Masker != nil {
 		h.Masks = NewMaskRegistry(h.Masker)
-	}
-	if h.bindAdmission != nil {
-		h.bindAdmission(h, input.Owner)
 	}
 	if h.Store == nil || h.Wait == nil || h.Masker == nil || h.Renew == nil {
 		return completion, errors.New("run host requires store, unit renewal, state follower and masking adapters")
@@ -202,22 +195,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	schedule := func(ctx context.Context) (RunCompletion, error) {
 		return h.schedule(ctx, input, accepted, entry)
 	}
-	if h.Around != nil {
-		completion, err := h.Around(ctx, accepted, schedule)
-		var refused *AdmissionFailure
-		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
-			policy := admissionPolicy(refused, int64(input.Owner.Owner.Generation))
-			applied, finishErr := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{
-				RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunPolicyRefused,
-				OwnerPolicy: &policy, Reason: refused.Reason,
-			}})
-			if finishErr != nil {
-				return RunCompletion{}, finishErr
-			}
-			completion, err = committedRunCompletion(applied)
-		}
-		return completion, err
-	}
+
 	return schedule(ctx)
 }
 
@@ -300,14 +278,9 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
-	if input.PlanCache != nil {
-		prepared.Planning.Cache = input.PlanCache
-	}
 	guards := prepared.Resolved.Guards
 	if !guards.Passed && (len(guards.When)+len(guards.Unless) != 0 || guards.Reason != "") {
-		prepared.Planning.Cache = nil
-		prepared.Planning.Disabled = true
-		prepared.Functions.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
+		prepared.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
 	}
 	if err := h.Masks.initialize(row.Request, &prepared.Resolved, nil, nil); err != nil {
 		return AcceptedRun{}, err
@@ -315,7 +288,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if h.Masks != nil {
 		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}
 	}
-	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
+	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Plan)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
@@ -400,3 +373,6 @@ func ownerAccepted(row store.RunRow) (AcceptedRun, error) {
 	}
 	return result, nil
 }
+
+// OwnerPolicy evaluates one owner decision before dispatch.
+type OwnerPolicy func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)

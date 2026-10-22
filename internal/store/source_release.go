@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -13,16 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
-
-type sourceReleaseContracts interface {
-	AuthorizeSourceRelease(capability.SourceReleaseRequest, time.Time) (capability.SourceReleaseAudit, error)
-}
-
-type sharedSourceReleaseContracts struct{}
-
-func (sharedSourceReleaseContracts) AuthorizeSourceRelease(request capability.SourceReleaseRequest, now time.Time) (capability.SourceReleaseAudit, error) {
-	return capability.AuthorizeSourceRelease(request, now)
-}
 
 // ReleaseSourceCredential returns the sealed credential only after its authorization audit commits.
 // Repository, host and executor come from persisted authority and the sealed request.
@@ -63,15 +52,11 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if credential.Kind != GitCredentialSSH && credential.Kind != GitCredentialHTTPS {
 			return bindingRefusal()
 		}
-		policy := t.s.sourcePolicy
-		if policy == nil {
-			policy = sharedSourceReleaseContracts{}
-		}
-		audit, err = policy.AuthorizeSourceRelease(request, tx.now(ctx))
+		audit, err = capability.AuthorizeSourceRelease(request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
-		// safety: enrollment and policy work may outlast the authority or lease.
+		// safety: enrollment may outlast the authority or lease.
 		if _, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, false); err != nil {
 			return err
 		}

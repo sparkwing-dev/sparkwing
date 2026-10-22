@@ -58,7 +58,7 @@ func TestAuthorityEnvelopeRefusesProjectionDrift(t *testing.T) {
 	}
 }
 
-func TestAuthorityGenerationIncludesCrossTeamAncestor(t *testing.T) {
+func TestAuthorityResolutionRechecksCrossTeamAncestor(t *testing.T) {
 	s := authorityStore(t)
 	root := authorityRoot("launcher", "")
 	root.Subject.Kind = capability.SubjectService

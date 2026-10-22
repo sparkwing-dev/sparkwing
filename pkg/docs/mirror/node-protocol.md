@@ -185,9 +185,9 @@ Runner planning and SDK installation use the same remote base and
 job-declared environment. Proxy credentials are masked before either process starts.
 
 Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
-`on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`. Omitted values resolve to
-`global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. The host
-computes scoped keys and checks consistent group definitions. Scopes are
+`on_limit` and `queue_timeout_ms`. Omitted values resolve to
+`global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. Acceptance checks consistent group definitions. The store derives scoped keys
+from accepted declarations and the authenticated execution award. Scopes are
 `global`, `run` and `box`. Policies are `queue`, `fail`, `skip` and `cancel_others`.
 
 `resources` carries optional `cores` and `memory_bytes`. `source` carries
@@ -241,6 +241,12 @@ recovery uses a separate disruption allowance.
 | `memo_key` | Nonempty string, or null to bypass reuse |
 | `before_run`, `after_run`, `verify` | Null |
 | `generate` | Array of flat job declarations |
+
+Executable-job `skip_if` and `memo_key` closures run on the executing host under
+the actual job award after concurrency and machine admission. The host checks
+SkipIf first, then memo reuse, before invoking the body. A skip or memo hit settles
+the job and releases its groups. Generator evaluations retain their separate
+expansion authority.
 
 Failed evals return `value: null` and a canonical inner `error`. `after_run`
 receives the final step-result shape in `input`, preserving the final failure.

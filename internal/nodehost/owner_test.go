@@ -244,9 +244,13 @@ func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance)
 		return store.AcceptedPlan{}, f.acceptErr
 	}
 	input.Seal.Resolved.SecretRegistration.Version = 1
-	spec := runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: input.Seal.Resolved}
-	f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), input.Seal.Plan
-	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: strings.Repeat("a", 64)}, nil
+	hash, err := runspec.CanonicalHash(input.Seal.Plan)
+	if err != nil {
+		return store.AcceptedPlan{}, err
+	}
+	spec := runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: hash, Resolved: input.Seal.Resolved}
+	f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, string(hash), input.Seal.Plan
+	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: string(hash)}, nil
 }
 
 func (f *ownerFixture) TransitionRun(_ context.Context, change store.RunTransition) (store.Applied, error) {
@@ -338,8 +342,9 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
-		Masker: secrets.NewMasker(),
-		Store:  f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		executionAdmission: ComposeStartGate(f, nil, false),
+		Masker:             secrets.NewMasker(),
+		Store:              f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Delegator: ownerDelegatorFixture{actor: in.Owner},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
@@ -347,16 +352,12 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 		},
 		Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 			f.record("prepare")
-			return OwnerPlanning{Planning: PlanningInput{Disabled: true, Validation: nodeproto.ValidationContext{Secrets: planCacheSecretMatcher{}}}, Functions: PlanningFunctions{
-				Plan: func(context.Context) (json.RawMessage, error) {
+			return OwnerPlanning{
+				Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}, Placement: nodeproto.PlacementLocal}}, Plan: func(context.Context) (json.RawMessage, error) {
 					f.record("plan")
 					return json.RawMessage(`{"jobs":[]}`), nil
 				},
-				Validate: func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nil
-				},
-				Hash: func(any) (runspec.Hash, error) { return runspec.Hash(strings.Repeat("a", 64)), nil },
-			}}, nil
+			}, nil
 		},
 		Project: func(s store.RunSnapshot) (store.ScheduleSnapshot, error) {
 			result := store.ScheduleSnapshot{}
@@ -460,10 +461,10 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
 	h.Local = func(store.NodeRow) bool { return true }
-	h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		f.record(layer.Name)
 		return OwnerLayerResult{}, nil
-	}
+	})
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
 		f.record("execute")
 		_, err := f.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(n.Accepted.RunID), NodeID: runspec.NodeID(n.NodeID)}, Outcome: store.NodeSuccess})
@@ -472,7 +473,7 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	if _, err := h.Run(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "memo", "admission", "ready", "claim", "node_renew", "execute", "success", "finish"}
+	want := []string{"renew", "acquire", "start", "debug", "skip_if", "ready", "claim", "node_renew", "admission", "execute", "success", "finish"}
 	if !reflect.DeepEqual(f.trace, want) {
 		t.Fatalf("trace=%v", f.trace)
 	}
@@ -522,9 +523,9 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 					return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 				}
 				h.Local = func(store.NodeRow) bool { return true }
-				h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+				setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 					return OwnerLayerResult{}, nil
-				}
+				})
 				deadline := time.Now().Add(time.Minute)
 				started := make(chan struct{})
 				stopped := make(chan time.Duration, 1)
@@ -565,4 +566,17 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 			})
 		})
 	}
+}
+
+func (f *ownerFixture) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
+	return store.Applied{}, nil
+}
+
+func (f *ownerFixture) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
+	f.record("admission")
+	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+}
+
+func (*ownerFixture) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+	return errors.New("unexpected provisional award relinquishment")
 }

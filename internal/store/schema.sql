@@ -616,10 +616,6 @@ CREATE TABLE concurrency_waiters (
     holder_id TEXT NOT NULL DEFAULT '',
     arrived_at BIGINT NOT NULL,
     policy TEXT NOT NULL CHECK(policy IN ('queue','skip','cancel_others')),
-    cache_key_hash TEXT NOT NULL DEFAULT '',
-    leader_run_id TEXT NOT NULL DEFAULT '',
-    leader_node_id TEXT NOT NULL DEFAULT '',
-    cancel_timeout_ns BIGINT NOT NULL DEFAULT 0,
     cost BIGINT NOT NULL DEFAULT 1,
     declared_capacity BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),
@@ -628,8 +624,7 @@ CREATE TABLE concurrency_waiters (
     PRIMARY KEY (team, key, run_id, node_id),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
     CHECK(cost >= 0),
-    CHECK(declared_capacity >= 0),
-    CHECK(cancel_timeout_ns >= 0)
+    CHECK(declared_capacity >= 0)
 );
 
 
@@ -1302,7 +1297,7 @@ CREATE TABLE blobs (
     PRIMARY KEY(team,digest)
 );
 
--- safety: cache records use NULL run_id so source retention cannot erase a live memo or binary.
+-- safety: reusable cache records use NULL run_id; pending memos cascade with their producer.
 -- safety: source_run_id is immutable provenance; output ownership uses the cascading run_id.
 CREATE TABLE blob_records (
     team TEXT NOT NULL REFERENCES teams(name),
@@ -1736,3 +1731,19 @@ CREATE TABLE source_uploads (
 CREATE INDEX idx_source_uploads_expiry ON source_uploads(expires_at,team,id);
 CREATE UNIQUE INDEX idx_credit_charges_one_reservation ON credit_charges(team,capability_prefix) WHERE kind = 'reservation';
 CREATE UNIQUE INDEX idx_credit_checkouts_one_open_refill ON credit_checkouts(team) WHERE kind = 'refill' AND closed_at IS NULL;
+
+CREATE TABLE admission_work (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    arrived_at BIGINT NOT NULL,
+    lease_expires_at BIGINT NOT NULL,
+    granted INTEGER NOT NULL DEFAULT 0 CHECK(granted IN (0,1)),
+    generation BIGINT NOT NULL DEFAULT 0,
+    holder TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(team,run_id,node_id),
+    UNIQUE(team,arrived_at),
+    CHECK(arrived_at>0 AND lease_expires_at>0),
+    CHECK(node_id='' OR (generation>0 AND holder<>'')),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+);

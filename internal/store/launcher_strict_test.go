@@ -24,7 +24,7 @@ func TestLauncherSnapshotRejectsMalformedScalarWithoutLosingHealthyAwards(t *tes
 		}
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
-	rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil)
+	rows, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("snapshot=%+v, %v", rows, err)
 	}

@@ -21,6 +21,9 @@ func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err != nil {
 		return err
 	}
+	if c.Unit == capability.UnitEval && row.Generation == runspec.ClaimGeneration(b.Generation) && pendingApprovalPredicate(row) {
+		return nil
+	}
 	if row.Status != StatusDone || row.Generation != runspec.ClaimGeneration(b.Generation) || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || row.Expansion == ExpansionAbsent || row.Expansion == ExpansionNone {
 		return bindingRefusal()
 	}
@@ -28,8 +31,14 @@ func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 }
 
 func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
+	if target.Reference != nil {
+		if target.RunID != "" || target.NodeID != "" || target.SourceGeneration != 0 || target.Pipeline != "" {
+			return bindingRefusal()
+		}
+		return bindingPipelineReferenceTx(ctx, tx, c, *target.Reference)
+	}
 	if target.Pipeline != "" {
-		return bindingPipelineReferenceTx(ctx, tx, c, target)
+		return bindingRefusal()
 	}
 	b := c.Binding
 	if b.RunID != "" && b.RunID != target.RunID && target.RunID != "" && target.NodeID != "" {
@@ -44,7 +53,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if run.FinishedAt == nil || row.Status != StatusDone || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || runspec.ClaimGeneration(target.SourceGeneration) != 0 && row.Generation != runspec.ClaimGeneration(target.SourceGeneration) {
 			return bindingRefusal()
 		}
-		return bindingPipelineReferenceTx(ctx, tx, c, capability.Target{Pipeline: run.Request.Request.Pipeline, NodeID: target.NodeID})
+		return bindingPipelineReferenceTx(ctx, tx, c, capability.PipelineReferenceTarget{Pipeline: run.Request.Request.Pipeline, JobID: target.NodeID})
 	}
 	if b.RunID == "" || b.RunID != target.RunID || target.NodeID == "" {
 		return bindingRefusal()
@@ -66,7 +75,13 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if target.NodeID == b.NodeID && source.Generation == runspec.ClaimGeneration(b.Generation) {
 			return nil
 		}
-		return bindingRefusal()
+		approval, err := approvalEvaluationReaderTx(ctx, tx, c)
+		if err != nil {
+			return err
+		}
+		if !approval {
+			return bindingRefusal()
+		}
 	}
 	for _, row := range snapshot.Nodes {
 		if b.Kind != capability.BindingTrigger && (b.Kind != capability.BindingNode || row.Ref.NodeID != runspec.NodeID(b.NodeID)) {
@@ -90,11 +105,15 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 	return bindingRefusal()
 }
 
-func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
+func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.PipelineReferenceTarget) error {
 	b := c.Binding
-	node := c.Unit == capability.UnitNode && b.Kind == capability.BindingNode && b.NodeID != ""
+	approval, err := approvalEvaluationReaderTx(ctx, tx, c)
+	if err != nil {
+		return err
+	}
+	node := (c.Unit == capability.UnitNode || approval) && b.Kind == capability.BindingNode && b.NodeID != ""
 	owner := c.Unit == capability.UnitTrigger && b.Kind == capability.BindingTrigger || c.Unit == capability.UnitPlan && b.Kind == capability.BindingRun
-	if (!node && !owner) || !slices.Contains(c.Grants, capability.RefsRead) || b.Expansion != nil || b.RunID == "" || target.RunID != "" || target.SourceGeneration != 0 || target.Pipeline == "" {
+	if (!node && !owner) || !slices.Contains(c.Grants, capability.RefsRead) || b.Expansion != nil && !approval || b.RunID == "" || target.Pipeline == "" {
 		return bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, Team(c.Team), b.RunID)
@@ -109,11 +128,11 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 		return err
 	}
 	now := tx.now(ctx)
-	if state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now) {
+	if !approval && (state.FinishedAt != nil || state.RunCancelled || state.Current.Generation != b.Generation || state.Current.Holder != b.Holder || !state.LeaseExpiresAt.After(now)) {
 		return bindingRefusal()
 	}
 	for _, row := range snapshot.Nodes {
-		if node && (row.Ref.NodeID != runspec.NodeID(b.NodeID) || row.CapabilityPrefix != c.Prefix) {
+		if node && (row.Ref.NodeID != runspec.NodeID(b.NodeID) || !approval && row.CapabilityPrefix != c.Prefix) {
 			continue
 		}
 		var spec nodeproto.JobSpec
@@ -121,7 +140,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 			return err
 		}
 		for _, ref := range spec.References {
-			if ref.Pipeline == target.Pipeline && ref.Job != "" && (target.NodeID == "" || target.NodeID == ref.Job) {
+			if ref.Pipeline == target.Pipeline && ref.Job != "" && (target.JobID == "" || target.JobID == ref.Job) {
 				return nil
 			}
 		}

@@ -83,6 +83,9 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 					return err
 				}
 			}
+ result.Node,err=readNodeTx(ctx,tx,t.team,request.Ref)
+ if err!=nil{return err}
+ if result.Node.ReadyAt==nil || result.Node.Status==StatusDone {result.Kind=Dispatch;return nil}
 			owner, err := tx.ResolveAuthority(ctx, request.Actor.Authority)
 			if err != nil {
 				return err

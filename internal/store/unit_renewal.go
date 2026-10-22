@@ -130,7 +130,7 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err != nil {
 		return err
 	}
-	if source.Generation != runspec.ClaimGeneration(unit.SourceGeneration) || source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Expansion != ExpansionExpected && run.CancelRequestedAt == nil {
+	if source.Generation != runspec.ClaimGeneration(unit.SourceGeneration) || !evaluationSourceCurrent(source) && (run.CancelRequestedAt == nil || source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome))) {
 		return holderRefusal()
 	}
 	*beat = LeaseBeat{CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
@@ -150,5 +150,8 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 		return err
 	}
 	beat.ExpiresAt = expiry
+	if err := renewCapacityTx(ctx, tx, team, string(unit.RunID), string(unit.NodeID), expiry); err != nil {
+		return err
+	}
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }

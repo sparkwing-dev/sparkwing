@@ -1,29 +1,15 @@
 package localcontroller
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
-
-func stateCipher(t testing.TB) controller.Cipher {
-	t.Helper()
-	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{7}, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cipher
-}
 
 func TestStateReconcilesLocalOrphansAndPreservesRemoteWork(t *testing.T) {
 	var binding Binding
@@ -46,7 +32,7 @@ VALUES (?,'live',?,'done',?,1,?,?)`, b.Tenant.Team(), outcome, outcome, []byte(`
 		}
 		services := serviceFixture(b)
 		var err error
-		services.State, err = NewState(b, stateCipher(t))
+		services.State, err = NewState(b)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +87,7 @@ func FuzzStateActivityExcludesForeignAndPublishedRuns(f *testing.F) {
 				}
 			}
 			services := serviceFixture(b)
-			services.State, err = NewState(b, stateCipher(t))
+			services.State, err = NewState(b)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,67 +104,6 @@ func FuzzStateActivityExcludesForeignAndPublishedRuns(f *testing.F) {
 	})
 }
 
-func FuzzStateTypeSafeKeyRequiresExactSecretBinding(f *testing.F) {
-	for mode := range uint8(6) {
-		f.Add(mode, "private-key")
-	}
-	f.Fuzz(func(t *testing.T, mode uint8, plain string) {
-		if len(plain) > 10000 {
-			t.Skip()
-		}
-		var state State
-		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
-			cipher := stateCipher(t)
-			secret := store.Secret{Name: "TYPESAFE_API_KEY", Masked: true}
-			var err error
-			state, err = NewState(b, cipher)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got, err := state.TypeSafeAPIKey(t.Context()); err != nil || got != "" {
-				t.Fatalf("optional missing key: %q: %v", got, err)
-			}
-			binding, team := secret, b.Tenant.Team()
-			switch mode % 6 {
-			case 1:
-				binding.Name = "OTHER"
-			case 2:
-				binding.Pipeline = "pipeline"
-			case 3:
-				binding.Shared = true
-			case 4:
-				binding.Masked = false
-			case 5:
-				team = "foreign"
-			}
-			secret.Value, err = controller.SealSecretValue(cipher, team, &binding, plain)
-			if err != nil {
-				t.Fatal(err)
-			}
-			teststore.RegisterSQLite(b.Store, filepath.Join(b.Home, "state.db"))
-			if err := teststore.SeedSecret(b.Store, b.Tenant.Team(), secret, time.Now()); err != nil {
-				t.Fatal(err)
-			}
-			services := serviceFixture(b)
-			services.State = state
-			return services, nil
-		})
-		got, err := state.TypeSafeAPIKey(t.Context())
-		if mode%6 == 0 {
-			if err != nil || got != plain {
-				t.Fatalf("valid key: %q: %v", got, err)
-			}
-		} else if err == nil || got != "" {
-			t.Fatalf("invalid binding %d released key: %q: %v", mode%6, got, err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		if got, err := c.TypeSafeAPIKey(ctx); got != "" || !errors.Is(err, context.Canceled) {
-			t.Fatalf("cancelled key read: %q: %v", got, err)
-		}
-	})
-}
-
 func TestStateWatchReportsChangesAndPropagatesReporterFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var binding Binding
@@ -187,7 +112,7 @@ func TestStateWatchReportsChangesAndPropagatesReporterFailure(t *testing.T) {
 			binding = b
 			services := serviceFixture(b)
 			var err error
-			state, err = NewState(b, stateCipher(t))
+			state, err = NewState(b)
 			services.State = state
 			return services, err
 		})

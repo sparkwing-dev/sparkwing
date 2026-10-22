@@ -204,10 +204,6 @@ func (r *blobRecords) readMembers(ctx context.Context, tx *storeTx, record blob.
 	return members, nil
 }
 
-func cacheMissError(err error) bool {
-	return errors.Is(err, blob.ErrNotFound) || errors.Is(err, blob.ErrIntegrity) || errors.Is(err, blob.ErrBudget)
-}
-
 func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (hit blob.MemoHit, err error) {
 	err = withBlobIO(ctx, func(reads *blobIO) error {
 		hit, err = r.lookupMemo(ctx, request, reads)
@@ -228,7 +224,7 @@ func (r *blobRecords) lookupMemo(ctx context.Context, request blob.MemoLookup, r
 		return blob.MemoHit{}, err
 	}
 	hit, err := r.lookupMemoTx(ctx, tx, a, request, nil)
-	if cacheMissError(err) {
+	if blob.IsCacheMiss(err) {
 		return blob.MemoHit{}, nil
 	}
 	if err != nil {
@@ -275,7 +271,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				pending = err
 				continue
 			}
-			if cacheMissError(err) {
+			if blob.IsCacheMiss(err) {
 				continue
 			}
 			if err != nil {
@@ -315,7 +311,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 		hit, err = r.lookupDepcache(ctx, request, reads)
 		return err
 	})
-	if cacheMissError(err) {
+	if blob.IsCacheMiss(err) {
 		return blob.DepcacheHit{}, nil
 	}
 	return hit, err
@@ -367,7 +363,7 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 			pending = err
 			continue
 		}
-		if cacheMissError(err) {
+		if blob.IsCacheMiss(err) {
 			continue
 		}
 		if err != nil {
@@ -399,7 +395,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 		hit, err = r.copyMemo(ctx, request, reads)
 		return err
 	})
-	if cacheMissError(err) {
+	if blob.IsCacheMiss(err) {
 		return blob.MemoHit{}, nil
 	}
 	return hit, err
@@ -421,7 +417,7 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 	}
 	var original blob.Record
 	hit, err := r.lookupMemoTx(ctx, tx, a, request.Lookup, &original)
-	if cacheMissError(err) {
+	if blob.IsCacheMiss(err) {
 		return blob.MemoHit{}, nil
 	}
 	if err != nil || !hit.Found {
@@ -457,7 +453,7 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 		return blob.MemoHit{}, err
 	}
 	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true, nil); err != nil {
-		if cacheMissError(err) {
+		if blob.IsCacheMiss(err) {
 			return blob.MemoHit{}, nil
 		}
 		return blob.MemoHit{}, err

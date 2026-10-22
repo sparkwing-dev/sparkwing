@@ -7,7 +7,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storeclock"
 )
 
-// WithClock pins fixture reads and transactions to clock in either dialect.
+// WithClock replaces the default advancing clock for fixture reads and transactions.
+// Both dialects use it when deriving authority and transaction time.
 func WithClock(clock func() time.Time) store.Option {
 	return storeclock.Option(clock).(store.Option)
 }
@@ -16,7 +17,7 @@ func WithClock(clock func() time.Time) store.Option {
 func Now(s *store.Store) time.Time { return storeclock.Now(s) }
 
 func fixtureOptions(opts []store.Option) []store.Option {
-	// Fixture authority must outlive scheduling delays; expiry tests advance their clock.
-	now := time.Now().UTC()
-	return append([]store.Option{WithClock(func() time.Time { return now })}, opts...)
+	// Wall-clock corrections must not move a fixture behind its own issued authority.
+	started := time.Now()
+	return append([]store.Option{WithClock(func() time.Time { return started.Add(time.Since(started)) })}, opts...)
 }

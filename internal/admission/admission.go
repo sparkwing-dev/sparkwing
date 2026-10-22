@@ -70,11 +70,6 @@ type Request struct {
 
 	ExpectedP99MS int64
 
-	// ReservationBypassBudgetMS lets a bounded advisor enlarge the delay
-	// budget considered for this request. It never bypasses capacity or
-	// semaphore checks.
-	ReservationBypassBudgetMS int64
-
 	BurstCores bool
 }
 

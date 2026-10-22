@@ -320,6 +320,7 @@ type nodeTransition struct {
 
 // Applied distinguishes an identical replay from a state change or a cooperative cancellation request.
 type Applied struct {
+	Waiting         bool
 	Outcome         RunState
 	Reason          string
 	Replayed        bool
@@ -486,6 +487,25 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	if err := guardNodeEdgeTx(ctx, tx, team, row, change, *edge, now); err != nil {
 		return Applied{}, err
 	}
+	if change.Cause == CauseStart || change.Cause == CauseRetry {
+		if err := checkStartPermitTx(ctx, tx, team, row); err != nil {
+			return Applied{}, err
+		}
+	}
+	releasedEvaluation := false
+	if change.To == NodeApprovalPending || change.Extra.OwnerPolicy != nil && (change.Extra.OwnerPolicy.Kind == PolicyApprovalBypass || change.Extra.OwnerPolicy.Kind == PolicyApprovalFail) {
+        releasedEvaluation,err=evaluationReleasedTx(ctx,tx,team,change.Ref,"job_approval_ready",row.Generation)
+        if err!=nil{return Applied{},err}
+	}
+	if (change.To == NodeReady || change.To == NodeApprovalPending) && !releasedEvaluation {
+		admitted, err := admitReleaseTx(ctx, tx, team, string(change.Ref.RunID), change.Actor)
+		if err != nil {
+			return Applied{}, err
+		}
+		if !admitted {
+			return Applied{Waiting: true}, nil
+		}
+	}
 	if err := attachNodeResultRecordsTx(ctx, tx, team, row, change); err != nil {
 		return Applied{}, err
 	}
@@ -541,6 +561,11 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	}
 	if row.CancelRequestedAt != nil {
 		if err := clampRunLeasesTx(ctx, tx, team, string(change.Ref.RunID), string(change.Ref.NodeID)); err != nil {
+			return Applied{}, err
+		}
+	}
+	if change.Actor.Kind == ActorRunHost && change.Actor.Owner.Kind == OwnerEval {
+		if err := finishApprovalEvaluationTx(ctx, tx, team, previous, change); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -638,6 +663,12 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	for _, guard := range edge.Guards {
 		switch guard {
 		case GuardOwner:
+			if change.Actor.Owner.Kind == OwnerEval {
+				if err := checkApprovalEvaluationTx(ctx, tx, team, row, change); err != nil {
+					return err
+				}
+				continue
+			}
 			check := checkOwnerTx
 			if change.Cause == causeCancel {
 				check = checkOwnerLeaseTx
@@ -798,6 +829,14 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		if n != 1 {
 			return errors.New("attempt closure did not match live attempt")
 		}
+		// Reusable memos become independent of producer retention with committed success.
+		memoSQL := `DELETE FROM blob_records WHERE team=? AND kind='memo' AND run_id=? AND source_node_id=? AND source_attempt=? AND source_generation=?`
+		if outcome == NodeSuccess {
+			memoSQL = `UPDATE blob_records SET run_id=NULL WHERE team=? AND kind='memo' AND run_id=? AND source_node_id=? AND source_attempt=? AND source_generation=?`
+		}
+		if _, err := tx.ExecContext(ctx, memoSQL, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation); err != nil {
+			return err
+		}
 		stepState := StepFailed
 		switch outcome {
 		case NodeSuccess:
@@ -817,9 +856,6 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 	case NodeClaimed:
 		award := change.Extra.Claim
-		if err := rebindCapacityGenerationTx(ctx, tx, team, row.Ref, int64(row.Generation), int64(award.Generation)); err != nil {
-			return err
-		}
 		row.ClaimedBy = award.Holder
 		row.CapabilityPrefix = award.CapabilityPrefix
 		row.Generation = award.Generation
@@ -863,6 +899,11 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 		row.Status = StatusApprovalPending
 	case nodePending:
+		if change.Cause == CauseRelease {
+			if err := releaseCapacityTx(ctx, tx, team, string(row.Ref.RunID), string(row.Ref.NodeID)); err != nil {
+				return err
+			}
+		}
 		if row.Status == StatusRunning && change.Cause == CauseLeaseLapse {
 			row.Disruptions++
 		}

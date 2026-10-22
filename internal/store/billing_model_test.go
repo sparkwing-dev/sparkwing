@@ -286,6 +286,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			s, demand, now := billingModelFixture(t)
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
+			admitExecution(t, tenant, actor)
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}

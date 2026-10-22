@@ -215,6 +215,7 @@ func TestBlobRecordsMemoCopyAndDepcachePointers(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
 	hit, err := records.LookupMemo(t.Context(), lookup)
 	if err != nil || !hit.Found || hit.Output.Value != intent.Digest {
@@ -258,6 +259,7 @@ func TestBlobRecordsMemoCopyRollsBackBothDestinations(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_manifest_copy BEFORE INSERT ON blob_records WHEN NEW.kind='manifest' BEGIN SELECT RAISE(ABORT,'manifest insert unavailable'); END`)
 	request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}, Destination: intent.Identity.Attempt.Value}
 	if _, err := records.CopyMemo(t.Context(), request); err == nil {
@@ -280,6 +282,7 @@ func TestBlobRecordsCacheSurvivesSourceRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateMemoFixture(t, s)
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
 	rewriteSchemaCount(t, s.db, "blob_receipts", 0)
 	rewriteSchemaCount(t, s.db, "blob_records", 1)
@@ -352,4 +355,10 @@ func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadI
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// safety: cache fixtures represent producers whose success already committed.
+func activateMemoFixture(t *testing.T, s *Store) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, "UPDATE blob_records SET run_id=NULL WHERE kind='memo'")
 }

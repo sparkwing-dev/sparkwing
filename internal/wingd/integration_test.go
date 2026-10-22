@@ -63,57 +63,6 @@ func TestAdmissionModeOffDoesNotGateHostCapacity(t *testing.T) {
 	}
 }
 
-type admittingJev struct {
-	mu    sync.Mutex
-	calls int
-}
-
-func (j *admittingJev) Advise(_ context.Context, _ wingd.JevState) (wingd.JevAnswer, error) {
-	j.mu.Lock()
-	j.calls++
-	j.mu.Unlock()
-	return wingd.JevAnswer{Admit: true, Choice: "admit_short_backfill", Confidence: 0.9, Probability: 0.9, Model: "fake-jev"}, nil
-}
-
-func TestAdmissionModeJevCanAuthorizeBoundedBackfill(t *testing.T) {
-	home := shortHome(t)
-	advisor := &admittingJev{}
-	policy := wingd.AdmissionPolicy{
-		Mode: admission.ModeJev,
-		Scheduling: admission.SchedulingPolicy{BackfillDelay: map[admission.WorkloadClass]time.Duration{
-			admission.ClassNormal: 0,
-		}},
-		Jev: wingd.JevPolicy{MaxBackfill: 2500 * time.Millisecond, MinConfidence: 0.8},
-	}
-	startDaemon(t, wingd.Config{Home: home, AdmissionPolicy: &policy, JevAdvisor: advisor})
-	holderClient := ensure(t, home, "")
-	defer holderClient.Close()
-	mustAcquire(t, holderClient, semReq("holder", "pool", 10, 5, wingwire.PolicyQueue))
-	heavyClient := ensure(t, home, "")
-	defer heavyClient.Close()
-	positions, _ := acquireAsync(heavyClient, semReq("heavy", "pool", 10, 8, wingwire.PolicyQueue))
-	waitForQueue(t, positions)
-	for _, id := range []string{"short-1", "short-2"} {
-		cl := ensure(t, home, "")
-		req := semReq(id, "pool", 10, 5, wingwire.PolicyQueue)
-		req.Class = "interactive"
-		req.ExpectedP99MS = 1000
-		req.SampleCount = 10
-		mustAcquire(t, cl, req)
-		cl.Close()
-	}
-	state, err := client.Query(context.Background(), client.Options{Home: home})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Jev == nil || state.Jev.Attempts != 1 || state.Jev.Admits != 1 {
-		t.Fatalf("jev stats = %+v", state.Jev)
-	}
-	if len(state.Waiters) != 1 || state.Waiters[0].RunID != "heavy" || state.Waiters[0].BackfillDelayMS != 2000 {
-		t.Fatalf("waiters = %+v", state.Waiters)
-	}
-}
-
 func TestElection_ExactlyOneWinner(t *testing.T) {
 	home := shortHome(t)
 	const n = 8

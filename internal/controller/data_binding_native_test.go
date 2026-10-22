@@ -142,6 +142,7 @@ func TestNativeDataWritesBindTicketsAndRecords(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","memo":{}}`))
 	raw := nativeClaimPresentation(t, e, a)
 	h := e.Server.Handler()
+	engineAdmitBearer(t, e.Store, raw)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	digest := fmt.Sprintf("%x", sha256.Sum256(nil))
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/data/upload", `{"digest":"`+digest+`","size":0}`, 200)

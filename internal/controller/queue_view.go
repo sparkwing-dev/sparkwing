@@ -66,11 +66,12 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 		}
 		for _, wt := range st.Waiters {
 			qs.Waiters = append(qs.Waiters, wingwire.Waiter{
-				RunID:     runNode(wt.RunID, wt.NodeID),
-				Position:  wt.Position + 1,
-				WaitingOn: []string{st.Key},
-				WaitingMS: sinceMS(wt.ArrivedAt, now),
-				Origin:    wingwire.OriginController,
+				RunID:          runNode(wt.RunID, wt.NodeID),
+				Position:       wt.Position + 1,
+				WaitingOn:      []string{st.Key},
+				BlockingReason: wt.BlockingReason,
+				WaitingMS:      sinceMS(wt.ArrivedAt, now),
+				Origin:         wingwire.OriginController,
 			})
 		}
 	}

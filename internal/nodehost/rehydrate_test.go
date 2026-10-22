@@ -29,15 +29,13 @@ func testRetrySourceProbe(t *testing.T, kind store.ReconcileKind) {
 	probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
 	h.Store = probe
 	sourceResult := &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 8}}
-	h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	f.snapshot.Run.Retry = &store.RetrySelection{Mode: "failed", Results: map[string]store.MaterializedResultSource{"job": *sourceResult.Result}}
+	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name == "admission" && kind == store.Materialize {
 			t.Fatal("copied result entered compute admission")
 		}
-		if layer.Name == "memo" {
-			return OwnerLayerResult{Source: sourceResult}, nil
-		}
 		return OwnerLayerResult{}, nil
-	}
+	})
 	dispatched, err := releasedRequest(&h, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
 	if err != nil || dispatched != nil || !probe.request.MaterializeOnly || probe.request.Policy != store.SourceManualRetry || !reflect.DeepEqual(probe.request.Source, sourceResult) {
 		t.Fatalf("probe = %+v, dispatched = %+v, error %v", probe.request, dispatched, err)

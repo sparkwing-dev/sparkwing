@@ -18,11 +18,9 @@ import (
 )
 
 type sdkCode struct {
-	Store         EvaluationStore
-	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash func(any) (runspec.Hash, error)
-	Validation    nodeproto.ValidationContext
+	Store      EvaluationStore
+	ReadOutput func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	Validation nodeproto.ValidationContext
 }
 
 func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage StorageBinding) (json.RawMessage, error) {
@@ -142,11 +140,11 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	if err != nil {
 		return err
 	}
-	plan, err := h.ValidatePlan(raw, h.Validation)
+	plan, err := nodeproto.ValidatePlan(raw, h.Validation)
 	if err != nil {
 		return err
 	}
-	hash, err := h.CanonicalHash(plan)
+	hash, err := runspec.CanonicalHash(plan)
 	if err != nil {
 		return err
 	}
@@ -167,7 +165,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 		if job.ID != input.NodeID {
 			continue
 		}
-		hash, err := h.CanonicalHash(job)
+		hash, err := runspec.CanonicalHash(job)
 		if err != nil {
 			return err
 		}

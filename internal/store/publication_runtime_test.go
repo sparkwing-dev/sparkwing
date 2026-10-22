@@ -34,12 +34,12 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 	authorityPersist(t, tenant.s, publisher)
 	actor := Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: publisher.Prefix}, CapabilityPrefix: publisher.Prefix}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "imported"}}}
-	resolved, err := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: admitted.Request, Plan: plan})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = tenant.AcceptPlan(t.Context(), PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{
-		Request: admitted.Request, Plan: []byte(`{"jobs":[{"id":"imported"}]}`),
+		Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[{"id":"imported","steps":[{"id":"step"}]}]}`),
 		Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}},
 	}})
 	if err != nil {

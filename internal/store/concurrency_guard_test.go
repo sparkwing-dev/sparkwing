@@ -46,10 +46,8 @@ func TestConcurrencyGuard_TablesTouchedOnlyByStore(t *testing.T) {
 	}
 }
 
-func TestConcurrencyGuard_MutatingCommitsAreChecked(t *testing.T) {
+func TestConcurrencyGuard_LedgerUsesOwningTransaction(t *testing.T) {
 	allowed := map[string]bool{
-		"txCommitChecked":     true,
-		"ResolveWaiter":       true,
 		"GetConcurrencyState": true,
 	}
 	fset := token.NewFileSet()
@@ -68,7 +66,7 @@ func TestConcurrencyGuard_MutatingCommitsAreChecked(t *testing.T) {
 				return true
 			}
 			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "tx" {
-				t.Errorf("%s commits directly at %s; mutating paths must use txCommitChecked",
+				t.Errorf("%s commits directly at %s; the admission or state owner must commit the ledger transaction",
 					fn.Name.Name, fset.Position(sel.Pos()))
 			}
 			return true

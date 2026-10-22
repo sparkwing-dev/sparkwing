@@ -107,7 +107,7 @@ type Approval struct {
 - `func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval` -- NeedsIfPresent permits plans whose optional prerequisite is absent.
 - `func (a *Approval) OnFailure(id string, body any) *JobNode` -- OnFailure declares and returns a recovery job for a failed gate.
 - `func (a *Approval) Optional() *Approval` -- Optional excludes a denied or expired gate from required run success.
-- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- SkipIf conditions gate admission without running executable before/after hooks.
+- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- SkipIf runs on the run's coordinator before requesting approval, holding no concurrency capacity.
 
 ### type ApprovalConfig
 
@@ -249,11 +249,6 @@ type ConcurrencyLimit struct {
     // before failing with failure_reason "queue_timeout". Zero waits
     // indefinitely. Only meaningful with OnLimit [Queue].
     QueueTimeout time.Duration
-    // CancelTimeout bounds how long evicted holders have to cooperatively
-    // release before they are force-released, so a stuck victim can't pin
-    // the budget indefinitely. Zero uses the backend default. Only
-    // meaningful with OnLimit [CancelOthers].
-    CancelTimeout time.Duration
 }
 ```
 
@@ -578,7 +573,7 @@ type JobNode struct {
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
-- `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
+- `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate evaluated on the executing host after this node's dependencies complete and its concurrency groups are acquired.
 - `func (n *JobNode) StartsChildren(pipelines ...string) *JobNode` -- StartsChildren appends pipelines in the parent repository that this job may start with RunAndAwait.
 - `func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobNode` -- StartsChildrenIn declares child pipelines in a canonical repository key such as "gh:123" or "git:host/org/repo".
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
@@ -965,11 +960,12 @@ type Scope string
 const (
     // ScopeRun bounds the budget to the nodes of a single run.
     ScopeRun Scope = "run"
-    // ScopeBox bounds the budget to one machine, even when a controller
-    // dispatches several runs to it.
+    // ScopeBox bounds a job-level budget to one machine, even when a controller
+    // dispatches several runs to it. Pipeline acceptance refuses box-scoped
+    // plan groups because a run can span machines. Use [JobNode.Concurrency].
     ScopeBox Scope = "box"
-    // ScopeGlobal pools the budget across every run that names the
-    // group, coordinated through the shared backend. The zero value.
+    // ScopeGlobal pools the budget across runs naming the group at the same
+    // plan or job level, coordinated through the shared backend. The zero value.
     ScopeGlobal Scope = "global"
 )
 ```
@@ -1009,7 +1005,7 @@ type SkipOption func(*JobNode)
 
 ### type SkipPredicate
 
-SkipPredicate is a function evaluated by the orchestrator after upstream dependencies complete.
+SkipPredicate is a function evaluated after upstream dependencies complete.
 
 ```
 type SkipPredicate func(ctx context.Context) bool

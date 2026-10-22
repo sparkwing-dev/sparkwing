@@ -27,6 +27,7 @@
         "sdk-services",
         "sdk-sparkwingtest",
         "artifacts",
+        "secrets",
         "admission",
         "local-execution",
         "ci-embedded",
@@ -90,6 +91,7 @@
     {
       "label": "CLI reference",
       "slugs": [
+        "cli-billing",
         "cli-cache",
         "cli-commands",
         "cli-completion",

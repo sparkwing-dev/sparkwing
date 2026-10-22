@@ -18,6 +18,7 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 		tenant, ref := &Tenant{s: s, team: "a"}, controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 		attempt := int64(0)
 		if started {
+			admitExecution(t, tenant, actor)
 			applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)

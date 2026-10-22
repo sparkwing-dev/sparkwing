@@ -20,3 +20,14 @@ func (o LauncherObservation) Validate() error {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher observation has an invalid unit kind"}
 	}
 }
+
+// Validate refuses activation without a fenced execution reservation.
+func (a LauncherActivation) Validate() error {
+	if err := (LauncherObservation{Award: a.Award}).Validate(); err != nil {
+		return err
+	}
+	if a.NodeUID == "" || a.ReservationID == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher activation requires an execution node reservation"}
+	}
+	return nil
+}

@@ -15,6 +15,7 @@ var (
 	}
 	EngineClaimHTTPFixture = engineClaimHTTPFixture
 	EngineClaimHTTP        = engineClaimHTTP
+	EngineAdmitBearer      = engineAdmitBearer
 	ChildIntakeFixture     = childIntakeFixture
 	EngineSQL              = engineSQL
 	EngineHTTPRoot         = engineHTTPRoot

@@ -48,7 +48,6 @@ export class ConcurrencyGroup implements API.ConcurrencyGroup {
     identifier("concurrency group", name);
     if (limit.capacity !== undefined) integer("concurrency capacity", limit.capacity, 1);
     if (limit.queueTimeoutMs !== undefined) integer("concurrency queue timeout", limit.queueTimeoutMs);
-    if (limit.cancelTimeoutMs !== undefined) integer("concurrency cancel timeout", limit.cancelTimeoutMs);
     if (limit.scope !== undefined && !["global", "run", "box"].includes(limit.scope)) throw new Error("invalid concurrency scope");
     if (limit.onLimit !== undefined && !["queue", "fail", "skip", "cancel_others"].includes(limit.onLimit))
       throw new Error("invalid concurrency onLimit");
@@ -70,7 +69,6 @@ function concurrency(group: API.ConcurrencyGroup, cost: number | undefined): Con
   if (cost !== undefined) spec.cost = cost;
   if (limit.onLimit !== undefined) spec.on_limit = limit.onLimit;
   if (limit.queueTimeoutMs !== undefined) spec.queue_timeout_ms = limit.queueTimeoutMs;
-  if (limit.cancelTimeoutMs !== undefined) spec.cancel_timeout_ms = limit.cancelTimeoutMs;
   return spec;
 }
 function addConcurrency(spec: { concurrency?: ConcurrencySpec[] }, group: API.ConcurrencyGroup, cost: number | undefined): void {

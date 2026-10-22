@@ -21,6 +21,7 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 		if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 			t.Fatal(err)
 		}
+		activateMemoFixture(t, s)
 		lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "copy-gc", time.Hour)
 		if err != nil {
 			t.Fatal(err)

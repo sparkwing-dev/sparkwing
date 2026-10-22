@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -8,7 +9,50 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
+
+func TestConcurrencyFirstArrivalLocksEntryBeforeHolders(t *testing.T) {
+	s, recorder := newRecordingStore(t)
+	tenant, request, _ := planFixtureWithInput(t, runspec.DispatchController, nil, s)
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Concurrency: []nodeproto.ConcurrencySpec{{Group: "new", Scope: new("global"), Capacity: new(1)}}}}}
+	var err error
+	request.Seal.Plan, err = json.Marshal(testBodyPlan(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Declarations: request.Seal.Declarations, Request: request.Seal.Request, Plan: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	actor := controllerJobAward(t, tenant, request.RunID)
+	recorder.reset()
+	result, err := tenant.MayStart(t.Context(), CapacityBinding{RunID: request.RunID, NodeID: "job", Generation: int64(actor.Generation)}, actor)
+	if err != nil || result.Kind != AcquireGranted {
+		t.Fatalf("MayStart: %+v %v", result, err)
+	}
+	created, locked, holders := -1, -1, -1
+	for i, statement := range recorder.snapshot() {
+		switch {
+		case strings.HasPrefix(statement, "INSERT INTO concurrency_entries"):
+			if created < 0 {
+				created = i
+			}
+		case created >= 0 && locked < 0 && strings.HasPrefix(statement, "SELECT capacity FROM concurrency_entries"):
+			locked = i
+		case holders < 0 && strings.HasPrefix(statement, "SELECT "+holderColumns) && strings.Contains(statement, "FROM concurrency_holders"):
+			holders = i
+		}
+	}
+	if created < 0 || locked <= created || holders <= locked {
+		t.Fatalf("first-arrival lock order: created=%d locked=%d holders=%d", created, locked, holders)
+	}
+}
 
 func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 	s, recorder := newRecordingStore(t)

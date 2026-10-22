@@ -223,15 +223,12 @@ func TestExecutorOutputCommit(t *testing.T) {
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return input.Engine, nil
 				},
-				CanonicalHash: expansionHash,
-				ValidatePlan: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					var plan nodeproto.PlanDoc
-					err := json.Unmarshal(raw, &plan)
-					return plan, err
-				},
 				ChildContext: func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
 					child, cancel := context.WithCancel(ctx)
 					return child, cancel, nil
+				}, Validation: nodeproto.ValidationContext{
+					Placement: nodeproto.PlacementLocal,
+					Secrets:   noV2Secrets{},
 				},
 			})
 			if err != nil {

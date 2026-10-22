@@ -20,11 +20,11 @@ func planWithJobs(t *testing.T, tenant *Tenant, request PlanAcceptance, count in
 		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: fmt.Sprintf("job-%d", i)})
 	}
 	var err error
-	request.Seal.Plan, err = json.Marshal(plan)
+	request.Seal.Plan, err = json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Seal.Resolved.Settings, err = tenant.s.intakeServices().ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: request.Seal.Declarations, Plan: plan})
+	request.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: request.Seal.Declarations, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestPlanInsertionGlobalLimitAndReplay(t *testing.T) {
 
 func TestExpansionInsertionLimitRollsBackBatch(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
-	request.Body = []byte(`{"jobs":[{"id":"one","groups":["group"],"deps":["job"]},{"id":"two","groups":["group"],"deps":["job"]}]}`)
+	request.Body = []byte(`{"jobs":[{"id":"one","steps":[{"id":"step"}],"groups":["group"],"deps":["job"]},{"id":"two","steps":[{"id":"step"}],"groups":["group"],"deps":["job"]}]}`)
 	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 2}); err != nil {
 		t.Fatal(err)
 	}

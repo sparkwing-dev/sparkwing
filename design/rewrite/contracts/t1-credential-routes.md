@@ -2,7 +2,7 @@
 
 <!-- design:begin -->
 
-This design appendix enumerates all 229 distinct routes in `internal/controller/testdata/credential_matrix.golden` at `1e16668363ecbd99ba922436ab1a6f9cae63335b`. Those routes generated 8,466 old cells. Every old route has one row below. This is a complete source-route inventory, not a complete final permission specification.
+This design appendix tracks 221 source routes from `internal/controller/testdata/credential_matrix.golden` at `1e16668363ecbd99ba922436ab1a6f9cae63335b`, excluding the retired concurrency endpoints. Each tracked route has one row below. This source-route inventory does not define final permissions.
 
 The frozen architecture determines some removals, resource names and permission boundaries. It does not determine every existing route's role grants. Unresolved rights below are launch blockers for their matrix cells. An unavailable or undecided expected answer cannot be reported as a passing or skipped launch check.
 
@@ -11,8 +11,8 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 ## Final route permission coverage
 
 `internal/controller/credential_route_expectations_test.go` contains committed literal expectations
-for all declared final C2 method/path pairs, including the eleven node-host
-routes and every public, browser and external-proof route. Each alternative pins
+for all declared final C2 method/path pairs, including private host
+capacity routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.
 Audience, resource owner and authentication proof are pinned per route. Empty
 grants are explicit, including account and discovery alternatives. No expected
@@ -166,7 +166,7 @@ No bound rule has a blanket admin bypass. A separately authorized operator actio
 | `BODY` | `bodyNamesRun` checks the run named by creation/parent bodies. Substituting another parent or run fails authorization before creation. Here intake requires the requester's live `runs.write` in the run's team. Ordinary role-to-intake grants remain `U-RUN`. Frozen §5.1/A68. |
 | `PIPE` | `pipelineOfBoundRun` limits a work claim to its bound run's exact repo/pipeline sizing identity. A machine root with claim scope alone cannot read arbitrary pipeline sizing. A bare or encoded name cannot manufacture another repo's binding. Frozen §5.1/A68, §4.1 repo identity and §9.5. |
 | `CHILD` | `children.start` and `childOfBoundNode` restrict child creation/read to the bound parent job's child. A sibling job's or foreign run's child is denied. Reading a child's output also requires the declared-reference/read-set rule. Frozen §5.1, §5.5 and §8.1. |
-| `SLOT` | `slotOfBoundNode` checks the bound job and slot holder names. Neither an admin credential nor tokenless local mode bypasses that bound-route check. A separate administrative force-release operation needs independently specified authority, recorded as `U-QUEUE`. Frozen §5.1/A68. |
+| `SLOT` | `slotOfBoundNode` restricts a claim group read to its accepted declaration and current work generation. Logical mutations use the private unit admission owner. |
 | `DATA` | `data.read`/`data.write` are bound to run, repo and server-derived ref scope. Reads and `HasMany` are limited to the read set. Reference creation requires own verified upload receipt or an already authorized dependency/reference/memo edge. Foreign existing bytes and unrelated same-run job receipts are insufficient. `CommitRecord` checks every member. Manual refs cannot overwrite verified refs. Frozen §5.1 and §8.1/A66. |
 | `LOG` | A bound claim can use its permitted job log-tail/report operations. Trigger owners remain subject to holder rights. Log reads reauthorize through the controller. Signed log PUT URLs name only their segment/manifest and last 15 minutes, without early revocation. Live authority for one job cannot sign or seal another holder's log. Account log-read roles remain `U-RUN`. Frozen §5.1, §5.5 and §8.1. |
 | `SECRET` | Execution release requires a live `secrets.release` grant, declared secrets and the awarded binding. `only_on` also requires the awarded reserved pool. Restricted secrets are refused on here machines. A machine root with claim scopes alone cannot read execution secrets. Account secret CRUD is `U-SECRET-ADMIN`. Frozen §3.5, §5.1, §5.3 and §5.5. |
@@ -392,19 +392,6 @@ The exact source spelling is retained in the first column, including `/metrics`,
 | `PUT /api/v1/storage/quotas/{principal}/allowance` | unresolved | Deployment operations live under `/api/v1/operator/*`; exact paths and read/write grants are C2 assumptions. | `credentials-matrix-pipeline-and-audience` | OPS; U-DEPLOYMENT |
 | `PUT /api/v1/storage/settings` | unresolved | Deployment operations live under `/api/v1/operator/*`; exact paths and read/write grants are C2 assumptions. | `credentials-matrix-pipeline-and-audience` | OPS; U-DEPLOYMENT |
 
-### Concurrency slots and queue operations
-
-| Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
-|---|---|---|---|---|
-| `GET /api/v1/concurrency/{key}/holder` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `GET /api/v1/concurrency/{key}/resolve` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `GET /api/v1/concurrency/{key}/state` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/acquire` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/cancel-waiter` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/force-release` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT prohibits a bound-route admin bypass; U-QUEUE must specify any distinct force-release authority |
-| `POST /api/v1/concurrency/{key}/heartbeat` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-| `POST /api/v1/concurrency/{key}/release` | unresolved | Queue resource `/api/v1/queue/groups/{group}` is specified. C2 must name runtime slot and administrative operations. | `credentials-matrix-node-child-slot` | SLOT; U-QUEUE |
-
 ### Billing and credit APIs
 
 | Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
@@ -627,7 +614,7 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 ## Completion record
 
-The inventory has 229 unique source routes: 12 keep, 22 rename, 20 delete, 175 unresolved. Each route has one primary destination scenario and at least one independent rule or unresolved-right reference. This historical inventory records source routes independently of the final declaration baseline above.
+The inventory has 221 unique source routes: 12 keep, 24 rename, 24 delete, 161 unresolved. Each route has one primary destination scenario and at least one independent rule or unresolved-right reference. This historical inventory records source routes independently of the final declaration baseline above.
 
 The complete source dimensions remain in [the port inventory](t1-port-inventory.md). The appendix supplies the missing route dimension. It does not close the unresolved expected answers. Launch acceptance remains incomplete until the lead resolves the named rights and T1 encodes those answers independently of the production route table.
 

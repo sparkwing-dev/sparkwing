@@ -34,6 +34,7 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 	engine, tenant := engineRuntimeStore(t)
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	actor := engineActor(authorized)
+	engineAdmitExecution(t, engine.Store, authorized.Principal)
 	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)

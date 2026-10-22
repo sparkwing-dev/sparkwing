@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 )
 
 func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
@@ -83,8 +82,8 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 			t.Cleanup(func() { http.DefaultTransport = previous })
 			principal := capability.Principal{Capability: capability.Capability{Team: "default", Unit: unit, Binding: capability.Binding{RunID: "run", NodeID: "job"}}}
 			binding := runners.StoreBinding{Tenant: tenant, Principal: principal, Bearer: func(context.Context) (string, error) { return "award", nil }}
-			services, err := localNativeServices(t.Context(), home, owned, binding, client.EngineOptions{URL: "http://local"}, func(context.Context, localcontroller.NativeConfig) (runners.NativeServices, error) {
-				return runners.NativeServices{Close: func() error { closed++; return nil }}, nil
+			services, err := localNativeServices(t.Context(), home, owned, binding, client.EngineOptions{URL: "http://local"}, func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error) {
+				return nodehost.NativeServices{Close: func() error { closed++; return nil }}, nil
 			})
 			if err != nil {
 				t.Fatal(err)

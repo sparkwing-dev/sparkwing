@@ -89,22 +89,27 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 }
 
 func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
-	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile("planner", "planner@example.test"), store.SignUpConditions{})
+	return storePlanSealRequestFor(ctx, s, string(acceptanceTeam), configure)
+}
+
+func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity string, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
+	team := store.Team(identity)
+	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile(identity, identity+"@example.test"), store.SignUpConditions{})
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	if member.PersonalTeam != acceptanceTeam {
+	if member.PersonalTeam != team {
 		return nil, store.PlanAcceptance{}, fmt.Errorf("planner team: %s", member.PersonalTeam)
 	}
-	raw, _, _, err := s.AsOperator().CreateAccountSession(ctx, member.Account, acceptanceTeam, time.Hour)
+	raw, _, _, err := s.AsOperator().CreateAccountSession(ctx, member.Account, team, time.Hour)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Authority: &authority, Team: string(acceptanceTeam),
-		RegistrationID: "runner:planner:host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
+		Kind: capability.ProvisionMachine, Authority: &authority, Team: string(team),
+		RegistrationID: "runner:" + identity + ":host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
 		Grants: []capability.Grant{capability.TriggersClaim},
 	})
@@ -112,11 +117,11 @@ func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure fun
 		return nil, store.PlanAcceptance{}, err
 	}
 	parent := issued.Capability
-	tenant, err := s.ForTeam(ctx, acceptanceTeam)
+	tenant, err := s.ForTeam(ctx, team)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	input := store.IntakeRequest{Authority: authority, Request: runspec.Request{Version: 1, Team: string(acceptanceTeam), Pipeline: "fixture", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{"message": "sealed"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}}}}}
+	input := store.IntakeRequest{Authority: authority, Request: runspec.Request{Version: 1, Team: string(team), Pipeline: "fixture", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{"message": "sealed"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}}}}}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "alpha", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "beta", Needs: []string{"alpha"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	if configure != nil {
 		configure(&input, &plan)

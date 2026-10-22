@@ -20,6 +20,7 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 			}
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
+			admitExecution(t, tenant, actor)
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
@@ -91,6 +92,7 @@ func TestHoldStopsRunningAndUnstartedAwardsTogether(t *testing.T) {
 	s, demand, now := billingModelFixture(t)
 	_, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
+	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +128,7 @@ func TestHoldRollbackRestoresRunningAward(t *testing.T) {
 	s, demand, now := billingModelFixture(t)
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
+	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +189,7 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 					t.Fatal(err)
 				}
 				claim, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}})
+				admitExecution(t, tenant, actor)
 				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)
 				}

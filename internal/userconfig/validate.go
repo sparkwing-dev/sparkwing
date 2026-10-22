@@ -158,9 +158,9 @@ func durationField(key string, value *string, zero bool) error {
 func validateAdmission(a AdmissionConfig) error {
 	if a.Mode != nil {
 		switch *a.Mode {
-		case "classic", "off", "auto", "jev", "custom":
+		case "classic", "off", "auto", "custom":
 		default:
-			return Invalid("admission.mode", "must be classic, off, auto, jev or custom")
+			return Invalid("admission.mode", "must be classic, off, auto or custom")
 		}
 	}
 	if a.Budget != nil {
@@ -196,23 +196,6 @@ func validateAdmission(a AdmissionConfig) error {
 			}
 			if err := durationField("admission.custom.interactive_burst.max_p99", b.MaxP99, true); err != nil {
 				return err
-			}
-		}
-	}
-	if a.Jev != nil {
-		j := a.Jev
-		if err := durationField("admission.jev.timeout", j.Timeout, false); err != nil {
-			return err
-		}
-		if err := durationField("admission.jev.max_backfill", j.MaxBackfill, true); err != nil {
-			return err
-		}
-		for _, field := range []struct {
-			key   string
-			value *float64
-		}{{"min_confidence", j.MinConfidence}, {"min_probability", j.MinProbability}} {
-			if field.value != nil && !inRange(*field.value, 0, 1) {
-				return Invalid("admission.jev."+field.key, "must be between 0 and 1")
 			}
 		}
 	}

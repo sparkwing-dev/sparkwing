@@ -104,7 +104,7 @@ the logs.
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
 | `agent_lost` | The runner holding the job's claim stopped renewing it. Started work requeues in the same run until three disruptions have occurred. | Check the runner and `job_requeued` events. Recovery preserves the application retry budget. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
-
+| `credits_exhausted` | The team's prepaid balance or a funding hold refused the next execution slice, and the job stopped within its drain deadline. | Add credits or resolve the funding hold, then start the run again. |
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, so no claim can be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The terminal job event records the `unpriced_cpu_class` reason. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
@@ -494,9 +494,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `sparkwing_runs_total` | Counter | `pipeline`, `status` | Runs that reached a terminal state |
-| `sparkwing_run_duration_seconds` | Histogram | `outcome`, `pipeline` | End-to-end wall time from create to finish |
-| `sparkwing_nodes_claimed_total` | Counter | `pipeline` | Successful node claims |
 | `sparkwing_pending_nodes` | Gauge | (none) | Claim-queue depth (ready, unclaimed nodes of active runs) |
 | `sparkwing_active_runners` | Gauge | (none) | Distinct runners with a non-expired lease in the last 2 minutes |
 | `sparkwing_http_requests_total` | Counter | `method`, `route`, `status` | HTTP requests the controller answered |
@@ -519,7 +516,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
 | `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
 | `sparkwing_queue_depth` | Gauge | `state` | Each unfinished job of an active run counts once: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. A held job stays claimed until recovery commits, including after lease expiry. Jobs retained by a finished run do not count. |
-| `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
 | `sparkwing_claim_empty_total` | Counter | `claimant` | Queued claim polls that matched no unit, by claimant (`launcher`, `runner`, `here`). A launcher that only polls empty while runs wait matches none of their units |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
@@ -555,13 +551,6 @@ credits, so the `sparkwing_credits_*` totals are paid work by construction and
 carry no free-versus-paid split; the split an operator wants is
 `sparkwing_node_seconds_total{placement}` for work and
 `sparkwing_credits_granted_micro_total{kind}` for funding.
-
-`sparkwing_node_claim_wait_seconds` measures from `placement_hold_from`, the
-instant the node became claimable, which survives the `ready_at` bump a
-label-mismatched claim applies. A node re-claimed after a lease-expiry requeue is not
-observed, because the only wait it could report is the previous attempt's. An
-automatic retry is observed, because the retry clears the hold instant and the
-claim generation, which makes its next claim a first claim.
 
 Per-run and per-team attribution lives in the ledger, not in the metrics:
 `GET /api/v1/credits/history` returns each charge with its run and node. A run

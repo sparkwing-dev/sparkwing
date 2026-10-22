@@ -110,6 +110,9 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			}
 			refuse(demand)
 			holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+			if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(holder.RunID), NodeID: string(holder.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || result.Kind != store.AcquireGranted {
+				t.Fatalf("execution admission: %+v, %v", result, err)
+			}
 			for _, change := range []store.NodeCommand{
 				store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)},
 				store.ReportNode{Ref: ref, Actor: holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)},

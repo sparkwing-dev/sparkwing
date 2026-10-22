@@ -81,11 +81,6 @@ controller:
   # than queued. 0 never sheds.
   shedQueueDepth: 0
 
-  # How long a content-identical API submission answers with the run the first
-  # one started instead of starting a second, for example "10m". GitHub
-  # deliveries are deduped by delivery id and body digest regardless. Empty
-  # dedupes no API submission.
-  triggerDedupeWindow: ""
 
   # Per-runner request budgets on the claim and heartbeat routes, per rolling
   # minute, keyed on the token prefix together with the runner the request

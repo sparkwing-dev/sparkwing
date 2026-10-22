@@ -315,8 +315,7 @@ func executionStoreFixture(t *testing.T, deps *ExecutorDependencies) *storeHostF
 	}
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, request)
 	deps.Store = fixture.Tenant
-	deps.CanonicalHash = runspec.CanonicalHash
-	deps.ValidatePlan = nodeproto.ValidatePlan
+
 	deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()}
 	deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return engine.Resolved{Identity: fixtureEngine(t, fixture.Accepted)}, nil
@@ -336,6 +335,7 @@ func fixtureEngine(t *testing.T, accepted AcceptedRun) engine.Identity {
 func storedExecutionInput(t *testing.T, fixture *storeHostFixture, host *ClaimedNodeHost) NodeInput {
 	t.Helper()
 	ctx := t.Context()
+	host.Admission = ComposeStartGate(fixture.Tenant, nil, false)
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"}
 	if _, err := fixture.Tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)

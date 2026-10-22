@@ -119,6 +119,9 @@ func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Di
 
 func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobReadCandidate) (blob.ReadEdge, bool, error) {
 	edge := blob.ReadEdge{}
+	if c.kind == blob.KindMemo && c.run != "" {
+		return edge, false, nil
+	}
 	if ((c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != c.facts.Scope.CapabilityScope()) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
 		return edge, false, nil
 	}
@@ -180,7 +183,25 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	}
 	if source := a.source.Unit.Value.Source; a.source.Kind == blob.UploadOwnerUnit && a.capability.Unit == capability.UnitEval && source.Set {
 		edge.Kind = blob.EdgeDependency
-		return edge, c.kind == blob.KindOutput && c.run == source.Value.RunID && c.node == source.Value.NodeID && c.attempt == source.Value.Attempt && c.generation == source.Value.Generation, nil
+		if c.kind == blob.KindOutput && c.run == source.Value.RunID && c.node == source.Value.NodeID && c.attempt == source.Value.Attempt && c.generation == source.Value.Generation {
+			return edge, true, nil
+		}
+		approval, err := approvalEvaluationReaderTx(ctx, tx, a.capability)
+		if err != nil {
+			return edge, false, err
+		}
+		if !approval || c.kind != blob.KindOutput || c.run != source.Value.RunID {
+			return edge, false, nil
+		}
+		selected, err := blobCandidateSelectedTx(ctx, tx, a.capability.Team, c)
+		if err != nil || !selected {
+			return edge, false, err
+		}
+		err = bindingDeclaredReadTx(ctx, tx, a.capability, capability.Target{Team: a.capability.Team, RunID: c.run, NodeID: c.node, SourceGeneration: c.generation})
+		if refusal(err) {
+			return edge, false, nil
+		}
+		return edge, err == nil, err
 	}
 	if !a.authority.Attempt.Set {
 		return edge, false, nil

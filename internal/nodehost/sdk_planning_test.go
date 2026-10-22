@@ -16,14 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	f := newPlanningFixture(t)
-	resolved := engine.Resolved{Identity: f.input.Inputs.Engine}
+	resolved := engine.Resolved{Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
 	var logs []nodeproto.FrameLog
 	var processes []*executorProcess
 	defaultValue, supplied := "sdk-private-default", "explicit-private-value"
@@ -33,8 +32,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Log:          func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil },
-		ValidatePlan: f.functions().Validate, CanonicalHash: f.functions().Hash,
+		Log: func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil },
 	}
 	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 		if planner.Masker.Mask(input.Args["label"]) != "***" {
@@ -87,7 +85,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {
 		t.Fatalf("logs = %+v", logs)
 	}
-	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions); err != nil {
+	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	if len(processes) != 2 {
@@ -102,7 +100,6 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 
 func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
 	planner, input, fixture, _ := sdkPlanningFixture(t)
-	planner.ValidatePlan = nodeproto.ValidatePlan
 	planner.Masks = NewMaskRegistry(planner.Masker)
 	if err := planner.Masks.registerIssued("issued-token"); err != nil {
 		t.Fatal(err)
@@ -111,7 +108,9 @@ func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prepared.Functions.Validate(json.RawMessage(`{"jobs":[{"id":"new-issued-token","steps":[{"id":"run"}]}]}`), nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: planner.Masks.replayMasks})
+	_, err = PlanInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) {
+		return json.RawMessage(`{"jobs":[{"id":"new-issued-token","steps":[{"id":"run"}]}]}`), nil
+	})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
 		t.Fatalf("fresh plan validation = %v", err)
@@ -121,7 +120,7 @@ func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
 func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planningFixture, *[]*executorProcess) {
 	t.Helper()
 	f := newPlanningFixture(t)
-	resolved := engine.Resolved{Identity: f.input.Inputs.Engine}
+	resolved := engine.Resolved{Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
 	processes := &[]*executorProcess{}
 	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}}
 	p := SDKPlanner{
@@ -129,9 +128,8 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		ValidatePlan: f.functions().Validate, CanonicalHash: f.functions().Hash,
 		Start: func(_ context.Context, _ PlanningProcessInput, _ func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := &executorProcess{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}}
+			process := &executorProcess{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}}
 			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 				switch request.Op {
 				case nodeproto.OpHello:
@@ -146,36 +144,6 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 		},
 	}
 	return p, input, f, processes
-}
-
-func TestSDKPlanningCacheKeepsCapturedAndHostEnvironmentIdentity(t *testing.T) {
-	seen := map[runspec.Hash]bool{}
-	for _, captured := range []string{"original", "changed"} {
-		for _, host := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64), ""} {
-			planner, input, fixture, _ := sdkPlanningFixture(t)
-			seal, err := runspec.EnvironmentDigest(map[string]string{"CAPTURED": captured}, strings.Repeat("5", 64))
-			if err != nil {
-				t.Fatal(err)
-			}
-			input.Environment = seal
-			fixture.input.Inputs.EnvironmentDigest = runspec.Hash(host)
-			prepared, err := planner.Prepare(t.Context(), input, fixture.input)
-			if err != nil {
-				t.Fatal(err)
-			}
-			digest := prepared.Input.Inputs.EnvironmentDigest
-			if host == "" {
-				if digest != "" {
-					t.Fatal("snapshot identity hid missing host environment inputs")
-				}
-				continue
-			}
-			if seen[digest] {
-				t.Fatal("planning cache ignored a changed snapshot or host environment")
-			}
-			seen[digest] = true
-		}
-	}
 }
 
 func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
@@ -211,7 +179,7 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.Run.Git.SHA, input.Run.Trigger.User, input.Run.Trigger.PullRequest.Number = "later", "later", 99
-	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions); err != nil {
+	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	if !planned || len(*processes) != 2 {
@@ -220,28 +188,6 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 	for _, process := range *processes {
 		if process.closed != 1 || process.cleaned != 1 {
 			t.Fatal("context proof leaked an SDK process")
-		}
-	}
-}
-
-func TestSDKPlanningCacheHitDoesNotStartAPlanProcess(t *testing.T) {
-	p, input, f, processes := sdkPlanningFixture(t)
-	for i := range 2 {
-		prepared, err := p.Prepare(t.Context(), input, f.input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions)
-		if err != nil || result.CacheHit != (i == 1) {
-			t.Fatalf("plan %d: %+v, %v", i, result, err)
-		}
-	}
-	if len(*processes) != 3 || f.validations != 2 {
-		t.Fatalf("processes = %d, validations = %d", len(*processes), f.validations)
-	}
-	for _, process := range *processes {
-		if process.closed != 1 || process.cleaned != 1 {
-			t.Fatal("cache hit leaked a process")
 		}
 	}
 }
@@ -319,7 +265,7 @@ func TestSDKPlanningRejectsIncompleteDescriptionsAndCleansUp(t *testing.T) {
 }
 
 func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
-	for _, stage := range []string{"start", "hello", "describe", "plan", "close", "cleanup", "log", "validate", "hash"} {
+	for _, stage := range []string{"start", "hello", "describe", "plan", "close", "cleanup", "log", "validate"} {
 		t.Run(stage, func(t *testing.T) {
 			p, input, f, processes := sdkPlanningFixture(t)
 			secret := "private-planning-secret"
@@ -331,6 +277,9 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 				proc := process.(*executorProcess)
 				answer := proc.answer
 				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
+					if stage == "validate" && req.Op == nodeproto.OpPlan {
+						return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: secret}}}, nil
+					}
 					if string(req.Op) == stage {
 						return nil, failure
 					}
@@ -355,20 +304,12 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 			if stage == "log" {
 				p.Log = func(context.Context, nodeproto.FrameLog) error { return failure }
 			}
-			if stage == "validate" {
-				p.ValidatePlan = func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-					return nodeproto.PlanDoc{}, failure
-				}
-			}
-			if stage == "hash" {
-				p.CanonicalHash = func(any) (runspec.Hash, error) { return "", failure }
-			}
 			prepared, err := p.Prepare(t.Context(), input, f.input)
 			var result PlannedInitial
 			if err == nil {
-				result, err = PlanInitial(t.Context(), prepared.Input, prepared.Functions)
+				result, err = PlanInitial(t.Context(), prepared.Input, prepared.Plan)
 			}
-			if err == nil || strings.Contains(err.Error(), secret) || len(result.CanonicalPlan) != 0 || len(f.cache.puts) != 0 {
+			if err == nil || strings.Contains(err.Error(), secret) || len(result.CanonicalPlan) != 0 {
 				t.Fatalf("plan = %+v, error = %v", result, err)
 			}
 			for _, process := range *processes {
@@ -377,34 +318,6 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestSDKPlanningCacheIdentityRetainsPlatformAndCallerRunnerFacts(t *testing.T) {
-	p, input, f, _ := sdkPlanningFixture(t)
-	input.Entry.Engine.Target = releaseasset.Target{GOOS: "linux", GOARCH: "amd64"}
-	p.EnsureEngine = func(_ context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
-		return engine.Resolved{Identity: identity, Target: target}, nil
-	}
-	first, err := p.Prepare(t.Context(), input, f.input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	input.Entry.Engine.Target.GOARCH = "arm64"
-	second, err := p.Prepare(t.Context(), input, f.input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Input.Inputs.RunnerDigest == second.Input.Inputs.RunnerDigest {
-		t.Fatal("planning cache ignores runner architecture")
-	}
-	f.input.Inputs.RunnerDigest = runspec.Hash(strings.Repeat("b", 64))
-	third, err := p.Prepare(t.Context(), input, f.input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Input.Inputs.RunnerDigest == third.Input.Inputs.RunnerDigest {
-		t.Fatal("planning cache discarded host runner facts")
 	}
 }
 
@@ -434,7 +347,7 @@ func TestSDKPlanningCancellationDiscardsSuccessfulReplies(t *testing.T) {
 					t.Fatal(err)
 				}
 				var raw json.RawMessage
-				raw, err = prepared.Functions.Plan(ctx)
+				raw, err = prepared.Plan(ctx)
 				if len(raw) != 0 {
 					t.Fatal("cancelled planning returned declarations")
 				}

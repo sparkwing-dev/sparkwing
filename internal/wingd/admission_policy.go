@@ -12,7 +12,6 @@ import (
 type AdmissionPolicy struct {
 	Mode       admission.Mode
 	Scheduling admission.SchedulingPolicy
-	Jev        JevPolicy
 }
 
 func DefaultAdmissionPolicy() AdmissionPolicy {
@@ -38,15 +37,4 @@ func (p AdmissionPolicy) interactiveBurstEligible(req *wingwire.AdmissionRequest
 	return burst.MaxCores > 0 && resources.Cores <= burst.MaxCores &&
 		burst.MaxP99 > 0 && time.Duration(req.ExpectedP99MS)*time.Millisecond <= burst.MaxP99 &&
 		req.SampleCount >= burst.MinSamples
-}
-
-// JevPolicy bounds optional TypeSafe advice. Hard capacity and semaphore
-// constraints are always enforced by the deterministic ledger.
-type JevPolicy struct {
-	Model          string
-	Endpoint       string
-	Timeout        time.Duration
-	MinConfidence  float64
-	MinProbability float64
-	MaxBackfill    time.Duration
 }

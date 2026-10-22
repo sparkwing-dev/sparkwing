@@ -158,9 +158,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 		for _, f := range []string{"capacity", "cost"} {
 			minimum(f, 1)
 		}
-		for _, f := range []string{"queue_timeout_ms", "cancel_timeout_ms"} {
-			minimum(f, 0)
-		}
+		minimum("queue_timeout_ms", 0)
 	case "resources":
 		minimum("cores", 0)
 		minimum("memory_bytes", 0)

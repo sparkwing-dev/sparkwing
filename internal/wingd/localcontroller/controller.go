@@ -20,7 +20,6 @@ import (
 // State supplies the local recovery and activity projection over the owned store.
 type State interface {
 	Ready() error
-	TypeSafeAPIKey(context.Context) (string, error)
 	Reconcile(context.Context, store.SingletonLease) (wingd.LocalActivity, error)
 	Watch(context.Context, func(wingd.LocalActivity) error) error
 }
@@ -253,7 +252,7 @@ func (c *localController) sweep(ctx context.Context, lease store.SingletonLease)
 			break
 		}
 	}
-	_, err := c.operator.MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+	_, err := c.operator.MaintainConcurrency(ctx, lease)
 	return err
 }
 

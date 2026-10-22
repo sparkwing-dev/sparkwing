@@ -30,9 +30,14 @@ type CloudControl interface {
 	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
 }
 
+// CloudCapacityObservation names a demand Pod, which is never an execution node.
+type CloudCapacityObservation struct{ PodUID string }
+
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
 type CloudJobObservation struct {
 	Binding       CloudJobBinding
+	Capacity      *CloudCapacityObservation
+	Activation    *CloudNodeReservation
 	JobNamespace  string
 	JobName       string
 	JobUID        string
@@ -244,8 +249,8 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		return true, errors.Join(validationErr, l.teardown(ctx, created, r.Reservation))
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
-	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID}})
-	if err == nil && retirements[created.Name].Delete {
+	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID, Activation: &r.Reservation}})
+	if err == nil && (retirements[created.Name].Delete || retirements[created.Name].Deferred) {
 		err = errors.New("Cloud award ended before Job activation")
 	}
 	if err != nil {

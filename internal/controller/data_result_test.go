@@ -41,6 +41,7 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 		actor := engineActor(authorized)
 		ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
 		ordinal := int64(0)
+		engineAdmitExecution(t, engine.Store, authorized.Principal)
 		started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)})
 		if err != nil {
 			t.Log(err)

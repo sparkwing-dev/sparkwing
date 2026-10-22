@@ -137,11 +137,6 @@ type SemaphoreClaim struct {
 	// QueueTimeoutMS bounds a PolicyQueue wait in milliseconds; zero
 	// waits indefinitely.
 	QueueTimeoutMS int64 `json:"queue_timeout_ms,omitempty"`
-	// CancelTimeoutMS bounds, in milliseconds, how long a
-	// PolicyCancelOthers requester waits for the holders it superseded to
-	// wind down cooperatively before the daemon force-releases their
-	// leases. Zero leaves a non-cooperating holder to release on its own.
-	CancelTimeoutMS int64 `json:"cancel_timeout_ms,omitempty"`
 }
 
 // AdmissionRequest asks the daemon for one admission lease. A request
@@ -630,8 +625,7 @@ type QueueState struct {
 	Waiters   []Waiter        `json:"waiters,omitempty"`
 	// AdmissionMode is the machine-local host contention policy. Empty means
 	// the serving daemon predates configurable admission.
-	AdmissionMode string             `json:"admission_mode,omitempty"`
-	Jev           *JevAdmissionStats `json:"jev,omitempty"`
+	AdmissionMode string `json:"admission_mode,omitempty"`
 	// ExpectedClearMS is the estimated time until the queue fully drains,
 	// in milliseconds from now. Nil when the estimate is unavailable
 	// because some queued or holding run lacks a measured duration.
@@ -685,13 +679,6 @@ type QueueState struct {
 	// the state comes from a controller's unified admission view. Empty for
 	// the local daemon, which arbitrates only its own host.
 	Runners []RunnerHeadroom `json:"runners,omitempty"`
-}
-
-// JevAdmissionStats reports advisory outcomes since this daemon started.
-type JevAdmissionStats struct {
-	Attempts  uint64 `json:"attempts"`
-	Admits    uint64 `json:"admits"`
-	Fallbacks uint64 `json:"fallbacks"`
 }
 
 // RunnerHeadroom is one registered runner's most recently advertised free

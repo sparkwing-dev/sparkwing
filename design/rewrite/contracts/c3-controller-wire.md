@@ -67,7 +67,7 @@ Local, standalone and here hosting share one session lifecycle. The award suppli
 the run-host kind and trigger owner fence. The trigger fence retains the run ID,
 holder and generation with an empty name, matching C1's persisted projection.
 Binding supplies the resolved authority reference, capability prefix, storage,
-engine resolver and plan cache. It cannot replace the owner fence, request,
+engine resolver. It cannot replace the owner fence, request,
 acceptance or granted runner. Cancellation preserves its cause through cleanup.
 
 Owner adapters serialize `runspec.Request` into `RunInput.SealedRequest`, as
@@ -274,8 +274,16 @@ expiry deadlines. Its sealed request carries Source.Location. CloudJobAward cons
 that immutable source projection. `LauncherObservation.Award` is the existing
 `capability.LeaseRef` tuple of kind, ID, holder and generation. An eval uses its own
 lease generation, separately from the immutable source generation. Observations
-carry only that fence, a reservation-only marker, and a Job rejection marker.
-The controller never receives Kubernetes Job, node or reservation instance IDs.
+carry that fence, a reservation-only marker, and a Job rejection marker.
+`LauncherCapacityObservation` carries only the award fence in the separate
+`LauncherSyncRequest.Capacity` list. It cannot name an execution host.
+`LauncherSyncRequest.Activations` carries `LauncherActivation` with the award
+fence, execution Node UID and reservation ID. The authenticated launcher sends it
+only after verifying its reserved node and suspended Job, before unsuspending
+that Job. The store seals the host on the live bootstrap award at this point.
+Ordinary Job, reservation and capacity observations never seal a host. A capacity
+observation cannot also activate the same award in one request. Kubernetes Job
+and cleanup identities remain local to the launcher.
 
 `LauncherSyncResponse` returns live `Awards` and `Retired` award LeaseRefs without
 raw bearers. The store proves reservation observations belong to the authenticated
@@ -340,7 +348,7 @@ one envelope and use `apierr.DecodeInner`.
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
 | `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
-| `LauncherObservation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
+| `LauncherObservation`, `LauncherCapacityObservation`, `LauncherActivation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
 | `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body with private `registration`, or a structured failure, and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |
@@ -351,7 +359,7 @@ one envelope and use `apierr.DecodeInner`.
 | `controller.IntakeForStore` | Carries tagged session/capability authority into C1 `IntakeRequest`. |
 | `controller.EngineController` | Shared server adapter for lifecycle, claims, renewals and reads. |
 | `client.EngineOptions`, `NewEngineClient` | Authenticated HTTP transport, including api.sock dialing. `Launcher` explicitly selects the deployment launcher claim route. |
-| `nodehost.RemoteOwnerStore` | Consumes the shared wire through C1 reconciler and expansion interfaces. |
+| `nodehost.RemoteHostStore` | Consumes the shared wire through C1 reconciler and expansion interfaces. |
 
 The expansion adapter derives the source and actor from the authenticated
 route/binding. It compares the immutable source generation and preserves
@@ -929,6 +937,27 @@ available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
 
+The private `may-start` POST admits only the job named by an authenticated
+`node.report` award. It accepts run, job and generation. The store derives all
+groups, policies, host scope and lease bounds. Plan, trigger, evaluation, root
+and foreign-team credentials cannot admit jobs. Every job requires a durable
+award-bound start permit, including jobs without groups. Queued sets hold no
+partial grant. Skip/fail commits the terminal node and derived verdict.
+
+The private `release-evaluation` POST accepts a trigger owner and exact source.
+It commits plan admission with permission to evaluate an approval or expansion.
+Controller-owned approvals and expansions use the same store release boundary
+and durable evaluation units. `relinquish-start` returns an unstarted provisional
+award and job reservations while preserving readiness ranking. The old private
+`capacity/acquire` surface is deleted.
+
+`Tenant.MayStart` reads accepted concurrency declarations and the award's persisted
+execution host in its transaction. A launcher award waits for activation to seal
+that host. Missing host identity on another award refuses box scope. Handoff
+changes authority fences and permits, while reservations retain their work identity
+and one arrival. Terminal transitions release capacity atomically. Job starts do
+not reacquire parent plan capacity.
+
 Private reconciliation also preserves `owner_capability_prefix` beside the node
 claim prefix. The local host checks the persisted owner relation before adopting
 the store-issued node award. Each job process delegates from that node award.
@@ -972,8 +1001,8 @@ client and is absent from the hosted controller.
 ## W9 launcher preparation transport
 
 `LauncherSyncRequest.Preparing` is an optional `[]LeaseRef` serialized as
-`preparing`. `LauncherSyncResponse.Prepared` is an optional `[]LeaseRef`
-serialized as `prepared`. Each acknowledgement names an exact still-unexchanged
+`preparing`. `LauncherSyncResponse.Prepared` is an optional `[]LauncherPreparation`
+serialized as `prepared`. Each preparation includes its committed expiry. Each acknowledgement names an exact still-unexchanged
 bootstrap lease renewed by the authenticated launcher root. Observed Jobs and
 reservations keep their existing decision correlation. Ended own awards remain
 eligible for cleanup decisions when they receive no preparation acknowledgement.

@@ -7,6 +7,9 @@ type credentialRouteExpectation struct {
 
 func credentialRouteExpectations() []credentialRouteExpectation {
 	return []credentialRouteExpectation{
+		{"POST", "/api/v1/runs/{run}/local-host/may-start", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.report|run|sensitive"}},
+		{"POST", "/api/v1/runs/{run}/local-host/release-evaluation", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|sensitive"}},
+		{"POST", "/api/v1/runs/{run}/local-host/relinquish-start", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.report|run|sensitive"}},
 		{"GET", "/api/v1/runs/{run}/local-host/data-authority", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|runOfTrigger|sensitive", "awarded_or_delegated_claim|data.read|planOwner|sensitive", "awarded_or_delegated_claim|data.read|sourceReport|sensitive"}},
 		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|ownNode|sensitive"}},
 		{"POST", "/api/v1/local/doctor", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
@@ -17,7 +20,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting", "awarded_or_delegated_claim|data.read|ownNode|reporting", "awarded_or_delegated_claim|data.read|planOwner|reporting", "eval_unit|expansion.submit|run|expansion"}},
 		{"POST", "/api/v1/runs/{run}/local-host/transition", "controller", "run", "capability", []string{"awarded_or_delegated_claim|runs.state|runOfTrigger|result"}},
 		{"POST", "/api/v1/runs/{run}/local-host/finish", "controller", "run", "capability", []string{"awarded_or_delegated_claim|runs.state|runOfTrigger|result", "awarded_or_delegated_claim|node.result|planOwner|result"}},
-		{"POST", "/api/v1/runs/{run}/local-host/nodes/{job}/transition", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.result|ownNode|result", "awarded_or_delegated_claim|node.result|runOfTrigger|result"}},
+		{"POST", "/api/v1/runs/{run}/local-host/nodes/{job}/transition", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.result|ownNode|result", "awarded_or_delegated_claim|node.result|runOfTrigger|result", "eval_unit|expansion.submit|run|expansion"}},
 		{"POST", "/api/v1/runs/{run}/local-host/authentication", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting", "awarded_or_delegated_claim|data.read|planOwner|reporting", "eval_unit|expansion.submit|run|expansion"}},
 		{"POST", "/api/v1/runs/{run}/local-host/binding", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting", "awarded_or_delegated_claim|data.read|planOwner|reporting", "eval_unit|expansion.submit|run|expansion"}},
 		{"GET", "/api/v1/runs/{run}/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|sensitive"}},
@@ -132,13 +135,6 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/schedules/{schedule}/resume", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"POST", "/api/v1/schedules/{schedule}/run", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"PUT", "/api/v1/queue/groups/{group}/priority", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
-		{"POST", "/api/v1/queue/groups/{group}/force-release", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
-		{"POST", "/api/v1/queue/groups/{group}/acquire", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|sensitive", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|sensitive"}},
-		{"POST", "/api/v1/queue/groups/{group}/heartbeat", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|reporting", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|reporting"}},
-		{"POST", "/api/v1/queue/groups/{group}/release", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|reporting", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|reporting"}},
-		{"POST", "/api/v1/queue/groups/{group}/cancel-waiter", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|reporting", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|reporting"}},
-		{"GET", "/api/v1/queue/groups/{group}/holder", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|reporting", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|reporting"}},
-		{"GET", "/api/v1/queue/groups/{group}/resolve", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|sensitive", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|sensitive"}},
 		{"GET", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"POST", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/tokens/{token}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},

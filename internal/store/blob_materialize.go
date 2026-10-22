@@ -223,7 +223,7 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 
 	_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
 	if err != nil {
-		if !cacheMissError(err) {
+		if !blob.IsCacheMiss(err) {
 			return false, err
 		}
 		if _, rollback := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT materialize_result"); rollback != nil {

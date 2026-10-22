@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-const ownerPlanHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const ownerPlanHash = "0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe"
 
 type ownerSealSecrets struct{}
 
@@ -79,18 +79,12 @@ func TestOwnerSeals(t *testing.T) {
 				},
 				Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 					s.trace = append(s.trace, "prepare")
-					return OwnerPlanning{Planning: PlanningInput{Disabled: true, Validation: nodeproto.ValidationContext{Secrets: ownerSealSecrets{}}}, Functions: PlanningFunctions{
-						Plan: func(context.Context) (json.RawMessage, error) {
+					return OwnerPlanning{
+						Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: ownerSealSecrets{}, Placement: nodeproto.PlacementLocal}}, Plan: func(context.Context) (json.RawMessage, error) {
 							s.trace = append(s.trace, "plan")
 							return json.RawMessage(`{"jobs":[]}`), nil
 						},
-						Validate: func(raw json.RawMessage, _ nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-							var plan nodeproto.PlanDoc
-							err := json.Unmarshal(raw, &plan)
-							return plan, err
-						},
-						Hash: func(any) (runspec.Hash, error) { return ownerPlanHash, nil },
-					}}, nil
+					}, nil
 				},
 				Project: func(store.RunSnapshot) (store.ScheduleSnapshot, error) { return store.ScheduleSnapshot{}, nil },
 				Decide:  func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{Outcome: "success"} },

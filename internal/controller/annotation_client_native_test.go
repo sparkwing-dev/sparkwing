@@ -23,6 +23,7 @@ func TestAnnotationClientAcknowledgesCommittedNativeWrite(t *testing.T) {
 			authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 			raw := nativeClaimPresentation(t, engine, authorized)
 			server := New(engine.Store, nil)
+			engineAdmitBearer(t, engine.Store, raw)
 			engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 			review, err := client.NewRunReview(client.EngineOptions{
 				URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}},
@@ -62,6 +63,7 @@ func FuzzMetadataNumericSelectorsRetainJobAuthority(f *testing.F) {
 		authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 		raw := nativeClaimPresentation(t, engine, authorized)
 		server := New(engine.Store, nil)
+		engineAdmitBearer(t, engine.Store, raw)
 		engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 		engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":1}`, 200)
 		engineSQL(t, engine.Store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
@@ -105,6 +107,7 @@ func TestNativeProcessReportingCommitsJobAndStepMetadata(t *testing.T) {
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	raw := nativeClaimPresentation(t, engine, authorized)
 	server := New(engine.Store, nil)
+	engineAdmitBearer(t, engine.Store, raw)
 	engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":1}`, 200)
 	host, err := client.NewNodeHostClient(client.EngineOptions{

@@ -29,11 +29,11 @@ source directories were left to the separate acceptance session.
 | 18 | Applied | Eval keeps expansion.submit and data.read. Its own-unit log alternatives use expansion authority; failures use the single expansion transaction. |
 | 19 | Applied | C2 verifies Stripe events; C1 settles committed checkouts idempotently with server-derived teams/credits. Test/live uses one implementation contract. |
 | 20 | Applied | `internal/controllerwire` owns lifecycle/claim/renewal/expansion/status types and the twelve-month fetched-engine API boundary. Intake retains idempotency keys on runs, including publication. |
-| 25 | Applied | C4 owns a five-second auth-cache TTL. Cache reuse also requires fresh ancestry/membership generations; C1 mutations advance them atomically. |
+| 25 | Superseded by decision 28 | The auth-cache framework is deleted. Authentication reads current authority and membership state. |
 | 21 | Applied | `internal/engine` owns exact Go/TS pin resolution, GitHub-only release fetching, version-aware closed-set verification and machine caching. |
 | 22 | Applied | Signed version index, short caching, verified fallback and rollback refusal are declared. First use without a verified copy fails with an actionable unavailable error. |
 | 23 | Applied | `sparkwing upgrade`, revocation/minimum errors, shared run/dashboard notices and verified runner self-update are declared. Age alone never revokes a release. |
-| 24 | Applied | C3 owns default-enabled plan caching, complete identity, eligibility, invalidation and validated hits. Hits still pass seal-point-two validation and incur no planning charge. |
+| 24 | Superseded by decision 28 | The persistent plan cache is deleted. Each planning invocation runs the SDK and passes seal-point-two validation. |
 | 26 | Applied | Decision 104 governs: TypeScript on Windows is supported; C3 notes and the SDK platform table agree. |
 
 No requested contract fix remains unapplied. All competing C3-suffixed target
@@ -73,7 +73,7 @@ retains committing and landing.
 
 The added mechanisms are the requested shared controller wire package, the
 single engine/version owner, version-aware declarations in the existing release
-asset owner, and the planning-cache boundary. Existing stores own authority,
+asset owner, and the planning boundary. Existing stores own authority,
 settlement and logging. There are no new trust roots, environment variables,
 compatibility aliases or runtime services.
 
@@ -86,8 +86,8 @@ Choices recorded for implementation:
   this adds no hostPath or controller mirror.
 - Allowed checkout policies are complete typed policy tuples; an unset policy
   leaves acquisition unrestricted. Resource conversion occurs at platform edges.
-- The plan cache includes the complete SDK-visible run context. Cross-run reuse
-  needs a determinism guarantee before IDs or timestamps can be omitted.
+- New runs plan afresh. Accepted resumes retain their sealed plan and complete
+  engine identity. Persistent plan caching is removed under decision 28.
 - The host's separate sixty-second billing minimum is retained and named.
 
 Existing questions outside these repairs remain in the area notes: root

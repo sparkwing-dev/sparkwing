@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -100,9 +99,14 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	if !ok {
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
-	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
+	admission := nodehost.MachineAdmission(home, installedVersion())
+	if options.URL != wingdclient.APIBaseURL {
+		admission.Controller = options.URL
+	}
+	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
+		Admission:    nodehost.ComposeStartGate(state, admission, true),
 		SubmittedEnv: award.SubmittedEnv, SubmitAccept: procenv.SubmitAcceptAll(),
-		Home: home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
+		Home: home, Store: state, Parent: private, Bindings: private,
 		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),
 		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 			return state.RenewOwner(ctx, store.Actor{}, computing)
@@ -112,9 +116,6 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
-	if options.URL != wingdclient.APIBaseURL {
-		services.Config.Admission.Controller = options.URL
-	}
 	adopt := services.Config.Owner.AdoptClaim
 	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {

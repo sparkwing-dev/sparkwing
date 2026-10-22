@@ -32,7 +32,17 @@ type LauncherAward struct {
 }
 
 // ReconcileLauncherAwards isolates each persisted award through renewal, rejection and snapshot validation.
-func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, observed, reservations, preparing, rejected []capability.LeaseRef) ([]LauncherAward, []LauncherPreparation, error) {
+func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, hosts []controllerwire.LauncherObservation, reservations, preparing, rejected []capability.LeaseRef, activations []controllerwire.LauncherActivation) ([]LauncherAward, []LauncherPreparation, error) {
+	var observed []capability.LeaseRef
+	if hosts != nil {
+		observed = make([]capability.LeaseRef, 0, len(hosts))
+	}
+	for _, host := range hosts {
+		if err := host.Validate(); err != nil {
+			return nil, nil, err
+		}
+		observed = append(observed, host.Award)
+	}
 	if err := validateLauncherPreparationFences(preparing); err != nil {
 		return nil, nil, err
 	}
@@ -40,6 +50,19 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 	owner, err := o.s.launcherAwardOwnership(ctx, authority, observed, selected)
 	if err != nil {
 		return nil, nil, err
+	}
+	for _, activation := range activations {
+		if err := activation.Validate(); err != nil {
+			return nil, nil, err
+		}
+		if !slices.ContainsFunc(hosts, func(o controllerwire.LauncherObservation) bool {
+			return o.Award == activation.Award && !o.Reservation && !o.Rejected
+		}) {
+			return nil, nil, bindingRefusal()
+		}
+		if err := owner.apply(ctx, activation.Award, func() error { return o.s.sealLauncherHost(ctx, authority, activation) }); err != nil {
+			return nil, nil, err
+		}
 	}
 	var prepared []LauncherPreparation
 	for _, fence := range preparing {
@@ -352,7 +375,7 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 }
 
 func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (bool, error) {
-	if award.Node.Generation != runspec.ClaimGeneration(award.Claim.SourceGeneration) || award.Node.Status != StatusDone || !scheduleSucceeded(string(award.Node.Outcome)) || award.Node.Expansion != ExpansionExpected {
+	if award.Node.Generation != runspec.ClaimGeneration(award.Claim.SourceGeneration) || !evaluationSourceCurrent(award.Node) {
 		return false, nil
 	}
 	var live int

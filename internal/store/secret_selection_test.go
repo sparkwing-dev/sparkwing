@@ -23,6 +23,7 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	run.Request.Request.Pipeline = "submitted-pipeline"
 	err = s.inTx(t.Context(), func(tx *storeTx) error {
 		selection, err := runSecretSelection(run.Request)
 		if err != nil {
@@ -34,6 +35,9 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 		var refused *SecretPreflightError
 		if err := secretPreflightTx(t.Context(), tx, tenant.team, run, selection, []string{"TOKEN"}); !errors.As(err, &refused) {
 			t.Fatalf("preflight accepted secret release refuses: %v", err)
+		}
+		if refused.Pipeline != run.Request.Provenance.Pipeline() {
+			t.Fatalf("preflight pipeline = %q, want sealed %q", refused.Pipeline, run.Request.Provenance.Pipeline())
 		}
 		spec := runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{SecretNames: []string{"TOKEN"}}}
 		if _, err := planSecretsTx(t.Context(), tx, tenant.team, spec, selection); err != nil {

@@ -156,7 +156,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 				if err != nil {
 					t.Fatal(err)
 				}
-				plan, err := selected.Functions.Plan(t.Context())
+				plan, err := selected.Plan(t.Context())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -200,7 +200,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw, err := planned.Functions.Plan(t.Context())
+			raw, err := planned.Plan(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}

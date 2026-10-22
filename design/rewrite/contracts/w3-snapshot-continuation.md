@@ -24,8 +24,8 @@ sealed identity. A failed loader cannot return partial environment output or
 select daemon values. Route revocation remains part of failed SDK startup.
 
 `PlanningProcessInput.Environment` carries first-seal metadata through describe
-and plan. Planning-cache identity keeps that digest and the host environment
-digest. A snapshot cannot hide missing or changed host inputs. Attempts and owner evals
+and plan. Each invocation plans with the sealed snapshot and host environment.
+A snapshot cannot hide missing or changed host inputs. Attempts and owner evals
 load from the accepted request, including retries whose embedded source run ID
 differs from the execution row. Filtering stays in `procenv.Build`.
 

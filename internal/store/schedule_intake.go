@@ -129,7 +129,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 				input.Git.SHA = stored.Request.Request.Git.SHA
 			}
 			input.Source.Ref = stored.Request.Request.Source.Ref
-			digest, err := tx.store.planServices().CanonicalHash(struct {
+			digest, err := runspec.CanonicalHash(struct {
 				Request  runspec.Request
 				Delivery string
 			}{Request: input})

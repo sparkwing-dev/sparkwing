@@ -84,11 +84,6 @@
               "name": "queue_timeout_ms",
               "kind": "int64",
               "omitempty": true
-            },
-            {
-              "name": "cancel_timeout_ms",
-              "kind": "int64",
-              "omitempty": true
             }
           ]
         },
@@ -798,28 +793,6 @@
           "name": "admission_mode",
           "kind": "string",
           "omitempty": true
-        },
-        {
-          "name": "jev",
-          "kind": "*struct",
-          "omitempty": true,
-          "fields": [
-            {
-              "name": "attempts",
-              "kind": "uint64",
-              "omitempty": false
-            },
-            {
-              "name": "admits",
-              "kind": "uint64",
-              "omitempty": false
-            },
-            {
-              "name": "fallbacks",
-              "kind": "uint64",
-              "omitempty": false
-            }
-          ]
         },
         {
           "name": "expected_clear_ms",

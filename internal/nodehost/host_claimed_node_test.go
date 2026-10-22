@@ -50,7 +50,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				acquired, executed, joined := false, false, false
-				host := ClaimedNodeHost{
+				host := ClaimedNodeHost{Admission: ComposeStartGate(s, nil, false),
 					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: testMasker("private"),
 					Acquire: func(_ context.Context, projected source.Spec, _ source.Options) (*source.Entry, error) {
 						acquired = true

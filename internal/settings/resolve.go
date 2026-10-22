@@ -3,7 +3,6 @@ package settings
 import (
 	"fmt"
 	"maps"
-	"slices"
 	"strings"
 )
 
@@ -90,17 +89,6 @@ func pick[T any](in Inputs, key string, field func(Values) *T, fallback T) (T, O
 		return zero, Origin{Source: Run, Key: key}, invalid(key, Origin{Source: Run, Key: key}, "sealed setting is absent")
 	}
 	return fallback, Origin{Source: Default, Key: key}, nil
-}
-
-func pickList(in Inputs, key string, field func(Values) []string) ([]string, Origin, error) {
-	value, origin, err := pick(in, key, func(v Values) *[]string {
-		s := field(v)
-		if s == nil {
-			return nil
-		}
-		return &s
-	}, []string{})
-	return slices.Clone(value), origin, err
 }
 
 func invalid(key string, origin Origin, reason string) error {

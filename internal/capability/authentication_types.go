@@ -40,8 +40,9 @@ type RecordedResult struct {
 	Digest     string
 }
 
-// ExpansionState supplies the owner/eval lease independently of the terminal source.
+// ExpansionState supplies the owner/eval lease independently of the evaluated source.
 type ExpansionState struct {
+	ApprovalPredicate        bool
 	Lease                    LeaseRef
 	ExpiresAt                time.Time
 	ControllerLeaseExpiresAt *time.Time
@@ -58,6 +59,7 @@ type BindingState struct {
 	HereClaimed    bool
 	LogSealed      bool
 	ProcessAlive   bool
+	StartPermitted bool
 	Result         *RecordedResult
 	Expansion      *ExpansionState
 }

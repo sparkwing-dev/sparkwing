@@ -89,7 +89,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if prepared.Description.Name != "Example" || prepared.Description.Args == nil || len(prepared.Args) != 0 {
 		t.Fatalf("run-path description: %+v", prepared)
 	}
-	raw, err := prepared.Functions.Plan(t.Context())
+	raw, err := prepared.Plan(t.Context())
 	if err != nil {
 		t.Fatalf("run-path plan: %v", err)
 	}

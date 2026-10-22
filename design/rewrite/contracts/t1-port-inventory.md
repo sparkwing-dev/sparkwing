@@ -610,9 +610,10 @@ finalization tests are deleted with the warm dispatcher. Their matching,
 tenant-scope and no-fallback concerns move to the final claim proofs. Enrollment
 remains a fake and native Actions/launcher transport is still required.
 
-`internal/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
-aged-waiter liveness, abandoned-work cleanup and repeated-pass assertions from the
-old maintenance suite. The fence property generates forged names, holders and
+`internal/store/concurrency_maintenance_fence_test.go` covers expired-holder
+cleanup, claim-or-owner waiter liveness, abandoned-work cleanup and repeated-pass
+assertions. Maintenance never promotes individual groups. Host `MayStart` retries
+exercise complete-set promotion through the durable admission owner. The fence property generates forged names, holders and
 generations. Rollback tests cover statement failure and lease expiry during the
 pass. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell also checks
 reopening and returning-owner queue order. Obsolete concurrency-cache sweeps are
@@ -874,7 +875,7 @@ The final three comparisons include all changes since the recorded merge base. E
 <!-- port-inventory:begin -->
 | Branch label | Revision | Source file | Source function | Cases | Disposition | New home and expected behavior |
 |---|---|---|---|---|---|---|
-| `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/lifecycle_test.go` | `TestLifecycleLayersPerPlacement` | `TestLifecycleLayersPerPlacement`, table rows `local`, `run host`, `dispatched`, `claimed`, `claimed retry_auto` | Replace | `internal/nodehost/lifecycle_test.go:TestLayerOwnership` and `protocol_test.go:TestProtocol/protocol-host-layers-risk-cleanup`. One owner/executor layer table governs every placement. Delete the `retry_auto` row and obsolete bounce/workers layers. Approvals remain owner-side. Application retry remains executor-side under the same claim. Proves §3.1-3.3 and §6.6. |
+| `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/lifecycle_test.go` | `TestLifecycleLayersPerPlacement` | `TestLifecycleLayersPerPlacement`, table rows `local`, `run host`, `dispatched`, `claimed`, `claimed retry_auto` | Replace | `internal/nodehost/owner_schedule_test.go:TestOwnerHostApprovalStopsBeforeComputeLayers` and `protocol_test.go:TestProtocol/protocol-host-layers-risk-cleanup`. Explicit ordered owner and executor operations govern every placement. Delete the `retry_auto` row and obsolete bounce/workers layers. Approvals remain owner-side. Application retry remains executor-side under the same claim. Proves §3.1-3.3 and §6.6. |
 | `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/lifecycle_test.go` | `TestLifecycleLocalNodeStartsAndEndsOnce` | `TestLifecycleLocalNodeStartsAndEndsOnce` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/local` and `/retry`. Ordinary and retried jobs have one `job_started` and one terminal event. A retried attempt adds `job_retrying`, retains its claim and generation, and increments the attempt ordinal. The store emits events. Proves §3.3. |
 | `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/lifecycle_test.go` | `TestLifecycleAFailedRecordEndsTheNodeOnce` | `TestLifecycleAFailedRecordEndsTheNodeOnce/refused output`; `TestLifecycleAFailedRecordEndsTheNodeOnce/store refuses the row` | Replace/Reverse | `lifecycle_test.go:TestLifecycle/lifecycle-result-commit-atomicity/refused_output`. An invalid output cannot become a successful result. Use the final 16 MiB cap instead of the fixture's old 64 MiB error. A committed failure has one store event. Proves §3.3, §7.6, §8.1. `lifecycle_test.go:TestLifecycle/lifecycle-result-commit-atomicity/store_unavailable`. Recording failure is loud. Do not retain the host-written `node_failed` event when the store refused the transition. State and lifecycle event commit together or neither commits. Proves §3.3. |
 | `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | `internal/nodehost/lifecycle_test.go` | `TestLifecycleADispatchedNodeEndsOnce` | `TestLifecycleADispatchedNodeEndsOnce/node host wrote the row`; `TestLifecycleADispatchedNodeEndsOnce/a writer that emits no event wrote the row` | Reverse/Replace | `lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/adopt_finished`. Change the expected terminal-event count from two to one. Adoption emits no second event. Proves §3.3/A8. `lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/executor_completion`. Every successful terminal transition emits its event in the store. Remove the run host's fallback event emission. Proves §3.3. |
@@ -1021,7 +1022,7 @@ The source/output/replay fixtures now use sealed Source.Location and committed
 start ordinals. See [W3's handoff](w3-amendment-handoff.md) for unresolved native
 and cross-area contracts.
 
-`internal/nodehost/lifecycle_test.go:TestLayerOwnership` ports
+`internal/nodehost/owner_schedule_test.go:TestOwnerHostApprovalStopsBeforeComputeLayers` ports
 `TestLifecycleLayersPerPlacement` to the final owner/executor table. The old
 retry-auto, bounce and workers rows are removed from that proof.
 `TestOwnerHostApprovalStopsBeforeComputeLayers` verifies the approval boundary
@@ -1097,7 +1098,7 @@ their behavior requirements without retaining the removed claimed-mode runtime:
 
 | Removed test | Replacement or integration obligation |
 |---|---|
-| `TestLaunchedNode_PlansHostsAndReports` | `CheckExecutorEnvelope/success`, `TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK` and `TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache` cover host execution, source, pipes and masking. Native environment policy, controller authority and log-manifest wiring remain open. |
+| `TestLaunchedNode_PlansHostsAndReports` | `CheckExecutorEnvelope/success`, `TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK` and `TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime` cover host execution, source, pipes and masking. Native environment policy, controller authority and log-manifest wiring remain open. |
 | `TestLaunchedNode_PlansWithTheTriggersActorAndPullRequest` | `TestSDKPlanningRetainsSealedRunContext` preserves actor, PR, git, start time, DryRun and NoMemo through planning. Native intake-to-SDK placement wiring remains open. |
 | `TestLaunchedNode_PlanDriftFailsTheNode` | `CheckExecutorEnvelope/drift` refuses before the body. |
 | `TestPodNode_WithoutAnAcceptedHashFailsClosed` | `TestClaimedNodeHostDoesNotRenewAChangedAward/missing_job_hash` and `/job_hash` refuse before acquisition or renewal. |
@@ -1106,11 +1107,11 @@ their behavior requirements without retaining the removed claimed-mode runtime:
 | `TestLaunchedNode_PlainRetryRunsInThePod` | `CheckExecutorEnvelope/retry` advances ordinals within one claim. |
 | `TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim` | Replace executor-owned admission with owner admission and claim-renewed holders. Native store/admission integration remains open. |
 | `TestLaunchedNode_PlanKeepsThePipelinesRequires` | Checkout declarations and accepted settings must retain YAML placement. Native configuration/acceptance wiring remains open. |
-| `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo is an owner decision committed by reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
+| `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo runs on the executing host under its job permit and materializes through fenced reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
 | `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. `TestOnlyRunsTheMatchedNodesAndWhatTheyNeed`, `TestNodeExecutorUsesSealedStepWindow` and `TestNativeExecutorSteps/window` cover sealed selections through the owner, executor and real Go SDK process. Native launcher placement remains open. |
-| `TestLaunchedNode_NoCacheMissesTheMemo` | NoMemo remains an owner-side read bypass. `TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull` covers key evaluation with that bypass. Native memo reads and writes remain open. |
+| `TestLaunchedNode_NoCacheMissesTheMemo` | NoMemo bypasses executor memo reads while preserving key evaluation for later writes. `TestExecutorMemoNoMemoStillEvaluatesKey` covers that behavior under the awarded execution input. |
 | `TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards` | `environment-origin-head-and-guards/hermetic-checkout-planning` covers shared YAML argument precedence and guard evaluation through owner acceptance. `TestOwnerHostReadsAcquiredProjectForSharedPlanning` reads real acquired checkout files. Native placement execution remains open. |
-| `TestLaunchedNode_AGuardJudgesTheSDKsDefaults` | The checkout-planning cell evaluates argument guards after SDK describe defaults. Refusals bypass SDK planning and plan cache, then seal refusal evidence through acceptance. Native placement execution remains open. |
+| `TestLaunchedNode_AGuardJudgesTheSDKsDefaults` | The checkout-planning cell evaluates argument guards after SDK describe defaults. Refusals bypass SDK planning and seal refusal evidence through acceptance. Native placement execution remains open. |
 | `TestApplyGoEnvFile_ReadsOnlyTheModuleSettings` | Drop the file reader and ambient environment mutation. `TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment` checks source installation's explicit environment for new and resumed owners. The legacy fetch-source file writer remains in the runner area. |
 
 `TestOwnerHostSourceProjectionFailureFinishesOnlyUnacceptedRuns` checks source
@@ -1209,7 +1210,7 @@ The old request builder names the target in concurrency bodies, run creation, ch
 
 ### Final matrix obligations
 
-Keep the old golden as source evidence in Git. Do not copy its expected statuses into the final suite. The tables above map credential presentations and target variants. [The route appendix](t1-credential-routes.md) enumerates all 229 old routes, their dispositions, scenario IDs, independent permission rules and unresolved rights. This completes the source inventory, not the expected permission matrix. Removed routes go to `surface-api-and-detail-parity`. Surviving cells remain launch-blocked until their expected rights are independently specified.
+Keep the old golden as source evidence in Git. Do not copy its expected statuses into the final suite. The tables above map credential presentations and target variants. [The route appendix](t1-credential-routes.md) enumerates the 221 retained source entries, their dispositions, scenario IDs, independent permission rules and unresolved rights. The eight retired concurrency-route entries are deleted. This completes the source inventory, not the expected permission matrix. Removed routes go to `surface-api-and-detail-parity`. Surviving cells remain launch-blocked until their expected rights are independently specified.
 
 | Old behavior or omission | Final expected behavior |
 |---|---|
@@ -1888,31 +1889,18 @@ the successful awarded-claim mint tests. The old
 Trigger/ClaimedRun readers are deleted from W2. No native credential matrix
 cell or production C1 identity projection is claimed complete by this port.
 
-## W2 concurrency transport cut
+## Concurrency transport
 
-TestObserveSlotMapsMissingHolder and TestHeartbeatSlotMapsLostOwnership move to
-`internal/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors`.
-The tests now use in-process transport and canonical errors. They preserve
-errors.Is for the store sentinels and errors.As for apierr.Error. Untyped legacy
-error bodies cannot become lost-ownership results. TestConcurrencyClientDistinguishesAdmissionFromRateLimits
-pins the refusal of a canonical 429 as an admission result.
+`TestConcurrencyHTTPGroupRead` exercises group views with job, trigger and plan
+authority. Foreign group selectors fail binding before the read adapter runs.
+`TestConcurrencyHTTPRetiredRoutes` checks the removed single-group endpoints in
+both URL namespaces. `TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes`
+uses the real store and controller: it acquires through `MayStart`, reads the
+persisted group and proves that removed endpoints return 404.
 
-TestConcurrencyHTTPTransactions exercises the eight actual group registrations
-with job, trigger and plan authority and fake committing adapters. The generated
-TestConcurrencyHTTPBindingProperty varies body/query run, job, holder and
-encoded group selectors against independent binding facts. Refused requests
-never enter the transaction adapter. TestConcurrencyHTTPRefusals covers current
-liveness, cancellation-sensitive acquire, cancellation-reporting release,
-stale generation, transaction refusal, safe errors, tenant selection, malformed
-inputs and unsupported methods. The client round trip uses final paths and job
-fields. The retired-route property reaches no adapter.
-
-The old claim_run_test.go concurrency properties and the cross-team leader
-resolution test remain unported native requirements. Fake adapters do not
-establish sealed group or memo policy, foreign leader resolution, lease ceilings,
-inheritance refusal or persistence races. W1 must implement C2's authority-bearing
-ConcurrencyStore and SlotKey/SlotHolderID checker before those cells can close.
-No native acceptance matrix cell is newly completed in this continuation.
+Private unit admission tests cover sealed declarations, award binding, execution
+host identity, lease continuity and recovery adoption. The single-group transport
+mutation tests are deleted with their production endpoints.
 
 W2's typed step continuation updates the existing TestEngineStepHTTP and
 reporting-authority cases to StepReportRequest. TestEngineTypedStepHTTP uses

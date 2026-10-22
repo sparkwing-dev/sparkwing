@@ -23,8 +23,8 @@ import (
 
 type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 
-func (f storeLauncherSyncW8) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation, _ []capability.LeaseRef) (controllerwire.LauncherSyncResponse, error) {
-	return f(ctx, ref, observed)
+func (f storeLauncherSyncW8) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	return f(ctx, ref, body.Observed)
 }
 
 func TestStoreLauncherW8(t *testing.T) {
@@ -79,6 +79,7 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitStoredUnitW8(t, server.Store, unit)
 	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("Cloud start: %+v: %v", started, err)

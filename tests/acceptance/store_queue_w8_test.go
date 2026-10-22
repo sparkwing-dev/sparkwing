@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -58,9 +60,9 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 		runner, err := runners.NewStoreRunner(server.EngineController, runners.StoreRunnerConfig{
 			Bearer: func(context.Context) (string, error) { return raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
-			Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {
+			Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
 				t.Fatal("claim executed pipeline code")
-				return runners.NativeServices{}, nil
+				return nodehost.NativeServices{}, nil
 			},
 		})
 		if err != nil {

@@ -5,17 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
-
-const capacityRunLiveSQL = `r.status IN ('pending','running') AND r.finished_at IS NULL AND (
- ((` + controllerRunOwnership + `) AND EXISTS (
-  SELECT 1 FROM leases l WHERE l.name='controller.owner' AND l.holder<>'' AND l.until>?))
- OR ((NOT (` + controllerRunOwnership + `)) AND EXISTS (
-  SELECT 1 FROM triggers t WHERE t.team=r.team AND t.id=r.id AND t.status='claimed' AND t.lease_expires_at>?))
- OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=r.team AND n.run_id=r.id
-  AND n.status<>'done' AND n.claimed_by IS NOT NULL AND n.lease_expires_at>?))`
 
 func capacityGenerationTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (int64, error) {
 	var generation int64
@@ -73,9 +63,7 @@ func renewCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID 
 		return holderRefusal()
 	}
 	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		if table == "concurrency_waiters" && nodeID != "" {
-			continue
-		}
+
 		superseded := ""
 		if table == "concurrency_holders" {
 			superseded = " AND superseded=0"
@@ -112,10 +100,38 @@ AND (node_id='' OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=leased.team AND n.
 			}
 		}
 	}
+	rows, err := tx.QueryContext(ctx, `SELECT node_id,lease_expires_at FROM admission_work WHERE team=? AND run_id=? AND (?='' OR node_id=? OR node_id='') AND lease_expires_at>?`, team, runID, nodeID, nodeID, now.UnixNano())
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		node   string
+		expiry int64
+	}
+	var all []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.node, &p.expiry); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		all = append(all, p)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, p := range all {
+		bound, err := capacityLeaseCeilingTx(ctx, tx, team, runID, p.node, max(p.expiry, expires.UnixNano()))
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE admission_work SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, bound, team, runID, p.node); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func releaseCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
+func releaseCapacityRowsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
 	if err := lockBoundCapacityTx(ctx, tx, team, runID, nodeID, false); err != nil {
 		return err
 	}
@@ -126,10 +142,19 @@ func releaseCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 	return err
 }
 
-func rebindCapacityGenerationTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, previous, generation int64) error {
-	if err := lockBoundCapacityTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), false); err != nil {
+func lockCapacityEntryTx(ctx context.Context, tx *storeTx, team Team, key string) error {
+	var found string
+	err := tx.QueryRowContext(ctx, `SELECT key FROM concurrency_entries WHERE team = ? AND key = ?`+tx.forUpdate(), team, key).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func releaseCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
+	if err := releaseCapacityRowsTx(ctx, tx, team, runID, nodeID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET generation=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND lease_expires_at>? AND superseded=0`, generation, team, ref.RunID, ref.NodeID, previous, tx.now(ctx).UnixNano())
+	_, err := tx.ExecContext(ctx, `DELETE FROM admission_work WHERE team=? AND run_id=? AND (?='' OR node_id=?)`, team, runID, nodeID, nodeID)
 	return err
 }

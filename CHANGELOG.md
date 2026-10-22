@@ -20,6 +20,29 @@ unlock.
 
 ## [Unreleased]
 
+- **runs:** Return cancellation committed after the owner's last scheduling snapshot in completion output and exit status.
+
+- **concurrency:** Release logical capacity when neither its claim nor owner remains live. After claim replacement, `cancel_others` cancels the current job while preserving the reservation's identity and arrival. Queue promotion grants complete group sets through the store admission owner. Replaying a live grant after its queue timeout retains admission. Keep simultaneous first arrivals to a new group from deadlocking on PostgreSQL.
+
+- **memo:** Preserve authorization and fence refusals as errors. Make cached results reusable only with the producer's committed success, so cancelled or refused completion cannot publish a hit.
+
+- **execution:** Evaluate executable jobs' `SkipIf` and memo checks on the executing host under the job's award, after concurrency admission. A skipped job waits for its slot, then releases its groups without running its body. The coordinator no longer acquires job groups for evaluation.
+
+- **approvals (Breaking):** Refuse concurrency groups on approvals at plan acceptance, including generated approvals. Put the group on the job after the approval. An approval's `SkipIf` runs on the run's coordinator before requesting approval, holding no capacity. A true predicate settles as skipped. Predicates retain their declared dependency, secret and pipeline-reference reads on both run-host and controller-owned runs. Pipeline references keep the caller's run identity separate from the referenced resource.
+
+- **concurrency (Breaking):** Remove the unused `CancelTimeout` option, retired coalesce cache/leader fields in stored waiters and queue responses, and `memo:` concurrency-key recognition. `cancel_others` replaces logical capacity immediately and requests cooperative cancellation. Disconnected holders can overlap until cleanup or their bounded drain deadline.
+
+- **concurrency (Breaking):** Give plan and job groups separate namespaces, so the same name at both levels identifies independent budgets. Refuse box-scoped plan groups when accepting a pipeline because a run can span machines. Use job-level box scope for per-machine budgets. See [migration](docs/migrations/_unreleased.md#concurrency-admission-and-queue-views).
+
+- **admission:** Wait to reacquire a lapsed plan concurrency group after work has been released. Released jobs finish, further releases wait, and queue views name the group being reacquired.
+
+- **admission (Breaking):** Move all logical capacity into one durable store owner. Grant complete plan and job group sets atomically with one arrival per set. Release permission commits with plan admission. Every job start and process grant requires an award-bound permit, including jobs without groups. Released jobs continue while the plan waits to reacquire capacity. Burst uses provisional awards and returns job reservations when compute is unavailable. Schema baseline 20 includes durable admission records.
+
+- **launcher:** Seal box-scoped concurrency to the reserved execution node at authenticated Job activation. Capacity requests and their Pod identities cannot select a box.
+
+- **controller (Breaking):** Remove `--trigger-dedupe-window` and chart `controller.triggerDedupeWindow`. Identical API submissions create separate runs unless the caller supplies an idempotency key. Explicit keys and GitHub delivery IDs keep their persistent replay behavior.
+- **admission (Breaking):** Remove the `jev` admission mode and its adviser configuration. Use `classic`, `off`, `auto` or `custom` for deterministic machine admission. Queue status drops the adviser counters.
+- **runner:** Remove the persistent plan cache. Each new planning attempt invokes the SDK. An accepted plan remains stored for resume.
 - **controller:** Helm persists credential epochs on a dedicated retained volume. Startup, admin and restore share `--credential-epoch-dir`; epoch files use the trusted credential-file checks.
 
 - **controller (Breaking):** Schema baseline 20 includes persisted credential epochs and declared restore preparation and schedule acknowledgment. An external credential epoch invalidates all earlier bearer tokens and dashboard sessions after restore; operators supply a fresh bootstrap seed and reissue credentials. Schedule acknowledgment discards catch-up through its timestamp. Schema mismatch errors distinguish upgrade from rollback and preserve newer stores. See [migration](docs/migrations/_unreleased.md#declared-restore-and-credential-epochs).
@@ -27,7 +50,6 @@ unlock.
 
 - **go api:** Add `secretname.ErrMissing` as the shared missing-secret error. `sparkwing.ErrSecretMissing` keeps the same error identity.
 
-- **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 16 adds generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
 - **store (Breaking):** The schema baseline advances to version 20, with SQLite STRICT storage and stronger tenant, account, attempt and row constraints. Secret and source credential releases and privileged mutations share an append-only audit log that survives run, team and account deletion. Audit entries use closed payloads containing identifiers and digests. Database recording time controls their operator-set retention horizon (400 days by default). Refund idempotency survives audit expiry. Runner clock skew cannot block step recovery. Editors may delete only runs they submitted. See [migration](docs/migrations/_unreleased.md#run-deletion-and-audit-retention).
 - **runs (Breaking):** Cancellation bounds work and concurrency leases to five minutes after the first request, including holders that keep heartbeating. Funding refusal retains its shorter prepaid deadline. Finish requests drop `outcome`; the store derives the verdict from persisted jobs, and a run without an accepted plan cannot finish successfully. Completion returns the committed verdict to the CLI, and admission skips preserve prior job failures. Session expiry uses snapshot time. Mutation authorization reads fresh database time after locks, including secret release. Schema baseline 20 includes generated cancellation deadlines. See [migration](docs/migrations/_unreleased.md#bounded-cancellation-and-derived-completion).
 

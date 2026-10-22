@@ -51,7 +51,7 @@ func FuzzArtifactLayerUsesExecutionWorkspace(f *testing.F) {
 		name := "output-" + hex.EncodeToString(path)
 		writePublishedFile(t, root, name, value, 0o600)
 		writePublishedFile(t, input.Entry.Directory, name, "SDK-directory decoy", 0o600)
-		finish, err := adapter.Prepare(t.Context(), LayerSpec{Name: "artifacts"}, input, nodeproto.JobSpec{Artifacts: []string{name}})
+		finish, err := adapter.Prepare(t.Context(), input, nodeproto.JobSpec{Artifacts: []string{name}})
 		if err != nil || finish == nil {
 			t.Fatalf("prepare: %v", err)
 		}
@@ -60,7 +60,7 @@ func FuzzArtifactLayerUsesExecutionWorkspace(f *testing.F) {
 			t.Fatal(err)
 		}
 		adapter.Producer = func(context.Context, NodeInput, string) (blob.RecordKey, error) { return backend.upload.Key, nil }
-		if _, err := adapter.Prepare(t.Context(), LayerSpec{Name: "artifacts"}, input, nodeproto.JobSpec{Consumes: []nodeproto.ArtifactInput{{Producer: backend.upload.Key.Scope.Job, Into: "received"}}}); err != nil {
+		if _, err := adapter.Prepare(t.Context(), input, nodeproto.JobSpec{Consumes: []nodeproto.ArtifactInput{{Producer: backend.upload.Key.Scope.Job, Into: "received"}}}); err != nil {
 			t.Fatal(err)
 		}
 		body, err := os.ReadFile(filepath.Join(root, "received", name))
@@ -78,7 +78,7 @@ func TestDepcacheLayerUsesExecutionWorkspace(t *testing.T) {
 	input.Entry = acquiredLayerEntry(t, 2)
 	root := input.Entry.CheckoutDirectory()
 	writePublishedFile(t, root, "lockfile", "dependencies-v1", 0o600)
-	finish, err := adapter.Prepare(t.Context(), LayerSpec{Name: "caches"}, input, job)
+	finish, err := adapter.Prepare(t.Context(), input, job)
 	if err != nil || finish == nil {
 		t.Fatalf("prepare cache: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDepcacheLayerUsesExecutionWorkspace(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "vendor")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adapter.Prepare(t.Context(), LayerSpec{Name: "caches"}, input, job); err != nil {
+	if _, err := adapter.Prepare(t.Context(), input, job); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(root, "vendor/module/file"))
