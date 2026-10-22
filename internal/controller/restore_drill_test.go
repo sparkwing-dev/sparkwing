@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -53,7 +56,7 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	schedule, _, err := liveTenant.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "restore-nightly", RepoPath: "https://github.com/acme/repo.git", Pipeline: "nightly", Cron: "* * * * *", CatchUp: 24 * time.Hour,
+		ID: "restore-nightly", RepoPath: "https://github.com/acme/repo.git", Pipeline: "nightly", Cron: "* * * * *", Overlap: store.CronOverlapQueue, CatchUp: 24 * time.Hour,
 		Where: store.CronWhereController, GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567",
 		GitHubInstallationID: 7, GitHubRepositoryID: 701, ArmedBy: "owner",
 	})
@@ -68,6 +71,15 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: token.Prefix}
 	if _, err := live.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
 		t.Fatal(err)
+	}
+	pendingDue := now.Add(time.Minute).Truncate(time.Minute)
+	now = pendingDue.Add(time.Second)
+	pending, err := liveTenant.AdmitScheduledRun(t.Context(), schedule, pendingDue)
+	if err != nil || pending.RunID == "" {
+		t.Fatalf("pending scheduled deploy: %+v %v", pending, err)
+	}
+	if run, err := liveTenant.ReadRun(t.Context(), pending.RunID); err != nil || run.State != store.RunPending || run.CancelRequestedAt != nil {
+		t.Fatalf("backup scheduled run: state=%s cancelled=%v err=%v", run.State, run.CancelRequestedAt, err)
 	}
 	backupPath := filepath.Join(dir, "backup.db")
 	if _, err := teststore.SQL(t, live).ExecContext(t.Context(), `VACUUM INTO ?`, backupPath); err != nil {
@@ -115,6 +127,27 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if run, err := tenant.ReadRun(t.Context(), pending.RunID); err != nil || run.CancelRequestedAt == nil || run.CancelReason != "cancelled by restore; rerun if needed" {
+		t.Fatalf("restored pending deploy: cancelled=%v reason=%q err=%v", run.CancelRequestedAt, run.CancelReason, err)
+	}
+	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+	if _, err := restored.AsOperator().EnsureBootstrapCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}); err != nil {
+		t.Fatal(err)
+	}
+	launcher, err := restored.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		Authority: &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: seed[:store.CredentialPrefixLength]},
+		Kind:      capability.ProvisionService, RegistrationID: "service:restore-launcher", Subject: capability.Subject{Kind: capability.SubjectService, ID: "restore-launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restored.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: launcher.Capability.Prefix}); err != nil {
+		t.Fatalf("fresh launcher was not authorized: %v", err)
+	}
+	var refused *store.ErrIllegalTransition
+	if _, err := restored.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(pending.RunID)}}); !errors.As(err, &refused) || refused.Reason != store.ReasonHolderRights {
+		t.Fatalf("restored pending deploy claim did not refuse cancelled work: %v", err)
+	}
 	if ran, err := restored.AsOperator().RunCronTickLeased(t.Context(), "restore-drill", time.Minute, func(context.Context) error { t.Fatal("restored cron tick ran before acknowledgement"); return nil }); ran || !errors.Is(err, store.ErrRestorePending) {
 		t.Fatalf("restored cron hold: ran=%t err=%v", ran, err)
 	}
@@ -136,7 +169,7 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 	if result, err := tenant.AdmitScheduledRun(t.Context(), schedule, next); err != nil || result.RunID == "" || result.Replayed {
 		t.Fatalf("future cron admission after acknowledgement: %+v %v", result, err)
 	}
-	if fires, err := tenant.ListCronFires(t.Context(), schedule.ID, 0); err != nil || len(fires) != 1 || !fires[0].DueAt.Equal(next) {
+	if fires, err := tenant.ListCronFires(t.Context(), schedule.ID, 0); err != nil || len(fires) != 2 || !fires[0].DueAt.Equal(next) || !fires[1].DueAt.Equal(pendingDue) {
 		t.Fatalf("restored cron fired a duplicate instant: %+v %v", fires, err)
 	}
 }

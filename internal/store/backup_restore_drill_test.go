@@ -251,8 +251,8 @@ func drillSQLite(t *testing.T) {
 	}
 	populateInstall(t, st, cipher)
 	source := fingerprintInstall(t, st, cipher)
-	// safety: a SQLite backup is only consistent once the writer has released the
-	// database and checkpointed its write-ahead log.
+	// safety: this raw file-copy backup needs the writer closed and WAL checkpointed.
+	// Online snapshots such as VACUUM INTO can run with an open store.
 	if err := st.Close(); err != nil {
 		t.Fatalf("close live store: %v", err)
 	}

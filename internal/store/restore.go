@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 const restoreStateKey = "restore.state"
@@ -46,6 +48,9 @@ func (s *Store) ensureCredentialEpoch(ctx context.Context, epoch string, prepare
 			return err
 		}
 		if prepared || err == nil && string(previous) != epoch {
+			if err := tx.operator.cancelRestoredSchedulesTx(ctx, tx); err != nil {
+				return err
+			}
 			if err := writeRestoreStateTx(ctx, tx, RestoreState{Epoch: epoch, Pending: true}); err != nil {
 				return err
 			}
@@ -56,6 +61,39 @@ func (s *Store) ensureCredentialEpoch(ctx context.Context, epoch string, prepare
 		_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('credential_epoch',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, []byte(epoch))
 		return err
 	})
+}
+
+func (o *Operator) cancelRestoredSchedulesTx(ctx context.Context, tx *storeTx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT team,id FROM runs WHERE trigger_source=? AND finished_at IS NULL ORDER BY team,id`, runspec.OriginSchedule)
+	if err != nil {
+		return err
+	}
+	var runs []struct {
+		team Team
+		id   runspec.RunID
+	}
+	for rows.Next() {
+		var run struct {
+			team Team
+			id   runspec.RunID
+		}
+		if err := rows.Scan(&run.team, &run.id); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		runs = append(runs, run)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	previous := tx.cancelingTeam
+	defer func() { tx.cancelingTeam = previous }()
+	for _, run := range runs {
+		tx.cancelingTeam = run.team
+		if _, err := transitionRunTx(ctx, tx, run.team, RunTransition{RunID: run.id, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "cancelled by restore; rerun if needed"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RestoreStatus reports whether restored schedules are held.
@@ -93,7 +131,8 @@ func writeRestoreStateTx(ctx context.Context, tx *storeTx, state RestoreState) e
 	return err
 }
 
-// AcknowledgeRestore discards schedule catch-up through database time and resumes future instants.
+// AcknowledgeRestore discards schedule catch-up through database time and lifts the hold.
+// API/local schedules need fresh consent because rotation invalidates their recorded authority.
 // Repeating acknowledgement leaves the first boundary unchanged.
 func (o *Operator) AcknowledgeRestore(ctx context.Context) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {

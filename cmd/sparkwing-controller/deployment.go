@@ -141,16 +141,13 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 		dialect, target = store.DialectPostgres, creds.PGURL
 	}
 	epochDir := credentialEpochDirectory(rec.EpochDir, rec.CredentialsDir, filepath.Dir(stateDB))
-	epoch, err := credentials.LoadOrCreateEpoch(epochDir)
+	epoch, err := credentials.LoadEpoch(epochDir)
 	if err != nil {
 		return nil, err
 	}
 	st, err := store.OpenExisting(ctx, dialect, target, store.WithCredentialEpoch(epoch))
 	if err != nil {
 		return nil, err
-	}
-	if err := st.EnsureCredentialEpoch(ctx); err != nil {
-		return nil, errors.Join(err, st.Close())
 	}
 	conn, err := st.Connection(ctx)
 	switch {
@@ -161,6 +158,9 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 		err = fmt.Errorf("the store at %s is not the one the serving controller recorded (baseline %d, recorded %d)", conn.Target, conn.Created, rec.Connection.Created)
 	}
 	if err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
+	if err := st.EnsureCredentialEpoch(ctx); err != nil {
 		return nil, errors.Join(err, st.Close())
 	}
 	return st, nil

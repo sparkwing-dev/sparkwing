@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestRestoreHoldsSchedulesUntilAcknowledgement(t *testing.T) {
@@ -70,5 +73,46 @@ func TestRestoreHoldsSchedulesUntilAcknowledgement(t *testing.T) {
 	state, err = op.RestoreStatus(ctx)
 	if err != nil || state.Pending {
 		t.Fatalf("same epoch reentered restore = %+v, %v", state, err)
+	}
+}
+
+func TestRestorePreparationCancelsScheduledWorkBeforeClaims(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitNode} {
+		for _, restored := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/restored=%t", kind, restored), func(t *testing.T) {
+				var s *Store
+				var tenant *Tenant
+				var demand UnitDemand
+				if kind == capability.UnitNode {
+					s, demand = unitClaimFixture(t)
+					fundUnitClaim(t, s)
+					tenant = &Tenant{s: s, team: "a"}
+				} else {
+					s, tenant, demand, _ = cancellationFixture(t, kind)
+				}
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET trigger_source='schedule'`)
+				if restored {
+					if err := s.AsOperator().PrepareRestore(t.Context(), "rotated"); err != nil {
+						t.Fatal(err)
+					}
+					run, err := tenant.ReadRun(t.Context(), "run")
+					if err != nil || run.CancelRequestedAt == nil || run.CancelReason != "cancelled by restore; rerun if needed" {
+						t.Fatalf("restored run cancellation: at=%v reason=%q err=%v", run.CancelRequestedAt, run.CancelReason, err)
+					}
+				}
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+				if restored && err == nil {
+					t.Fatal("restored scheduled work was claimed")
+				}
+				if !restored && err != nil {
+					t.Fatalf("backup work was not claimable: %v", err)
+				}
+				if !restored {
+					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }

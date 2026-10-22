@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).cancelRestoredSchedulesTx":      "offline restore cancels every tenant scheduled run through its scoped lifecycle owner before the rotated epoch is recorded",
 	"(*Operator).AcknowledgeRestore":             "offline restore acknowledgement advances every tenant schedule past the recovery window before schedules resume",
 	"(*Operator).installAuditProtection":         "baseline audit collision protection checks globally unique event IDs across teams",
 	"(*Operator).installRunTombstones":           "baseline tombstone trigger writes OLD.team for each deleted run, including bulk retention and purge",

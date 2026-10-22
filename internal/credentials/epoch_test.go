@@ -13,6 +13,14 @@ func TestEpochSurvivesRestartAndRotates(t *testing.T) {
 	if err := os.Chmod(dir, 0o770); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := LoadEpoch(dir); !os.IsNotExist(err) {
+		t.Fatalf("read-only epoch load created a fence: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o770 {
+			t.Fatalf("read-only epoch load changed its directory: %v %v", info, err)
+		}
+	}
 	first, err := LoadOrCreateEpoch(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +31,7 @@ func TestEpochSurvivesRestartAndRotates(t *testing.T) {
 			t.Fatalf("epoch directory is not private: %v, %v", info, err)
 		}
 	}
-	again, err := LoadOrCreateEpoch(dir)
+	again, err := LoadEpoch(dir)
 	if err != nil || again != first {
 		t.Fatalf("restart: %q %v", again, err)
 	}
@@ -67,8 +75,10 @@ func TestEpochRejectsUntrustedFiles(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := LoadOrCreateEpoch(dir); err == nil {
-				t.Fatalf("accepted %s credential epoch", kind)
+			for _, read := range []func(string) (string, error){LoadEpoch, LoadOrCreateEpoch} {
+				if _, err := read(dir); err == nil {
+					t.Fatalf("accepted %s credential epoch", kind)
+				}
 			}
 		})
 	}

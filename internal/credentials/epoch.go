@@ -15,6 +15,19 @@ import (
 
 func epochPath(dir string) string { return filepath.Join(dir, "credential-epoch") }
 
+// LoadEpoch reads an existing external credential fence without changing its directory.
+func LoadEpoch(dir string) (string, error) {
+	f, err := fssecure.OpenCredential(dir, "credential-epoch")
+	if err != nil {
+		return "", err
+	}
+	body, readErr := io.ReadAll(f)
+	if err := errors.Join(readErr, f.Close()); err != nil {
+		return "", err
+	}
+	return parseEpoch(body)
+}
+
 // LoadOrCreateEpoch loads the external credential fence, creating it on first startup.
 // A restored database must retain this file from the current deployment.
 func LoadOrCreateEpoch(dir string) (string, error) {
@@ -22,22 +35,18 @@ func LoadOrCreateEpoch(dir string) (string, error) {
 		return "", err
 	}
 	path := epochPath(dir)
-	f, err := fssecure.OpenCredential(dir, "credential-epoch")
+	epoch, err := LoadEpoch(dir)
 	if err == nil {
-		body, readErr := io.ReadAll(f)
-		if err := errors.Join(readErr, f.Close()); err != nil {
-			return "", err
-		}
-		return parseEpoch(body)
+		return epoch, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	epoch, err := newEpoch()
+	epoch, err = newEpoch()
 	if err != nil {
 		return "", err
 	}
-	f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return LoadOrCreateEpoch(dir)
 	}

@@ -19,8 +19,9 @@ const restoreUsage = `usage: sparkwing-controller restore prepare|acknowledge [-
 
 Stop every controller before replacing the database and keep it stopped for
 these operations. prepare rotates credential-epoch outside the database,
-invalidating every old bearer and session, and holds schedules. acknowledge
-discards schedule catch-up through the acknowledgement time and resumes future ticks.
+invalidating every old bearer and session, cancelling unfinished scheduled runs,
+and holding new schedule admissions. acknowledge discards catch-up through that time
+and lifts the hold. API/local schedules need fresh consent before they can fire again.
 All operations open an existing database and refuse to create one.
 Payment recovery is manual; follow the operator runbook kept outside this repository.`
 

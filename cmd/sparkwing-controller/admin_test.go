@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -208,7 +210,11 @@ func openState(t *testing.T) *store.Store {
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := openControllerStore(context.Background(), deployment.Config{}, p.StateDB())
+	epoch, err := credentials.LoadOrCreateEpoch(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := openControllerStore(context.Background(), deployment.Config{}, p.StateDB(), store.WithCredentialEpoch(epoch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,11 +259,41 @@ func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := teststore.SQLite(t, p.StateDB())
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO settings(key,value) VALUES ('credential_epoch',?),('bootstrap_admin',?)`, []byte("other-deployment"), []byte("consumed")); err != nil {
+		t.Fatal(err)
+	}
+	settings := func() map[string]string {
+		t.Helper()
+		rows, err := db.QueryContext(t.Context(), `SELECT key,value FROM settings ORDER BY key`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		result := map[string]string{}
+		for rows.Next() {
+			var key string
+			var value []byte
+			if err := rows.Scan(&key, &value); err != nil {
+				t.Fatal(err)
+			}
+			result[key] = string(value)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	before := settings()
 	if err := other.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := freeze(); err == nil || !strings.Contains(err.Error(), "recorded") {
 		t.Fatalf("admin on a store other than the recorded one = %v, want an identity refusal", err)
+	}
+
+	if after := settings(); !reflect.DeepEqual(before, after) {
+		t.Fatalf("baseline refusal changed settings: before=%v after=%v", before, after)
 	}
 
 	// A record naming another connection target, as when pg-url now points
@@ -280,6 +316,9 @@ func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
 	}
 	if err := freeze(); err == nil || !strings.Contains(err.Error(), "connected to") {
 		t.Fatalf("admin on another connection target = %v, want a target refusal", err)
+	}
+	if after := settings(); !reflect.DeepEqual(before, after) {
+		t.Fatalf("target refusal changed settings: before=%v after=%v", before, after)
 	}
 }
 

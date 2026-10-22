@@ -210,9 +210,23 @@ func (p *paymentProvider) read(ctx context.Context, collection, id, kind string,
 	}) >= 0 {
 		return object, invalidPaymentEvent()
 	}
-	body, err := p.fetch(ctx, collection+"/"+id, 1<<20)
+	if p == nil {
+		return object, paymentProviderUnavailable()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.stripe.com/v1/"+collection+"/"+id, nil)
 	if err != nil {
-		return object, err
+		return object, paymentProviderUnavailable()
+	}
+	request.Header.Set("Authorization", "Bearer "+p.key)
+	request.Header.Set("Stripe-Version", PaymentProviderAPIVersion)
+	response, err := p.client.Do(request)
+	if err != nil {
+		return object, paymentProviderUnavailable()
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil || len(body) > 1<<20 || response.StatusCode != http.StatusOK {
+		return object, paymentProviderUnavailable()
 	}
 	if json.Unmarshal(body, &object) != nil || object.ID != id || object.Object != kind || object.LiveMode == nil || *object.LiveMode != (mode == PaymentLive) {
 		return paymentObject{}, invalidPaymentEvent()
@@ -222,26 +236,4 @@ func (p *paymentProvider) read(ctx context.Context, collection, id, kind string,
 
 func paymentProviderUnavailable() *apierr.Error {
 	return &apierr.Error{Code: apierr.Unavailable, Message: "payment provider is unavailable"}
-}
-
-func (p *paymentProvider) fetch(ctx context.Context, resource string, maxBytes int64) ([]byte, error) {
-	if p == nil {
-		return nil, paymentProviderUnavailable()
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.stripe.com/v1/"+resource, nil)
-	if err != nil {
-		return nil, paymentProviderUnavailable()
-	}
-	request.Header.Set("Authorization", "Bearer "+p.key)
-	request.Header.Set("Stripe-Version", PaymentProviderAPIVersion)
-	response, err := p.client.Do(request)
-	if err != nil {
-		return nil, paymentProviderUnavailable()
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
-	if err != nil || int64(len(body)) > maxBytes || response.StatusCode != http.StatusOK {
-		return nil, paymentProviderUnavailable()
-	}
-	return body, nil
 }
