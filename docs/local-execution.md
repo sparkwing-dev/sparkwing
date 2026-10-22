@@ -77,7 +77,8 @@ The local controller owns one home, its SQLite store, admission, queue and
 browser dashboard. It starts on demand. The CLI hosts a foreground run and
 sends state operations through the controller API. Its first trigger claim is
 reserved for that foreground command, so the background queue cannot take it
-between submission and hosting. Detached submissions enter the background queue.
+between submission and hosting. Local intake resolves an omitted dispatch to
+host execution before checking that reservation. Detached submissions enter the background queue.
 SDK processes declare and
 execute work through protocol v2. They do not open the controller's database.
 

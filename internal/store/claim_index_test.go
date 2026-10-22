@@ -244,3 +244,60 @@ func TestClaimPredicateJoinsOnlyTheTeamsClaimants(t *testing.T) {
 		t.Fatalf("claimant scope lacks a team index seek: %v", plan)
 	}
 }
+
+func TestFreshClaimTeamDiscoverySeeksOneHeadPerRequirementRoute(t *testing.T) {
+	var visited atomic.Int64
+	probe := fmt.Sprintf("fresh_team_probe_%x", time.Now().UnixNano())
+	if err := sqlite.RegisterScalarFunction(probe, 1, func(_ *sqlite.FunctionContext, _ []driver.Value) (driver.Value, error) {
+		visited.Add(1)
+		return int64(1), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, demand := unitClaimFixture(t)
+	demand.Target = nil
+	demand.Kinds = []capability.UnitKind{capability.UnitNode}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		requirements, err := persistClaimRequirementsTx(t.Context(), tx, "a", []string{"sparkwing-4cpu"})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=?,ready_at=? WHERE team='a'`, requirements, tx.now(t.Context()).UnixNano()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(t.Context(), `WITH RECURSIVE sequence(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM sequence WHERE i<2000) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) SELECT 'a','run','fresh-'||i,'pending',ready_at,spec_json,execution_json,claim_requirements FROM sequence,nodes WHERE team='a' AND node_id='job'`); err != nil {
+			return err
+		}
+		q := claimSQL{}
+		if err := claimInputsTx(t.Context(), tx, demand, demand.Kinds, &q); err != nil {
+			return err
+		}
+		query, args, err := q.freshTeamsSQL(demand)
+		if err != nil {
+			return err
+		}
+		query = strings.ReplaceAll(query, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
+		rows, err := tx.QueryContext(t.Context(), query, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		var teams []string
+		for rows.Next() {
+			var team string
+			if err := rows.Scan(&team); err != nil {
+				return err
+			}
+			teams = append(teams, team)
+		}
+		if len(teams) != 1 || teams[0] != "a" {
+			t.Errorf("fresh teams = %v; want [a]", teams)
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := visited.Load(); got < 1 || got > 2 {
+		t.Fatalf("fresh team discovery visited %d nodes; want at most two indexed head evaluations", got)
+	}
+}

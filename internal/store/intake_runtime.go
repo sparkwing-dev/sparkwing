@@ -356,7 +356,11 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 	if c.Team != string(team) || c.Audience != capability.Controller || request.Request.Team != "" && request.Request.Team != string(team) || request.CapabilityPrefix != "" && request.CapabilityPrefix != c.Prefix {
 		return p, authorityError(apierr.Forbidden, "intake authority does not match the team")
 	}
-	if request.Request.LocalForeground && (request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginLocal || request.Request.Dispatch != runspec.DispatchHost || c.Subject.Kind != capability.SubjectLocal) {
+	dispatch := request.Request.Dispatch
+	if dispatch == "" {
+		dispatch = SelectDispatch(request.Request)
+	}
+	if request.Request.LocalForeground && (request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginLocal || dispatch != runspec.DispatchHost || c.Subject.Kind != capability.SubjectLocal) {
 		return p, authorityError(apierr.Forbidden, "foreground reservation requires local host intake")
 	}
 	grant := capability.RunsWrite

@@ -589,9 +589,13 @@ func TestLocalForegroundReservationUsesTheRequestingOSAccount(t *testing.T) {
 			authorityPersist(t, tenant.s, requester)
 			request.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: requester.Prefix}
 			request.Request.Origin, request.Request.LocalForeground = runspec.OriginLocal, foreground
+			request.Request.Dispatch = ""
 			admitted, err := tenant.AdmitRun(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if admitted.Request.Request.Dispatch != runspec.DispatchHost {
+				t.Fatalf("local dispatch=%q, want host", admitted.Request.Request.Dispatch)
 			}
 			background := authorityRoot("local-queue", "a")
 			background.Subject, background.Grants = requester.Subject, requester.Grants

@@ -834,7 +834,8 @@ lookups select matching requirement sets, and a transaction-local merge checks
 each route's head with the shared predicate. Each route selects one head per
 unit kind through its source index, then compares those heads in the same order.
 Rejected heads advance only that transaction's route. Named rechecks seek the complete team and unit key.
-Local foreground intake seals `Request.LocalForeground`. The shared predicate
+Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
+is resolved from the request before checking foreground authority. The shared predicate
 reserves the original intake's generation-zero trigger for a named claim by the
 submitting OS account. Queued polls retain their original unnamed intent when
 an indexed head recheck names a candidate. Detached intake, retry destinations
@@ -850,7 +851,8 @@ A committed ask can still hold the award for its preferred claimant. Broad
 requests record asks for every eligible requested unit in its ranking window
 before selecting an award. Readiness range indexes bound the ask pass to fresh
 work. Ask collection uses the same label routes and narrows observers to the
-source teams before checking eligibility. Awarding another unit cannot discard
+source teams before checking eligibility. Fresh-team discovery seeks one indexed
+head per requirement route instead of enumerating its jobs. Awarding another unit cannot discard
 those asks. The number of ask writes
 still depends on the number of fresh eligible units.
 Requirement references prevent retention from removing a set still used by work.

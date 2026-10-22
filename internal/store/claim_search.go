@@ -176,7 +176,7 @@ func (template *claimSQL) routesSQL(includeFresh bool) (string, []any, error) {
 }
 
 func (template *claimSQL) freshTeamsSQL(demand UnitDemand) (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true, routeJoin: true, freshOnly: true, target: demand.Target}
+	q := claimSQL{dialect: template.dialect, route: true, freshOnly: true, target: demand.Target}
 	if template.facts[0].Cloud == 0 {
 		q.team = template.facts[0].Team
 	}
@@ -185,8 +185,8 @@ func (template *claimSQL) freshTeamsSQL(demand UnitDemand) (string, []any, error
 	if err != nil {
 		return "", nil, err
 	}
-	source := q.source(template.kinds)
-	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + ` SELECT DISTINCT team FROM (` + source + `) fresh`, q.args, nil
+	head := q.headSQL(template.kinds)
+	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + ` SELECT DISTINCT route.team FROM routes route WHERE ` + head + ` IS NOT NULL`, q.args, nil
 }
 
 func decodeClaimHead(head *claimHead, raw string) error {
