@@ -392,9 +392,49 @@
       ],
       "type": "object"
     },
+    "MemoInput": {
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/MemoInput"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parts": {
+          "items": {},
+          "type": "array"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
     "MemoSpec": {
       "additionalProperties": false,
       "properties": {
+        "input": {
+          "$ref": "#/$defs/MemoInput"
+        },
         "ttl_ms": {
           "type": "integer"
         }

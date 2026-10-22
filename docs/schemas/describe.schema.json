@@ -422,12 +422,52 @@
     "memo": {
       "additionalProperties": false,
       "properties": {
+        "input": {
+          "$ref": "#/$defs/memoInput"
+        },
         "ttl_ms": {
           "maximum": 2592000000,
           "minimum": 0,
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "memoInput": {
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/memoInput"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parts": {
+          "items": {},
+          "type": "array"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
       "type": "object"
     },
     "pipeline": {

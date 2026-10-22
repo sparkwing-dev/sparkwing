@@ -131,7 +131,7 @@ func testProtocolReplyCorrelation(t *testing.T) {
 
 func testProtocolEvalValueTypes(t *testing.T) {
 	for kind, valid := range map[string][]string{
-		"skip_if": {"true", "false"}, "memo_key": {`"key"`, "null"},
+		"skip_if": {"true", "false"}, "memo_key": {"true", "false", `"key"`, "null", "[]", "{}", "1"},
 		"before_run": {"null"}, "after_run": {"null"}, "verify": {"null"},
 		"generate": {"[]"},
 	} {

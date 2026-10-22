@@ -4725,9 +4725,47 @@ components:
         - value
       type: object
       x-sparkwing-go-type: nodeproto.MaskRequest
+    internal.nodeproto.MemoInput:
+      additionalProperties: true
+      properties:
+        inputs:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.nodeproto.MemoInput'
+              type: array
+            - type: "null"
+        kind:
+          type: string
+        names:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        parts:
+          anyOf:
+            - items: {}
+              type: array
+            - type: "null"
+        patterns:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        root:
+          type: string
+      required:
+        - kind
+      type: object
+      x-sparkwing-go-type: nodeproto.MemoInput
     internal.nodeproto.MemoSpec:
       additionalProperties: true
       properties:
+        input:
+          anyOf:
+            - $ref: '#/components/schemas/internal.nodeproto.MemoInput'
+            - type: "null"
         ttl_ms:
           anyOf:
             - type: integer
