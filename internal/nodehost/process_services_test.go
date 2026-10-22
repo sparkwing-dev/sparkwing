@@ -159,7 +159,7 @@ func TestProcessServicesRefuseUnknownStepsAndPropagateMaskedWrites(t *testing.T)
 		calls++
 		return sentinel
 	}
-	for _, body := range []string{`null`, `{"value":null}`, `{"level":"warning","message":"text"}`, `{"level":"warn","message":"text","step":"unknown"}`, `{"level":"warn","step":"step","step":"other"}`, `{"level":"warn"} {}`} {
+	for _, body := range []string{`null`, `{"value":null}`, `{"level":"warning","message":"text"}`, `{"message":"range","line":5,"end_line":4}`, `{"message":"negative","line":-1}`, `{"level":"warn","message":"text","step":"unknown"}`, `{"level":"warn","step":"step","step":"other"}`, `{"level":"warn"} {}`} {
 		if _, err := callService(t, routes, auth, "/node/v1/annotations", body); err == nil {
 			t.Fatal("accepted malformed record")
 		}

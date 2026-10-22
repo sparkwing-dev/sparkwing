@@ -210,7 +210,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 }
 
 func (p pipelineInspection) presentation(ctx context.Context) (runspec.PipelinePresentation, error) {
-	prepared, err := p.planner.Prepare(ctx, p.input, nodehost.PlanningInput{})
+	prepared, err := p.planner.Inspect(ctx, p.input)
 	if err != nil {
 		return runspec.PipelinePresentation{}, err
 	}
@@ -238,7 +238,7 @@ type planned struct {
 
 func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline string, args []string) (planned, error) {
 	out := planned{pipeline: pipeline}
-	prepared, err := entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
+	prepared, err := entry.planner.Inspect(ctx, entry.input)
 	if err != nil {
 		return out, planError(pipeline, err)
 	}

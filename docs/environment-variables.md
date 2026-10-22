@@ -164,7 +164,6 @@ does not change the build.
 | `SPARKWING_REPO` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_TRIGGER_SOURCE` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_TOOLCHAIN_ACTIVE` | Protocol | CLI or test marker; no pipeline inheritance. |
-| `SPARKWING_HOOK_SELFTEST` | Protocol | CLI or test marker; no pipeline inheritance. |
 | `SPARKWING_TEST_*` | Protocol | CLI or test marker; no pipeline inheritance. |
 | `HOME` | Tool | Minimal process base. |
 | `TMPDIR` | Tool | Minimal process base. |

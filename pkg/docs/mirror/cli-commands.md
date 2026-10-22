@@ -19,7 +19,7 @@ Search command paths and summaries. Lists return bounded pages and a next_cursor
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--search TEXT` | Match records; never scan log text. |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--format markdown` | Artifact format; markdown exports the full command reference. |
 | `--split-dir DIR` | Directory for one generated Markdown page per command family. |

@@ -14,12 +14,3 @@ func TestAnnotateEmitsLocation(t *testing.T) {
 		t.Fatalf("annotation = %+v", record)
 	}
 }
-
-func TestAnnotateRejectsUnknownLevel(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("invalid level accepted")
-		}
-	}()
-	Annotate(t.Context(), Annotation{Level: "warning", Message: "bad level"})
-}

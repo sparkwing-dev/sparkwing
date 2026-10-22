@@ -203,7 +203,7 @@ JSON emits matching records and a page record with next_cursor and truncated. Qu
 | `--sha PREFIX` | sha |
 | `--started-after DATE` | started after |
 | `--started-before DATE` | started before |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--max-matches N` | max matches |
 | `-q, --quiet` | quiet |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
@@ -239,7 +239,7 @@ JSON emits compact run records and a page record with next_cursor and truncated.
 | `--started-before DATE` | started before |
 | `--finished-after DATE` | finished after |
 | `--finished-before DATE` | finished before |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `-q, --quiet` | quiet |
 | `--by-pipeline` | by pipeline |
@@ -289,7 +289,7 @@ JSON emits tagged log records. Plain emits log lines. Use --grep without --run t
 | `--sha PREFIX` | sha |
 | `--started-after DATE` | started after |
 | `--started-before DATE` | started before |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--max-matches N` | max matches |
 | `-q, --quiet` | quiet |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |

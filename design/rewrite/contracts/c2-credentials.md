@@ -1620,7 +1620,7 @@ path-derived team selection and authenticated signup attribution. Invalid bodies
 leave the fixture unchanged. Store failures remain private; a typed transaction
 refusal reaches HTTP unchanged. These fakes do not establish transaction safety.
 Seven breaker tests and two request-budget projection tests now exercise the
-policy router without sockets, preserving budget, ceiling, reset and thaw
+policy router without sockets, preserving request-budget reset and ceiling enforcement
 behavior. No additional full T1 port or
 cross-placement scenario is claimed complete.
 

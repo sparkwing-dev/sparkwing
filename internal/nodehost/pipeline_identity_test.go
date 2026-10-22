@@ -19,7 +19,7 @@ func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
 			switch request.Op {
 			case nodeproto.OpDescribe:
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "target", Required: true}, {Name: "build.image", Required: true, JobID: "build"}}}}}, nil
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "string", Required: true}, {Name: "build.image", Type: "string", Required: true, JobID: "build"}}}}}, nil
 			case nodeproto.OpPlan:
 				if request.Pipeline != "Deploy" || request.Run.Pipeline != "deploy-prod" || request.Args["target"] != "production" || request.Args["build.image"] != "release" {
 					t.Fatalf("pipeline identity or arguments changed: %+v", request)

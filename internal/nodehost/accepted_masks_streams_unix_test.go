@@ -202,7 +202,7 @@ func TestSealedMaskStreamChild(t *testing.T) {
 		case nodeproto.OpHello:
 			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: request.Engine.Version}, Features: []string{}}
 		case nodeproto.OpDescribe:
-			result = nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{}}}}
+			result = nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}}}}}
 		case nodeproto.OpPlan:
 			if request.Run != nil && request.Run.Pipeline == "build" {
 				reply.OK = false

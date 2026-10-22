@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (PreparedPlanning, bool, error) {
+func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput, declarationsOnly bool) (PreparedPlanning, bool, error) {
 	var doc nodeproto.DescribeDoc
 	if err := json.Unmarshal(raw, &doc); err != nil || doc.Pipelines == nil {
 		return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe requires a pipelines array")
@@ -18,9 +18,14 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 	if err != nil {
 		return PreparedPlanning{}, false, err
 	}
-	arguments, err := gate.Resolve(input.Entrypoint, input.Args, input.SecretArgs)
+	var arguments runspec.DeclaredArguments
+	if declarationsOnly {
+		arguments, err = gate.Inspect(input.Entrypoint)
+	} else {
+		arguments, err = gate.Resolve(input.Entrypoint, input.Args, input.SecretArgs)
+	}
 	if err != nil {
-		return PreparedPlanning{}, false, gate.Error(err)
+		return PreparedPlanning{Declarations: gate}, gate.Complete() && arguments.Registration.Version != 0, gate.Error(err)
 	}
 	prepared := PreparedPlanning{Declarations: gate, Description: arguments.Description, Args: arguments.Args, SecretArgs: arguments.SecretArgs, SecretRegistration: arguments.Registration}
 

@@ -176,10 +176,10 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			return nodeproto.EvalResult{Value: raw}, err
 		}}
 		code := sdkCode{Store: state, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-		replayed, err := code.replaySource(t.Context(), &executorSession{process: process}, NodeInput{Accepted: AcceptedRun{RunID: "run"}}, source, GeneratorReplay{SourceJob: "targets", SourceGeneration: 1, GeneratorID: testGenerator, Output: json.RawMessage("null")}, snapshot, []nodeproto.JobSpec{source})
+		replayed, err := code.replaySource(t.Context(), &executorSession{process: process}, NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: json.RawMessage(`{}`)}}, source, GeneratorReplay{SourceJob: "targets", SourceGeneration: 1, GeneratorID: testGenerator, Output: json.RawMessage("null")}, snapshot, []nodeproto.JobSpec{source})
 		unchanged := siblingID == "sibling" && !optional && !add && !partial
 		if unchanged != (err == nil) || !unchanged && replayed != nil || len(state.nodes) != stored || len(state.changes) != 0 {
-			t.Fatal("generator replay changed accepted membership or a sibling declaration")
+			t.Fatalf("generator replay changed accepted membership or a sibling declaration: %v", err)
 		}
 	})
 }

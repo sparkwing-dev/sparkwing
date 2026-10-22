@@ -57,8 +57,8 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 					t.Fatal("describe output escaped before secret classification")
 				}
 				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-					{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "other-secret", Secret: true, Default: &defaultValue}}},
-					{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true}, {Name: "empty", Default: &empty}, {Name: "label", Default: &fallback}}},
+					{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "other-secret", Type: "string", Secret: true, Default: &defaultValue}}},
+					{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "empty", Type: "string", Default: &empty}, {Name: "label", Type: "string", Default: &fallback}}},
 				}}, nil
 			case nodeproto.OpPlan:
 				if request.Args["token"] != supplied || request.Args["empty"] != "" || request.Args["label"] != "explicit" || request.Run.RunID != "run" {
@@ -82,7 +82,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || !reflect.DeepEqual(prepared.Args, map[string]string{"label": "explicit", "token": supplied}) {
 		t.Fatalf("description = %+v", prepared)
 	}
-	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {
+	if len(logs) != 1 || strings.Contains(logs[0].Message, supplied) || strings.Contains(string(logs[0].Attrs), supplied) {
 		t.Fatalf("logs = %+v", logs)
 	}
 	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
@@ -135,7 +135,7 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 				case nodeproto.OpHello:
 					return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}, Features: []string{}}, nil
 				case nodeproto.OpDescribe:
-					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{}}}}, nil
+					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Extra: true, Args: []nodeproto.ArgumentDescription{}}}}, nil
 				}
 				return nil, nil
 			}
@@ -440,6 +440,52 @@ func TestSDKPlanningReportsBufferedLogLoss(t *testing.T) {
 				}
 			} else if len(logs) != 2 || logs[0].Message != "kept" || !strings.Contains(logs[1].Message, "1 log lines dropped") {
 				t.Fatalf("overflow not reported: %+v", logs)
+			}
+		})
+	}
+}
+
+func TestSDKPlanningArgumentFailuresRespectRegistration(t *testing.T) {
+	for _, short := range []bool{false, true} {
+		t.Run(fmt.Sprint(short), func(t *testing.T) {
+			planner, input, fixture, _ := sdkPlanningFixture(t)
+			value := "supplied-private-secret"
+			input.Args = map[string]string{"token": value}
+			want := "no flag --*** is declared"
+			if short {
+				input.Args["short"] = "bad"
+			} else {
+				input.Args[value] = "unknown"
+			}
+			var logs []nodeproto.FrameLog
+			planner.Log = func(_ context.Context, frame nodeproto.FrameLog) error { logs = append(logs, frame); return nil }
+			start := planner.Start
+			planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+				process, err := start(ctx, in, log)
+				child := process.(*executorProcess)
+				answer := child.answer
+				child.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
+					if req.Op != nodeproto.OpDescribe {
+						return answer(ctx, req)
+					}
+					if err := log(ctx, nodeproto.FrameLog{Message: value}); err != nil {
+						return nil, err
+					}
+					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "short", Type: "string", Secret: true}}}}}, nil
+				}
+				return process, err
+			}
+			_, err := planner.Prepare(t.Context(), input, fixture.input)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs {
+				t.Fatalf("preparation error = %v", err)
+			}
+			if !short && failure.Message != want {
+				t.Fatalf("known argument error = %q, want %q", failure.Message, want)
+			}
+			encoded, _ := json.Marshal(logs)
+			if strings.Contains(err.Error()+string(encoded), value) {
+				t.Fatalf("argument failure released unregistered secret: %s, %v", encoded, err)
 			}
 		})
 	}

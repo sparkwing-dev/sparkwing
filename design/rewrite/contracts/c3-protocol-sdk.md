@@ -1196,8 +1196,9 @@ synchronous. Without a host, pipeline execution is unmasked.
 
 The accepted run seals `Resolved.SecretRegistration`, including valid discovered
 secret defaults, list argument kinds, raw/effective values and normalized list
-items. Go argument parsing and projection use `argvalue.List`. TypeScript uses
-the same comma split, Unicode White_Space trim and empty-item omission contract.
+items. The host argument validator and registration projection both use
+`argvalue.List` for comma splitting, Unicode whitespace trimming and empty-item
+omission. SDKs decode the host-prepared values.
 Known registrations precede author execution. Lazily issued values are registered
 before release. Refuse fewer than four characters in customer-stored
 secrets, supplied secret args and selected nonempty defaults, including individual
@@ -1252,3 +1253,36 @@ Partial describe failure does not block a healthy selected pipeline. Its host
 keeps output gated through planning because a failed sibling leaves declarations
 unknown. Selecting the failed pipeline preserves the error code and withholds
 its author-provided error details.
+
+## Host argument preparation (decision 50)
+
+One host validator owns defaults, required and unknown arguments, types, enums
+and list normalization after describe. Empty defaults mean no default. A required
+argument with a nonempty default is invalid. NaN and infinity are invalid. Enum
+choices are trimmed. Scalar string values retain whitespace. CLI parsing and the
+registration projection use the same host rules.
+
+Describe executes planning with zero inputs and discovers only static declarations.
+Inspection validates discovered declarations and defaults without requiring invocation
+values. Generated jobs carry `arguments` in `JobSpec`, including job ownership,
+types and defaults. After generation the host uses the same validator to prepare
+those values from the accepted run snapshot. Supplied flags declared only by a
+generator require the pipeline's extra-flag bag. The accepted run seals static
+`Resolved.ArgumentDeclarations`. The host validates these together with persisted
+and new generated declarations, so long and short flag names remain unique across
+the pipeline. Invocation inputs can change a described job's ID. Its argument
+declaration must still match the discovered declaration except for that ID, and
+two invocation jobs cannot claim the same flag. Initial plans refuse undiscovered
+argument declarations, including conditional jobs with secret defaults. Only the
+gated expansion path may add declarations, and it registers their secrets before
+execution. Each job prepares its defaults against the immutable accepted argument
+values. The second seal resolves raw request arguments through those sealed static
+declarations and checks the canonical values. Raw request bytes retain request
+identity even when list normalization changes their execution representation.
+
+The host sends prepared values in `args` on `run_step` and `eval` requests for
+jobs with argument declarations, including generator replay. SDKs decode these
+values before invoking author callbacks. They perform no default resolution or
+validation. Job declarations and hashes contain no host-prepared values. Invalid
+arguments fail with `invalid_args` during host preparation, before execution.
+The test host follows the same preparation and decoding path.

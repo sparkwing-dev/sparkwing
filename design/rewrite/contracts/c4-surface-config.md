@@ -126,15 +126,14 @@ Native local-services construction and readiness remain W8 integration points.
 
 `daemon events` reads the retained local journal with the final clisurface
 grammar. It selects the newest 50 matching records by default and accepts
-positive limits. Opaque cursors bind the journal directory, normalized filters,
-initial since cutoff and exact unread prefix. Newer appends keep continuation stable.
-Missing, inserted, reordered or edited unread records fail with a restart hint. The cursor
-contains hashes, cutoff and count, never record payloads. It grants no authority.
-JSON emits event rows followed by a page record with next_cursor and truncated,
-including empty and final pages. Plain/pretty continuation goes to stderr.
+positive limits. Each invocation selects from the retained journal independently.
+JSON emits event rows followed by a page record with an empty next_cursor and
+truncated, including empty results. Plain/pretty output reports omitted older
+records on stderr. Increase `--limit` to include them. Unreadable records produce
+a diagnostic with the skipped count, and journal read failures remain errors.
 `--explain --run` renders the complete related timeline without page metadata.
-It conflicts with list filters and pagination. Offset and zero-limit paths are
-deleted. Journal producer lifecycle remains W8-owned.
+It conflicts with list filters and limits. Cursor, offset and zero-limit paths
+are deleted. Journal producer lifecycle remains W8-owned.
 
 Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
 Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a

@@ -428,6 +428,7 @@ type Guards struct {
 // classifications but cannot declassify a requested value or expose it through display.
 // Raw Args remain available for execution, retries and masking, never direct display.
 type Resolved struct {
+	ArgumentDeclarations []nodeproto.ArgumentDescription `json:"argument_declarations,omitempty"`
 	// Engine pins the portable verified release identity; executors resolve their own platform asset.
 	Engine              engine.Identity     `json:"engine"`
 	Args                map[string]string   `json:"args"`

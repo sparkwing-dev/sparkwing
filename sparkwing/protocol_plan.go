@@ -86,6 +86,14 @@ func concurrencyDocument(g *ConcurrencyGroup, cost *int) nodeproto.ConcurrencySp
 
 func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {
 	s := nodeproto.JobSpec{ID: n.id, Needs: n.needs, NeedsIfPresent: n.needsOptional, NeedsGenerated: n.needsGenerated, Groups: jobGroups(p, n), Env: n.declaredEnv, Artifacts: n.outputGlobs, Requires: append(append([]string(nil), n.requires...), n.tools...), Prefers: n.prefers, Children: n.children, Inline: n.inline, Optional: n.optional, ContinueOnError: n.continueOnError, Resources: resourceDocument(n.resources)}
+	for _, declaration := range p.jobArgs {
+		if declaration.jobID != n.id {
+			continue
+		}
+		for _, f := range declaration.schema.Fields {
+			s.Arguments = append(s.Arguments, nodeproto.ArgumentDescription{Name: f.Name, Short: f.Short, Type: f.Type, Required: f.Required, Description: f.Description, Default: declaredDefault(f.Default), Enum: f.Enum, Secret: f.Secret, JobID: n.id})
+		}
+	}
 	for _, e := range n.consumes {
 		s.Consumes = append(s.Consumes, nodeproto.ArtifactInput{Producer: e.producer, Into: e.into})
 	}

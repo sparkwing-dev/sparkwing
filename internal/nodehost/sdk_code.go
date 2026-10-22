@@ -41,10 +41,13 @@ func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage Sto
 }
 
 type executorSession struct {
-	arguments []nodeproto.ArgumentDescription
-	process   ExecutorProcess
-	sequence  atomic.Int64
-	failure   *nodeproto.JobFailure
+	rawArgs     map[string]string
+	jobArgs     map[string]map[string]string
+	closureArgs map[string]map[string]string
+	arguments   []nodeproto.ArgumentDescription
+	process     ExecutorProcess
+	sequence    atomic.Int64
+	failure     *nodeproto.JobFailure
 }
 
 func checkProcessBinding(parent, child nodeproto.ProcessBinding) error {
@@ -79,6 +82,12 @@ func (s *executorSession) call(ctx context.Context, request nodeproto.Request, r
 	}
 	if !validDestination {
 		return executorError(apierr.ProtocolError, "SDK result destination does not match the operation")
+	}
+	if request.Op == nodeproto.OpRunStep {
+		request.Args = s.jobArgs[request.Job]
+	}
+	if request.Op == nodeproto.OpEval {
+		request.Args = s.closureArgs[request.Closure]
 	}
 	request.ID = strconv.FormatInt(s.sequence.Add(1), 10)
 	if request.Op == nodeproto.OpRunStep {
@@ -122,6 +131,7 @@ func sdkHello(ctx context.Context, session *executorSession, identity engine.Ide
 }
 
 func (h *sdkCode) replan(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec) error {
+	session.rawArgs = spec.Resolved.Args
 	run := executorRunContext(spec)
 	run.RunID = input.Accepted.RunID
 	args := spec.Resolved.Args
@@ -172,7 +182,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 		if string(hash) != input.SpecHash {
 			return executorError(apierr.PlanDrift, "SDK job differs from the accepted job")
 		}
-		return nil
+		return session.prepareArguments(job)
 	}
 	return executorError(apierr.PlanDrift, "SDK did not reconstruct the accepted job")
 }
@@ -215,4 +225,33 @@ func executorRunContext(spec runspec.Spec) nodeproto.RunContext {
 		context.Trigger.PullRequest = &nodeproto.PullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
 	return context
+}
+
+func (s *executorSession) prepareArguments(job nodeproto.JobSpec) error {
+	args, err := nodeproto.PrepareJobArguments(job.Arguments, s.rawArgs)
+	if err != nil {
+		return err
+	}
+	if len(job.Arguments) == 0 {
+		return nil
+	}
+	if s.jobArgs == nil {
+		s.jobArgs = map[string]map[string]string{}
+		s.closureArgs = map[string]map[string]string{}
+	}
+	s.jobArgs[job.ID] = args
+	closures := job.Closures
+	ids := append([]string{closures.MemoKey, closures.Verify}, closures.SkipIf...)
+	ids = append(ids, closures.BeforeRun...)
+	ids = append(ids, closures.AfterRun...)
+	ids = append(ids, closures.Generate...)
+	for _, step := range job.Steps {
+		ids = append(ids, step.Closures.SkipIf...)
+	}
+	for _, id := range ids {
+		if id != "" {
+			s.closureArgs[id] = args
+		}
+	}
+	return nil
 }

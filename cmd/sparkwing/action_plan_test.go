@@ -148,8 +148,8 @@ func TestPlanErrorsNameTheirCause(t *testing.T) {
 		invalid bool
 	}{
 		"invalid_args": {
-			plan:    `"ok":false,"error":{"code":"invalid_args","message":"inputs for pipeline \"demo\": --env is required"}}`,
-			want:    `demo: invalid arguments: inputs for pipeline "demo": --env is required`,
+			plan:    fixturePlan,
+			want:    `demo: invalid arguments: argument --env is required`,
 			invalid: true,
 		},
 		"unknown flag": {

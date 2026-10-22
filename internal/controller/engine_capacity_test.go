@@ -33,7 +33,7 @@ func controllerCapacityFixture(t *testing.T, opts ...store.Option) (*serverFixtu
 	engineSQL(t, engine.Store, `UPDATE triggers SET unit_kind='plan' WHERE id='run'`)
 	owner := engineRuntimeClaim(t, engine, capability.UnitPlan)
 	server := New(engine.Store, nil)
-	if _, err := engine.Store.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", server.measureHolder(), time.Hour); err != nil {
+	if _, err := engine.Store.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", server.leaseHolder, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	return &serverFixture{Server: server, store: engine.Store, engine: engine}, tenant, owner.Principal

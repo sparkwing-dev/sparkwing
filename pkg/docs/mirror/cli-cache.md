@@ -12,7 +12,7 @@ Inspect or trim the compiled pipeline binary cache
 
 - `explain` -- Show a pipeline's cache key and the inputs behind it
 - `info` -- Print cache dir, size, ceilings, and recent entries
-- `prune` -- Evict least recently used binaries down to the ceilings
+- `prune` -- Prune oldest cached binaries down to the ceilings
 - `warm` -- Prepare the local pipeline cache and dependencies
 
 ### Flags
@@ -54,7 +54,7 @@ Print cache dir, size, ceilings, and recent entries
 
 ## `sparkwing cache prune`
 
-Evict least recently used binaries down to the ceilings
+Prune oldest cached binaries down to the ceilings
 
 ### Flags
 

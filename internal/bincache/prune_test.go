@@ -46,7 +46,7 @@ func TestPruneToLimitsUsesLogicalRemovalForCacheByteCeiling(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if request.RemoveBytes != 50 || request.ReclaimBytes != 0 || request.MaxEntries != 2 {
+		if request.RemoveBytes != 50 || request.MaxEntries != 2 {
 			t.Fatalf("prune request = %+v", request)
 		}
 		if result.GoalSatisfied != !exhausted || result.WorkBoundExhausted != exhausted || result.LogicalRemovedBytes != 60 {

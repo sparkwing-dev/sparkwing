@@ -10,6 +10,9 @@ import (
 )
 
 func (h *sdkCode) generate(ctx context.Context, session *executorSession, code NodeInput, job nodeproto.JobSpec, output json.RawMessage) (json.RawMessage, error) {
+	if err := session.prepareArguments(job); err != nil {
+		return nil, err
+	}
 	jobs := []json.RawMessage{}
 	for _, id := range job.Closures.Generate {
 		value, err := h.eval(ctx, session, code, id, "generate", output, nil)
@@ -26,10 +29,14 @@ func (h *sdkCode) generate(ctx context.Context, session *executorSession, code N
 		}
 		for _, raw := range group {
 			var member struct {
-				Groups []string `json:"groups"`
+				Groups    []string                        `json:"groups"`
+				Arguments []nodeproto.ArgumentDescription `json:"arguments"`
 			}
 			if err := json.Unmarshal(raw, &member); err != nil || !executorContains(member.Groups, id) {
 				return nil, executorError(apierr.PlanInvalid, "generated job does not belong to its evaluated generator")
+			}
+			if _, err := nodeproto.PrepareJobArguments(member.Arguments, session.rawArgs); err != nil {
+				return nil, err
 			}
 		}
 		jobs = append(jobs, group...)

@@ -187,8 +187,8 @@ func requestSchemaRules() []any {
 		{"hello", []string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding"}},
 		{"describe", nil, nil},
 		{"plan", []string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
-		{"run_step", []string{"job", "step", "attempt"}, []string{"job", "step", "attempt", "failure"}},
-		{"eval", []string{"closure"}, []string{"closure", "job", "step", "attempt", "input", "failure"}},
+		{"run_step", []string{"job", "step", "attempt"}, []string{"args", "job", "step", "attempt", "failure"}},
+		{"eval", []string{"closure"}, []string{"args", "closure", "job", "step", "attempt", "input", "failure"}},
 		{"cancel", nil, []string{"job", "step", "target"}},
 	} {
 		then := protocolSchema{}

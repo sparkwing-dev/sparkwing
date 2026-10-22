@@ -14,7 +14,7 @@ const (
 )
 
 func (s *Server) reconcileOwnedRuns(ctx context.Context) {
-	if _, err := reconcileControllerRuns(ctx, s.operator, s.measureHolder()); err != nil {
+	if _, err := reconcileControllerRuns(ctx, s.operator, s.leaseHolder); err != nil {
 		s.logger.Error("controller run recovery failed", "err", err)
 	}
 }

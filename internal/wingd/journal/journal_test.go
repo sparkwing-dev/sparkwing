@@ -63,26 +63,6 @@ func TestJournalOverflowCountsDroppedEventsWithoutWaitingForWriter(t *testing.T)
 	}
 }
 
-func TestJournalIncarnationIncreases(t *testing.T) {
-	dir := t.TempDir()
-	first := NextIncarnation()
-	if first == 0 {
-		t.Fatal("zero incarnation")
-	}
-	if second := NextIncarnation(); second <= first {
-		t.Fatalf("incarnation did not advance: %d, %d", first, second)
-	}
-	if _, err := PersistIncarnation(dir, first); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := PersistIncarnation(dir, first+1); err != nil {
-		t.Fatal(err)
-	}
-	if Incarnation(dir) != first+1 {
-		t.Fatalf("incarnation: %d", Incarnation(dir))
-	}
-}
-
 func TestJournalReadIgnoresInterruptedFinalLine(t *testing.T) {
 	dir := t.TempDir()
 	if err := appendRecord(dir, daemonFile, 1024, 3, Record{Kind: "ready"}); err != nil {
@@ -107,94 +87,6 @@ func TestJournalReadIgnoresInterruptedFinalLine(t *testing.T) {
 	}
 	if len(records) != 2 || records[0].Kind != "ready" || records[1].Kind != "shutdown" {
 		t.Fatalf("records: %+v", records)
-	}
-}
-
-func TestJournalIncarnationRepairsCorruptFile(t *testing.T) {
-	for _, content := range []string{"", "not-a-number", "3 junk", "18446744073709551614 junk"} {
-		t.Run(content, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "incarnation")
-			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			n := uint64(42)
-			if _, err := PersistIncarnation(dir, n); err == nil {
-				t.Fatal("missing corruption warning")
-			}
-			if got := Incarnation(dir); got != n {
-				t.Fatalf("repaired incarnation = %d, want %d", got, n)
-			}
-			if _, err := PersistIncarnation(dir, n+1); err != nil || Incarnation(dir) != n+1 {
-				t.Fatalf("next after repair = %d, %v", Incarnation(dir), err)
-			}
-		})
-	}
-}
-
-func TestJournalIncarnationWriteFailureKeepsSelectedValue(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "missing")
-	if _, err := PersistIncarnation(dir, 7); err == nil {
-		t.Fatal("missing write warning")
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := PersistIncarnation(dir, 7); err != nil || Incarnation(dir) != 7 {
-		t.Fatalf("repaired write = %d, %v", Incarnation(dir), err)
-	}
-}
-
-func TestJournalIncarnationContinuesWhenReadFails(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "incarnation")
-	if err := os.Mkdir(path, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := PersistIncarnation(dir, 42); err == nil {
-		t.Fatal("missing read warning")
-	}
-}
-
-func TestJournalIncarnationOlderRepairDoesNotRegressCounter(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := PersistIncarnation(dir, 100); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := PersistIncarnation(dir, 99); err != nil {
-		t.Fatal(err)
-	}
-	if got := Incarnation(dir); got != 101 {
-		t.Fatalf("incarnation = %d, want 101", got)
-	}
-}
-
-func TestJournalIncarnationRemovesInterruptedTemps(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := PersistIncarnation(dir, 10); err != nil {
-		t.Fatal(err)
-	}
-	stale := filepath.Join(dir, "incarnation-abandoned.tmp")
-	if err := os.WriteFile(stale, []byte("11"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	selected, err := PersistIncarnation(dir, 1)
-	if err != nil || selected != 11 || Incarnation(dir) != 11 {
-		t.Fatalf("selected = %d, stored = %d, err = %v", selected, Incarnation(dir), err)
-	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("interrupted temp remains: %v", err)
-	}
-}
-
-func TestJournalIncarnationCounterExhaustion(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "incarnation"), []byte("18446744073709551615"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	selected, err := PersistIncarnation(dir, 1)
-	if selected != 0 || err == nil || Incarnation(dir) != ^uint64(0) {
-		t.Fatalf("selected = %d, stored = %d, err = %v", selected, Incarnation(dir), err)
 	}
 }
 
@@ -283,16 +175,4 @@ func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
 	a := &appender{dir: dir, name: name, maxSize: maxSize, files: files}
 	err := a.append(r)
 	return errors.Join(err, a.close())
-}
-
-func Incarnation(dir string) uint64 {
-	b, err := os.ReadFile(filepath.Join(dir, "incarnation"))
-	if err != nil {
-		return 0
-	}
-	n, err := parseIncarnation(b)
-	if err != nil {
-		return 0
-	}
-	return n
 }

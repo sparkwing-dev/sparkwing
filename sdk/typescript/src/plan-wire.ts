@@ -1,3 +1,4 @@
+import type { DescribeArg } from "./describe.ts";
 export interface PlanDoc {
   jobs: JobSpec[];
   concurrency?: ConcurrencySpec[];
@@ -9,6 +10,7 @@ export interface PlanDoc {
 }
 
 export interface JobSpec {
+  arguments?: DescribeArg[];
   id: string;
   deps?: string[];
   deps_if_present?: string[];

@@ -254,6 +254,12 @@
         "approval": {
           "$ref": "#/$defs/ApprovalSpec"
         },
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/ArgumentDescription"
+          },
+          "type": "array"
+        },
         "artifacts": {
           "items": {
             "type": "string"

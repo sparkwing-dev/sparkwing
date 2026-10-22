@@ -485,7 +485,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				send(nodeproto.FrameLog{Level: "info", Message: secret, Attrs: json.RawMessage(`{"escaped":"private-plan-def\u0061ult"}`)})
 				fmt.Fprintln(os.Stdout, secret)
 				fmt.Fprintln(os.Stderr, secret)
-				reply(request, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &secret}}}}})
+				reply(request, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}}}})
 			case nodeproto.OpPlan:
 				if request.Args["token"] != "private-plan-default" || request.Run.RunID != "run" {
 					os.Exit(9)

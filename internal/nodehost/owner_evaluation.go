@@ -215,6 +215,9 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	if err != nil {
 		return nil, runspec.SecretRegistration{}, err
 	}
+	if err := nodeproto.ValidateJobArgumentNamespace(spec.Resolved.ArgumentDeclarations, append(validation.ExistingJobs, plan.Jobs...)); err != nil {
+		return nil, runspec.SecretRegistration{}, err
+	}
 	if err := nodeproto.VisitPlanIdentifiers(plan, func(value, path string) error {
 		if h.deps.Masker.ContainsSecret(value) {
 			return identifierMaskError(path)

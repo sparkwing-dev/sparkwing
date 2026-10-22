@@ -19,7 +19,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 	for _, command := range []string{
 		"pipeline list", "runs list", "schedules list", "runners list", "pools list",
 		"tokens list", "secrets list", "profiles list", "queue list", "daemon status",
-		"daemon events --run r1 --limit 1 --cursor opaque", "daemon events --kind queued,grant --kind release --since 1d",
+		"daemon events --run r1 --limit 1", "daemon events --kind queued,grant --kind release --since 1d",
 		"daemon events --run r1 --explain",
 		"dashboard status", "cache info", "repos list", "debug env --run r1 --job j1",
 		"pipeline sparks inflate --library templates",
@@ -39,7 +39,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 		"pipeline sparks inflate --module templates", "pipeline sparks inflate",
 		"runs list --limit 0", "runs list --node build", "runs status r1", "run check --unknown", "run check --profile prod",
 		"daemon events --limit 0", "daemon events --offset 1", "daemon events --incarnation -1",
-		"daemon events --explain", "daemon events --run r1 --explain --cursor opaque",
+		"daemon events --explain", "daemon events --run r1 --explain --cursor opaque", "pipeline hooks status --prove",
 		"daemon events --run r1 --explain --limit 1",
 	} {
 		if _, err := clisurface.Parse("sparkwing", strings.Fields(command)); err == nil {

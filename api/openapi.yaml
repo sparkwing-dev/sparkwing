@@ -2229,8 +2229,6 @@ components:
           type: boolean
         reset:
           type: string
-        thawed:
-          type: boolean
         tripped:
           type: boolean
       required:
@@ -2277,8 +2275,6 @@ components:
           type: string
         refused_total:
           type: integer
-        thawed:
-          type: boolean
         warn_bytes:
           type: integer
         warn_objects:
@@ -2295,7 +2291,6 @@ components:
         - objects
         - warning
         - frozen
-        - thawed
         - freezes_total
         - refused_total
         - measurement_incomplete
@@ -4413,6 +4408,39 @@ components:
             - type: "null"
       type: object
       x-sparkwing-go-type: nodeproto.ApprovalSpec
+    internal.nodeproto.ArgumentDescription:
+      additionalProperties: true
+      properties:
+        default:
+          anyOf:
+            - type: string
+            - type: "null"
+        desc:
+          type: string
+        enum:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        job_id:
+          type: string
+        name:
+          type: string
+        required:
+          type: boolean
+        secret:
+          type: boolean
+        short:
+          type: string
+        type:
+          type: string
+      required:
+        - name
+        - type
+        - required
+      type: object
+      x-sparkwing-go-type: nodeproto.ArgumentDescription
     internal.nodeproto.ArtifactInput:
       additionalProperties: true
       properties:
@@ -4553,6 +4581,12 @@ components:
         approval:
           anyOf:
             - $ref: '#/components/schemas/internal.nodeproto.ApprovalSpec'
+            - type: "null"
+        arguments:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.nodeproto.ArgumentDescription'
+              type: array
             - type: "null"
         artifacts:
           anyOf:
@@ -5657,6 +5691,12 @@ components:
             - additionalProperties:
                 type: string
               type: object
+            - type: "null"
+        argument_declarations:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.nodeproto.ArgumentDescription'
+              type: array
             - type: "null"
         default_branch:
           $ref: '#/components/schemas/internal.runspec.Optional.string.'

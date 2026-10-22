@@ -2,7 +2,6 @@ package runspec
 
 import (
 	"errors"
-	"maps"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -45,12 +44,7 @@ func NewDeclarationGate(doc nodeproto.DescribeDoc, masker *secrets.Masker) (*Dec
 		if pipeline.Args == nil {
 			return nil, declarationError("SDK describe has invalid pipeline declarations")
 		}
-		args := map[string]bool{}
 		for _, argument := range pipeline.Args {
-			if argument.Name == "" || args[argument.Name] {
-				return nil, declarationError("SDK describe has ambiguous arguments")
-			}
-			args[argument.Name] = true
 			// Unselected defaults protect discovery output but cannot refuse another pipeline.
 			if argument.Secret && argument.Default != nil && *argument.Default != "" {
 				for _, value := range secretCandidates(*argument.Default, argument.Type == "[]string") {
@@ -67,6 +61,15 @@ func NewDeclarationGate(doc nodeproto.DescribeDoc, masker *secrets.Masker) (*Dec
 func (g *DeclarationGate) Complete() bool { return g != nil && g.complete }
 
 func (g *DeclarationGate) Resolve(name string, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
+	return g.resolve(name, args, secretArgs, false)
+}
+
+// Inspect prepares declaration defaults without requiring invocation inputs.
+func (g *DeclarationGate) Inspect(name string) (DeclaredArguments, error) {
+	return g.resolve(name, nil, nil, true)
+}
+
+func (g *DeclarationGate) resolve(name string, args map[string]string, secretArgs []string, inspect bool) (DeclaredArguments, error) {
 	pipeline, ok := g.doc.Pipeline(name)
 	if !ok {
 		return DeclaredArguments{}, &apierr.Error{Code: apierr.UnknownPipeline, Message: "SDK describe does not declare the requested pipeline"}
@@ -77,6 +80,20 @@ func (g *DeclarationGate) Resolve(name string, args map[string]string, secretArg
 	resolved, err := RegisterArguments(pipeline.Args, args, secretArgs, g.masker)
 	if err != nil {
 		return resolved, err
+	}
+	if err := nodeproto.ValidateArgumentDeclarations(pipeline.Args); err != nil {
+		return resolved, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+	}
+	if err := nodeproto.ValidateSecretDeclarations(pipeline.Secrets); err != nil {
+		return resolved, &apierr.Error{Code: apierr.ProtocolError, Message: err.Error()}
+	}
+	if inspect {
+		resolved.Args, err = nodeproto.ArgumentDefaults(pipeline)
+	} else {
+		resolved.Args, err = nodeproto.ResolveArguments(pipeline, args)
+	}
+	if err != nil {
+		return resolved, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 	}
 	resolved.Registration.Defaults = append(resolved.Registration.Defaults, g.defaults...)
 	resolved.Registration, err = BuildSecretRegistration(Request{RequestedArgs: args, SecretArgs: Optional[[]string]{Set: true, Value: secretArgs}}, Resolved{Args: resolved.Args, SecretArgs: resolved.SecretArgs, SecretRegistration: resolved.Registration})
@@ -99,15 +116,9 @@ func RegisterArguments(arguments []nodeproto.ArgumentDescription, args map[strin
 }
 
 func projectArguments(arguments []nodeproto.ArgumentDescription, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
-	resolved := DeclaredArguments{Args: maps.Clone(args), SecretArgs: append([]string{}, secretArgs...)}
-	if resolved.Args == nil {
-		resolved.Args = map[string]string{}
-	}
+	resolved := DeclaredArguments{Args: nodeproto.ApplyArgumentDefaults(arguments, args), SecretArgs: append([]string{}, secretArgs...)}
 	projection := SecretRegistration{}
 	for _, argument := range arguments {
-		if _, present := resolved.Args[argument.Name]; !present && argument.Default != nil && *argument.Default != "" {
-			resolved.Args[argument.Name] = *argument.Default
-		}
 		if argument.Type == "[]string" {
 			projection.ListArgs = append(projection.ListArgs, argument.Name)
 		}

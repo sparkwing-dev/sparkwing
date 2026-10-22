@@ -1,4 +1,4 @@
-package argvalue
+package argvalue_test
 
 import (
 	"testing"

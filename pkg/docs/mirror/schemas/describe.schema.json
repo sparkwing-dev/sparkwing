@@ -271,6 +271,12 @@
         "approval": {
           "$ref": "#/$defs/approval"
         },
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/arg"
+          },
+          "type": "array"
+        },
         "artifacts": {
           "items": {
             "type": "string"

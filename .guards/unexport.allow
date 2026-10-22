@@ -13,7 +13,7 @@ internal/apiroutes	7
 internal/artifacts	2
 internal/authwire	2
 internal/backend	1
-internal/bincache	16
+internal/bincache	15
 internal/blob	20
 internal/capability	28
 internal/capacity	9
@@ -33,7 +33,6 @@ internal/executionpolicy	45
 internal/executorinfo	3
 internal/fssecure	8
 internal/gatescope	1
-internal/githooks	6
 internal/githubapp	6
 internal/githubapp/githubapptest	3
 internal/githubauth	4
@@ -49,7 +48,7 @@ internal/logpretty	6
 internal/logutil	2
 internal/nodehost	41
 internal/nodeproto	43
-internal/objectguard	48
+internal/objectguard	43
 internal/oidcissuer	8
 internal/opsview	20
 internal/orchestrator	2

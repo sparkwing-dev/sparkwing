@@ -62,6 +62,15 @@ type SDKPlanner struct {
 // Prepare describes the selected entry, registers defaults from every pipeline
 // and resolves requested arguments.
 func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput) (PreparedPlanning, error) {
+	return p.prepare(ctx, input, planning, false)
+}
+
+// Inspect returns private declarations and their sanitized presentation.
+func (p SDKPlanner) Inspect(ctx context.Context, input PlanningProcessInput) (PreparedPlanning, error) {
+	return p.prepare(ctx, input, PlanningInput{}, true)
+}
+
+func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput, declarationsOnly bool) (PreparedPlanning, error) {
 	if p.Start == nil || p.EnsureEngine == nil || p.Masker == nil || p.Log == nil {
 		return PreparedPlanning{}, errors.New("SDK planning requires process, engine, masking and run-log adapters")
 	}
@@ -88,14 +97,11 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		}
 		var err error
 		var complete bool
-		prepared, complete, err = p.describe(raw, input)
-		if err != nil {
+		prepared, complete, err = p.describe(raw, input, declarationsOnly)
+		if !complete {
 			return err
 		}
-		if !complete {
-			return nil
-		}
-		return logs.release(ctx)
+		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {
 		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
@@ -104,8 +110,12 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	if prepared.Description.Error != nil {
 		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known)
 	}
+	if declarationsOnly {
+		return prepared, nil
+	}
 	input.Args = maps.Clone(prepared.Args)
 	planning.declarations = prepared.Declarations
+	planning.argumentDeclarations = prepared.Description.Args
 	planning.Validation.Secrets = planningSecrets{prior: planning.Validation.Secrets, masker: p.Masker}
 	prepared.Plan = func(ctx context.Context) (json.RawMessage, error) {
 		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown}

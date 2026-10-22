@@ -29,9 +29,9 @@ Inspect and manage the local controller
 
 Read retained local controller events
 
-Show the newest 50 matching records by default, in chronological order within each page. Positive --limit and opaque --cursor continue toward older records with the same filters. Newer arrivals do not shift a continuation. Changed or removed unread history requires restarting without the cursor.
+Show the newest 50 matching records by default, in chronological order within each page. Positive --limit controls the bounded output; increase it to include older records.
 
-JSON emits event records followed by a page record with next_cursor and truncated. Plain and pretty output send continuation instructions to stderr. --explain reads the complete run timeline, including descendants, without pagination.
+JSON emits event records followed by a page record with truncated. Plain and pretty output warn on stderr when older matching records are omitted. --explain reads the complete run timeline, including descendants, without pagination.
 
 ### Flags
 
@@ -45,9 +45,8 @@ JSON emits event records followed by a page record with next_cursor and truncate
 | `--since DURATION` | since |
 | `--kind KIND` | kind Repeatable; comma-separated values are accepted. |
 | `--incarnation N` | incarnation Must be at least 0. |
-| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
 | `--explain` | explain |
-| `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 
 ## `sparkwing daemon recover-state`
 

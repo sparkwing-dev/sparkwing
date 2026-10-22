@@ -1,5 +1,4 @@
 import type { ArgSpec, RunContext } from "../index.d.ts";
-import { resolveArgs, validateArgSpecs } from "./args.ts";
 import { Plan, pipelines } from "./plan.ts";
 import { SDKError, errorFields, type ErrorFields } from "./errors.ts";
 
@@ -61,9 +60,8 @@ export async function describe(run: RunContext): Promise<DescribeDoc> {
           name: secret.name,
           ...(secret.optional === undefined ? {} : { optional: secret.optional }),
         }));
-      const args = resolveArgs(definition.args ?? [], {}, { allowMissing: true });
+      const args = {};
       await definition.plan(plan, { ...run, pipeline: definition.name, args });
-      validateArgSpecs([...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())]);
       const risks = new Set<string>();
       const byStep: NonNullable<DescribePipeline["risks_by_step"]> = [];
       for (const job of plan.jobs()) {

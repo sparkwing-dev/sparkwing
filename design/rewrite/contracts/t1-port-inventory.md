@@ -2624,8 +2624,8 @@ horizon, concurrency_cache and on_limit=coalesce. Current record/materialization
 and fenced capacity tests retain those execution invariants. Retained reporting,
 queue, capacity cost and cancellation tests continue against current columns.
 
-The new generated properties check bucket-measurement successor fencing and
-execution-activity tenant isolation against the store clock. Existing random
+The generated properties check execution-activity tenant isolation against the
+store clock. Bucket measurement uses the controller timer (decision 50). Existing random
 capacity tests now generate retained policies and seed live owner/job rows.
 
 

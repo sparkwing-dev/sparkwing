@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
@@ -43,13 +42,6 @@ func runDaemonEventsCommand(inv clisurface.Invocation, out, diagnostics io.Write
 	if err != nil {
 		return err
 	}
-	cursor, err := decodeDaemonEventCursor(inv.Value("cursor"))
-	if err != nil {
-		return err
-	}
-	if cursor.Version != 0 && (cursor.Cutoff.IsZero() != (query.Since == 0)) {
-		return invalidDaemonEventCursor()
-	}
 	dir, records, skipped, err := read()
 	if err != nil {
 		return err
@@ -62,15 +54,23 @@ func runDaemonEventsCommand(inv clisurface.Invocation, out, diagnostics io.Write
 	if inv.Bool("explain") {
 		return explainRunAdmission(out, records, query.Run, format)
 	}
-	page, err := selectDaemonEventPage(records, dir, query, limit, cursor, now)
-	if err != nil {
-		return err
+	var selected []journal.Record
+	for _, record := range records {
+		if query.Run != "" && record.RunID != query.Run && record.DisplayRunID != query.Run ||
+			query.Since > 0 && record.TS.Before(now.Add(-query.Since)) ||
+			query.Incarnation != 0 && record.Incarnation != query.Incarnation ||
+			len(query.Kinds) > 0 && !slices.Contains(query.Kinds, record.Kind) {
+			continue
+		}
+		selected = append(selected, record)
 	}
+	truncated := len(selected) > limit
+	selected = selected[max(0, len(selected)-limit):]
 	if len(records) == 0 && format != "json" {
 		_, err := fmt.Fprintf(out, "No events are retained in %s.\n", dir)
 		return err
 	}
-	for _, record := range page.records {
+	for _, record := range selected {
 		if format == "json" {
 			err = json.NewEncoder(out).Encode(record)
 		} else {
@@ -81,10 +81,10 @@ func runDaemonEventsCommand(inv clisurface.Invocation, out, diagnostics io.Write
 		}
 	}
 	if format == "json" {
-		return writePageInfo(out, diagnostics, page.next, page.next != "", format, false)
+		return writePageInfo(out, diagnostics, "", truncated, format, false)
 	}
-	if page.next != "" {
-		_, err = fmt.Fprintf(diagnostics, "Older matching events: repeat the same filters with --cursor %s\n", page.next)
+	if truncated {
+		_, err = fmt.Fprintln(diagnostics, "Older matching events omitted; increase --limit to include them.")
 	}
 	return err
 }
@@ -117,8 +117,4 @@ func parseDaemonEventQuery(inv clisurface.Invocation) (daemonEventQuery, int, er
 		query.Since = duration
 	}
 	return query, limit, nil
-}
-
-func staleDaemonEventCursor() error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "retained event history changed during pagination", Hint: "restart daemon events without --cursor"}
 }

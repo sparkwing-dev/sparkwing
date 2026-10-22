@@ -22,19 +22,20 @@ import (
 )
 
 type host struct {
-	opts        Options
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.Mutex
-	work        sync.WaitGroup
-	masker      *secrets.Masker
-	replayMasks *secrets.Masker
-	presenters  map[string]*secrets.LogStreams
-	records     []sparkwing.LogRecord
-	plans       []json.RawMessage
-	settled     map[stepStateKey][]string
-	args        map[string]string
-	initErr     error
+	argumentDeclarations []nodeproto.ArgumentDescription
+	opts                 Options
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	mu                   sync.Mutex
+	work                 sync.WaitGroup
+	masker               *secrets.Masker
+	replayMasks          *secrets.Masker
+	presenters           map[string]*secrets.LogStreams
+	records              []sparkwing.LogRecord
+	plans                []json.RawMessage
+	settled              map[stepStateKey][]string
+	args                 map[string]string
+	initErr              error
 }
 
 type pendingLog struct {
@@ -114,6 +115,7 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	}
 	h.mu.Lock()
 	h.args = selected.Args
+	h.argumentDeclarations = selected.Description.Args
 	h.mu.Unlock()
 	failedDiscovery := !declarations.Complete()
 	if failedDiscovery {
@@ -123,7 +125,7 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	}
 	planGate := &outputGate{}
 	ctx = h.Context(context.WithValue(baseCtx, outputGateKey{}, planGate))
-	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, args, h.runContext(name))
+	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, selected.Args, h.runContext(name))
 	if err != nil {
 		h.discardGate(planGate)
 		return nodeproto.PlanDoc{}, declarations.Error(err)
@@ -132,6 +134,10 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	if err != nil {
 		h.discardGate(planGate)
 		return doc, err
+	}
+	if err := nodeproto.ValidateInitialJobArguments(selected.Description.Args, doc.Jobs); err != nil {
+		h.discardGate(planGate)
+		return nodeproto.PlanDoc{}, err
 	}
 	accepted, err := h.accept(raw)
 	if err != nil {
@@ -181,7 +187,11 @@ func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string)
 	if err := h.remember(p); err != nil {
 		return nil, err
 	}
-	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Job: job, Step: step, Attempt: 1, Settled: h.stepSnapshot(p, job)})
+	args, err := h.jobArguments(p, job)
+	if err != nil {
+		return nil, err
+	}
+	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Args: args, Job: job, Step: step, Attempt: 1, Settled: h.stepSnapshot(p, job)})
 	if err != nil {
 		return nil, h.maskError(err)
 	}
@@ -215,7 +225,11 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 		gate = &outputGate{}
 		ctx = h.Context(context.WithValue(baseCtx, outputGateKey{}, gate))
 	}
-	request := nodeproto.Request{Job: job, Closure: closure, Input: input}
+	args, err := h.jobArguments(p, job)
+	if err != nil {
+		return nil, err
+	}
+	request := nodeproto.Request{Args: args, Job: job, Closure: closure, Input: input}
 	step := predicateStep(p, job, closure)
 	if step != "" {
 		request.Attempt = 1
@@ -276,12 +290,11 @@ func (h *host) output(ctx context.Context, raw json.RawMessage) json.RawMessage 
 func (h *host) registerGenerated(arguments []nodeproto.ArgumentDescription) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	selected, err := runspec.RegisterArguments(arguments, h.args, nil, h.replayMasks)
+	_, err := runspec.RegisterArguments(arguments, h.args, nil, h.replayMasks)
 	h.masker.Merge(h.replayMasks)
 	if err != nil {
 		return err
 	}
-	h.args = selected.Args
 	return nil
 }
 
@@ -525,6 +538,14 @@ func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 	if err != nil {
 		return doc, err
 	}
+	if err := nodeproto.ValidateJobArgumentNamespace(h.argumentDeclarations, doc.Jobs); err != nil {
+		return doc, err
+	}
+	for _, job := range doc.Jobs {
+		if _, err := nodeproto.PrepareJobArguments(job.Arguments, h.args); err != nil {
+			return doc, err
+		}
+	}
 	// Only exact accepted declarations may replay after an issued-value collision.
 	fresh := doc
 	fresh.Jobs = slices.Clone(doc.Jobs)
@@ -583,6 +604,20 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 	}
 	if h.presenters == nil {
 		h.presenters = map[string]*secrets.LogStreams{}
+	}
+	if frame.Event == "annotation" {
+		var location nodeproto.AnnotationRequest
+		if len(frame.Attrs) > 0 {
+			if err := json.Unmarshal(frame.Attrs, &location); err != nil {
+				panic(err)
+			}
+		}
+		if err := nodeproto.ValidateAnnotation(frame.Level, location.Line, location.EndLine, location.Column); err != nil {
+			panic(err)
+		}
+		if frame.Level == "" {
+			frame.Level = "info"
+		}
 	}
 	presenter := h.presenters[job]
 	if presenter == nil {
@@ -661,4 +696,15 @@ func (h *host) runContext(name string) nodeproto.RunContext {
 		out.Trigger.PullRequest = &nodeproto.PullRequest{Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
 	return out
+}
+
+func (h *host) jobArguments(p *sparkwing.Plan, id string) (map[string]string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, job := range sdkserve.DefaultOperations.Document(p).Jobs {
+		if job.ID == id {
+			return nodeproto.PrepareJobArguments(job.Arguments, h.args)
+		}
+	}
+	return nil, &apierr.Error{Code: apierr.UnknownJob, Message: "job is not declared"}
 }

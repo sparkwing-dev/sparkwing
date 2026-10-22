@@ -175,6 +175,13 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 	if err != nil {
 		return nil, errors.Join(executorError(apierr.PlanDrift, "generator replay no longer matches its accepted topology"), err)
 	}
+	var spec runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+		return nil, err
+	}
+	if err := nodeproto.ValidateJobArgumentNamespace(spec.Resolved.ArgumentDeclarations, append(validation.ExistingJobs, expansion.Jobs...)); err != nil {
+		return nil, err
+	}
 	if len(expansion.Jobs) != len(expected) {
 		return nil, executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
 	}

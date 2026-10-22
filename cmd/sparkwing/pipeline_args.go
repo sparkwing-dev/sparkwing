@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
@@ -87,20 +85,13 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 			i++
 			value = args[i]
 		}
-		if found && len(arg.Enum) > 0 {
-			values := []string{value}
-			if arg.Type == "[]string" {
-				values = argvalue.List(value)
+		if found {
+			arg.Name = flagName
+			normalized, err := nodeproto.ValidateArgument(arg, value)
+			if err != nil {
+				return nil, err
 			}
-			for _, item := range values {
-				if slices.Contains(arg.Enum, item) {
-					continue
-				}
-				if arg.Secret {
-					return nil, fmt.Errorf("flag %s%s: invalid secret value", dashes, flagName)
-				}
-				return nil, fmt.Errorf("flag %s%s: value is not a declared enum choice", dashes, flagName)
-			}
+			value = normalized
 		}
 		out[name] = value
 	}
@@ -171,7 +162,7 @@ func pipelineFlagLine(a nodeproto.ArgumentDescription) string {
 	}
 	head += " <" + a.Type + ">"
 	var suffix strings.Builder
-	if a.Default != nil {
+	if a.Default != nil && *a.Default != "" {
 		fmt.Fprintf(&suffix, " (default: %s)", *a.Default)
 	}
 	if len(a.Enum) > 0 {

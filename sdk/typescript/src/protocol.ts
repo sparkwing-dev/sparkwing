@@ -53,8 +53,8 @@ const fields: Record<string, readonly string[]> = {
   hello: ["protocol", "engine", "runner", "binding"],
   describe: [],
   plan: ["pipeline", "args", "run"],
-  run_step: ["job", "step", "attempt", "settled", "failure"],
-  eval: ["closure", "input", "attempt", "settled"],
+  run_step: ["args", "job", "step", "attempt", "settled", "failure"],
+  eval: ["args", "closure", "input", "attempt", "settled"],
   cancel: ["job", "step", "target"],
 };
 const operationFields = new Set(Object.values(fields).flat());

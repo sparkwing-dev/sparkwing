@@ -55,9 +55,14 @@ flags use `sw.NoInputs`.
 Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
 tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
 map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
-share the pipeline's flag namespace. The SDK checks required values, types,
-enums and name collisions before execution. Generated jobs bind their arguments
-from the original run snapshot.
+share the pipeline's flag namespace. The host checks required values, types,
+enums and name collisions before execution. Generated jobs carry declarations
+with their job specification. The host prepares their values from the accepted
+run snapshot after generation and sends them for typed decoding before execution.
+Use the pipeline extra-flag map for supplied flags that only a generator declares.
+Initial jobs must use argument declarations discovered by zero-input describe,
+even when invocation inputs change job IDs. New declarations belong in generated
+jobs, whose secrets the host registers before execution.
 
 Secret flag values are masked in logs and diagnostics. Input masking does not
 remove those values from stored invocation arguments, so use declared secrets
@@ -66,8 +71,21 @@ for credentials.
 The SDK describes registered inputs, defaults, help, risks and secret names to
 the host. A discovery error refuses only that pipeline and reports its sanitized
 cause when invoked. Other pipelines retain their own complete secret declarations.
-A pipeline cannot run when its declarations are incomplete. Describe uses defaults
-without requiring execution-only arguments and does not execute generators.
+A pipeline cannot run when its declarations are incomplete. Help and describe
+validate declarations and defaults without requiring invocation values. Describe
+uses zero values and does not execute generators.
+
+The host validates arguments after describe and before planning. Empty defaults mean
+no default; a required argument cannot also have a non-empty default. Numeric and
+duration values use Go parsing rules, and floating-point NaN and infinity are
+refused. Lists split on commas, trim Unicode whitespace from each item and drop empty items; both the raw
+argument map and typed list receive that normalized value. The host trims enum
+choices and checks each list item. Scalar string values keep their whitespace.
+Invalid arguments and declarations fail during host preparation
+with `invalid_args`. SDKs project declarations and decode the host's prepared
+values. Plan graph and secret declaration validation also belong to the host.
+Annotation locations, including an end line preceding the start, are checked by
+the host service when the annotation is written.
 
 ## Plan() must be pure
 

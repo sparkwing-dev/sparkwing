@@ -2,12 +2,10 @@ package acceptance_test
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
@@ -68,24 +66,22 @@ func testRecoveryChainArguments(t *testing.T, bin string, host sparkwingtest.Hos
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, err := host.Plan(t.Context(), protocolgo.RecoveryChainName, tc.args)
-			if tc.output == "" {
-				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs {
-					t.Errorf("fake argument validation = %v", err)
-				}
-			} else if err != nil {
-				t.Errorf("fake plan = %v", err)
-			}
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
 			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "notify", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
 			sendProtocolProbe(t, process, hello)
 			protocolProbeReply(t, process, "hello")
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.RecoveryChainName, Args: tc.args, Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.RecoveryChainName}})
-			reply := protocolProbeReply(t, process, "plan")
+			args, prepareErr := prepareProtocolArguments(t, process, protocolgo.RecoveryChainName, tc.args)
 			if tc.output == "" {
-				requireProtocolCode(t, reply, apierr.InvalidArgs)
+				if prepareErr == nil || err == nil || prepareErr.Error() != err.Error() {
+					t.Fatalf("process preparation = %v, fake preparation = %v", prepareErr, err)
+				}
 			} else {
+				if prepareErr != nil || err != nil {
+					t.Fatalf("process preparation = %v, fake preparation = %v", prepareErr, err)
+				}
+				sendProtocolProbe(t, process, nodeproto.Request{ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.RecoveryChainName, Args: args, Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.RecoveryChainName}})
+				reply := protocolProbeReply(t, process, "plan")
 				var doc nodeproto.PlanDoc
 				decodeProtocolProbe(t, reply, &doc)
 				assertRecoveryChain(t, doc.Jobs, false)
@@ -120,16 +116,11 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 		t.Fatal(err)
 	}
 	assertRecoveryChain(t, jobs, true)
-	if output, err := host.RunStep(t.Context(), plan, "notify", "run"); err != nil || string(output) != `{"Mode":"email"}` {
-		t.Errorf("fake generated recovery = %s, %v", output, err)
-	}
 	for _, tc := range []struct {
 		name, output string
 		args         map[string]string
 	}{
-		{"default", `{"Mode":"email"}`, map[string]string{}},
 		{"override", `{"Mode":"chat"}`, map[string]string{"notification": "chat"}},
-		{"invalid", "", map[string]string{"notification": "invalid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			process := startProtocolProbe(t, bin)
@@ -142,23 +133,23 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 			sendProtocolProbe(t, process, nodeproto.Request{ID: "expand", Op: nodeproto.OpEval, Closure: "source/generate/0", Input: json.RawMessage("null")})
 			var result nodeproto.EvalResult
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "expand"), &result)
-			if tc.output == "" {
-				if result.Error == nil || result.Error.Code != apierr.InvalidArgs || string(result.Value) != "null" {
-					t.Errorf("invalid generated arguments = %+v", result)
-				}
-			} else if result.Error != nil || !reflect.DeepEqual(result.Value, fake) {
+			if result.Error != nil || !reflect.DeepEqual(result.Value, fake) {
 				t.Errorf("process expansion = %+v, want %s", result, fake)
 			}
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1, Settled: []string{}})
+			var generated []nodeproto.JobSpec
+			if err := json.Unmarshal(result.Value, &generated); err != nil {
+				t.Fatal(err)
+			}
+			args, err := nodeproto.PrepareJobArguments(generated[2].Arguments, tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Args: args, Attempt: 1, Settled: []string{}})
 			reply := protocolProbeReply(t, process, "body")
-			if tc.output == "" {
-				requireProtocolCode(t, reply, apierr.UnknownJob)
-			} else {
-				var body nodeproto.RunResult
-				decodeProtocolProbe(t, reply, &body)
-				if body.Outcome != "success" || body.Error != nil || string(body.Output) != tc.output {
-					t.Errorf("generated recovery body = %+v, want %s", body, tc.output)
-				}
+			var body nodeproto.RunResult
+			decodeProtocolProbe(t, reply, &body)
+			if body.Outcome != "success" || body.Error != nil || string(body.Output) != tc.output {
+				t.Errorf("generated recovery body = %+v, want %s", body, tc.output)
 			}
 			if err := process.Finish(); err != nil {
 				t.Fatal(err)

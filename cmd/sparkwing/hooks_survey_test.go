@@ -10,12 +10,13 @@ import (
 
 func surveyRows() []githooks.RepoGates {
 	return []githooks.RepoGates{
-		{Repo: "/code/xwing", Declared: []string{"pre-commit"}, State: githooks.GateArmed},
+		{Repo: "/code/xwing", Declared: []string{"pre-commit"}, Hooks: currentHooks("pre-commit"), State: githooks.GateArmed},
 		{
 			Repo:      "/code/overwing",
 			Declared:  []string{"pre-commit"},
 			Installed: []string{"pre-commit"},
 			Shadowed:  []string{"pre-commit"},
+			Hooks:     []githooks.HookObservation{{Name: "pre-commit", Declared: true, Required: true}},
 			ActiveDir: "/config/git/hooks",
 			Scope:     "global",
 			State:     githooks.GateShadowed,
@@ -24,6 +25,7 @@ func surveyRows() []githooks.RepoGates {
 			Repo:     "/code/pulsewing",
 			Declared: []string{"pre-commit"},
 			Missing:  []string{"pre-commit"},
+			Hooks:    []githooks.HookObservation{{Name: "pre-commit", Declared: true, Required: true, Active: true}},
 			State:    githooks.GateUninstalled,
 		},
 	}
@@ -38,7 +40,7 @@ func TestRenderHooksSurvey_CountsAndNamesTheUngatedRepos(t *testing.T) {
 	if !strings.Contains(got, "2 of 3 repo(s) do not run a gate of their own") {
 		t.Errorf("output = %q, want the ungated count", got)
 	}
-	for _, want := range []string{"overwing", "pulsewing", "/config/git/hooks", "no gate is installed"} {
+	for _, want := range []string{"overwing", "pulsewing", "/config/git/hooks", "the hooks are missing or not current"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output = %q, want it to mention %q", got, want)
 		}
@@ -47,8 +49,8 @@ func TestRenderHooksSurvey_CountsAndNamesTheUngatedRepos(t *testing.T) {
 
 func TestRenderHooksSurvey_SaysSoWhenEveryGateFires(t *testing.T) {
 	rows := []githooks.RepoGates{
-		{Repo: "/code/xwing", Declared: []string{"pre-commit"}, State: githooks.GateArmed},
-		{Repo: "/code/bitwing", Declared: []string{"pre-commit", "pre-push"}, State: githooks.GateArmed},
+		{Repo: "/code/xwing", Declared: []string{"pre-commit"}, Hooks: currentHooks("pre-commit"), State: githooks.GateArmed},
+		{Repo: "/code/bitwing", Declared: []string{"pre-commit", "pre-push"}, Hooks: currentHooks("pre-commit", "pre-push"), State: githooks.GateArmed},
 	}
 	var buf bytes.Buffer
 	if err := renderHooksSurvey(&buf, rows, "pretty"); err != nil {
@@ -112,7 +114,7 @@ func TestRenderHooksSurvey_EmptyFleetTellsTheOperatorToRegisterOne(t *testing.T)
 
 func TestRenderHooksSurvey_DoesNotCallARepoArmedWhenNothingCanRefuseACommit(t *testing.T) {
 	rows := []githooks.RepoGates{
-		{Repo: "/code/toolbox", Declared: []string{"post-commit"}, Firing: []string{"post-commit"}, State: githooks.GateArmed},
+		{Repo: "/code/toolbox", Declared: []string{"post-commit"}, Firing: []string{"post-commit"}, Hooks: currentHooks("post-commit"), State: githooks.GateArmed},
 	}
 	var buf bytes.Buffer
 	if err := renderHooksSurvey(&buf, rows, "pretty"); err != nil {
@@ -136,6 +138,7 @@ func TestRenderHooksSurvey_DoesNotClaimEveryGateFiresWhileAHookIsMissing(t *test
 			Repo:     "/code/xwing",
 			Declared: []string{"post-commit", "pre-commit"},
 			Missing:  []string{"post-commit"},
+			Hooks:    append(currentHooks("pre-commit"), githooks.HookObservation{Name: "post-commit", Declared: true, Active: true}),
 			State:    githooks.GateUninstalled,
 		},
 	}
@@ -161,4 +164,15 @@ func rowFor(t *testing.T, out, repo string) string {
 	}
 	t.Fatalf("no row for %s in:\n%s", repo, out)
 	return ""
+}
+
+func currentHooks(names ...string) []githooks.HookObservation {
+	var hooks []githooks.HookObservation
+	for _, name := range names {
+		hooks = append(hooks, githooks.HookObservation{
+			Name: name, Present: true, Managed: true, ContentMatches: true,
+			VersionMatches: true, Executable: true, Declared: true, Active: true, Required: name != "post-commit",
+		})
+	}
+	return hooks
 }

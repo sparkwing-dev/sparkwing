@@ -58,8 +58,8 @@ func (e *CeilingError) Error() string {
 const DefaultCeilingSubject = "the bucket"
 
 func defaultRemedy(r CeilingReason) string {
-	return "Delete objects until the next measurement puts the store under the ceiling, raise " +
-		ceilingFlag(r) + ", or clear the freeze with `sparkwing operator object-store reset-breaker --profile NAME`"
+	return "Delete objects until the next measurement puts the store under the ceiling, or raise " +
+		ceilingFlag(r)
 }
 
 func (e *CeilingError) Unwrap() error { return ErrCeilingFrozen }
@@ -93,7 +93,7 @@ type CeilingConfig struct {
 	// Empty uses DefaultCeilingSubject.
 	Subject string
 	// Remedy is the operator instruction a refusal ends with. Empty
-	// names the controller's flags and reset verb.
+	// names the controller's flags.
 	Remedy string
 	// Reconcile is the gap between measured bucket totals. A value at or
 	// below zero measures once at startup and then leaves the
@@ -123,21 +123,18 @@ var ErrMeasurementPartial = errors.New("store measurement did not finish")
 type CeilingState struct {
 	// Enforced is false while neither ceiling is set, which is the
 	// shipped default and means the ceiling never refuses a write.
-	Enforced     bool      `json:"enforced"`
-	MaxBytes     int64     `json:"max_bytes"`
-	MaxObjects   int64     `json:"max_objects"`
-	WarnBytes    int64     `json:"warn_bytes"`
-	WarnObjects  int64     `json:"warn_objects"`
-	Bytes        int64     `json:"bytes"`
-	Objects      int64     `json:"objects"`
-	CountedAt    time.Time `json:"counted_at,omitzero"`
-	ReconciledAt time.Time `json:"reconciled_at,omitzero"`
-	Reconcile    string    `json:"reconcile_interval,omitempty"`
-	Warning      bool      `json:"warning"`
-	Frozen       bool      `json:"frozen"`
-	// Thawed is true while an operator's reset holds the freeze off
-	// until the next measurement.
-	Thawed       bool          `json:"thawed"`
+	Enforced     bool          `json:"enforced"`
+	MaxBytes     int64         `json:"max_bytes"`
+	MaxObjects   int64         `json:"max_objects"`
+	WarnBytes    int64         `json:"warn_bytes"`
+	WarnObjects  int64         `json:"warn_objects"`
+	Bytes        int64         `json:"bytes"`
+	Objects      int64         `json:"objects"`
+	CountedAt    time.Time     `json:"counted_at,omitzero"`
+	ReconciledAt time.Time     `json:"reconciled_at,omitzero"`
+	Reconcile    string        `json:"reconcile_interval,omitempty"`
+	Warning      bool          `json:"warning"`
+	Frozen       bool          `json:"frozen"`
 	FrozenAt     time.Time     `json:"frozen_at,omitzero"`
 	FrozenReason CeilingReason `json:"frozen_reason,omitempty"`
 	Freezes      uint64        `json:"freezes_total"`
@@ -159,8 +156,7 @@ type CeilingState struct {
 //
 // A total that reaches a ceiling freezes writes: every further object
 // write is refused with a *CeilingError until a measurement puts the
-// bucket back under the ceiling or an operator thaws it. Safe for
-// concurrent use.
+// bucket back under the ceiling or the ceiling is raised. Safe for concurrent use.
 type Ceiling struct {
 	mu        sync.Mutex
 	limit     CeilingLimit
@@ -177,7 +173,6 @@ type Ceiling struct {
 	frozenAt     time.Time
 	frozenReason CeilingReason
 	frozenOn     int64
-	thawed       bool
 	incomplete   bool
 	measureErr   string
 	freezes      uint64
@@ -211,7 +206,6 @@ func (c *Ceiling) Configure(cfg CeilingConfig) {
 	c.reconcile = cfg.Reconcile
 	c.subject = cfg.Subject
 	c.remedy = cfg.Remedy
-	c.thawed = false
 	c.evaluateLocked()
 }
 
@@ -245,11 +239,7 @@ func (c *Ceiling) Record(bytes, objects int64) {
 		c.objects = 0
 	}
 	c.counted = c.now().UTC()
-	// safety: a thaw holds until the next measurement, so the write that follows
-	// an operator's reset does not freeze the bucket again on the running count.
-	if !c.thawed {
-		c.evaluateLocked()
-	}
+	c.evaluateLocked()
 }
 
 // Observe replaces the counters with a measured bucket total and
@@ -266,14 +256,11 @@ func (c *Ceiling) Observe(u Usage) {
 	}
 	c.counted = at.UTC()
 	c.reconciled = c.counted
-	c.thawed = false
 	c.incomplete = false
 	c.measureErr = ""
 	c.evaluateLocked()
 }
 
-// safety: the freeze is taken from whichever ceiling the totals crossed first,
-// so the error names the ceiling an operator has to act on.
 func (c *Ceiling) evaluateLocked() {
 	reason, observed, over := c.overLocked()
 	if !over {
@@ -343,37 +330,6 @@ func (c *Ceiling) Frozen() bool {
 	return c.frozen
 }
 
-// ErrNoMeasurementScheduled reports a thaw refused because nothing
-// would ever end it.
-var ErrNoMeasurementScheduled = errors.New("no further measurement is scheduled")
-
-// Thaw clears a freeze and reports whether one was in place. It holds
-// until the next measurement: writes counted in the meantime do not
-// freeze the bucket again, so the thaw buys the whole window an
-// operator needs to delete objects or raise the ceiling. The next
-// measurement decides, and freezes again while the bucket is still over
-// the ceiling.
-//
-// It is refused when no measurement is scheduled, because a thaw that
-// nothing ends is the ceiling switched off for the life of the process
-// without saying so. Schedule one, or raise the ceiling instead.
-func (c *Ceiling) Thaw() (bool, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.limit.Enforced() && c.reconcile <= 0 {
-		return false, fmt.Errorf(
-			"%w, so a thaw would leave the ceiling off until this process restarts: "+
-				"set a reconciliation interval, or raise the ceiling instead", ErrNoMeasurementScheduled)
-	}
-	was := c.frozen
-	c.frozen = false
-	c.frozenReason = ""
-	c.frozenAt = time.Time{}
-	c.frozenOn = 0
-	c.thawed = true
-	return was, nil
-}
-
 // State snapshots the ceiling for the health route and metrics.
 func (c *Ceiling) State() CeilingState {
 	c.mu.Lock()
@@ -390,7 +346,6 @@ func (c *Ceiling) State() CeilingState {
 		ReconciledAt: c.reconciled,
 		Warning:      c.warningLocked(),
 		Frozen:       c.frozen,
-		Thawed:       c.thawed,
 		FrozenAt:     c.frozenAt,
 		FrozenReason: c.frozenReason,
 		Freezes:      c.freezes,

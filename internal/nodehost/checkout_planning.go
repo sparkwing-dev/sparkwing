@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -120,14 +119,10 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 		return out, err
 	}
 	resolved.Args, resolved.SecretArgs = prepared.Args, prepared.SecretArgs
+	resolved.ArgumentDeclarations = prepared.Description.Args
 	resolved.SecretRegistration = prepared.SecretRegistration
 	resolved.SecretNames = []string{}
-	names := map[string]bool{}
 	for _, declaration := range prepared.Description.Secrets {
-		if declaration.Name == "" || names[declaration.Name] {
-			return out, executorError(apierr.ProtocolError, "SDK describe has invalid secret declarations")
-		}
-		names[declaration.Name] = true
 		resolved.SecretNames = append(resolved.SecretNames, declaration.Name)
 	}
 	resolved.Guards = checkoutGuardVerdict(guards, request, resolved)

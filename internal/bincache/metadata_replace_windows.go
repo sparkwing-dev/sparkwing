@@ -15,7 +15,3 @@ func replaceCacheMetadata(source, destination string) error {
 	}
 	return windows.MoveFileEx(sourcePath, destinationPath, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
-
-func syncCacheMetadataDir(string) error {
-	return nil
-}

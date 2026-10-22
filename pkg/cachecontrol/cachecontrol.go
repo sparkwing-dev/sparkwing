@@ -10,14 +10,14 @@ import (
 
 // PruneOptions bounds one reclamation attempt.
 type PruneOptions struct {
-	ReclaimBytes int64
-	MaxEntries   int
+	RemoveBytes int64
+	MaxEntries  int
 }
 
 // PruneResult reports observed cache state and completed work.
 type PruneResult = bincache.PruneResult
 
-// Status reports managed and legacy pipeline-cache state.
+// Status reports managed pipeline-cache state.
 type Status = bincache.CacheStatus
 
 // Measure reports pipeline-cache state.
@@ -25,11 +25,12 @@ func Measure(ctx context.Context) (Status, error) {
 	return bincache.Status(ctx, "")
 }
 
-// Prune reclaims inactive entries within opts. Callers must remeasure filesystem
-// capacity before admission; GoalSatisfied is reclamation evidence, not authority.
+// Prune removes inactive entries toward a logical-byte goal within opts.
+// Logical bytes are file lengths, not physical disk space. Callers must remeasure
+// filesystem capacity before admission.
 func Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
 	return bincache.Prune(ctx, bincache.PruneOptions{
-		ReclaimBytes: opts.ReclaimBytes,
-		MaxEntries:   opts.MaxEntries,
+		RemoveBytes: opts.RemoveBytes,
+		MaxEntries:  opts.MaxEntries,
 	})
 }

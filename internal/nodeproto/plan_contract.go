@@ -15,15 +15,16 @@ type PlanDoc struct {
 
 // JobSpec is flat so every placement validates the same execution envelope.
 type JobSpec struct {
-	ID             string              `json:"id"`
-	Needs          []string            `json:"deps,omitempty"`
-	NeedsIfPresent []string            `json:"deps_if_present,omitempty"`
-	NeedsGenerated []string            `json:"needs_generated,omitempty"`
-	Groups         []string            `json:"groups,omitempty"`
-	Env            map[string]EnvValue `json:"env,omitempty"`
-	Artifacts      []string            `json:"artifacts,omitempty"`
-	Consumes       []ArtifactInput     `json:"consumes,omitempty"`
-	References     []PipelineReference `json:"pipeline_refs,omitempty"`
+	Arguments      []ArgumentDescription `json:"arguments,omitempty"`
+	ID             string                `json:"id"`
+	Needs          []string              `json:"deps,omitempty"`
+	NeedsIfPresent []string              `json:"deps_if_present,omitempty"`
+	NeedsGenerated []string              `json:"needs_generated,omitempty"`
+	Groups         []string              `json:"groups,omitempty"`
+	Env            map[string]EnvValue   `json:"env,omitempty"`
+	Artifacts      []string              `json:"artifacts,omitempty"`
+	Consumes       []ArtifactInput       `json:"consumes,omitempty"`
+	References     []PipelineReference   `json:"pipeline_refs,omitempty"`
 	// Children names the pipelines this job may start as child runs; intake refuses any other.
 	Children            []ChildPipeline   `json:"children,omitempty"`
 	Approval            *ApprovalSpec     `json:"approval,omitempty"`

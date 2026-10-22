@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import type { Readable } from "node:stream";
 import type { Args, Context, Failure, JobResult, PipelineDef, RunContext, RunnerInfo, Trigger } from "../index.d.ts";
 import { argument, describe, type DescribeArg } from "./describe.ts";
-import { resolveArgs } from "./args.ts";
 import { Generated, lookupPipeline, Plan, type Closure } from "./plan.ts";
 import type { JobSpec } from "./plan-wire.ts";
 import { Git } from "./helpers/git.ts";
@@ -25,7 +24,6 @@ interface Planned {
   plan: Plan;
   run: RunContext;
   definition: PipelineDef;
-  rawArgs: Args;
 }
 interface Active {
   job: string;
@@ -191,15 +189,13 @@ class Session {
     if (!definition) throw failure("unknown_pipeline", "pipeline is not registered");
     const rawArgs = stringMap(req.args, "args");
     const plan = new Plan();
-    const args = resolvedArgs(definition.args ?? [], rawArgs, true);
+    const args = { ...rawArgs };
     const run = this.#run(object(req.run, "run"), args);
     if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
     await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
     const doc = plan.toDoc();
-    const allSpecs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
-    resolvedArgs(allSpecs, rawArgs, definition.extra === true);
     plan.seal();
-    this.#planned = { plan, run, definition, rawArgs };
+    this.#planned = { plan, run, definition };
     return doc;
   }
   #current(): Planned {
@@ -211,7 +207,7 @@ class Session {
     if (!replay && this.#binding.job !== job) throw failure("protocol_error", "job does not match hello binding");
   }
   #context(req: Request, spec: JobSpec, signal: AbortSignal, step?: string, replay = false): Context {
-    const { run, definition, plan, rawArgs } = this.#current();
+    const { run, definition } = this.#current();
     for (const [key, value] of this.#originalEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -228,18 +224,7 @@ class Session {
       const f = object(req.failure, "failure");
       failureInfo = { job: String(f.job), stage: String(f.stage), message: decodeError(f.error).message };
     }
-    const inputs = { ...run.args, ...rawArgs };
-    const pipelineArgs = resolvedArgs(
-      [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())],
-      inputs,
-      definition.extra === true,
-    );
-    let args: Args;
-    try {
-      args = plan.findJob(spec.id)!.resolveArgs(pipelineArgs);
-    } catch (error) {
-      throw failure("invalid_args", messageOf(error));
-    }
+    const args = req.args === undefined ? { ...run.args } : stringMap(req.args, "args");
     const outputs = this.#state(spec.id).outputs;
     return makeContext({
       run,
@@ -329,15 +314,10 @@ class Session {
     ctx.signal.throwIfAborted();
     if (closure.kind === "generate") {
       if (this.#generated.has(closure.id)) return structuredClone(this.#generated.get(closure.id));
-      const { definition, plan, rawArgs } = this.#current();
+      const { plan } = this.#current();
       const generated = new Generated(closure.generator.source, closure.id, plan);
       await closure.fn(generated, req.input ?? null, ctx);
       ctx.signal.throwIfAborted();
-      resolvedArgs(
-        [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
-        rawArgs,
-        definition.extra === true,
-      );
       const jobs = generated.toDoc().jobs;
       plan.insert(generated);
       this.#generatedArguments.set(closure.id, generated.jobs().flatMap((job) => job.argSpecs().map((spec) => argument(spec, job.id))));
@@ -391,13 +371,5 @@ async function evalTurn(previous: Promise<void>, signal: AbortSignal): Promise<v
     signal.throwIfAborted();
   } finally {
     signal.removeEventListener("abort", abort);
-  }
-}
-
-function resolvedArgs(specs: readonly import("../index.d.ts").ArgSpec[], raw: Args, allowUnknown: boolean): Record<string, string> {
-  try {
-    return resolveArgs(specs, raw, { allowUnknown });
-  } catch (error) {
-    throw failure("invalid_args", messageOf(error));
   }
 }

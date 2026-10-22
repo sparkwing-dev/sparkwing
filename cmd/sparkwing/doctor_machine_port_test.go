@@ -109,7 +109,7 @@ func TestDoctorCommandDistinguishesSurveyFailureFromGatedFleet(t *testing.T) {
 				if failed {
 					return doctorReport{GatesSurveyError: "read the repo registry: malformed config"}
 				}
-				return doctorReport{GatesSurveyed: 3, UngatedRepos: []githooks.RepoGates{{Repo: "/projects/repo", Missing: []string{"pre-push"}}}}
+				return doctorReport{GatesSurveyed: 3, UngatedRepos: []githooks.RepoGates{{Repo: "/projects/repo", Missing: []string{"pre-push"}, Hooks: []githooks.HookObservation{{Name: "pre-push", Declared: true, Required: true, Active: true}}}}}
 			}
 			var out bytes.Buffer
 			if err := runDoctorCommandArgs(t.Context(), []string{"-o", format}, &out, deps); err != nil {

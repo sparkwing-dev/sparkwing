@@ -13,8 +13,9 @@ import (
 
 // PlanningInput supplies current validation for initial SDK planning.
 type PlanningInput struct {
-	Validation   nodeproto.ValidationContext
-	declarations *runspec.DeclarationGate
+	Validation           nodeproto.ValidationContext
+	declarations         *runspec.DeclarationGate
+	argumentDeclarations []nodeproto.ArgumentDescription
 }
 
 // PlannedInitial contains validated declarations for AcceptPlan.
@@ -52,6 +53,9 @@ func PlanInitial(ctx context.Context, input PlanningInput, planSDK func(context.
 		return PlannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
+		return PlannedInitial{}, err
+	}
+	if err := nodeproto.ValidateInitialJobArguments(input.argumentDeclarations, plan.Jobs); err != nil {
 		return PlannedInitial{}, err
 	}
 	canonical, hash, err := canonicalPlanningDocument(raw)

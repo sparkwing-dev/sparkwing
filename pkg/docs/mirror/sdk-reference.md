@@ -17,7 +17,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ## Functions
 
-- `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution and panics on invalid input or host write failure.
+- `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution.
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug record; the host decides whether to retain it.
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.
@@ -490,7 +490,7 @@ type HelpProvider interface {
 
 ### type InputError
 
-InputError is what a Registration's Invoke returns when args fail the declared flags of the pipeline or of a job's WithArgs: a missing required flag, a value of the wrong type or outside its enum, or a flag nothing declares.
+InputError reports a typed decoding failure in pipeline Inputs or a job's WithArgs.
 
 ```
 type InputError struct {

@@ -69,12 +69,9 @@ export function makeContext(options: ContextOptions): Context {
   return ctx;
 }
 function checkAnnotation(annotation: Annotation): void {
-  if (annotation.endLine !== undefined && annotation.endLine > 0 && annotation.endLine < (annotation.line ?? 0))
-    throw failure("bad_request", "annotation end line precedes its start");
   if (typeof annotation.message !== "string") throw failure("bad_request", "annotation message must be a string");
-  if (annotation.level !== undefined && !["debug", "info", "warn", "error"].includes(annotation.level))
-    throw failure("bad_request", "invalid annotation level");
+  if (annotation.level !== undefined && typeof annotation.level !== "string") throw failure("bad_request", "annotation level must be a string");
   for (const value of [annotation.line, annotation.endLine, annotation.column])
-    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
-      throw failure("bad_request", "annotation location must be a nonnegative integer");
+    if (value !== undefined && !Number.isSafeInteger(value))
+      throw failure("bad_request", "annotation location must be an integer");
 }

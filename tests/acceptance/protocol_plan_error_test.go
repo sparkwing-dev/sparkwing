@@ -39,8 +39,12 @@ func testGoSDKPlanErrorMasks(t *testing.T) {
 			process := startProtocolProbe(t, bin)
 			sendProtocolProbe(t, process, probeHello())
 			protocolProbeReply(t, process, "hello")
+			args, err := prepareProtocolArguments(t, process, protocolgo.PlanErrorName, test.args)
+			if err != nil {
+				t.Fatal(err)
+			}
 			sendProtocolProbe(t, process, nodeproto.Request{
-				ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.PlanErrorName, Args: test.args,
+				ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.PlanErrorName, Args: args,
 				Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.PlanErrorName},
 			})
 			reply := protocolProbeReply(t, process, "plan")

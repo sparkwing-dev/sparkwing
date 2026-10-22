@@ -657,8 +657,8 @@ sparkwing operator object-store status --profile prod
 sparkwing operator object-store reset-breaker --profile prod
 ```
 
-A reset clears every tripped class and both window counters, and thaws a
-frozen bucket ceiling; lifetime request and trip totals survive so the
+A reset clears every tripped class and both window counters. Lifetime request
+and trip totals survive so the
 metrics keep their history. A budget that keeps tripping wants a larger
 limit or a caller that stops retrying, not a repeated reset.
 
@@ -710,17 +710,11 @@ has written since it started.
 
 The ceiling is the controller's alone; no other process takes one.
 
-Three properties keep the measurement from becoming the cost it bounds.
-One replica measures per window: the controllers claim a store-wide
-lease, so N replicas cost one listing rather than N. A completed measurement
-advances the window only while its captured lease is live. An expired worker
-cannot overwrite a successor's window. The measurement's
-requests sit outside the object-store request budget, because totalling
-a million-object bucket spends twice the per-minute list budget in one
-pass and would otherwise leave every other reader refused for the rest
-of the minute. And the walk itself is bounded, at `--bucket-measure-pages` listings
-(1000 by default, a thousand objects each) and at half the
-reconciliation interval, whichever comes first.
+The controller measures on its ordinary timer. Measurement requests sit outside
+the object-store request budget, because totalling a million-object bucket would
+otherwise spend the per-minute list budget and refuse other readers. The walk
+is bounded at `--bucket-measure-pages` listings (1000 by default, a thousand
+objects each) and at half the reconciliation interval, whichever comes first.
 
 A measurement that stops at either bound is discarded rather than folded
 in, because a total short of the truth would thaw a store that is still
@@ -748,21 +742,10 @@ measured). Alarm on
 `BucketSizeBytes` and `NumberOfObjects` daily at no charge, which is the
 same signal from the account side.
 
-Clearing a freeze is an operator decision:
-
-```bash
-sparkwing operator object-store reset-breaker --profile prod
-```
-
-A thaw is refused while no measurement is scheduled
-(`--bucket-reconcile 0`), because nothing would ever end it and the
-ceiling would be off until the process restarts; raise the ceiling
-instead. Otherwise it thaws the bucket and holds the thaw until the next
-measurement: writes counted in between do not freeze it again, so the
-operator gets the whole window to act. The measurement then decides, and freezes again
-while the bucket is still over the ceiling. Raise the ceiling on the
-controller to keep writes flowing, or delete objects until the
-measurement falls back under it.
+To clear a storage freeze, raise the ceiling or delete objects until the next
+measurement puts the bucket under it. With `--bucket-reconcile 0`, restart the
+controller to take a new measurement after cleanup. Request-budget resets leave
+the storage ceiling in force.
 
 ## Egress budgets
 

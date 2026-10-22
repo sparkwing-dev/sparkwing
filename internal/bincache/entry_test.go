@@ -11,15 +11,6 @@ import (
 	"time"
 )
 
-func TestCacheDiscoveryRejectsEffectivelyUnboundedCallerLimits(t *testing.T) {
-	if got := boundedCacheDiscoveryLimit(math.MaxInt); got != maxCacheDiscoveryEntries {
-		t.Fatalf("boundedCacheDiscoveryLimit(MaxInt) = %d, want %d", got, maxCacheDiscoveryEntries)
-	}
-	if got := boundedCacheDiscoveryLimit(7); got != 7 {
-		t.Fatalf("boundedCacheDiscoveryLimit(7) = %d, want 7", got)
-	}
-}
-
 const seededRecordBytes = 64
 
 func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
@@ -38,13 +29,6 @@ func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(filepath.Dir(entry.binaryPath()), modTime, modTime); err != nil {
-		t.Fatal(err)
-	}
-	sequence, err := enqueueCacheEntry(context.Background(), entry.root, entry.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := markCacheQueueRecordCurrent(entry.root, sequence, modTime); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,9 +63,9 @@ func TestPruneSkipsActiveHolderAndReclaimsAnotherEntry(t *testing.T) {
 	})
 
 	result, err := Prune(context.Background(), PruneOptions{
-		Root:         root,
-		ReclaimBytes: 1,
-		MaxEntries:   2,
+		Root:        root,
+		RemoveBytes: 1,
+		MaxEntries:  2,
 	})
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
@@ -97,7 +81,7 @@ func TestPruneSkipsActiveHolderAndReclaimsAnotherEntry(t *testing.T) {
 	}
 }
 
-func TestPruneIsBoundedAndUsesStableQueueOrder(t *testing.T) {
+func TestPruneIsBoundedAndUsesStableOldestOrder(t *testing.T) {
 	root := t.TempDir()
 	stamp := time.Unix(1, 0)
 	first := testEntry(t, root, "11111111-11111111")
@@ -108,9 +92,9 @@ func TestPruneIsBoundedAndUsesStableQueueOrder(t *testing.T) {
 	seedEntry(t, third, "333", stamp)
 
 	result, err := Prune(context.Background(), PruneOptions{
-		Root:         root,
-		ReclaimBytes: math.MaxInt64,
-		MaxEntries:   1,
+		Root:        root,
+		RemoveBytes: math.MaxInt64,
+		MaxEntries:  1,
 	})
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
@@ -136,47 +120,16 @@ func TestPruneRemainsHealthyAfterRemovingAnEntry(t *testing.T) {
 	entry := testEntry(t, root, "11111111-11111111")
 	seedEntry(t, entry, "remove", time.Unix(1, 0))
 
-	first, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	first, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil || first.ReclaimedEntries != 1 {
 		t.Fatalf("first Prune = (%+v, %v)", first, err)
 	}
-	second, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	second, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatalf("second Prune: %v", err)
 	}
 	if second.ReclaimedEntries != 0 || second.WorkBoundExhausted {
 		t.Fatalf("second Prune = %+v", second)
-	}
-}
-
-func TestRepeatedBoundedPruneAdvancesPastAnActiveEntry(t *testing.T) {
-	root := t.TempDir()
-	active := testEntry(t, root, "11111111-11111111")
-	reclaimable := testEntry(t, root, "22222222-22222222")
-	seedEntry(t, active, "active", time.Unix(1, 0))
-	seedEntry(t, reclaimable, "reclaimable", time.Unix(2, 0))
-	lease, found, err := active.Acquire(context.Background())
-	if err != nil || !found {
-		t.Fatalf("active Acquire = (%v, %v)", found, err)
-	}
-	defer func() { _ = lease.Release() }()
-
-	first, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.ActiveSkippedEntries != 1 || first.ReclaimedEntries != 0 {
-		t.Fatalf("first bounded prune = %+v", first)
-	}
-	second, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.ReclaimedEntries != 1 {
-		t.Fatalf("second bounded prune = %+v, want later entry reclaimed", second)
-	}
-	if _, err := os.Stat(reclaimable.binaryPath()); !os.IsNotExist(err) {
-		t.Fatalf("later reclaimable entry remains: %v", err)
 	}
 }
 
@@ -229,7 +182,7 @@ func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 		t.Fatal("Materialize did not enter writer")
 	}
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatalf("Prune while writer active: %v", err)
 	}
@@ -262,8 +215,8 @@ func TestEntryRejectsInvalidKeysAndPruneRejectsInvalidBounds(t *testing.T) {
 	}
 
 	for _, opts := range []PruneOptions{
-		{Root: root, ReclaimBytes: 0, MaxEntries: 1},
-		{Root: root, ReclaimBytes: 1, MaxEntries: 0},
+		{Root: root, RemoveBytes: 0, MaxEntries: 1},
+		{Root: root, RemoveBytes: 1, MaxEntries: 0},
 	} {
 		if _, err := Prune(context.Background(), opts); err == nil || errors.Is(err, context.Canceled) {
 			t.Errorf("Prune(%+v) error = %v", opts, err)
@@ -286,7 +239,7 @@ func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
 		return errors.New("remove-" + filepath.Base(path))
 	}
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 100, MaxEntries: 2})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 100, MaxEntries: 2})
 	if err == nil {
 		t.Fatal("Prune succeeded despite persistent removal failures")
 	}
@@ -298,7 +251,7 @@ func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
 			t.Errorf("Prune error %q lacks %q", err, diagnostic)
 		}
 	}
-	if result.ObservedBytes != 11+2*seededRecordBytes || result.LogicalRemovedBytes != 0 || result.ObservedCapacityGainedBytes != 0 || result.ReclaimedEntries != 0 {
+	if result.ObservedBytes != 11+2*seededRecordBytes || result.LogicalRemovedBytes != 0 || result.ReclaimedEntries != 0 {
 		t.Fatalf("failed removal accounting: %+v", result)
 	}
 }
@@ -318,7 +271,7 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 		t.Fatalf("published = %v, writes = %d", published, writes)
 	}
 
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(context.Background(), PruneOptions{Root: root, RemoveBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatalf("Prune with returned lease: %v", err)
 	}
@@ -395,7 +348,7 @@ func TestAcquireOrMaterializeReportsAutomaticPruneFailure(t *testing.T) {
 	}
 }
 
-func TestConcurrentMaterializationQueuesOnlyThePublisher(t *testing.T) {
+func TestConcurrentMaterializationPublishesOnce(t *testing.T) {
 	root := t.TempDir()
 	entry := testEntry(t, root, "11111111-11111111")
 	started := make(chan struct{})
@@ -441,13 +394,6 @@ func TestConcurrentMaterializationQueuesOnlyThePublisher(t *testing.T) {
 	}
 	if published != 1 {
 		t.Fatalf("publishers = %d, want 1", published)
-	}
-	state, err := readCacheQueueState(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if records := state.Next - state.Head; records != 1 {
-		t.Fatalf("queue records = %d, want 1", records)
 	}
 }
 

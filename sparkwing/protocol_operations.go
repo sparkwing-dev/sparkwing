@@ -202,6 +202,11 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 }
 
 func executionContext(ctx context.Context, p *Plan, n *JobNode, req nodeproto.Request) (context.Context, error) {
+	if req.Args != nil {
+		if err := decodeAndBindJobArgs(p, req.Args, n.id); err != nil {
+			return nil, err
+		}
+	}
 	ctx = context.WithValue(ctx, keyNode, n.id)
 	ctx = context.WithValue(ctx, keyInputs, p.inputs)
 	ctx = withStep(ctx, req.Step)
@@ -364,6 +369,7 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		for _, ancestor := range jobGroups(p, n) {
 			GroupJobs(expansion, ancestor, members...)
 		}
+		registerRecoveryArgs(expansion)
 		doc := planDocument(expansion)
 		raw, err := json.Marshal(doc)
 		if err != nil {
@@ -375,17 +381,6 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			Expansion: true, ExistingJobs: existing.Jobs, ExistingConcurrency: existing.Concurrency, SourceJob: n.id,
 		}); err != nil {
 			return nil, err
-		}
-		registerRecoveryArgs(expansion)
-		var schema inputSchema
-		if p.registration != nil {
-			schema = p.registration.Schema
-		}
-		if err := assertJobArgsDisjoint(expansion, schema, p.jobArgs...); err != nil {
-			return nil, sdkError(apierr.PlanInvalid, err.Error())
-		}
-		if err := resolveAndBindJobArgs(expansion, p.args); err != nil {
-			return nil, sdkError(apierr.InvalidArgs, err.Error())
 		}
 		var arguments []nodeproto.ArgumentDescription
 		for _, field := range expansion.declaredArguments() {
