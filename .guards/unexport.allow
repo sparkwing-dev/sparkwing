@@ -82,7 +82,7 @@ internal/storage/logseg	24
 internal/storage/s3	1
 internal/store	260
 internal/store/internal/storetest	1
-internal/store/teststore	5
+internal/store/teststore	4
 internal/tokenpark	3
 internal/toolchain	2
 internal/userconfig	3
