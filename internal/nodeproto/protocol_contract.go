@@ -123,18 +123,23 @@ type RunResult struct {
 
 // EvalResult can carry scalar closure values or generated jobs without changing framing.
 type EvalResult struct {
-	Value json.RawMessage `json:"value"`
-	Error *apierr.Error   `json:"error,omitempty"`
+	Arguments         []ArgumentDescription `json:"arguments,omitempty"`
+	DeclarationsKnown bool                  `json:"declarations_known,omitempty"`
+	Value             json.RawMessage       `json:"value"`
+	Error             *apierr.Error         `json:"error,omitempty"`
 }
 
 // FrameLog has no job field because the host, not pipeline code, assigns log attribution.
 type FrameLog struct {
-	TS      string          `json:"ts"`
-	Level   string          `json:"level,omitempty"`
-	Step    string          `json:"step,omitempty"`
-	Event   string          `json:"event,omitempty"`
-	Message string          `json:"msg,omitempty"`
-	Attrs   json.RawMessage `json:"attrs,omitempty"`
+	Stream     string          `json:"stream,omitempty"`
+	StreamData string          `json:"stream_data,omitempty"`
+	StreamEnd  bool            `json:"stream_end,omitempty"`
+	TS         string          `json:"ts"`
+	Level      string          `json:"level,omitempty"`
+	Step       string          `json:"step,omitempty"`
+	Event      string          `json:"event,omitempty"`
+	Message    string          `json:"msg,omitempty"`
+	Attrs      json.RawMessage `json:"attrs,omitempty"`
 }
 
 // Frame represents either a reply or log record on the isolated frame pipe, never stdout.
@@ -272,7 +277,8 @@ func (r Request) Validate() error {
 		return &apierr.Error{Code: apierr.UnknownOp, Message: fmt.Sprintf("unknown node operation %q; rebuild .sparkwing if the SDK is older than the engine", r.Op)}
 	}
 	if r.Op != OpHello && (r.Protocol != 0 || r.Engine != nil || r.Runner != nil || r.Binding != nil) ||
-		r.Op != OpPlan && (r.Pipeline != "" || r.Args != nil || r.Run != nil) ||
+		r.Op != OpPlan && (r.Pipeline != "" || r.Run != nil) ||
+		r.Op != OpPlan && r.Op != OpRunStep && r.Op != OpEval && r.Args != nil ||
 		r.Op != OpRunStep && r.Failure != nil ||
 		r.Op != OpRunStep && r.Op != OpEval && (r.Attempt != 0 || r.Settled != nil) ||
 		r.Op != OpRunStep && r.Op != OpCancel && (r.Job != "" || r.Step != "") ||
@@ -417,8 +423,10 @@ func requestFields(obj map[string]json.RawMessage, op Op) error {
 	case OpPlan:
 		allowed["pipeline"], allowed["args"], allowed["run"] = true, true, true
 	case OpRunStep:
+		allowed["args"] = true
 		allowed["job"], allowed["step"], allowed["attempt"], allowed["failure"], allowed["settled"] = true, true, true, true, true
 	case OpEval:
+		allowed["args"] = true
 		allowed["closure"], allowed["input"], allowed["attempt"], allowed["settled"] = true, true, true, true
 	case OpCancel:
 		allowed["job"], allowed["step"], allowed["target"] = true, true, true

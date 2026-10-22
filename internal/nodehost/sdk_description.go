@@ -2,8 +2,6 @@ package nodehost
 
 import (
 	"encoding/json"
-	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -16,56 +14,22 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput, de
 	if err := json.Unmarshal(raw, &doc); err != nil || doc.Pipelines == nil {
 		return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe requires a pipelines array")
 	}
-	complete := true
-	seen := map[string]bool{}
-	for i := range doc.Pipelines {
-		pipeline := &doc.Pipelines[i]
-		if pipeline.Name == "" || seen[pipeline.Name] {
-			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
-		}
-		seen[pipeline.Name] = true
-		if pipeline.Error != nil {
-			complete = false
-			continue
-		}
-		if pipeline.Args == nil {
-			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
-		}
-	}
-	selected, found := (nodeproto.DescribeDoc{Pipelines: doc.Pipelines}).Pipeline(input.Entrypoint)
-	if !found {
-		return PreparedPlanning{}, false, executorError(apierr.UnknownPipeline, "SDK describe does not declare the requested pipeline")
-	}
-	if selected.Error != nil {
-		return PreparedPlanning{Description: nodeproto.PipelineDescription{Name: selected.Name, Error: selected.Error}}, false, nil
-	}
-	if err := nodeproto.ValidateArgumentDeclarations(selected.Args); err != nil {
-		return PreparedPlanning{}, false, executorError(apierr.InvalidArgs, err.Error())
-	}
-	if err := nodeproto.ValidateSecretDeclarations(selected.Secrets); err != nil {
-		return PreparedPlanning{}, false, executorError(apierr.ProtocolError, err.Error())
-	}
-
-	var args map[string]string
-	var err error
-	if declarationsOnly {
-		args, err = nodeproto.ArgumentDefaults(selected)
-	} else {
-		args, err = nodeproto.ResolveArguments(selected, input.Args)
-	}
+	gate, err := runspec.NewDeclarationGate(doc, p.Masker)
 	if err != nil {
-		return PreparedPlanning{}, false, executorError(apierr.InvalidArgs, err.Error())
-	}
-	prepared := PreparedPlanning{Description: selected, Args: args, SecretArgs: append([]string{}, input.SecretArgs...)}
-	for _, arg := range selected.Args {
-		if arg.Secret && !slices.Contains(prepared.SecretArgs, arg.Name) {
-			prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
-		}
-	}
-	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, &runspec.Resolved{Args: prepared.Args, SecretArgs: prepared.SecretArgs}, nil, nil); err != nil {
 		return PreparedPlanning{}, false, err
 	}
-	return prepared, complete, nil
+	var arguments runspec.DeclaredArguments
+	if declarationsOnly {
+		arguments, err = gate.Inspect(input.Entrypoint)
+	} else {
+		arguments, err = gate.Resolve(input.Entrypoint, input.Args, input.SecretArgs)
+	}
+	if err != nil {
+		return PreparedPlanning{Declarations: gate}, gate.Complete() && arguments.Registration.Version != 0, gate.Error(err)
+	}
+	prepared := PreparedPlanning{Declarations: gate, Description: arguments.Description, Args: arguments.Args, SecretArgs: arguments.SecretArgs, SecretRegistration: arguments.Registration}
+
+	return prepared, gate.Complete(), nil
 }
 
 type planningSecrets struct {
@@ -77,10 +41,5 @@ func (s planningSecrets) ContainsSecret(identifier string) bool {
 	if s.prior != nil && s.prior.ContainsSecret(identifier) {
 		return true
 	}
-	for _, value := range s.masker.Values() {
-		if value != "" && strings.Contains(identifier, value) {
-			return true
-		}
-	}
-	return false
+	return s.masker.ContainsSecret(identifier)
 }

@@ -22,6 +22,9 @@ SELECT `+runColumns+`
 	if err != nil {
 		return nil, err
 	}
+	if err := t.s.refreshRunPresentations(ctx, []*Run{run}); err != nil {
+		return nil, err
+	}
 	return run, nil
 }
 
@@ -143,5 +146,11 @@ func (t *Tenant) retriesOf(ctx context.Context, id string) (_ []*Run, err error)
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	if err := t.s.refreshRunPresentations(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

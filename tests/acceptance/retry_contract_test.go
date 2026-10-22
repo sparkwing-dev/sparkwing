@@ -31,7 +31,7 @@ func TestRetrySelectionContract(t *testing.T) {
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil || len(body) != 2 || string(body["mode"]) != `"`+string(mode)+`"` || string(body["idempotency_key"]) != `"retry-selection"` {
 						t.Fatalf("retry proposal: %s %v", body, err)
 					}
-					response, err := json.Marshal(controllerwire.CreateRunResponse{RunID: "retry-run", Number: 413, Request: runspec.SealedRequest{RunID: "original-run"}, Replayed: true})
+					response, err := json.Marshal(controllerwire.CreateRunResponse{RunID: "retry-run", Number: 413, Inputs: runspec.Display{Pipeline: "deploy"}, Replayed: true})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -41,7 +41,7 @@ func TestRetrySelectionContract(t *testing.T) {
 					t.Fatal(err)
 				}
 				got, err := c.Retry(t.Context(), "412", controllerwire.RetryRequest{Mode: mode, IdempotencyKey: "retry-selection"})
-				if err != nil || got.RunID != "retry-run" || got.Number != 413 || got.Request.RunID != "original-run" || !got.Replayed || calls != 1 {
+				if err != nil || got.RunID != "retry-run" || got.Number != 413 || got.Inputs.Pipeline != "deploy" || !got.Replayed || calls != 1 {
 					t.Fatalf("retry receipt: run=%q number=%d replayed=%v calls=%d error=%v", got.RunID, got.Number, got.Replayed, calls, err)
 				}
 			})

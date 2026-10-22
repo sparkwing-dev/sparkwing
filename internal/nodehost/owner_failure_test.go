@@ -20,7 +20,7 @@ func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
 			f, host, input := newOwnerFixture(t, false)
 			secret := "private-owner-credential"
 			failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: "retry " + secret, Details: map[string]any{"credential": secret}}
-			host.Mask = func(value string) string { return strings.ReplaceAll(value, secret, "***") }
+			host.Masker = testMasker(secret)
 			switch stage {
 			case "acquire":
 				host.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return nil, failure }
@@ -54,7 +54,7 @@ func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
 
 func TestOwnerHostRequiresMaskingBeforeRenewal(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
-	host.Mask = nil
+	host.Masker = nil
 	if _, err := host.Run(t.Context(), input); err == nil || len(f.trace) != 0 {
 		t.Fatalf("unmasked host started: trace=%v error=%v", f.trace, err)
 	}
@@ -178,7 +178,7 @@ func TestOwnerHostResumeAcquisitionFailureLeavesAcceptedWorkRecoverable(t *testi
 
 func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}}
 	failure := errors.New("policy write refused")
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome != "" {

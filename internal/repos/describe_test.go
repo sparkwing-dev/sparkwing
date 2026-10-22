@@ -40,8 +40,8 @@ printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"n
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Pipelines) != 1 || doc.Pipelines[0].Name != "demo" || len(doc.Pipelines[0].Args) != 1 || !doc.Pipelines[0].Args[0].Required {
-		t.Fatalf("pipelines = %+v", doc.Pipelines)
+	if len(doc.Declarations().Pipelines) != 1 || doc.Declarations().Pipelines[0].Name != "demo" || len(doc.Declarations().Pipelines[0].Args) != 1 || !doc.Declarations().Pipelines[0].Args[0].Required {
+		t.Fatalf("pipelines = %+v", doc.Declarations().Pipelines)
 	}
 	raw, err := os.ReadFile(requests)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestDescribeRefusesAnotherProtocolVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "invalid hello result") {
+	if err == nil || !strings.Contains(err.Error(), "details withheld") {
 		t.Fatalf("err = %v, want a protocol refusal", err)
 	}
 }
@@ -81,8 +81,8 @@ func TestDescribeReturnsAFailedReply(t *testing.T) {
 func TestDescribeReportsAnExitWithoutAReply(t *testing.T) {
 	bin, _ := fakeSDK(t, `echo "registry init failed" >&2; exit 3`)
 	_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "exited without answering describe") || !strings.Contains(err.Error(), "registry init failed") {
-		t.Fatalf("err = %v, want the exit and its stderr", err)
+	if err == nil || !strings.Contains(err.Error(), "details withheld") || strings.Contains(err.Error(), "registry init failed") {
+		t.Fatalf("err = %v, want withheld unclassified stderr", err)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestDescribeFiltersCredentialsAndMasksDiagnostics(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "https://alice:proxy-private-password@proxy.example")
 	bin, _ := fakeSDK(t, `printf '%s|%s|%s|%s\n' "$AWS_SECRET_ACCESS_KEY" "$GH_TOKEN" "$CUSTOM_API_TOKEN" "$HTTPS_PROXY" >&2; exit 3`)
 	_, err := Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "|||https://***@proxy.example") {
+	if err == nil || !strings.Contains(err.Error(), "details withheld") {
 		t.Fatalf("describe did not filter and mask pipeline output: %v", err)
 	}
 	for _, value := range []string{"describe-aws-secret", "describe-gh-secret", "describe-custom-secret", "proxy-private-password", "alice"} {
@@ -180,16 +180,40 @@ func TestDescribeStopsAtTheDeadline(t *testing.T) {
 }
 
 func TestResolverDescribesOverTheProtocol(t *testing.T) {
-	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"build","args":[]},{"name":"","args":[]},{"name":"deploy","args":[]}]}}\n' >&4`)
+	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"build","args":[]},{"name":"deploy","args":[]}]}}\n' >&4`)
 	schemas, err := describePipelines(pipelineentry.Binary(bin), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(pipelineNames(schemas), ","); got != "build,deploy" {
+	if got := strings.Join(pipelineNames(schemas.Presentation().Pipelines), ","); got != "build,deploy" {
 		t.Fatalf("names = %s", got)
 	}
 	bad, _ := fakeSDK(t, `exit 1`)
 	if _, err := describePipelines(pipelineentry.Binary(bad), t.TempDir()); err == nil || !strings.Contains(err.Error(), bad) {
 		t.Fatalf("err = %v, want it to name the binary", err)
+	}
+}
+
+func TestDescribeWithholdsUnknownDiscoveryDiagnostics(t *testing.T) {
+	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"failed","args":[],"error":{"code":"plan_failed","message":"unknown-private-default","hint":"unknown-private-default","details":{"value":"unknown-private-default"}}},{"name":"healthy","args":[],"help":"unknown-private-default"}]}}\n' >&4`)
+	doc, err := Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(doc.Presentation())
+	if strings.Contains(string(raw), "unknown-private-default") || !strings.Contains(string(raw), "details withheld") {
+		t.Fatalf("unsafe discovery projection: %s", raw)
+	}
+}
+
+func TestDescribePresentationMasksDefaultsAndAuthorText(t *testing.T) {
+	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"token","type":"string","required":false,"secret":true,"default":"private-default","desc":"private-default","enum":["private-default"]}],"help":"private-default","examples":[{"command":"private-default","comment":"private-default"}]}]}}\n' >&4`)
+	doc, err := Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(doc.Presentation())
+	if strings.Contains(string(raw), "private-default") || doc.Presentation().Pipelines[0].Args[0].Default == nil || *doc.Presentation().Pipelines[0].Args[0].Default != "***" {
+		t.Fatalf("unsafe discovery projection: %s", raw)
 	}
 }

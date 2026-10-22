@@ -170,20 +170,20 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	inputs := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}
 	inputs.Machine.SubmitEnvAllow.Set, inputs.Machine.SubmitEnvAllow.Value = allow != nil, allow
 	inputs.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: configPath, Key: "run.submit_env_allow"}
-	request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selected, settings: inputs, described: described, args: args, submittedEnv: submitted, idempotencyKey: flags.idempotencyKey})
+	request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selected, settings: inputs, declarations: described, args: args, submittedEnv: submitted, idempotencyKey: flags.idempotencyKey})
 	if err != nil {
 		return request, err
 	}
-	schema, err := boundPipelineSchema(described, clisurface.PipelineIdentity{Name: pipeline, Entrypoint: selected.source.Entrypoint})
+	schema, err := boundPipelineSchema(described.Declarations().Pipelines, clisurface.PipelineIdentity{Name: pipeline, Entrypoint: selected.source.Entrypoint})
 	if err != nil {
 		return request, err
 	}
 	if err := enforceRiskGate(pipeline, risksIn(schema), runFlags{allow: request.Request.Options.AllowRisk.Value, dryRun: request.Request.Options.DryRun.Value}); err != nil {
-		return request, err
+		return request, described.Error(err)
 	}
 	request.LocalSecrets, err = resolveBurstSecrets(ctx, environment.names, schema.Secrets, held)
 	if err != nil {
-		return request, err
+		return request, described.Error(err)
 	}
 	for name, value := range request.LocalSecrets {
 		held[name] = value

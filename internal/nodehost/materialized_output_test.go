@@ -64,7 +64,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			body, failure, err := host.Expand(t.Context(), input)
+			body, _, failure, err := host.Expand(t.Context(), input)
 			if err != nil || (failure != nil) != missing || !missing && (records.reads != 1 || string(body) != `{"jobs":[]}`) || missing && records.reads != 0 {
 				t.Fatalf("body=%s failure=%+v reads=%d: %v", body, failure, records.reads, err)
 			}
@@ -90,7 +90,7 @@ func TestOwnerEvaluationGivesAnUntypedSourceANullResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body, failure, err := host.Expand(t.Context(), input); err != nil || failure != nil || string(body) != `{"jobs":[]}` {
+	if body, _, failure, err := host.Expand(t.Context(), input); err != nil || failure != nil || string(body) != `{"jobs":[]}` {
 		t.Fatalf("untyped source expansion: %s %+v %v", body, failure, err)
 	}
 }

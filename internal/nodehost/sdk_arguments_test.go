@@ -34,6 +34,21 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	generated := map[string]map[string][]nodeproto.JobSpec{}
+	for sdk, command := range map[string]*exec.Cmd{
+		"go":         exec.CommandContext(t.Context(), binary, "--generated"),
+		"typescript": exec.CommandContext(t.Context(), node, "../../sdk/typescript/test/fixtures/arguments-describe.mjs", "--generated"),
+	} {
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s generated declarations: %v: %s", sdk, err, output)
+		}
+		var jobs map[string][]nodeproto.JobSpec
+		if err := json.Unmarshal(output, &jobs); err != nil {
+			t.Fatal(err)
+		}
+		generated[sdk] = jobs
+	}
 	documents := map[string][]byte{"go": goDoc, "typescript": tsDoc}
 	for sdk, raw := range documents {
 		var doc nodeproto.DescribeDoc
@@ -47,7 +62,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 		}
 	}
 	for _, pipeline := range []string{"secret-empty", "secret-duplicate"} {
-		_, _, err := (SDKPlanner{}).describe(tsDoc, PlanningProcessInput{Entrypoint: pipeline}, false)
+		_, _, err := (SDKPlanner{Masker: secrets.NewMasker()}).describe(tsDoc, PlanningProcessInput{Entrypoint: pipeline}, false)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError || failure.Message != "SDK describe has invalid secret declarations" {
 			t.Fatalf("TypeScript host secret error = %v", err)
@@ -81,17 +96,50 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for sdk, raw := range documents {
-				planner := SDKPlanner{Masks: NewMaskRegistry(secrets.NewMasker())}
+				planner := SDKPlanner{Masker: secrets.NewMasker()}
 				_, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: test.pipeline, Args: test.args}, false)
 				var failure *apierr.Error
 				if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != test.message {
 					t.Fatalf("%s host error = %v; want invalid_args: %s", sdk, err, test.message)
 				}
+				if test.name == "unknown" {
+					continue
+				} // Unknown inputs were judged before generation.
+				jobs := generated[sdk][test.pipeline]
+				if len(jobs) != 1 || len(jobs[0].Arguments) == 0 {
+					t.Fatalf("%s omitted generated declarations: %+v", sdk, jobs)
+				}
+				session := executorSession{rawArgs: test.args}
+				err = session.prepareArguments(jobs[0])
+				if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != test.message {
+					t.Fatalf("%s generated host error = %v; want invalid_args: %s", sdk, err, test.message)
+				}
 			}
 		})
 	}
+	static := []nodeproto.ArgumentDescription{{Name: "taken", Type: "string"}, {Name: "known", Type: "string", JobID: "child"}}
+	changed := []nodeproto.JobSpec{{ID: "child", Arguments: []nodeproto.ArgumentDescription{{Name: "taken", Type: "string", JobID: "child"}}}}
+	if err := nodeproto.ValidateJobArgumentNamespace(static, changed); err == nil {
+		t.Fatal("changed described job escaped the shared argument namespace")
+	}
+	for sdk, plans := range generated {
+		job := plans["args"][0]
+		for _, static := range [][]nodeproto.ArgumentDescription{nil, {{Name: "text", Type: "string"}}} {
+			jobs := []nodeproto.JobSpec{job}
+			if static == nil {
+				sibling := job
+				sibling.ID = "sibling"
+				jobs = append(jobs, sibling)
+			}
+			err := nodeproto.ValidateJobArgumentNamespace(static, jobs)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != "SDK describe has ambiguous arguments" {
+				t.Fatalf("%s generated namespace collision = %v", sdk, err)
+			}
+		}
+	}
 	for sdk, raw := range documents {
-		planner := SDKPlanner{Masks: NewMaskRegistry(secrets.NewMasker())}
+		planner := SDKPlanner{Masker: secrets.NewMasker()}
 		metadata, _, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "args"}, true)
 		if err != nil || !reflect.DeepEqual(metadata.Args, map[string]string{"list": "dev,prod"}) {
 			t.Fatalf("%s declaration inspection required invocation values or lost defaults: %v, %v", sdk, metadata.Args, err)
@@ -114,7 +162,7 @@ func TestHostRefusesInvalidSecretDeclarationsAfterDescribe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = (SDKPlanner{}).describe(raw, PlanningProcessInput{Entrypoint: "pipeline"}, false)
+		_, _, err = (SDKPlanner{Masker: secrets.NewMasker()}).describe(raw, PlanningProcessInput{Entrypoint: "pipeline"}, false)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
 			t.Fatalf("secret declarations accepted: %v", err)

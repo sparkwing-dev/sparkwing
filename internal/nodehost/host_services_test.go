@@ -83,9 +83,8 @@ func TestHostServices(t *testing.T) {
 		t.Fatal("acknowledged mask was absent from sinks or validation")
 	}
 	err := call("/node/v1/masks", nodeproto.MaskRequest{Value: "j"})
-	var collision *apierr.Error
-	if !errors.As(err, &collision) || collision.Code != apierr.SecretInIdentifier {
-		t.Fatal("accepted a short mask colliding with a persisted identifier")
+	if !errors.Is(err, secrets.ErrInvalidValue) {
+		t.Fatalf("short mask error = %v", err)
 	}
 	if err := call("/node/v1/annotations", nodeproto.AnnotationRequest{Level: "warn", Message: "private-secret", File: "private-secret.go", Line: 2, EndLine: 4, Column: 1, Step: "step"}); err != nil {
 		t.Fatal(err)

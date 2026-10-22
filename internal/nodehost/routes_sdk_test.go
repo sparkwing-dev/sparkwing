@@ -179,3 +179,5 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 		}
 	}
 }
+
+func (routerSDK) Arguments(any) []nodeproto.ArgumentDescription { return nil }

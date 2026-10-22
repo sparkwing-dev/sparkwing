@@ -39,6 +39,48 @@
       ],
       "type": "object"
     },
+    "arg": {
+      "additionalProperties": true,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "secret": {
+          "type": "boolean"
+        },
+        "short": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "required"
+      ],
+      "type": "object"
+    },
     "engineIdentity": {
       "additionalProperties": true,
       "properties": {
@@ -55,6 +97,15 @@
     "evalResult": {
       "additionalProperties": true,
       "properties": {
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/arg"
+          },
+          "type": "array"
+        },
+        "declarations_known": {
+          "type": "boolean"
+        },
         "error": {
           "$ref": "#/$defs/replyError"
         },
@@ -648,13 +699,6 @@
               {
                 "not": {
                   "required": [
-                    "args"
-                  ]
-                }
-              },
-              {
-                "not": {
-                  "required": [
                     "run"
                   ]
                 }
@@ -733,13 +777,6 @@
                 "not": {
                   "required": [
                     "pipeline"
-                  ]
-                }
-              },
-              {
-                "not": {
-                  "required": [
-                    "args"
                   ]
                 }
               },

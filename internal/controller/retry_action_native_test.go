@@ -74,6 +74,14 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 	for _, accepted := range []bool{false, true} {
 		t.Run(strconv.FormatBool(accepted), func(t *testing.T) {
 			s, options, _, original := retryActionFixture(t, "private-retry-value", accepted)
+			wantInputs := runspec.Display{
+				Pipeline: "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
+				Git: original.Request.Request.Git, Actor: runspec.Actor{Kind: "account", ID: "original-author"},
+			}
+			if accepted {
+				wantInputs.Args = map[string]string{"public": "visible", "secret": "***"}
+				wantInputs.Reproducer = []string{"sparkwing", "run", "ci", "--", "--public=visible"}
+			}
 			control, err := client.NewEngineClient(options)
 			if err != nil {
 				t.Fatal(err)
@@ -89,7 +97,7 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if result.RunID == parent || result.RunID == "" || result.Number != int64(attempt+2) || result.Replayed || result.HereBearer != "" || !reflect.DeepEqual(result.Request, original.Request) {
+				if result.RunID == parent || result.RunID == "" || result.Number != int64(attempt+2) || result.Replayed || result.HereBearer != "" || !reflect.DeepEqual(result.Inputs, wantInputs) {
 					t.Fatalf("retry changed the seal or execution identity: %+v", result)
 				}
 				for _, id := range []string{"run", result.RunID} {
@@ -103,7 +111,7 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 					t.Fatalf("retry did not retain execution inputs and independent lineage: %+v %v", row, err)
 				}
 				replay, err := control.Retry(t.Context(), selector, input)
-				if err != nil || !replay.Replayed || replay.RunID != result.RunID || replay.Number != result.Number || !reflect.DeepEqual(replay.Request, result.Request) {
+				if err != nil || !replay.Replayed || replay.RunID != result.RunID || replay.Number != result.Number || !reflect.DeepEqual(replay.Inputs, result.Inputs) {
 					t.Fatalf("retry replay: %+v %v", replay, err)
 				}
 				var unitKind, unitState string
@@ -150,6 +158,11 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 	for _, mode := range []controllerwire.RetryMode{controllerwire.RetryFailed, controllerwire.RetryAll} {
 		t.Run(string(mode), func(t *testing.T) {
 			s, options, _, source := retryActionFixture(t, "private-value", true)
+			wantInputs := runspec.Display{
+				Pipeline: "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, Args: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
+				Git: source.Request.Request.Git, Actor: runspec.Actor{Kind: "account", ID: "original-author"},
+				Reproducer: []string{"sparkwing", "run", "ci", "--", "--public=visible"},
+			}
 			control, err := client.NewEngineClient(options)
 			if err != nil {
 				t.Fatal(err)
@@ -160,7 +173,7 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 				t.Fatal(err)
 			}
 			replay, err := control.Retry(t.Context(), "run", request)
-			if err != nil || !replay.Replayed || replay.RunID != first.RunID || replay.Number != first.Number || replay.HereBearer != "" || !reflect.DeepEqual(replay.Request, source.Request) {
+			if err != nil || !replay.Replayed || replay.RunID != first.RunID || replay.Number != first.Number || replay.HereBearer != "" || !reflect.DeepEqual(first.Inputs, wantInputs) || !reflect.DeepEqual(replay.Inputs, wantInputs) {
 				t.Fatalf("alias changed committed execution: %+v %v", replay, err)
 			}
 			tenant, err := s.store.ForTeam(t.Context(), "a")
@@ -204,7 +217,7 @@ func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
 		if (err == nil) != want {
 			t.Fatalf("selector %q state %d: %+v %v", selector, state%3, result, err)
 		}
-		if want && !reflect.DeepEqual(result.Request, original.Request) {
+		if want && !reflect.DeepEqual(result.Inputs, runspec.DisplayRequest(original.Request)) {
 			t.Fatal("retry changed its source seal")
 		}
 		if !want && strings.Contains(err.Error(), secret) {

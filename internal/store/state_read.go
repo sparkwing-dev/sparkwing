@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -36,6 +37,10 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 				return v, authorityError(apierr.IntegrityFailure, "invalid persisted run: "+err.Error())
 			}
 		}
+	}
+	v.expansions, err = readAcceptedExpansionsTx(ctx, tx, team, id)
+	if err != nil {
+		return v, err
 	}
 	v.Lineage, v.Retry = execution.Lineage, execution.Retry
 	v.admission = execution.admissionIdentity
@@ -124,33 +129,85 @@ func stateTime(v sql.NullInt64) *time.Time {
 	return &t
 }
 
+func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) ([]AcceptedExpansionRow, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_body IS NOT NULL ORDER BY seq,node_id`, team, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []AcceptedExpansionRow
+	for rows.Next() {
+		var node string
+		var generation int64
+		var body []byte
+		var digest string
+		var registrationRaw []byte
+		if err = rows.Scan(&node, &generation, &body, &digest, &registrationRaw); err != nil {
+			_ = rows.Close()
+			return out, err
+		}
+		ref := controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
+		if len(body) > 0 {
+			if len(registrationRaw) == 0 {
+				_ = rows.Close()
+				return out, errors.New("accepted expansion is missing host masking registrations; start a new run instead of resuming")
+			}
+			bodyHash, err := runspec.CanonicalHash(json.RawMessage(body))
+			if err != nil {
+				_ = rows.Close()
+				return out, err
+			}
+			var registration runspec.SecretRegistration
+			if err := json.Unmarshal(registrationRaw, &registration); err != nil {
+				_ = rows.Close()
+				return out, err
+			}
+			if registration.Version != 1 {
+				_ = rows.Close()
+				return out, errors.New("accepted expansion was sealed without host masking registrations; start a new run instead of resuming")
+			}
+			projected, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: registration})
+			if err != nil || !reflect.DeepEqual(projected, registration) {
+				_ = rows.Close()
+				return out, errors.New("persisted expansion registration differs from its projection")
+			}
+			committed, err := runspec.CanonicalHash(struct {
+				Body         json.RawMessage
+				Registration runspec.SecretRegistration
+			}{body, registration})
+			if err != nil || string(committed) != digest {
+				_ = rows.Close()
+				return out, errors.New("persisted expansion registration differs from its accepted digest")
+			}
+			out = append(out, AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash), Registration: registration})
+		}
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (RunSnapshot, error) {
 	out := RunSnapshot{StoreNow: tx.now(ctx)}
 	var err error
 	if out.Run, err = readRunTx(ctx, tx, team, id); err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest FROM nodes WHERE team=? AND run_id=? ORDER BY seq,node_id`, team, id)
+	out.Expansions = out.Run.expansions
+	rows, err := tx.QueryContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? ORDER BY seq,node_id`, team, id)
 	if err != nil {
 		return out, err
 	}
 	var refs []controllerwire.NodeRef
 	for rows.Next() {
 		var node string
-		var generation int64
-		var body []byte
-		var digest string
-		if err = rows.Scan(&node, &generation, &body, &digest); err != nil {
+		if err := rows.Scan(&node); err != nil {
 			_ = rows.Close()
 			return out, err
 		}
-		ref := controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
-		refs = append(refs, ref)
-		if len(body) > 0 {
-			out.Expansions = append(out.Expansions, AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: digest})
-		}
+		refs = append(refs, controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)})
 	}
-	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return out, err
 	}
 	for _, ref := range refs {

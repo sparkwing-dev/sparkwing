@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
-func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, captured []string, options source.Options) (described []nodeproto.PipelineDescription, resultErr error) {
+func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, captured []string, options source.Options) (declarations *runspec.DeclarationGate, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 			return err
 		},
 	}
-	description, err := planner.Describe(ctx, nodehost.PlanningProcessInput{
+	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
 		Entry: entry, Entrypoint: selection.source.Entrypoint, Environment: environment, Args: map[string]string{},
 		Run:    nodeproto.RunContext{RunID: rand.Text(), Pipeline: selection.pipeline},
 		Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
@@ -73,5 +73,5 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	if err != nil {
 		return nil, err
 	}
-	return []nodeproto.PipelineDescription{description}, nil
+	return prepared.Declarations, nil
 }

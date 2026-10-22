@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -54,6 +55,7 @@ func TestGeneratedJobArguments(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				acceptedArgs := maps.Clone(tc.args)
 				// safety: generator replay must use the argument snapshot accepted by planning.
 				tc.args["replicas"], tc.args["mode"] = "mutated", "mutated"
 				result, err := ops.Eval(t.Context(), built, nodeproto.Request{Closure: "source/generate/0", Input: json.RawMessage("null")})
@@ -63,6 +65,27 @@ func TestGeneratedJobArguments(t *testing.T) {
 
 				if result.Error != nil {
 					t.Fatal(result.Error)
+				}
+				if !result.DeclarationsKnown || len(result.Arguments) == 0 {
+					t.Fatalf("successful expansion did not disclose its arguments: %+v", result)
+				}
+				var children []nodeproto.JobSpec
+				if err := json.Unmarshal(result.Value, &children); err != nil || len(children) == 0 {
+					t.Fatalf("generated declarations: %s, %v", result.Value, err)
+				}
+				var child nodeproto.JobSpec
+				for _, member := range children {
+					if member.ID == "child" {
+						child = member
+					}
+				}
+				prepared, err := nodeproto.PrepareJobArguments(child.Arguments, acceptedArgs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				run, err := ops.RunStep(t.Context(), built, nodeproto.Request{Args: prepared, Job: "child", Step: "run", Attempt: 1, Settled: []string{}})
+				if err != nil || run.Error != nil {
+					t.Fatalf("run generated job: %+v, %v", run, err)
 				}
 				want := jobargsArgs1{Replicas: 3, Image: "nginx:latest", Mode: "rolling"}
 				if tc.name == "overrides" {

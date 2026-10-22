@@ -99,7 +99,7 @@ func snapshotExpansions(snapshot store.RunSnapshot) ([]controllerwire.AcceptedEx
 		}
 		out = append(out, controllerwire.AcceptedExpansion{
 			SourceJob: string(row.Source.NodeID), SourceGeneration: row.SourceGeneration,
-			Body: append(json.RawMessage(nil), row.Body...), BodyHash: row.BodyHash,
+			Body: append(json.RawMessage(nil), row.Body...), BodyHash: row.BodyHash, Registration: row.Registration,
 		})
 	}
 	return out, nil

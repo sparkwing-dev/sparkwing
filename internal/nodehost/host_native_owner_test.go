@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -48,14 +49,14 @@ func TestNativeOwnerFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			selected := engine.Resolved{Identity: engine.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engine.Pin{SDK: engine.GoSDK, Version: hello.SDK.Version}}}
-			spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "eval"}}, Resolved: runspec.Resolved{Engine: selected.Identity, Entrypoint: "eval"}}
+			spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "eval"}}, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: selected.Identity, Entrypoint: "eval"}}
 			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")}, strings.Repeat("5", 64))
 			if err != nil {
 				t.Fatal(err)
 			}
 			spec.Resolved.Settings.Options.NoMemo.Value = id == "memo_no_read"
 			accepted := AcceptedRun{RunID: "run", Spec: marshalEventFixture(t, spec), SpecHash: string(spec.Hash), Plan: plan, PlanHash: string(planHash)}
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
+			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
 			if id == "source" {
 				st.node.Status, st.node.Outcome, st.node.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
 			}
@@ -63,7 +64,10 @@ func TestNativeOwnerFailures(t *testing.T) {
 			revoked, cleaned := false, false
 			var mu sync.Mutex
 			var logs []string
+			masker := secrets.NewMasker()
+			masks := NewMaskRegistry(masker)
 			cfg := ProtocolSessionConfig{
+				Masks:        masks,
 				Environments: SDKEnvironment{Store: st, Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH")}}},
 				Log: func(_ context.Context, frame nodeproto.FrameLog) error {
 					mu.Lock()
@@ -80,7 +84,7 @@ func TestNativeOwnerFailures(t *testing.T) {
 				},
 			}
 			host, err := NewOwnerEvaluator(EvaluationDependencies{
-				Store: st, Start: cfg.StartEvaluation, Mask: func(s string) string { return s },
+				Store: st, Start: cfg.StartEvaluation, Masker: masker, Masks: masks,
 				Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return selected, nil
@@ -99,8 +103,8 @@ func TestNativeOwnerFailures(t *testing.T) {
 			}
 			switch jobID {
 			case "source":
-				body, failure, err := host.Expand(ctx, input)
-				if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.SDKError || !strings.Contains(failure.MaskedError, "generator refused") {
+				body, _, failure, err := host.Expand(ctx, input)
+				if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.SDKError || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" {
 					t.Fatalf("failed generator became topology: body=%s failure=%+v error=%v", body, failure, err)
 				}
 			case "skip":

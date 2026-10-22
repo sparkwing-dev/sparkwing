@@ -51,7 +51,10 @@ String-array arguments use comma splitting, trimming and empty-item removal in
 both the raw argument map and typed values. The host trims enum choices and checks
 each list item. Scalar string values keep their whitespace.
 SDK declarations and direct `toDoc()` calls rely on host validation of argument
-schemas, plan graphs and secret declarations. Annotation locations are validated
+schemas, plan graphs and secret declarations. Generated jobs carry argument
+declarations in their job specification. The host validates and prepares values
+from the accepted run snapshot after generation, then sends them with execution
+requests. Enable `extra` for supplied flags that only a generator declares. Annotation locations are validated
 by the host service; TypeScript retains transport type checks.
 
 `Context` provides lazy secrets and plain variables, typed outputs, references,
@@ -88,9 +91,9 @@ logs or assign job identity to log frames.
 
 Every encoded frame must fit the 17 MiB wire limit. Oversized logs fail before
 writing. Typed job and step outputs also have a separate 16 MiB limit.
-Generated declarations use the frame budget. Planning diagnostics mask declared
-secret argument defaults and supplied values in messages, hints and nested
-details, including keys. Execution masking belongs to the host.
+Generated declarations use the frame budget. The Sparkwing host masks output and
+protocol payloads after receiving them from the SDK. Pipeline code run without a
+Sparkwing host has unmasked logs and errors.
 
 Tracked memo inputs encode each path, entry type and file bytes or symlink
 target. They never read a symlink's target bytes. Tree inputs hash regular files,

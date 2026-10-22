@@ -63,9 +63,6 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	}
 	response, err := connection.CreateRun(ctx, input)
 	masker.Register(response.HereBearer)
-	for _, value := range response.Request.Request.RequestedArgs {
-		masker.Register(value)
-	}
 	if err != nil {
 		return err
 	}
@@ -95,13 +92,9 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 
 func initialTriggerReceipt(pipeline string, here bool, response controllerwire.CreateRunResponse) (triggerReceipt, error) {
 	receipt := triggerReceipt{RunID: response.RunID, Number: response.Number, Replayed: response.Replayed}
-	seal := response.Request
-	hash, err := runspec.CanonicalHash(seal)
-	sealedHere := seal.Request.Options.Runner.Set && seal.Request.Options.Runner.Value.Kind == runspec.RunnerHere
-	validIdentity := response.RunID != "" && response.Number > 0 && seal.RunID == response.RunID && seal.Request.Pipeline == pipeline
-	validSeal := err == nil && seal.Version == 1 && seal.Request.Version == 1 && seal.Hash != "" && hash == seal.Hash
+	validIdentity := response.RunID != "" && response.Number > 0 && response.Inputs.Pipeline == pipeline
 	expectsBearer := here && !response.Replayed
-	if !validIdentity || !validSeal || sealedHere != here || (response.HereBearer != "") != expectsBearer {
+	if !validIdentity || response.Here != here || (response.HereBearer != "") != expectsBearer {
 		return triggerReceipt{}, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid initial intake receipt"}
 	}
 	return receipt, nil

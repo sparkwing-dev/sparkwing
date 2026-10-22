@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
@@ -22,7 +23,7 @@ import (
 )
 
 type Pipeline struct {
-	nodeproto.PipelineDescription
+	runspec.PipelinePresentation
 	Triggers   []string `json:"triggers,omitempty"`
 	Entrypoint string   `json:"entrypoint,omitempty"`
 	// PinnedProfile is the profile: the pipeline's sparkwing.yaml entry names;
@@ -187,8 +188,8 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 		return err
 	}
 	name := pipelineName
-	found := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: name}}
-	var schema nodeproto.PipelineDescription
+	found := Pipeline{PipelinePresentation: runspec.PipelinePresentation{Name: name}}
+	var schema runspec.PipelinePresentation
 	err = withEntry(name, func(ctx context.Context, entry pipelineInspection, dir string) error {
 		cfg, err := projectconfig.Load(filepath.Join(dir, ".sparkwing", projectconfig.Filename))
 		if err != nil {
@@ -205,7 +206,7 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 				break
 			}
 		}
-		schema, err = entry.describe(ctx)
+		schema, err = entry.presentation(ctx)
 		return err
 	})
 	if err != nil {
@@ -214,7 +215,7 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 	if secretsOnly {
 		return describePipelineSecrets(name, format, schema.Secrets)
 	}
-	found.describe(schema)
+	found.PipelinePresentation = schema
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -264,7 +265,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	if err != nil {
 		return nil, err
 	}
-	describeByName := map[string]nodeproto.PipelineDescription{}
+	describeByName := map[string]runspec.PipelinePresentation{}
 	if sparkwingDir, ok := walkUpForSparkwing(cwd); ok {
 		if schema, serr := readDescribeCache(context.Background(), sparkwingDir); serr == nil {
 			for _, dp := range schema {
@@ -279,24 +280,20 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				continue
 			}
 			a := Pipeline{
-				PipelineDescription: nodeproto.PipelineDescription{Name: p.Name},
-				Entrypoint:          p.Entrypoint,
-				PinnedProfile:       p.Profile,
-				Triggers:            summarizeTriggerList(p.On),
+				PipelinePresentation: runspec.PipelinePresentation{Name: p.Name},
+				Entrypoint:           p.Entrypoint,
+				PinnedProfile:        p.Profile,
+				Triggers:             summarizeTriggerList(p.On),
 			}
 			if dp, ok := describeByName[p.Entrypoint]; ok {
-				a.describe(dp)
+				dp.Name = a.Name
+				a.PipelinePresentation = dp
 			}
 			out = append(out, a)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
-}
-
-func (p *Pipeline) describe(schema nodeproto.PipelineDescription) {
-	schema.Name = p.Name
-	p.PipelineDescription = schema
 }
 
 func summarizeTriggerList(t pipelines.Triggers) []string {

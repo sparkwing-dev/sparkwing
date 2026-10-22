@@ -26,7 +26,6 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 	if holder == nil || argsType == nil {
 		return
 	}
-	p.diagnostics.collectJob(jobValue)
 	schema, err := parseInputsSchema(argsType)
 	if err != nil {
 		panic(fmt.Sprintf("sparkwing: Job(%q): invalid WithArgs[%s]: %v", id, argsType, err))
@@ -66,12 +65,15 @@ func (p *Plan) declaredArguments() []describeArg {
 	return out
 }
 
-func resolveAndBindJobArgs(p *Plan, args map[string]string) error {
+func decodeAndBindJobArgs(p *Plan, args map[string]string, jobID string) error {
 	if p == nil {
 		return nil
 	}
 	var problems []error
 	for _, d := range p.jobArgs {
+		if jobID != "" && jobID != d.jobID {
+			continue
+		}
 		own := make(map[string]string, len(d.schema.Fields))
 		for _, f := range d.schema.Fields {
 			if v, ok := args[f.Name]; ok {

@@ -1,10 +1,8 @@
 package secrets
 
 import (
-	"context"
-	"errors"
 	"slices"
-	"sync/atomic"
+	"strings"
 	"testing"
 )
 
@@ -22,14 +20,13 @@ func TestMasker_RegisterAndMask(t *testing.T) {
 	}
 }
 
-func TestContainsSecretChecksIdentifiersEvenWhenMaskingWouldNotChangeThem(t *testing.T) {
+func TestContainsSecretChecksIdentifiers(t *testing.T) {
 	m := NewMasker()
 	if m.ContainsSecret("ordinary-job") {
 		t.Fatal("an empty registry matched an identifier")
 	}
-	m.Register("***")
 	m.Register("private/value")
-	for _, identifier := range []string{"***", "job-private/value", "job-private%2Fvalue"} {
+	for _, identifier := range []string{"job-private/value", "job-private%2Fvalue"} {
 		if !m.ContainsSecret(identifier) {
 			t.Fatalf("registered secret was accepted in %q", identifier)
 		}
@@ -37,80 +34,6 @@ func TestContainsSecretChecksIdentifiersEvenWhenMaskingWouldNotChangeThem(t *tes
 	if m.ContainsSecret("ordinary-job") {
 		t.Fatal("unrelated identifier matched a registered secret")
 	}
-}
-
-func TestCached_HitsSourceOnce(t *testing.T) {
-	var calls int32
-	src := SourceFunc(func(name string) (string, bool, error) {
-		atomic.AddInt32(&calls, 1)
-		return "val-" + name, true, nil
-	})
-	masker := NewMasker()
-	c := NewCached(src, masker)
-
-	for range 5 {
-		v, masked, err := c.Resolve(context.Background(), "FOO")
-		if err != nil {
-			t.Fatalf("Resolve: %v", err)
-		}
-		if v != "val-FOO" {
-			t.Fatalf("v = %q", v)
-		}
-		if !masked {
-			t.Fatalf("Resolve masked = false, want true")
-		}
-	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
-		t.Fatalf("source called %d times, want 1 (cache miss)", got)
-	}
-	if !contains(masker.Values(), "val-FOO") {
-		t.Fatalf("masker did not register the resolved value")
-	}
-}
-
-func TestCached_DoesNotCacheErrors(t *testing.T) {
-	var calls int32
-	src := SourceFunc(func(name string) (string, bool, error) {
-		atomic.AddInt32(&calls, 1)
-		return "", false, errors.New("source unreachable")
-	})
-	c := NewCached(src, NewMasker())
-
-	for range 3 {
-		if _, _, err := c.Resolve(context.Background(), "FOO"); err == nil {
-			t.Fatal("expected error")
-		}
-	}
-	if got := atomic.LoadInt32(&calls); got != 3 {
-		t.Fatalf("source called %d times, want 3 (errors must not cache)", got)
-	}
-}
-
-func TestCached_DoesNotMaskUnmaskedEntries(t *testing.T) {
-	src := SourceFunc(func(name string) (string, bool, error) {
-		return "us-east-1", false, nil
-	})
-	masker := NewMasker()
-	c := NewCached(src, masker)
-	v, masked, err := c.Resolve(context.Background(), "REGION")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if v != "us-east-1" || masked {
-		t.Fatalf("Resolve = %q, masked=%v; want us-east-1, masked=false", v, masked)
-	}
-	if len(masker.Values()) != 0 {
-		t.Fatalf("masker registered unmasked entry: %v", masker.Values())
-	}
-}
-
-func contains(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestCipher_PreviousKeyOpensOldEnvelopes(t *testing.T) {
@@ -185,33 +108,31 @@ func TestNewCipherWithPrevious_RejectsAShortPreviousKey(t *testing.T) {
 	}
 }
 
-func TestMaskerMultilineComponentsKeepLiteralMatchingPolicy(t *testing.T) {
+func TestMaskerRejectsShortValues(t *testing.T) {
 	m := NewMasker()
-	value := "xy\n \r\nlonger-private-xy\n"
-	m.Register(value)
-	before := m.Values()
-	m.Register(value)
-	if !slices.Equal(before, m.Values()) || !slices.Contains(before, "xy") || !slices.Contains(before, "longer-private-xy") || slices.Contains(before, " ") {
-		t.Fatalf("registration not deduplicated: %q", m.Values())
+	for _, value := range []string{"", "abc", "ééé"} {
+		if err := m.Register(value); err == nil || !strings.Contains(err.Error(), "plain config variable") {
+			t.Fatalf("Register(%q) = %v", value, err)
+		}
 	}
-	if !slices.Contains(before, value) {
-		t.Fatal("whole value not retained")
+	if len(m.Values()) != 0 {
+		t.Fatalf("refused values registered: %q", m.Values())
 	}
-	if got := m.Mask("longer-private-xy xy ordinary"); got != "*** *** ordinary" {
-		t.Fatalf("longest/literal matching=%q", got)
+	if err := m.Register("éééé"); err != nil {
+		t.Fatal(err)
 	}
-	if got := m.Mask("ordinary xy text"); got != "ordinary *** text" {
-		t.Fatalf("short component rule=%q", got)
-	}
-	if got := m.Mask(" \r"); got != " \r" {
-		t.Fatal("blank component became a mask pattern")
-	}
-	spaces := NewMasker()
-	spaces.Register(" left \r\nright\r\n")
-	if spaces.Mask("left") != "left" || spaces.Mask(" left ") != "***" || spaces.Mask("right") != "***" {
-		t.Fatal("line whitespace was changed beyond CRLF normalization")
-	}
-	if m.Mask("longer-private-") != "longer-private-" {
-		t.Fatal("partial-prefix matching was introduced")
+}
+
+func TestMaskerAcceptsMarkerContainingSecrets(t *testing.T) {
+	for _, value := range []string{"long***secret", "****", "x***"} {
+		m := NewMasker()
+		if err := m.Register(value); err != nil {
+			t.Fatal(err)
+		}
+		stream := m.Stream()
+		got := stream.Mask(value[:2]) + stream.Mask(value[2:]) + stream.Flush()
+		if got != "***" {
+			t.Fatalf("%q masked to %q", value, got)
+		}
 	}
 }

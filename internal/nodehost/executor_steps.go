@@ -111,7 +111,7 @@ func (h *nodeExecutor) recordStep(ctx context.Context, input NodeInput, spec run
 		Actor:   executorActor(input), StepID: id, State: state, StartedAt: started,
 	}
 	if failure != nil {
-		report.MaskedError = limits.Error(h.deps.Mask(failure.Error()))
+		report.MaskedError = limits.Error(h.deps.Masker.Mask(failure.Error()))
 	}
 	if state != "running" {
 		finished := time.Now()

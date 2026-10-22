@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -85,9 +86,9 @@ type OwnerHost struct {
 	Delegator      OwnerDelegator
 	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
 	Executor       NodeHost
-	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
-	// Mask shares the source and SDK secret registry and protects returned errors.
-	Mask func(string) string
+	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error)
+	// Masker shares the source and SDK secret registry and protects returned errors.
+	Masker *secrets.Masker
 	// Masks serializes accepted identifiers with the shared process service registry.
 	Masks *MaskRegistry
 }
@@ -102,17 +103,20 @@ var (
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
 	bound := *h
 	h = &bound
+	if h.Masks == nil && h.Masker != nil {
+		h.Masks = NewMaskRegistry(h.Masker)
+	}
 	if h.bindAdmission != nil {
 		h.bindAdmission(h, input.Owner)
 	}
-	if h.Store == nil || h.Wait == nil || h.Mask == nil || h.Renew == nil {
+	if h.Store == nil || h.Wait == nil || h.Masker == nil || h.Renew == nil {
 		return completion, errors.New("run host requires store, unit renewal, state follower and masking adapters")
 	}
 	defer func() {
 		if cause := context.Cause(parent); cause != nil && !errors.Is(err, cause) {
 			err = errors.Join(cause, err)
 		}
-		err = maskHostError(err, h.Mask)
+		err = maskHostError(err, h.Masker)
 	}()
 	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != runspec.RunID(input.RunID) {
 		return completion, errors.New("run host requires a bound owner and sealed request")
@@ -151,6 +155,9 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		return completion, err
 	}
 	if snapshot.Run.Spec != nil {
+		if err := runspec.CheckMaskingSeal(*snapshot.Run.Spec); err != nil {
+			return completion, err
+		}
 		persisted, err := ownerAccepted(snapshot.Run)
 		if err != nil {
 			return completion, err
@@ -162,7 +169,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		if _, err := selectionSkips(persisted.Plan, snapshot.Run.Spec.Resolved.Settings.Options); err != nil {
 			return completion, err
 		}
-		if err := h.Masks.initialize(snapshot.Run.Spec.Request, &snapshot.Run.Spec.Resolved, &persisted.Plan, snapshot.Nodes); err != nil {
+		if err := h.Masks.initializeSnapshot(snapshot, persisted); err != nil {
 			return completion, err
 		}
 	} else if input.Accepted != nil {

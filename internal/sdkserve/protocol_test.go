@@ -221,3 +221,5 @@ func TestServeEvalUsesClosureWithoutJob(t *testing.T) {
 		t.Fatalf("eval rejected: %+v", reply)
 	}
 }
+
+func (*wireOperations) Arguments(any) []nodeproto.ArgumentDescription { return nil }

@@ -25,6 +25,30 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
+func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {
+	now := time.Date(2000, 1, 1, 12, 0, 0, 0, time.UTC)
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	authority, _, err := seedDepcacheBoundary(t, t.Context(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Capability.IssuedAt.Equal(now) {
+		t.Fatalf("storage authority issued at %s, want %s", p.Capability.IssuedAt, now)
+	}
+}
+
 func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
 	s, dataController, err := openStorageData(path, objects)

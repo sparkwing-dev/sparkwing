@@ -4,28 +4,21 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-)
 
-func normalizeArgument(kind, value string) string {
-	if kind != "[]string" {
-		return value
-	}
-	items := []string{}
-	for _, item := range strings.Split(value, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			items = append(items, item)
-		}
-	}
-	return strings.Join(items, ",")
-}
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
+)
 
 // ValidateArgument checks a supplied value and returns its canonical representation.
 func ValidateArgument(arg ArgumentDescription, value string) (string, error) {
-	value = normalizeArgument(arg.Type, value)
+	if arg.Type == "[]string" {
+		value = strings.Join(argvalue.List(value), ",")
+	}
 	var err error
 	switch arg.Type {
 	case "string", "[]string":
@@ -49,10 +42,7 @@ func ValidateArgument(arg ArgumentDescription, value string) (string, error) {
 	}
 	values := []string{value}
 	if arg.Type == "[]string" {
-		values = nil
-		if value != "" {
-			values = strings.Split(value, ",")
-		}
+		values = argvalue.List(value)
 	}
 	for _, item := range values {
 		if len(arg.Enum) > 0 && !slices.ContainsFunc(arg.Enum, func(choice string) bool { return strings.TrimSpace(choice) == item }) {
@@ -113,17 +103,11 @@ func ArgumentDefaults(description PipelineDescription) (map[string]string, error
 }
 
 func resolveArguments(description PipelineDescription, raw map[string]string, requireInputs bool) (map[string]string, error) {
-	out := maps.Clone(raw)
-	if out == nil {
-		out = map[string]string{}
-	}
+	out := ApplyArgumentDefaults(description.Args, raw)
 	names := map[string]bool{}
 	for _, arg := range description.Args {
 		names[arg.Name] = true
 		value, present := out[arg.Name]
-		if !present && arg.Default != nil && *arg.Default != "" {
-			value, present = *arg.Default, true
-		}
 		if !present {
 			if arg.Required && requireInputs {
 				return nil, fmt.Errorf("argument --%s is required", arg.Name)
@@ -144,4 +128,51 @@ func resolveArguments(description PipelineDescription, raw map[string]string, re
 		}
 	}
 	return out, nil
+}
+
+// ApplyArgumentDefaults copies supplied values and fills only nonempty defaults.
+func ApplyArgumentDefaults(arguments []ArgumentDescription, raw map[string]string) map[string]string {
+	out := maps.Clone(raw)
+	if out == nil {
+		out = map[string]string{}
+	}
+	for _, argument := range arguments {
+		if _, present := out[argument.Name]; !present && argument.Default != nil && *argument.Default != "" {
+			out[argument.Name] = *argument.Default
+		}
+	}
+	return out
+}
+
+// PrepareJobArguments prepares late declarations without rejecting other jobs' inputs.
+func PrepareJobArguments(arguments []ArgumentDescription, raw map[string]string) (map[string]string, error) {
+	if err := ValidateArgumentDeclarations(arguments); err != nil {
+		return nil, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+	}
+	args, err := ResolveArguments(PipelineDescription{Args: arguments, Extra: true}, raw)
+	if err != nil {
+		return nil, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+	}
+	return args, nil
+}
+
+// ValidateJobArgumentNamespace keeps late declarations in the discovered flag namespace.
+func ValidateJobArgumentNamespace(static []ArgumentDescription, jobs []JobSpec) error {
+	arguments := slices.Clone(static)
+	for _, job := range jobs {
+		if err := ValidateArgumentDeclarations(job.Arguments); err != nil {
+			return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+		}
+		for _, argument := range job.Arguments {
+			if !slices.ContainsFunc(static, func(known ArgumentDescription) bool {
+				return known.JobID == job.ID && reflect.DeepEqual(known, argument)
+			}) {
+				arguments = append(arguments, argument)
+			}
+		}
+	}
+	if err := ValidateArgumentDeclarations(arguments); err != nil {
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+	}
+	return nil
 }

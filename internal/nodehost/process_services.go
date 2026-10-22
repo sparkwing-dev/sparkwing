@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // ProcessServices supplies one live process's accepted declaration and record writers.
@@ -96,12 +97,12 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 				request = request.WithContext(ctx)
 			}
 			if err := context.Cause(request.Context()); err != nil {
-				return processServiceError(err, service.Masks.mask)
+				return processServiceError(err, service.Masks.masker)
 			}
 			body, status, err := service.serve(request, auth, path)
 			err = errors.Join(err, context.Cause(request.Context()))
 			if err != nil {
-				return processServiceError(err, service.Masks.mask)
+				return processServiceError(err, service.Masks.masker)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
@@ -118,7 +119,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 	return nil
 }
 
-func processServiceError(err error, mask func(string) string) error {
+func processServiceError(err error, masker *secrets.Masker) error {
 	var canonical *apierr.Error
 	if !errors.As(err, &canonical) {
 		switch {
@@ -128,7 +129,7 @@ func processServiceError(err error, mask func(string) string) error {
 			err = errors.Join(executorError(apierr.Cancelled, "process service was cancelled"), err)
 		}
 	}
-	return maskHostError(err, mask)
+	return maskHostError(err, masker)
 }
 
 func processServiceTarget(_ context.Context, principal capability.Principal, target capability.Target) (capability.Target, error) {

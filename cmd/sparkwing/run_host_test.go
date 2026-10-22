@@ -85,7 +85,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 						t.Fatal(err)
 					}
 					award.Request = sealed
-					return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Request: sealed}, nil
+					return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Inputs: runspec.DisplayRequest(sealed), RequestID: sealed.Request.RequestID, Here: sealed.Request.Options.Runner.Value.Kind == runspec.RunnerHere}, nil
 				},
 				claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					*observed = append(*observed, "claim")
@@ -309,14 +309,11 @@ func TestLocalRunSelectsStandaloneFromRealParser(t *testing.T) {
 	}
 }
 
-func TestLocalIntakeCannotSwitchPipelineOrDispatchPurpose(t *testing.T) {
+func TestLocalIntakeRejectsDifferentDisplayPipeline(t *testing.T) {
 	award := localTestAward(t)
-	property := func(pipeline string, mode, origin, dispatch uint8) bool {
+	property := func(pipeline string) bool {
 		request := award.Request.Request
 		request.Pipeline = pipeline
-		request.Mode = []runspec.IntakeMode{runspec.IntakeExecute, runspec.IntakePublish}[mode%2]
-		request.Origin = []runspec.Origin{runspec.OriginLocal, runspec.OriginTrigger}[origin%2]
-		request.Dispatch = []runspec.Dispatch{runspec.DispatchHost, runspec.DispatchController}[dispatch%2]
 		if request.Pipeline == "" {
 			request.Pipeline = "other"
 		}
@@ -330,12 +327,12 @@ func TestLocalIntakeCannotSwitchPipelineOrDispatchPurpose(t *testing.T) {
 		deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
 			runtime, err := resolve(ctx, opts)
 			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-				return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Request: sealed}, nil
+				return controllerwire.CreateRunResponse{RunID: award.RunID, Number: 1, Inputs: runspec.DisplayRequest(sealed), RequestID: sealed.Request.RequestID, Here: sealed.Request.Options.Runner.Value.Kind == runspec.RunnerHere}, nil
 			}}
 			return runtime, err
 		}
 		err = runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
-		valid := request.Pipeline == "ci" && request.Mode == runspec.IntakeExecute && request.Origin == runspec.OriginLocal && request.Dispatch == runspec.DispatchHost
+		valid := request.Pipeline == "ci"
 		return (err == nil) == valid
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
@@ -368,9 +365,9 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 		t.Fatal(err)
 	}
 	return localRunPreparation{
-		identity:  clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
-		described: []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
-		git:       award.Request.Request.Git, source: runspec.Source{Ref: award.Request.Request.Source.Ref, Entrypoint: "CI"}, environment: env,
+		identity:     clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
+		declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
+		git:          award.Request.Request.Git, source: runspec.Source{Ref: award.Request.Request.Source.Ref, Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
 	}
 }
@@ -448,18 +445,21 @@ func TestLocalPreparationRiskRefusalPrecedesIntake(t *testing.T) {
 		runtime, err := resolve(ctx, opts)
 		runtime.prepare = func(context.Context, string, runFlags) (localRunPreparation, error) {
 			input := localTestPreparation(t, award)
-			input.described[0].Risks = []string{"prod"}
+			doc := input.declarations.Declarations()
+			doc.Pipelines[0].Risks = []string{"prod"}
+			input.declarations = declarationFixture(t, doc.Pipelines)
 			return input, nil
 		}
 		return runtime, err
 	}
 	err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
-	var blocked *riskBlockedError
-	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) || !reflect.DeepEqual(calls, []string{"resolve", "close"}) {
+	if err == nil || !strings.Contains(err.Error(), "requires --sw-allow-risk prod") || !reflect.DeepEqual(calls, []string{"resolve", "close"}) {
 		t.Fatalf("risk refusal=%v calls=%v", err, calls)
 	}
 	input := localTestPreparation(t, award)
-	input.described[0].Risks = []string{"prod"}
+	doc := input.declarations.Declarations()
+	doc.Pipelines[0].Risks = []string{"prod"}
+	input.declarations = declarationFixture(t, doc.Pipelines)
 	request, err := prepareLocalRunRequest(t.Context(), input, runFlags{allow: []string{"prod"}}, []string{"--password", "private-value"})
 	if err != nil || !reflect.DeepEqual(request.Request.Options.AllowRisk.Value, []string{"prod"}) {
 		t.Fatalf("risk authorization did not seal: %+v %v", request.Request.Options.AllowRisk, err)
@@ -624,7 +624,7 @@ func FuzzLocalRunPrivateResponseDiagnostics(f *testing.F) {
 				return runtime, err
 			}
 			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-				response := controllerwire.CreateRunResponse{HereBearer: secret, Request: runspec.SealedRequest{Request: runspec.Request{RequestedArgs: map[string]string{"token": secret}}}}
+				response := controllerwire.CreateRunResponse{HereBearer: secret, Inputs: runspec.Display{RequestedArgs: map[string]string{"token": "***"}}}
 				if stage%3 == 1 {
 					return response, errors.New("invalid response: " + secret)
 				}
@@ -873,5 +873,48 @@ func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
 	}
 	if !followed || !strings.Contains(out.String(), "masked output ***") {
 		t.Fatalf("attached run lost logs: %s", &out)
+	}
+}
+
+func TestLocalOwnerClaimRejectsDifferentIntakePurposes(t *testing.T) {
+	for _, change := range []func(*runspec.Request){
+		func(r *runspec.Request) { r.Origin = runspec.OriginTrigger },
+		func(r *runspec.Request) { r.Mode = runspec.IntakePublish },
+		func(r *runspec.Request) { r.Dispatch = runspec.DispatchController },
+	} {
+		award := localTestAward(t)
+		request := award.Request.Request
+		change(&request)
+		sealed, err := runspec.SealRequest(request, runspec.IntakeFacts{RunID: award.RunID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		award.Request = sealed
+		if _, err := localRunInput(award.RunID, sealed.Hash, award); err == nil {
+			t.Fatal("local execution accepted a different intake purpose")
+		}
+	}
+}
+
+func TestLocalPreparationGatesDeclarationErrors(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprint(complete), func(t *testing.T) {
+			private := "legitimate-private-token"
+			input := localTestPreparation(t, localTestAward(t))
+			pipelines := []nodeproto.PipelineDescription{
+				{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{private}}}, RisksByStep: []nodeproto.StepRisks{{JobID: private, StepID: private, Labels: []string{"prod"}}}},
+				{Name: "sibling", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &private}}},
+			}
+			if !complete {
+				pipelines[1].Error = &apierr.Error{Code: apierr.SDKError, Message: private}
+			}
+			input.declarations = declarationFixture(t, pipelines)
+			for _, args := range [][]string{{"--region", "invalid"}, {}} {
+				_, err := prepareLocalRunRequest(t.Context(), input, runFlags{}, args)
+				if err == nil || strings.Contains(err.Error(), private) || (!complete && !strings.Contains(err.Error(), "details withheld")) {
+					t.Fatalf("private declaration escaped: %v", err)
+				}
+			}
+		})
 	}
 }

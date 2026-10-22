@@ -90,13 +90,15 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 		return p.Log(ctx, service.RunID, service.Job.ID, record)
 	}}
 	config.Log = logs.write
+	config.output, config.Masks = logs, service.Masks
 	config.RunCleanups = func(ctx context.Context, scope CleanupScope) error {
-		sink := &nativeCleanupSink{ctx: ctx, logs: logs}
-		output := &LineWriter{sink: sink, level: LevelInfo, stream: service.Masks.masker.Stream()}
+		ctx, cancel := context.WithCancelCause(ctx)
+		defer cancel(context.Canceled)
+		cleanupLogs := &planningLogs{known: true, debug: debug, masker: service.Masks.masker, sink: logs.sink, fail: cancel}
+		output := cleanupLogs.writer(ctx, LevelInfo)
 		scope.Log = output
 		err := service.Cleanups.Run(ctx, scope)
-		output.Flush()
-		return errors.Join(err, sink.err)
+		return errors.Join(err, output.close(), cleanupLogs.finish(ctx))
 	}
 	return config, nil
 }
@@ -112,12 +114,6 @@ func (a *ProcessAuthorities) processServices(ctx context.Context, binding nodepr
 		return nil, processUnauthenticated()
 	}
 	return entry.services, nil
-}
-
-type nativeCleanupSink struct {
-	ctx  context.Context
-	logs *planningLogs
-	err  error
 }
 
 type nativeProcessActivity struct {
@@ -139,10 +135,4 @@ func (a *nativeProcessActivity) wait() func() {
 		return await()
 	}
 	return func() {}
-}
-
-func (s *nativeCleanupSink) Text(level, line string) {
-	if s.err == nil && line != "" {
-		s.err = s.logs.write(s.ctx, nodeproto.FrameLog{Level: level, Message: line})
-	}
 }

@@ -308,7 +308,7 @@ func (secretValuesPipe) Plan(_ context.Context, _ *Plan, _ secretValuesCreds, _ 
 	return errors.New("from-args fallback-secret not-secret")
 }
 
-func TestPlanningDiagnosticsPreservePublicArguments(t *testing.T) {
+func TestStandaloneSDKReturnsAuthorPlanningError(t *testing.T) {
 	name := inputsSchemaTestName("secret-values-fixture-")
 	Register[secretValuesCreds](name, func() Pipeline[secretValuesCreds] {
 		return secretValuesPipe{}
@@ -317,7 +317,7 @@ func TestPlanningDiagnosticsPreservePublicArguments(t *testing.T) {
 		"token":   "from-args",
 		"visible": "not-secret",
 	}, nodeproto.RunContext{})
-	if err == nil || err.Error() != "*** *** not-secret" {
+	if err == nil || err.Error() != "from-args fallback-secret not-secret" {
 		t.Fatalf("planning diagnostic = %v", err)
 	}
 }

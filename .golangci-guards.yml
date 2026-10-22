@@ -62,6 +62,8 @@ linters:
               desc: "The public SDK shares procenv as its process boundary and swtags as build metadata. Other new SDK dependencies belong in the SDK or a leaf package; .guards/depguard-sdk-no-internal.allow lists the imports that predate this rule."
           allow:
             - $gostd
+            # Argument parsing and host registration share this leaf grammar.
+            - github.com/sparkwing-dev/sparkwing/internal/argvalue
             - github.com/sparkwing-dev/sparkwing/internal/swtags
             - github.com/sparkwing-dev/sparkwing/internal/procenv
 

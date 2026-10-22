@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 )
 
 // Pipeline is the canonical pipeline shape: every pipeline declares a
@@ -350,10 +352,7 @@ func setField(fv reflect.Value, f inputField, raw string) error {
 		}
 		fv.SetInt(int64(d))
 	case kindStringSlice:
-		parts := []string{}
-		if raw != "" {
-			parts = strings.Split(raw, ",")
-		}
+		parts := argvalue.List(raw)
 		out := reflect.MakeSlice(fv.Type(), len(parts), len(parts))
 		for i, p := range parts {
 			out.Index(i).SetString(p)

@@ -115,3 +115,36 @@ No Git mutations or commits; scratch directory removed after verification.
 B1 generated-only argument declarations and host-prepared execution values still
 need the lead's wire-contract decision. Full/native/PostgreSQL remain with lead;
 the lead's two masking-fixture failures remain outside this lane's ownership.
+
+CU continuation 7 - base 25b5ae2d8; MERGE_HEAD is integration d646f001e.
+Resolved all conflict markers. Harness must stage resolutions and finish the merge.
+No git add, commit, reset, checkout, rebase or stash commands were run.
+
+Completed B1: JobSpec carries job argument declarations. The host seals static
+ArgumentDeclarations, validates the shared namespace and prepares execution args
+from immutable accepted inputs. Go/TS declaration fixtures prove identical host
+refusals for invalid static and generated declarations/values. Validation and
+RM registration both use argvalue.List and share default application.
+Fixed both lead failures: native sealed-secret streams and the TestProtocol
+TypeScript boundaries. Removed references to deleted SDK validation/diagnostics.
+
+Red then green: TestSDKPlanningArgumentFailuresRespectRegistration demonstrated
+that a failed short-secret registration released another valid secret. Failure
+completeness now requires successful registration. The concurrent-step argument
+binding test reproduced a race; atomic argument snapshots preserve safe rebinding.
+Independent review's namespace bypass and mutable test-host argument findings
+were fixed and re-reviewed with no remaining findings.
+
+PASS with GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache:
+- sparkwing, sparkwing/sparkwingtest, internal/nodeproto/...,
+  internal/argvalue, internal/runspec, internal/acceptance packages.
+- Focused nodehost host-argument, annotation, registration, native sealed-stream,
+  SDK planning, executor, owner evaluation and checkout planning tests.
+- Focused cmd/sparkwing argument/plan/help tests and the two TestProtocol
+  TypeScript boundary regressions. Focused rewrite_integration checks also pass.
+- Race: sparkwing -run '^TestJobArgumentDecodingIsSafeAcrossConcurrentSteps$'.
+- TypeScript npm test (20/20 files), npm run typecheck.
+- internal/doccheck, command compilation, docs mirror check,
+  guardcheck -fast and git diff --check.
+Full suites, PostgreSQL, full architecture/lint and socket-dependent coverage
+remain with the lead. Scratch /tmp/sw-astra-CU was removed after verification.

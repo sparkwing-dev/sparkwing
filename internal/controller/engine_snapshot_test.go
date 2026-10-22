@@ -14,14 +14,31 @@ func TestEngineSnapshotRetainsEmptyExpansionAndPersistedState(t *testing.T) {
 	server, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 	plan := []byte(`{"jobs":[{"id":"source","closures":{"generate":["empty"]}},{"id":"consumer","needs_generated":["empty"]}]}`)
+	expansion := json.RawMessage(`{"jobs":[]}`)
+	registration := runspec.SecretRegistration{Version: 1}
+	digest, err := runspec.CanonicalHash(struct {
+		Body         json.RawMessage
+		Registration runspec.SecretRegistration
+	}{expansion, registration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrationJSON, err := json.Marshal(registration)
+	if err != nil {
+		t.Fatal(err)
+	}
 	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, plan, []byte(`{}`))
-	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,outcome,finished_at,generation,attempt,state_seq,spec_json,execution_json,expansion,expansion_body,expansion_digest) VALUES ('a','run','source',0,'done','success',1,3,2,7,?,?,'accepted',?,'expansion')`, []byte(`{"id":"source","closures":{"generate":["empty"]}}`), []byte(`{}`), []byte(`{"jobs":[]}`))
+	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,outcome,finished_at,generation,attempt,state_seq,spec_json,execution_json,expansion,expansion_body,expansion_registration,expansion_digest) VALUES ('a','run','source',0,'done','success',1,3,2,7,?,?,'accepted',?,?,?)`, []byte(`{"id":"source","closures":{"generate":["empty"]}}`), []byte(`{}`), expansion, registrationJSON, digest)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,spec_json,execution_json) VALUES ('a','run','consumer',1,'pending',?,?)`, []byte(`{"id":"consumer","needs_generated":["empty"]}`), []byte(`{}`))
 	got, err := server.Snapshot(t.Context(), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RunID != "run" || got.StoreNow.IsZero() || len(got.Jobs) != 2 || got.Jobs[0].ID != "source" || got.Jobs[0].Generation != 3 || got.Jobs[0].Attempt != 2 || got.Jobs[0].StateSeq != 7 || got.Jobs[1].Declaration.ID != "consumer" || got.Jobs[1].Ready || len(got.Generators) != 1 || got.Generators[0].ID != "empty" || len(got.Generators[0].Members) != 0 || got.Generators[0].State != "accepted" || len(got.Expansions) != 1 || got.Expansions[0].SourceGeneration != 3 || got.Expansions[0].BodyHash != "expansion" || string(got.Expansions[0].Body) != `{"jobs":[]}` {
+	bodyHash, err := runspec.CanonicalHash(json.RawMessage(`{"jobs":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RunID != "run" || got.StoreNow.IsZero() || len(got.Jobs) != 2 || got.Jobs[0].ID != "source" || got.Jobs[0].Generation != 3 || got.Jobs[0].Attempt != 2 || got.Jobs[0].StateSeq != 7 || got.Jobs[1].Declaration.ID != "consumer" || got.Jobs[1].Ready || len(got.Generators) != 1 || got.Generators[0].ID != "empty" || len(got.Generators[0].Members) != 0 || got.Generators[0].State != "accepted" || len(got.Expansions) != 1 || got.Expansions[0].SourceGeneration != 3 || got.Expansions[0].BodyHash != string(bodyHash) || string(got.Expansions[0].Body) != `{"jobs":[]}` {
 		t.Fatalf("persisted snapshot: %+v", got)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET cancel_requested_at=1`)

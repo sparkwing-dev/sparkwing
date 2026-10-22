@@ -54,3 +54,15 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 		}
 	}
 }
+
+func TestResumeRefusesLegacyMaskingSealBeforeSourceAcquisition(t *testing.T) {
+	state, host, input := newOwnerFixture(t, true)
+	state.snapshot.Run.Spec.Resolved.SecretRegistration.Version = 0
+	host.Acquire = func(context.Context, RunInput) (*source.Entry, error) {
+		t.Fatal("legacy masking seal acquired source")
+		return nil, nil
+	}
+	if _, err := host.Run(t.Context(), input); err == nil || !strings.Contains(err.Error(), "start a new run instead of resuming") {
+		t.Fatalf("expected explicit legacy seal refusal, got %v", err)
+	}
+}

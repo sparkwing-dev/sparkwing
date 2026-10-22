@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -24,8 +25,8 @@ import (
 )
 
 func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
-	for _, value := range []string{"requester-local-secret-value", ""} {
-		t.Run(fmt.Sprintf("empty=%v", value == ""), func(t *testing.T) { requesterLocalSecretRelease(t, value) })
+	for _, value := range []string{"requester-local-secret-value", "", "abc", "value***suffix"} {
+		t.Run(fmt.Sprintf("value=%q", value), func(t *testing.T) { requesterLocalSecretRelease(t, value) })
 	}
 }
 
@@ -61,6 +62,12 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	input.EnvironmentSource = runspec.EnvironmentSubmitted
 	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "local-secret", LocalSecrets: map[string]string{"TOKEN": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte(submittedValue), "BUILD_EMPTY": {}}})
+	if utf8.RuneCountInString(value) < 4 {
+		if err == nil || !strings.Contains(err.Error(), "plain config variable") {
+			t.Fatalf("invalid local secret intake: %v", err)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +109,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: plan})
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Request, Declarations: declarations, Plan: plan})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,16 +121,16 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		badResolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: badPlan})
+		badResolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Request, Declarations: declarations, Plan: badPlan})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
+		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Env: award.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
 		if err == nil || value != "" && strings.Contains(err.Error(), value) {
 			t.Fatal("local secret reached a persisted plan identifier or its refusal")
 		}
 	}
-	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: award.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,6 +282,8 @@ func FuzzHTTPIntakeReplayValidatesPrivateInputs(f *testing.F) {
 	f.Add([]byte("signing-material"))
 	f.Add([]byte{0, 255, 34, 10})
 	f.Add([]byte{})
+	f.Add([]byte("abc"))
+	f.Add([]byte("value***suffix"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > 256 {
 			t.Skip()
@@ -298,7 +307,7 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	request := controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "private-replay", LocalSecrets: map[string]string{"SIGNING_MATERIAL": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte("original")}}
-	send := func(handler http.Handler, req controllerwire.CreateRunRequest, want int) {
+	send := func(handler http.Handler, req controllerwire.CreateRunRequest, want int) string {
 		t.Helper()
 		body, err := json.Marshal(req)
 		if err != nil {
@@ -308,6 +317,13 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 		if w.Code != want {
 			t.Fatalf("intake HTTP %d, want %d: %s", w.Code, want, w.Body)
 		}
+		return w.Body.String()
+	}
+	if utf8.RuneCountInString(value) < 4 {
+		if body := send(s.Handler(), request, http.StatusBadRequest); !strings.Contains(body, "plain config variable") {
+			t.Fatalf("invalid local secret refusal: %s", body)
+		}
+		return
 	}
 	send(s.Handler(), request, http.StatusCreated)
 	send(s.Handler(), request, http.StatusOK)

@@ -84,9 +84,11 @@ func scanPublication(ctx context.Context, root string, bundle *os.File, environm
 			line = strings.TrimSpace(line)
 			return strings.HasPrefix(line, "-----BEGIN ") || strings.HasPrefix(line, "-----END ")
 		})
-		value = strings.Join(lines, "\n")
+		value = strings.TrimSpace(strings.Join(lines, "\n"))
 		if len(value) >= 8 {
-			masker.Register(value)
+			if err := masker.Register(value); err != nil {
+				return err
+			}
 		}
 	}
 	patterns := slices.DeleteFunc(masker.Values(), func(pattern string) bool { return len(pattern) < 8 })

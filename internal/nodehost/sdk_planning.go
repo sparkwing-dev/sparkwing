@@ -24,6 +24,7 @@ import (
 // PlanningProcessInput holds acquired code and host-resolved inputs. Args contains
 // request/YAML winners; describe fills only absent keys. Planning has no job bearer.
 type PlanningProcessInput struct {
+	output      *planningLogs
 	Entry       *source.Entry
 	Entrypoint  string
 	Runner      nodeproto.RunnerIdentity
@@ -39,11 +40,13 @@ type PlanningProcessInput struct {
 // Args and SecretArgs belong in the resolved half submitted to AcceptPlan.
 // Prepare owns and closes describe; Functions.Plan owns and closes a fresh process.
 type PreparedPlanning struct {
-	Description nodeproto.PipelineDescription
-	Args        map[string]string
-	SecretArgs  []string
-	Input       PlanningInput
-	Functions   PlanningFunctions
+	SecretRegistration runspec.SecretRegistration
+	Description        nodeproto.PipelineDescription
+	Declarations       *runspec.DeclarationGate
+	Args               map[string]string
+	SecretArgs         []string
+	Input              PlanningInput
+	Functions          PlanningFunctions
 }
 
 // SDKPlanner reconstructs planning inputs before PlanInitial checks the cache.
@@ -69,10 +72,9 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 	return p.prepare(ctx, input, planning, false)
 }
 
-// Describe inspects declarations before invocation arguments have been supplied.
-func (p SDKPlanner) Describe(ctx context.Context, input PlanningProcessInput) (nodeproto.PipelineDescription, error) {
-	prepared, err := p.prepare(ctx, input, PlanningInput{}, true)
-	return prepared.Description, err
+// Inspect returns private declarations and their sanitized presentation.
+func (p SDKPlanner) Inspect(ctx context.Context, input PlanningProcessInput) (PreparedPlanning, error) {
+	return p.prepare(ctx, input, PlanningInput{}, true)
 }
 
 func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, planning PlanningInput, declarationsOnly bool) (PreparedPlanning, error) {
@@ -92,19 +94,25 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, nil, nil, nil); err != nil {
 		return PreparedPlanning{}, err
 	}
+	var argumentDeclarations []nodeproto.ArgumentDescription
 	functions := (PlanningFunctions{Validate: p.ValidatePlan, Hash: p.CanonicalHash, Warn: p.Warn}).defaults()
 	validate, hash := functions.Validate, functions.Hash
+	declarationsKnown := false
 	functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+		validation.Secrets = p.Masker
 		plan, err := validate(raw, validation)
+		if err == nil {
+			err = nodeproto.ValidateJobArgumentNamespace(argumentDeclarations, plan.Jobs)
+		}
 		if err != nil {
-			return nodeproto.PlanDoc{}, p.planningError(context.Background(), err, true)
+			return nodeproto.PlanDoc{}, p.planningError(context.Background(), err, declarationsKnown)
 		}
 		return plan, nil
 	}
 	functions.Hash = func(value any) (runspec.Hash, error) {
 		digest, err := hash(value)
 		if err != nil {
-			return "", p.planningError(context.Background(), err, true)
+			return "", p.planningError(context.Background(), err, declarationsKnown)
 		}
 		return digest, nil
 	}
@@ -129,19 +137,18 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		var err error
 		var complete bool
 		prepared, complete, err = p.describe(raw, input, declarationsOnly)
-		if err != nil {
+		if !complete {
 			return err
 		}
-		if !complete {
-			return nil
-		}
-		return logs.release(ctx)
+		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {
 		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
 	}
+	argumentDeclarations = prepared.Description.Args
+	declarationsKnown = logs.known
 	if prepared.Description.Error != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, true)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known)
 	}
 	if declarationsOnly {
 		return prepared, nil
@@ -149,7 +156,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	input.Args = maps.Clone(prepared.Args)
 	if p.Environment != nil && !planning.Disabled {
 		if err := p.fingerprintPlanning(ctx, input, prepared, &planning); err != nil {
-			return PreparedPlanning{}, p.planningError(ctx, err, true)
+			return PreparedPlanning{}, p.planningError(ctx, err, declarationsKnown)
 		}
 	}
 	planning.Inputs.Engine, planning.Inputs.Pipeline, planning.Inputs.Entrypoint = input.Entry.Engine.Identity, input.Run.Pipeline, input.Entrypoint
@@ -164,19 +171,19 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	}{{raw, &planning.Inputs.DescribeDigest}, {input.Args, &planning.Inputs.ArgsDigest}, {input.Run, &planning.Inputs.RunContextDigest}, {runner, &planning.Inputs.RunnerDigest}} {
 		hash, err := functions.Hash(field.value)
 		if err != nil {
-			return PreparedPlanning{}, p.planningError(ctx, err, true)
+			return PreparedPlanning{}, p.planningError(ctx, err, declarationsKnown)
 		}
 		*field.dst = hash
 	}
 	planning.Validation.Secrets = planningSecrets{prior: planning.Validation.Secrets, masker: p.Masker}
 	functions.Plan = func(ctx context.Context) (json.RawMessage, error) {
-		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: true}
+		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
 			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
-			return nil, p.planningError(ctx, err, true)
+			return nil, p.planningError(ctx, err, logs.known)
 		}
 		return raw, nil
 	}
@@ -224,6 +231,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 	}
 	input = clonePlanningProcessInput(input)
 	input.Entry.Engine = resolved
+	input.output = logs
 	process, err := p.Start(ctx, input, logs.write)
 	defer func() {
 		var closeErr error
@@ -257,6 +265,9 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 }
 
 func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) error {
+	if errors.Is(err, secrets.ErrInvalidValue) {
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: secrets.ErrInvalidValue.Error()}
+	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
@@ -272,6 +283,14 @@ func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) er
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}
 	failure := &apierr.Error{Code: code, Message: message}
+	if known {
+		if structured != nil {
+			failure = p.Masker.Error(structured)
+			failure.Message = message
+		} else {
+			failure = p.Masker.Error(failure)
+		}
+	}
 	if code == apierr.ProtocolMismatch {
 		failure.Hint = "Rebuild .sparkwing with the matching SDK."
 	}

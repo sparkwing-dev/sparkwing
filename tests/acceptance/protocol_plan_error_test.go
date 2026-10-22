@@ -2,6 +2,7 @@ package acceptance_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
@@ -48,7 +49,15 @@ func testGoSDKPlanErrorMasks(t *testing.T) {
 			})
 			reply := protocolProbeReply(t, process, "plan")
 			requireProtocolCode(t, reply, apierr.PlanFailed)
-			if reply.Error.Message != "declaration refused: *** ***" {
+			first, second := "plan-secret", "plan-secret-tail"
+			if value, ok := test.args["first"]; ok {
+				first = value
+			}
+			if value, ok := test.args["second"]; ok {
+				second = value
+			}
+			// This wire probe bypasses the Go host, which owns all masking.
+			if reply.Error.Message != fmt.Sprintf("declaration refused: %s %s", first, second) {
 				t.Errorf("process planning error = %v", reply.Error)
 			}
 			if err := process.Finish(); err != nil {

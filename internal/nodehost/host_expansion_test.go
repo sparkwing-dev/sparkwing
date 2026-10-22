@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -81,7 +82,7 @@ func TestOwnerExpansion(t *testing.T) {
 			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
 			request := runspec.SealedRequest{RunID: "run", Hash: "request", Request: runspec.Request{Pipeline: "pipeline"}}
-			spec := runspec.Spec{Request: request, Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{Engine: identity}}
+			spec := runspec.Spec{Request: request, Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 			rawPlan, _ := json.Marshal(plan)
 			rawJob, _ := json.Marshal(job)
 			s := newExpansionHostStore(store.RunRow{ID: "run", State: store.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Expansion: store.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
@@ -104,13 +105,13 @@ func TestOwnerExpansion(t *testing.T) {
 					t.Fatal("output read lost source fence")
 				}
 				return json.RawMessage(`{"value":7}`), nil
-			}, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") }})
+			}, Masker: testMasker("private")})
 			if err != nil {
 				t.Fatal(err)
 			}
 			entry := &source.Entry{Engine: resolved}
 			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-			host := OwnerHost{Mask: func(value string) string { return value }, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}
@@ -139,16 +140,12 @@ func TestOwnerExpansion(t *testing.T) {
 				if result.Outcome != "failed" || s.submission.Failure == nil || len(s.submission.Body) != 0 || strings.Contains(s.submission.Failure.MaskedError, "private") {
 					t.Fatalf("failure = %+v", s.submission)
 				}
-				reason := map[string]string{
-					"unknown": "unknown field", "duplicate": "duplicate field", "null": "null is not a declaration",
-					"concurrency": "explicit capacity and cost must be positive", "cycle": "dependency cycle",
-					"fan257": "generator fan-out exceeds 256 jobs",
-				}[mode]
-				if reason != "" && (s.submission.Failure.Code != apierr.PlanInvalid || !strings.Contains(s.submission.Failure.MaskedError, reason)) {
-					t.Fatalf("expansion failed for a different reason: %+v", s.submission.Failure)
+				wantCode := apierr.PlanInvalid
+				if mode == "failure" {
+					wantCode = apierr.SDKError
 				}
-				if mismatch != mode && !strings.Contains(s.submission.Failure.MaskedError, "jobs[0].concurrency[0]."+mismatch) {
-					t.Fatalf("mismatch lost its field path: %+v", s.submission.Failure)
+				if s.submission.Failure.Code != wantCode || s.submission.Failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" {
+					t.Fatalf("expansion failed for a different reason: %+v", s.submission.Failure)
 				}
 				return
 			}

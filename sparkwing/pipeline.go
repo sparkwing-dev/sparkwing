@@ -114,14 +114,13 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 			return nil, fmt.Errorf("sparkwing: factory for pipeline %q returned nil", name)
 		}
 		plan := NewPlan()
-		plan.diagnostics, _ = ctx.Value(planningDiagnosticsKey{}).(*planningDiagnostics)
 		plan.setInputs(in)
 		if err := p.Plan(sdkserve.DeclarationContext(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
 		registerRecoveryArgs(plan)
 		if !discovery {
-			if err := resolveAndBindJobArgs(plan, args); err != nil {
+			if err := decodeAndBindJobArgs(plan, args, ""); err != nil {
 				return nil, &InputError{Err: fmt.Errorf("pipeline %q: %w", name, err)}
 			}
 		}

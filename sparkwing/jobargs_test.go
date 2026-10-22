@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -153,9 +154,9 @@ func TestResolveAndBindJobArgs_AppliesTagsAndBinds(t *testing.T) {
 	Job(p, "deploy", deploy)
 	Job(p, "notify", notify)
 
-	err := resolveAndBindJobArgs(p, map[string]string{"replicas": "5", "image": "nginx:latest", "mode": "rolling", "webhook": "https://hook", "pipeline-flag": "x"})
+	err := decodeAndBindJobArgs(p, map[string]string{"replicas": "5", "image": "nginx:latest", "mode": "rolling", "webhook": "https://hook", "pipeline-flag": "x"}, "")
 	if err != nil {
-		t.Fatalf("resolveAndBindJobArgs: %v", err)
+		t.Fatalf("decodeAndBindJobArgs: %v", err)
 	}
 	a := deploy.Args(context.Background())
 	if a.Replicas != 5 || a.Image != "nginx:latest" || a.Mode != "rolling" {
@@ -197,4 +198,23 @@ func TestWithArgs_BindFromAny(t *testing.T) {
 	if err := j.bindFromAny("wrong"); err == nil || !strings.Contains(err.Error(), "type mismatch") {
 		t.Errorf("BindFromAny(wrong type) = %v, want a type mismatch", err)
 	}
+}
+
+func TestJobArgumentDecodingIsSafeAcrossConcurrentSteps(t *testing.T) {
+	job := &jobargsJob1{}
+	plan := NewPlan()
+	Job(plan, "job", job)
+	var work sync.WaitGroup
+	for range 16 {
+		work.Go(func() {
+			if err := decodeAndBindJobArgs(plan, map[string]string{"replicas": "3", "image": "nginx", "mode": "rolling"}, "job"); err != nil {
+				t.Error(err)
+				return
+			}
+			if got := job.Args(t.Context()); got.Replicas != 3 || got.Image != "nginx" || got.Mode != "rolling" {
+				t.Errorf("concurrent typed arguments = %+v", got)
+			}
+		})
+	}
+	work.Wait()
 }

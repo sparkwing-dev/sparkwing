@@ -1,7 +1,6 @@
 import type { ArgSpec, RunContext } from "../index.d.ts";
 import { Plan, pipelines } from "./plan.ts";
-import { PlanningDiagnostics } from "./diagnostics.ts";
-import { errorFields, type ErrorFields } from "./errors.ts";
+import { SDKError, errorFields, type ErrorFields } from "./errors.ts";
 
 export interface DescribeArg {
   name: string;
@@ -31,7 +30,7 @@ export interface DescribeDoc {
   pipelines: DescribePipeline[];
 }
 
-function argument(spec: ArgSpec, jobID?: string): DescribeArg {
+export function argument(spec: ArgSpec, jobID?: string): DescribeArg {
   const arg: DescribeArg = { name: spec.name, type: spec.type, required: spec.required ?? false };
   if (spec.short !== undefined) arg.short = spec.short;
   if (spec.description !== undefined) arg.desc = spec.description;
@@ -45,47 +44,41 @@ function argument(spec: ArgSpec, jobID?: string): DescribeArg {
 export async function describe(run: RunContext): Promise<DescribeDoc> {
   const descriptions: DescribePipeline[] = [];
   const definitions = pipelines();
-  const diagnostics = new PlanningDiagnostics(definitions.flatMap((definition) => definition.args ?? []));
   for (const definition of definitions) {
-    const plan = new Plan(diagnostics);
+    const plan = new Plan();
     try {
-      await plan.diagnostics.run(
-        async () => {
-          const entry: DescribePipeline = { name: definition.name, args: (definition.args ?? []).map((spec) => argument(spec)) };
-          if (definition.short !== undefined) entry.short = definition.short;
-          const help = definition.help ?? definition.description;
-          if (help !== undefined) entry.help = help;
-          if (definition.extra !== undefined) entry.extra = definition.extra;
-          if (definition.examples)
-            entry.examples = definition.examples.map((example) => ({ command: example.command, comment: example.comment ?? "" }));
-          if (definition.envVars) entry.env_vars = definition.envVars.map((env) => ({ ...env }));
-          if (definition.secrets)
-            entry.secrets = definition.secrets.map((secret) => ({
-              name: secret.name,
-              ...(secret.optional === undefined ? {} : { optional: secret.optional }),
-            }));
-          const args = {};
-          await definition.plan(plan, { ...run, pipeline: definition.name, args });
-          const risks = new Set<string>();
-          const byStep: NonNullable<DescribePipeline["risks_by_step"]> = [];
-          for (const job of plan.jobs()) {
-            entry.args.push(...job.argSpecs().map((spec) => argument(spec, job.id)));
-            for (const step of job.steps()) {
-              const labels = step.toSpec().risks ?? [];
-              if (labels.length) byStep.push({ job_id: job.id, step_id: step.id, labels });
-              for (const label of labels) risks.add(label);
-            }
-          }
-          if (risks.size) entry.risks = [...risks].sort();
-          if (byStep.length) entry.risks_by_step = byStep;
-          plan.seal();
-          descriptions.push(entry);
-        },
-        `describe pipeline ${JSON.stringify(definition.name)}: `,
-        "plan_failed",
-      );
+      const entry: DescribePipeline = { name: definition.name, args: (definition.args ?? []).map((spec) => argument(spec)) };
+      if (definition.short !== undefined) entry.short = definition.short;
+      const help = definition.help ?? definition.description;
+      if (help !== undefined) entry.help = help;
+      if (definition.extra !== undefined) entry.extra = definition.extra;
+      if (definition.examples)
+        entry.examples = definition.examples.map((example) => ({ command: example.command, comment: example.comment ?? "" }));
+      if (definition.envVars) entry.env_vars = definition.envVars.map((env) => ({ ...env }));
+      if (definition.secrets)
+        entry.secrets = definition.secrets.map((secret) => ({
+          name: secret.name,
+          ...(secret.optional === undefined ? {} : { optional: secret.optional }),
+        }));
+      const args = {};
+      await definition.plan(plan, { ...run, pipeline: definition.name, args });
+      const risks = new Set<string>();
+      const byStep: NonNullable<DescribePipeline["risks_by_step"]> = [];
+      for (const job of plan.jobs()) {
+        entry.args.push(...job.argSpecs().map((spec) => argument(spec, job.id)));
+        for (const step of job.steps()) {
+          const labels = step.toSpec().risks ?? [];
+          if (labels.length) byStep.push({ job_id: job.id, step_id: step.id, labels });
+          for (const label of labels) risks.add(label);
+        }
+      }
+      if (risks.size) entry.risks = [...risks].sort();
+      if (byStep.length) entry.risks_by_step = byStep;
+      plan.seal();
+      descriptions.push(entry);
     } catch (error) {
-      descriptions.push({ name: definition.name, args: [], error: errorFields(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      descriptions.push({ name: definition.name, args: [], error: errorFields(new SDKError(`describe pipeline ${JSON.stringify(definition.name)}: ${message}`, { code: "plan_failed" })) });
     }
   }
   return { pipelines: descriptions };

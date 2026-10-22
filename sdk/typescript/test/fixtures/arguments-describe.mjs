@@ -1,4 +1,4 @@
-import { definePipeline } from "../../src/plan.ts";
+import { Plan, Generated, definePipeline } from "../../src/plan.ts";
 import { describe } from "../../src/describe.ts";
 const declarations = {
  args: [
@@ -19,9 +19,23 @@ const declarations = {
  "enum-default": [{name:"value",type:"string",enum:["one"],default:"two"}],
  "float-default": [{name:"value",type:"float64",default:"NaN"}],
 };
+if (process.argv.includes("--generated")) {
+ const jobs = {};
+ for (const [name,args] of Object.entries(declarations)) {
+  const plan = new Plan();
+  const source = plan.job("source",()=>null);
+  const generator = source.generate(()=>{});
+  const generated = new Generated(source,generator.id,plan);
+  generated.job("child",()=>null).withArgs(...args);
+  jobs[name] = generated.toDoc().jobs;
+ }
+ process.stdout.write(JSON.stringify(jobs));
+} else {
 for (const [name,args] of Object.entries(declarations)) {
  definePipeline({name,args,plan(p){p.job("job",()=>null)}});
 }
 definePipeline({name:"secret-empty",secrets:[{name:""}],plan(p){p.job("job",()=>null)}});
 definePipeline({name:"secret-duplicate",secrets:[{name:"TOKEN"},{name:"TOKEN"}],plan(p){p.job("job",()=>null)}});
 process.stdout.write(JSON.stringify(await describe({args:{},git:{},runner:{},id:"r",pipeline:"args"})));
+
+}

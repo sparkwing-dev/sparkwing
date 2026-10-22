@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -56,17 +57,61 @@ func (pipe[T]) Plan(_ context.Context, p *sw.Plan, _ T, _ sw.RunContext) error {
 	return nil
 }
 
+type generatedJob[T any] struct{ sw.WithArgs[T] }
+
+func (*generatedJob[T]) Work(w *sw.Work) (*sw.WorkStep, error) {
+	return sw.Step(w, "run", func(context.Context) error { return nil }), nil
+}
+
+type generatedPipe[T any] struct{}
+
+func (generatedPipe[T]) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunContext) error {
+	sw.Job(p, "source", func(context.Context) error { return nil }).Generate(func(_ context.Context, expansion *sw.Plan) error {
+		sw.Job(expansion, "child", &generatedJob[T]{})
+		return nil
+	})
+	return nil
+}
+func register[T any](name string) {
+	if len(os.Args) > 1 {
+		sw.Register[sw.NoInputs](name, func() sw.Pipeline[sw.NoInputs] { return generatedPipe[T]{} })
+	} else {
+		sw.Register[T](name, func() sw.Pipeline[T] { return pipe[T]{} })
+	}
+}
 func main() {
-	sw.Register[inputs]("args", func() sw.Pipeline[inputs] { return pipe[inputs]{} })
-	sw.Register[requiredDefault]("required-default", func() sw.Pipeline[requiredDefault] { return pipe[requiredDefault]{} })
-	sw.Register[enumType]("enum-type", func() sw.Pipeline[enumType] { return pipe[enumType]{} })
-	sw.Register[enumAnchor]("enum-anchor", func() sw.Pipeline[enumAnchor] { return pipe[enumAnchor]{} })
-	sw.Register[enumDefault]("enum-default", func() sw.Pipeline[enumDefault] { return pipe[enumDefault]{} })
-	sw.Register[floatDefault]("float-default", func() sw.Pipeline[floatDefault] { return pipe[floatDefault]{} })
-	sw.Register[duplicateName]("duplicate-name", func() sw.Pipeline[duplicateName] { return pipe[duplicateName]{} })
-	sw.Register[duplicateShort]("duplicate-short", func() sw.Pipeline[duplicateShort] { return pipe[duplicateShort]{} })
-	sw.Register[invalidShort]("invalid-short", func() sw.Pipeline[invalidShort] { return pipe[invalidShort]{} })
-	sw.Register[requiredEmpty]("required-empty", func() sw.Pipeline[requiredEmpty] { return pipe[requiredEmpty]{} })
+	register[inputs]("args")
+	register[requiredDefault]("required-default")
+	register[enumType]("enum-type")
+	register[enumAnchor]("enum-anchor")
+	register[enumDefault]("enum-default")
+	register[floatDefault]("float-default")
+	register[duplicateName]("duplicate-name")
+	register[duplicateShort]("duplicate-short")
+	register[invalidShort]("invalid-short")
+	register[requiredEmpty]("required-empty")
+	if len(os.Args) > 1 {
+		jobs := map[string][]nodeproto.JobSpec{}
+		for _, name := range []string{"args", "required-default", "enum-type", "enum-anchor", "enum-default", "float-default", "duplicate-name", "duplicate-short", "invalid-short", "required-empty"} {
+			built, _, err := sdkserve.DefaultOperations.Plan(context.Background(), name, nil, nodeproto.RunContext{Pipeline: name})
+			if err != nil {
+				panic(err)
+			}
+			result, err := sdkserve.DefaultOperations.Eval(context.Background(), built, nodeproto.Request{Closure: "source/generate/0", Input: json.RawMessage("null")})
+			if err != nil || result.Error != nil {
+				panic(result.Error)
+			}
+			var members []nodeproto.JobSpec
+			if err := json.Unmarshal(result.Value, &members); err != nil {
+				panic(err)
+			}
+			jobs[name] = members
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(jobs); err != nil {
+			panic(err)
+		}
+		return
+	}
 	doc, err := sdkserve.DefaultOperations.Describe(context.Background())
 	if err != nil {
 		panic(err)

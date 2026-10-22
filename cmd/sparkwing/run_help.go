@@ -8,7 +8,7 @@ import (
 
 func runSelectedHelp(dir, pipeline string, flags runFlags) error {
 	return withPipelineEntryAt(dir, pipeline, flags, func(ctx context.Context, entry pipelineInspection, _ string) error {
-		schema, err := entry.describe(ctx)
+		schema, err := entry.presentation(ctx)
 		if err != nil {
 			return err
 		}

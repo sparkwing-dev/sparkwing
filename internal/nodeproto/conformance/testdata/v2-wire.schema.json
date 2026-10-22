@@ -1,5 +1,46 @@
 {
   "$defs": {
+    "ArgumentDescription": {
+      "additionalProperties": true,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "secret": {
+          "type": "boolean"
+        },
+        "short": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "required"
+      ],
+      "type": "object"
+    },
     "EngineIdentity": {
       "additionalProperties": true,
       "properties": {
@@ -38,6 +79,15 @@
     "EvalResult": {
       "additionalProperties": true,
       "properties": {
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/ArgumentDescription"
+          },
+          "type": "array"
+        },
+        "declarations_known": {
+          "type": "boolean"
+        },
         "error": {
           "$ref": "#/$defs/Error"
         },
@@ -63,6 +113,15 @@
         },
         "step": {
           "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        },
+        "stream_data": {
+          "type": "string"
+        },
+        "stream_end": {
+          "type": "boolean"
         },
         "ts": {
           "type": "string"

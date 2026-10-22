@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/mod/modfile"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 type CheckName string

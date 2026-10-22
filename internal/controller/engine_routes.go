@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -295,14 +296,15 @@ func engineLookupError(err error) error {
 
 func decodeExpansion(r *http.Request) (controllerwire.ExpansionSubmission, error) {
 	var wire struct {
-		SourceGeneration int64           `json:"source_generation"`
-		Body             json.RawMessage `json:"body"`
-		Failure          json.RawMessage `json:"failure"`
+		SourceGeneration int64                      `json:"source_generation"`
+		Body             json.RawMessage            `json:"body"`
+		Registration     runspec.SecretRegistration `json:"registration"`
+		Failure          json.RawMessage            `json:"failure"`
 	}
 	if err := decodeEngineRequest(r, &wire); err != nil {
 		return controllerwire.ExpansionSubmission{}, err
 	}
-	body := controllerwire.ExpansionSubmission{SourceGeneration: wire.SourceGeneration, Body: wire.Body}
+	body := controllerwire.ExpansionSubmission{SourceGeneration: wire.SourceGeneration, Body: wire.Body, Registration: wire.Registration}
 	if len(wire.Failure) > 0 && !bytes.Equal(bytes.TrimSpace(wire.Failure), []byte("null")) {
 		failure, err := apierr.DecodeInner(wire.Failure)
 		if err != nil {

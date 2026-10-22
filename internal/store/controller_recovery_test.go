@@ -332,7 +332,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Source: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, SourceGeneration: 1, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Owner: claim.Owner}, Body: []byte("{\"jobs\":[]}")})
+	_, err = tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Registration: runspec.SecretRegistration{Version: 1}, Source: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, SourceGeneration: 1, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Owner: claim.Owner}, Body: []byte("{\"jobs\":[]}")})
 	if err != nil {
 		t.Fatal(err)
 	}

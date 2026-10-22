@@ -204,12 +204,13 @@ func TestReportingDistinguishesUnknownAndEmptyClassification(t *testing.T) {
 		name         string
 		names        []string
 		set, visible bool
+		refused      bool
 	}{
 		{name: "absent"},
 		{name: "nil", set: true},
 		{name: "empty", set: true, names: []string{}, visible: true},
 		{name: "duplicate", set: true, names: []string{"value", "value"}},
-		{name: "invalid", set: true, names: []string{""}},
+		{name: "invalid", set: true, names: []string{""}, refused: true},
 	} {
 		t.Run(classification.name, func(t *testing.T) {
 			s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
@@ -217,6 +218,12 @@ func TestReportingDistinguishesUnknownAndEmptyClassification(t *testing.T) {
 				in.Request.RequestedArgs = map[string]string{"value": "public-when-classified"}
 				in.Request.SecretArgs = runspec.Optional[[]string]{Set: classification.set, Value: classification.names}
 			})
+			if classification.refused {
+				if err == nil || !strings.Contains(err.Error(), "absent argument") {
+					t.Fatalf("invalid classification intake: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

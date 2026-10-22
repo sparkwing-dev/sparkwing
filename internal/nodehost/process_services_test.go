@@ -20,7 +20,7 @@ import (
 )
 
 func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
-	for _, value := range []string{"b", "build", "body", "group", "new\nbuild", "YnVpbGQ="} {
+	for _, value := range []string{"build", "body", "group", "YnVpbGQ="} {
 		t.Run(value, func(t *testing.T) {
 			m := secrets.NewMasker()
 			registry := NewMaskRegistry(m)
@@ -224,5 +224,36 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 	}
 	if err := registry.Register("persisted"); err == nil {
 		t.Fatal("accepted job was missing from process mask registry")
+	}
+}
+
+func TestMaskRegistryIssuedValueMayMatchAcceptedIdentifier(t *testing.T) {
+	m := secrets.NewMasker()
+	registry := NewMaskRegistry(m)
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build-private-token"}}}
+	if err := registry.Accept(plan, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.registerIssued("private-token"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Mask("private-token") != "***" {
+		t.Fatal("issued value was released without registration")
+	}
+	if err := registry.accept(plan, func() error { return nil }, registry.replayMasks); err != nil {
+		t.Fatalf("issued value refused repeat acceptance: %v", err)
+	}
+}
+
+func TestMaskRegistryRefusesIssuedValueInFreshExpansion(t *testing.T) {
+	registry := NewMaskRegistry(secrets.NewMasker())
+	if err := registry.registerIssued("private-token"); err != nil {
+		t.Fatal(err)
+	}
+	committed := false
+	err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-private-token"}}}, func() error { committed = true; return nil })
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || committed {
+		t.Fatalf("fresh expansion acceptance = %v, committed = %v", err, committed)
 	}
 }

@@ -13,6 +13,7 @@ import (
 type Operations interface {
 	Context(context.Context, nodeproto.RunContext, nodeproto.RunnerIdentity, Services) context.Context
 	Document(any) nodeproto.PlanDoc
+	Arguments(any) []nodeproto.ArgumentDescription
 	Describe(context.Context) (nodeproto.DescribeDoc, error)
 	Plan(context.Context, string, map[string]string, nodeproto.RunContext) (any, nodeproto.PlanDoc, error)
 	RunStep(context.Context, any, nodeproto.Request) (nodeproto.RunResult, error)
@@ -53,18 +54,23 @@ type unavailableServices struct{}
 func (unavailableServices) Secret(context.Context, string) (string, bool, error) {
 	return "", false, fmt.Errorf("host secret service unavailable")
 }
+
 func (unavailableServices) Output(context.Context, string) (json.RawMessage, error) {
 	return nil, fmt.Errorf("host output service unavailable")
 }
+
 func (unavailableServices) Latest(context.Context, string, string, time.Duration) (json.RawMessage, error) {
 	return nil, fmt.Errorf("host reference service unavailable")
 }
+
 func (unavailableServices) RunPipeline(context.Context, ChildRequest) (json.RawMessage, error) {
 	return nil, fmt.Errorf("host pipeline service unavailable")
 }
+
 func (unavailableServices) OIDC(context.Context, string) (string, error) {
 	return "", fmt.Errorf("host OIDC service unavailable")
 }
+
 func (unavailableServices) Mask(context.Context, string) error {
 	return fmt.Errorf("host mask service unavailable")
 }

@@ -462,7 +462,7 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
         })
         .memo(() => noMemo)
         .generate((generated, output) => {
-          generated.job("generated", () => output);
+          generated.job("generated", () => output).withArgs({ name: "token", type: "[]string", secret: true, default: "alpha-secret,beta-secret" });
         });
     },
   });
@@ -488,6 +488,8 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
     assert.deepEqual(called, ["before", "verify", "failed"]);
     const expansion = await host.send({ id: "generate", op: "eval", closure: closures.generate[0], input: "recorded memo output" });
     assert.equal(expansion.result.value[0].id, "generated");
+    assert.equal(expansion.result.declarations_known, true);
+    assert.deepEqual(expansion.result.arguments, [{ name: "token", type: "[]string", required: false, default: "alpha-secret,beta-secret", secret: true, job_id: "generated" }]);
     assert.ok(expansion.result.value[0].groups.includes(closures.generate[0]));
     const again = await host.send({ id: "again", op: "eval", closure: closures.generate[0], input: "changed" });
     assert.deepEqual(again.result.value, expansion.result.value);
@@ -655,7 +657,7 @@ test("cancelled generation leaves no reconstructed child code behind", async () 
   }
 });
 
-test("execution cannot mutate topology and per-operation argument injection is refused", async () => {
+test("execution cannot mutate topology and malformed host arguments are refused", async () => {
   resetPipelines();
   definePipeline({
     name: "fixture",
@@ -681,7 +683,7 @@ test("execution cannot mutate topology and per-operation argument injection is r
       job: "build",
       step: plan.result.jobs[0].steps[0].id,
       attempt: 1,
-      args: { mode: "invalid" },
+      args: { mode: 1 },
     });
     assert.equal(invalid.error.code, "bad_request");
   } finally {
@@ -741,7 +743,7 @@ test("generator source body env does not leak into the reconstructed child", asy
   }
 });
 
-test("unknown execution args and malformed after-run outcomes are refused", async () => {
+test("malformed host arguments and after-run outcomes are refused", async () => {
   resetPipelines();
   let observed: unknown;
   definePipeline({
@@ -765,7 +767,7 @@ test("unknown execution args and malformed after-run outcomes are refused", asyn
       job: "build",
       step: job.steps[0].id,
       attempt: 1,
-      args: { undeclared: "value" },
+      args: { undeclared: null },
     });
     assert.equal(invalid.error.code, "bad_request");
     const wrong = await host.send({ id: "outcome", op: "eval", closure: job.closures.after_run[0], input: { outcome: ["success"] } });
@@ -862,8 +864,53 @@ test("generated argument declarations rely on host preparation", async () => {
     const planned = await host.send(planRequest);
     const expanded = await host.send({ id: "expand", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
     assert.equal(expanded.result.error, undefined);
-    const child = await host.send({ id: "child", op: "run_step", job: "child", step: "run", attempt: 1, settled: [] });
+    assert.deepEqual(expanded.result.value[0].arguments, [{ name: "required", type: "string", required: true, job_id: "child" }]);
+    const child = await host.send({ id: "child", op: "run_step", args: { required: "prepared-by-host" }, job: "child", step: "run", attempt: 1, settled: [] });
     assert.equal(child.result.outcome, "success");
+    assert.equal(child.result.output, "prepared-by-host");
+  } finally {
+    await host.close();
+  }
+});
+
+test("declared secrets do not call Mask during planning", async () => {
+  resetPipelines();
+  let calls = 0;
+  definePipeline({
+    name: "fixture",
+    args: [{ name: "tokens", type: "[]string", secret: true, default: "default-private,supplied-private" }],
+    plan(plan) {
+      plan.job("build", () => null).withArgs({ name: "extra", type: "[]string", secret: true, default: "job-private-value" });
+    },
+  });
+  const host = await setup(fakeServices({ mask: async () => { calls++; } }));
+  try {
+    const reply = await host.send({ ...planRequest, args: { tokens: "supplied-private" } });
+    assert.equal(reply.ok, true, JSON.stringify(reply));
+    assert.equal(calls, 0);
+  } finally {
+    await host.close();
+  }
+});
+
+test("standalone generator returns author error for host sanitization", async () => {
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    args: [{ name: "token", type: "string", secret: true, default: "private-code" }],
+    plan(plan) {
+      plan
+        .job("build", () => null)
+        .generate(() => {
+          throw new SDKError("failed", { code: "failure-private-code" });
+        });
+    },
+  });
+  const host = await setup();
+  try {
+    const planned = await host.send(planRequest);
+    const reply = await host.send({ id: "generate", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
+    assert.equal(reply.result.error.code, "failure-private-code");
   } finally {
     await host.close();
   }

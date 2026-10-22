@@ -71,3 +71,37 @@ func TestHostRefusesInvalidAnnotations(t *testing.T) {
 		})
 	}
 }
+
+type firstGeneratedInputs struct {
+	Value string `flag:"first" default:"first"`
+}
+type secondGeneratedInputs struct {
+	Value string `flag:"second" default:"second"`
+}
+type generatedInputsJob[T any] struct{ sparkwing.WithArgs[T] }
+
+func (j *generatedInputsJob[T]) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", func(ctx context.Context) error { _ = j.Args(ctx); return nil }), nil
+}
+func TestGeneratedDefaultsStayWithTheirJob(t *testing.T) {
+	host := sparkwingtest.New(sparkwingtest.Options{})
+	defer host.Close()
+	plan := sparkwing.NewPlan()
+	first, second := &generatedInputsJob[firstGeneratedInputs]{}, &generatedInputsJob[secondGeneratedInputs]{}
+	sparkwing.Job(plan, "source", func(context.Context) error { return nil }).Generate(func(_ context.Context, children *sparkwing.Plan) error {
+		sparkwing.Job(children, "first", first)
+		sparkwing.Job(children, "second", second)
+		return nil
+	})
+	if _, err := host.Eval(t.Context(), plan, "source", "source/generate/0", []byte("null")); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"first", "second"} {
+		if _, err := host.RunStep(t.Context(), plan, id, "run"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if first.Args(t.Context()).Value != "first" || second.Args(t.Context()).Value != "second" {
+		t.Fatalf("generated defaults crossed jobs: %+v, %+v", first.Args(t.Context()), second.Args(t.Context()))
+	}
+}

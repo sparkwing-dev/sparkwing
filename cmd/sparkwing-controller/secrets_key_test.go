@@ -102,7 +102,7 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 	if err := configureSecrets(context.Background(), srv, st, deployment.Config{}, keyPath); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := postSecret(t, srv, st, "TOKEN", "v"); code != http.StatusNoContent {
+	if code, _ := postSecret(t, srv, st, "TOKEN", "private-value"); code != http.StatusNoContent {
 		t.Fatalf("POST secret = %d", code)
 	}
 	if err := os.Remove(keyPath); err != nil {

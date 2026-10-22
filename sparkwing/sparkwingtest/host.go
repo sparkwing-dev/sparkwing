@@ -7,29 +7,50 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type host struct {
-	opts    Options
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mu      sync.Mutex
-	work    sync.WaitGroup
-	masks   []string
-	records []sparkwing.LogRecord
-	plans   []json.RawMessage
-	settled map[stepStateKey][]string
+	argumentDeclarations []nodeproto.ArgumentDescription
+	opts                 Options
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	mu                   sync.Mutex
+	work                 sync.WaitGroup
+	masker               *secrets.Masker
+	replayMasks          *secrets.Masker
+	presenters           map[string]*secrets.LogStreams
+	records              []sparkwing.LogRecord
+	plans                []json.RawMessage
+	settled              map[stepStateKey][]string
+	args                 map[string]string
+	initErr              error
 }
+
+type pendingLog struct {
+	frame nodeproto.FrameLog
+	job   string
+}
+
+type (
+	outputGateKey struct{}
+	outputGate    struct {
+		mu      sync.Mutex
+		pending []pendingLog
+		state   uint8 // 0 pending, 1 released, 2 discarded
+	}
+)
 
 type stepStateKey struct {
 	plan *sparkwing.Plan
@@ -64,42 +85,93 @@ type boundServices struct {
 }
 
 func (s boundServices) Emit(frame nodeproto.FrameLog) { s.host.emit(s.ctx, frame, s.job) }
+
+// SDK reconstruction sees replay masks; host acceptance checks fresh declarations.
+func (s boundServices) ContainsSecret(value string) bool { return s.replayMasks.ContainsSecret(value) }
+
 func (h *host) Plan(ctx context.Context, name string, args map[string]string) (nodeproto.PlanDoc, error) {
-	ctx = h.Context(ctx)
+	baseCtx := ctx
+	discoveryGate := &outputGate{}
+	ctx = h.Context(context.WithValue(baseCtx, outputGateKey{}, discoveryGate))
 	if err := h.begin(ctx); err != nil {
 		return nodeproto.PlanDoc{}, err
 	}
 	defer h.work.Done()
-	declarations, err := sdkserve.DefaultOperations.Describe(ctx)
+	described, err := sdkserve.DefaultOperations.Describe(ctx)
 	if err != nil {
-		return nodeproto.PlanDoc{}, err
+		h.discardGate(discoveryGate)
+		return nodeproto.PlanDoc{}, fmt.Errorf("pipeline discovery failed")
 	}
-	description, found := declarations.Pipeline(name)
-	if !found {
-		return nodeproto.PlanDoc{}, fmt.Errorf("unknown pipeline %q", name)
-	}
-	if description.Error != nil {
-		return nodeproto.PlanDoc{}, description.Error
-	}
-	if err := nodeproto.ValidateArgumentDeclarations(description.Args); err != nil {
-		return nodeproto.PlanDoc{}, err
-	}
-	if err := nodeproto.ValidateSecretDeclarations(description.Secrets); err != nil {
-		return nodeproto.PlanDoc{}, err
-	}
-	args, err = nodeproto.ResolveArguments(description, args)
+	declarations, err := runspec.NewDeclarationGate(described, h.replayMasks)
 	if err != nil {
+		h.discardGate(discoveryGate)
 		return nodeproto.PlanDoc{}, err
 	}
-	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, args, h.runContext(name))
+	selected, err := declarations.Resolve(name, args, nil)
+	h.masker.Merge(h.replayMasks)
 	if err != nil {
-		return doc, err
+		h.discardGate(discoveryGate)
+		return nodeproto.PlanDoc{}, err
+	}
+	h.mu.Lock()
+	h.args = selected.Args
+	h.argumentDeclarations = selected.Description.Args
+	h.mu.Unlock()
+	failedDiscovery := !declarations.Complete()
+	if failedDiscovery {
+		h.discardGate(discoveryGate)
+	} else {
+		h.releaseGate(discoveryGate)
+	}
+	planGate := &outputGate{}
+	ctx = h.Context(context.WithValue(baseCtx, outputGateKey{}, planGate))
+	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, selected.Args, h.runContext(name))
+	if err != nil {
+		h.discardGate(planGate)
+		return nodeproto.PlanDoc{}, declarations.Error(err)
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
+		h.discardGate(planGate)
 		return doc, err
 	}
-	return h.accept(raw)
+	accepted, err := h.accept(raw)
+	if err != nil {
+		h.discardGate(planGate)
+		return accepted, err
+	}
+	if failedDiscovery {
+		h.discardGate(planGate)
+	} else {
+		h.releaseGate(planGate)
+	}
+	return accepted, nil
+}
+
+func (h *host) discardGate(g *outputGate) {
+	g.mu.Lock()
+	g.state = 2
+	g.pending = nil
+	g.mu.Unlock()
+}
+
+func (h *host) releaseGate(g *outputGate) {
+	g.mu.Lock()
+	pending := g.pending
+	g.pending = nil
+	g.state = 1
+	g.mu.Unlock()
+	for _, item := range pending {
+		h.emit(h.ctx, item.frame, item.job)
+	}
+}
+
+func (h *host) maskError(err error) error {
+	var canonical *apierr.Error
+	if errors.As(err, &canonical) {
+		return h.masker.Error(canonical)
+	}
+	return h.masker.Error(&apierr.Error{Code: apierr.SDKError, Message: err.Error()})
 }
 
 func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string) (json.RawMessage, error) {
@@ -111,18 +183,23 @@ func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string)
 	if err := h.remember(p); err != nil {
 		return nil, err
 	}
-	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Job: job, Step: step, Attempt: 1, Settled: h.stepSnapshot(p, job)})
+	args, err := h.jobArguments(p, job)
 	if err != nil {
 		return nil, err
 	}
+	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Args: args, Job: job, Step: step, Attempt: 1, Settled: h.stepSnapshot(p, job)})
+	if err != nil {
+		return nil, h.maskError(err)
+	}
 	h.settleStep(p, job, step)
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, h.masker.Error(result.Error)
 	}
-	return result.Output, nil
+	return h.output(ctx, result.Output), nil
 }
 
 func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string, input json.RawMessage) (json.RawMessage, error) {
+	baseCtx := ctx
 	ctx = h.Context(ctx)
 	if err := h.begin(ctx); err != nil {
 		return nil, err
@@ -131,21 +208,63 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 	if err := h.remember(p); err != nil {
 		return nil, err
 	}
-	request := nodeproto.Request{Job: job, Closure: closure, Input: input}
+	generator := false
+	for _, item := range sdkserve.DefaultOperations.Document(p).Jobs {
+		for _, id := range item.Closures.Generate {
+			if id == closure {
+				generator = true
+			}
+		}
+	}
+	var gate *outputGate
+	if generator {
+		gate = &outputGate{}
+		ctx = h.Context(context.WithValue(baseCtx, outputGateKey{}, gate))
+	}
+	args, err := h.jobArguments(p, job)
+	if err != nil {
+		return nil, err
+	}
+	request := nodeproto.Request{Args: args, Job: job, Closure: closure, Input: input}
 	step := predicateStep(p, job, closure)
 	if step != "" {
 		request.Attempt = 1
 		request.Settled = h.stepSnapshot(p, job)
 	}
 	result, err := sdkserve.DefaultOperations.Eval(ctx, p, request)
+	if ctx.Err() != nil {
+		if generator {
+			h.discardGate(gate)
+		}
+		return nil, ctx.Err()
+	}
 	if err != nil {
-		return nil, err
+		if generator {
+			h.discardGate(gate)
+			return nil, fmt.Errorf("generator declaration failed")
+		}
+		return nil, h.maskError(err)
 	}
 	if result.Error != nil {
+		if generator {
+			h.discardGate(gate)
+			return nil, fmt.Errorf("generator declaration failed")
+		}
 		if step != "" {
 			h.settleStep(p, job, step)
 		}
-		return nil, result.Error
+		return nil, h.masker.Error(result.Error)
+	}
+	if generator {
+		if !result.DeclarationsKnown {
+			h.discardGate(gate)
+			return nil, fmt.Errorf("generator declaration failed")
+		}
+		if err := h.registerGenerated(result.Arguments); err != nil {
+			h.discardGate(gate)
+			return nil, err
+		}
+		h.releaseGate(gate)
 	}
 	if err := h.remember(p); err != nil {
 		return nil, err
@@ -153,7 +272,26 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 	if step != "" && string(result.Value) == "true" {
 		h.settleStep(p, job, step)
 	}
-	return result.Value, nil
+	return h.output(ctx, result.Value), nil
+}
+
+func (h *host) output(ctx context.Context, raw json.RawMessage) json.RawMessage {
+	if h.masker.Mask(string(raw)) != string(raw) {
+		h.emit(ctx, nodeproto.FrameLog{Level: "warn", Event: "output_withheld", Message: "output withheld: contains a secret"}, "")
+		return nil
+	}
+	return raw
+}
+
+func (h *host) registerGenerated(arguments []nodeproto.ArgumentDescription) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err := runspec.RegisterArguments(arguments, h.args, nil, h.replayMasks)
+	h.masker.Merge(h.replayMasks)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *host) stepSnapshot(p *sparkwing.Plan, job string) []string {
@@ -207,7 +345,7 @@ func (h *host) Records() []sparkwing.LogRecord {
 func (h *host) Masks() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]string(nil), h.masks...)
+	return h.masker.Values()
 }
 
 func (h *host) Close() error {
@@ -215,6 +353,13 @@ func (h *host) Close() error {
 	h.cancel()
 	h.mu.Unlock()
 	h.work.Wait()
+	h.mu.Lock()
+	for job, presenter := range h.presenters {
+		for _, frame := range presenter.Flush() {
+			h.appendRecord(frame, job)
+		}
+	}
+	h.mu.Unlock()
 	return nil
 }
 
@@ -224,6 +369,9 @@ func (h *host) begin(ctx context.Context) error {
 	defer h.mu.Unlock()
 	if err := h.ctx.Err(); err != nil {
 		return err
+	}
+	if h.initErr != nil {
+		return h.initErr
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -254,7 +402,7 @@ func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
 		return "", false, fmt.Errorf("secret %q: %w", name, sparkwing.ErrSecretMissing)
 	}
 	if v.Masked {
-		if err := h.Mask(ctx, v.Value); err != nil {
+		if err := h.registerIssued(ctx, v.Value); err != nil {
 			return "", false, err
 		}
 	}
@@ -322,7 +470,7 @@ func (h *host) OIDC(ctx context.Context, a string) (string, error) {
 		err = fmt.Errorf("host OIDC response needs a token")
 	}
 	if err == nil {
-		err = h.Mask(ctx, token)
+		err = h.registerIssued(ctx, token)
 	}
 	return token, err
 }
@@ -335,34 +483,42 @@ func (h *host) ReleaseCleanup(context.Context, string) error {
 	return &apierr.Error{Code: apierr.Unavailable, Message: "fake host does not execute cleanups"}
 }
 
-func (h *host) Mask(ctx context.Context, value string) error {
+func (h *host) registerIssued(ctx context.Context, value string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if err := h.executionError(ctx); err != nil {
 		return err
 	}
-	if value == "" {
-		return nil
+	return h.masker.Register(value)
+}
+
+func (h *host) Mask(ctx context.Context, value string) error {
+	if err := h.executionError(ctx); err != nil {
+		return err
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if err := h.executionError(ctx); err != nil {
 		return err
 	}
+	candidate := secrets.NewMasker()
+	if err := candidate.Register(value); err != nil {
+		return err
+	}
 	for _, plan := range h.plans {
-		if _, err := nodeproto.ValidatePlan(plan, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: registeredMasks{value}}); err != nil {
+		if _, err := nodeproto.ValidatePlan(plan, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: candidate}); err != nil {
 			return err
 		}
 	}
-	for _, v := range h.masks {
-		if v == value {
-			return nil
-		}
-	}
-	h.masks = append(h.masks, value)
-	slices.SortFunc(h.masks, func(a, b string) int { return len(b) - len(a) })
+	h.masker.Merge(candidate)
+	h.replayMasks.Merge(candidate)
 	return nil
 }
 
 func (h *host) remember(p *sparkwing.Plan) error {
+	if err := h.registerGenerated(sdkserve.DefaultOperations.Arguments(p)); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(sdkserve.DefaultOperations.Document(p))
 	if err != nil {
 		return err
@@ -371,22 +527,45 @@ func (h *host) remember(p *sparkwing.Plan) error {
 	return err
 }
 
-type registeredMasks []string
-
-func (values registeredMasks) ContainsSecret(id string) bool {
-	for _, value := range values {
-		if value != "" && strings.Contains(id, value) {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: registeredMasks(h.masks)})
-	if err == nil && (len(h.plans) == 0 || !bytes.Equal(raw, h.plans[len(h.plans)-1])) {
+	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: h.replayMasks})
+	if err != nil {
+		return doc, err
+	}
+	if err := nodeproto.ValidateJobArgumentNamespace(h.argumentDeclarations, doc.Jobs); err != nil {
+		return doc, err
+	}
+	for _, job := range doc.Jobs {
+		if _, err := nodeproto.PrepareJobArguments(job.Arguments, h.args); err != nil {
+			return doc, err
+		}
+	}
+	// Only exact accepted declarations may replay after an issued-value collision.
+	fresh := doc
+	fresh.Jobs = slices.Clone(doc.Jobs)
+	for _, raw := range h.plans {
+		var accepted nodeproto.PlanDoc
+		if err := json.Unmarshal(raw, &accepted); err != nil {
+			return doc, err
+		}
+		fresh.Jobs = slices.DeleteFunc(fresh.Jobs, func(job nodeproto.JobSpec) bool {
+			return slices.ContainsFunc(accepted.Jobs, func(old nodeproto.JobSpec) bool { return reflect.DeepEqual(job, old) })
+		})
+		if reflect.DeepEqual(doc.Concurrency, accepted.Concurrency) {
+			fresh.Concurrency = nil
+		}
+	}
+	if err := nodeproto.VisitPlanIdentifiers(fresh, func(value, path string) error {
+		if h.masker.ContainsSecret(value) {
+			return &apierr.Error{Code: apierr.SecretInIdentifier, Message: "registered secret conflicts with identifier at " + path}
+		}
+		return nil
+	}); err != nil {
+		return doc, err
+	}
+	if len(h.plans) == 0 || !bytes.Equal(raw, h.plans[len(h.plans)-1]) {
 		h.plans = append(h.plans, raw)
 	}
 	return doc, err
@@ -395,10 +574,23 @@ func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 func (h *host) ContainsSecret(id string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return registeredMasks(h.masks).ContainsSecret(id)
+	return h.masker.ContainsSecret(id)
 }
 
 func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
+	if gate, ok := ctx.Value(outputGateKey{}).(*outputGate); ok {
+		gate.mu.Lock()
+		switch gate.state {
+		case 0:
+			gate.pending = append(gate.pending, pendingLog{frame: frame, job: job})
+			gate.mu.Unlock()
+			return
+		case 2:
+			gate.mu.Unlock()
+			return
+		}
+		gate.mu.Unlock()
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if frame.Event == "annotation" || frame.Event == "summary" {
@@ -406,11 +598,8 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 			panic(err)
 		}
 	}
-	mask := func(s string) string {
-		for _, v := range h.masks {
-			s = strings.ReplaceAll(s, v, "***")
-		}
-		return s
+	if h.presenters == nil {
+		h.presenters = map[string]*secrets.LogStreams{}
 	}
 	if frame.Event == "annotation" {
 		var location nodeproto.AnnotationRequest
@@ -426,21 +615,31 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 			frame.Level = "info"
 		}
 	}
+	presenter := h.presenters[job]
+	if presenter == nil {
+		presenter = secrets.NewLogStreams(h.masker)
+		h.presenters[job] = presenter
+	}
+	frames, err := presenter.Push(frame)
+	if err != nil {
+		frames = []nodeproto.FrameLog{{Level: "error", Message: "invalid SDK log stream"}}
+	}
+	for _, presented := range frames {
+		h.appendRecord(presented, job)
+	}
+}
+
+func (h *host) appendRecord(frame nodeproto.FrameLog, job string) {
 	ts, _ := time.Parse(time.RFC3339Nano, frame.TS)
 	attrs := map[string]any{}
 	if len(frame.Attrs) > 0 && string(frame.Attrs) != "null" {
-		if !json.Valid(frame.Attrs) {
-			panic("invalid log attributes")
-		}
-		// safety: rounding a numeric secret before masking can conceal the match.
 		decoder := json.NewDecoder(bytes.NewReader(frame.Attrs))
 		decoder.UseNumber()
 		if err := decoder.Decode(&attrs); err != nil {
-			panic(err)
+			attrs = map[string]any{"masked_attrs": "***"}
 		}
 	}
-	attrs = maskAttrs(attrs, mask).(map[string]any)
-	message := mask(frame.Message)
+	message := frame.Message
 	if (frame.Event == "annotation" || frame.Event == "summary") && int64(len(message)) > limits.AnnotationBytes {
 		message = limits.Record(message)
 	}
@@ -448,32 +647,6 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 		attrs["markdown"] = message
 	}
 	h.records = append(h.records, sparkwing.LogRecord{TS: ts, JobID: job, Level: frame.Level, Step: frame.Step, Event: frame.Event, Msg: message, Attrs: attrs})
-}
-
-func maskAttrs(v any, mask func(string) string) any {
-	switch value := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(value))
-		for k, x := range value {
-			out[mask(k)] = maskAttrs(x, mask)
-		}
-		return out
-	case []any:
-		for i, x := range value {
-			value[i] = maskAttrs(x, mask)
-		}
-	case string:
-		return mask(value)
-	case json.Number, bool, nil:
-		text := "null"
-		if value != nil {
-			text = fmt.Sprint(value)
-		}
-		if masked := mask(text); masked != text {
-			return masked
-		}
-	}
-	return v
 }
 
 func newHost(opts Options) Host {
@@ -493,13 +666,15 @@ func newHost(opts Options) Host {
 	opts.Outputs = outputs
 	opts.Runner.Labels = append([]string(nil), opts.Runner.Labels...)
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &host{opts: opts, ctx: ctx, cancel: cancel}
+	h := &host{opts: opts, ctx: ctx, cancel: cancel, masker: secrets.NewMasker(), replayMasks: secrets.NewMasker()}
 	for _, v := range opts.Secrets {
-		if v.Masked && v.Value != "" {
-			h.masks = append(h.masks, v.Value)
+		if v.Masked {
+			if err := h.replayMasks.Register(v.Value); err != nil {
+				h.initErr = err
+			}
 		}
 	}
-	slices.SortFunc(h.masks, func(a, b string) int { return len(b) - len(a) })
+	h.masker.Merge(h.replayMasks)
 	return h
 }
 
@@ -517,4 +692,15 @@ func (h *host) runContext(name string) nodeproto.RunContext {
 		out.Trigger.PullRequest = &nodeproto.PullRequest{Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
 	return out
+}
+
+func (h *host) jobArguments(p *sparkwing.Plan, id string) (map[string]string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, job := range sdkserve.DefaultOperations.Document(p).Jobs {
+		if job.ID == id {
+			return nodeproto.PrepareJobArguments(job.Arguments, h.args)
+		}
+	}
+	return nil, &apierr.Error{Code: apierr.UnknownJob, Message: "job is not declared"}
 }

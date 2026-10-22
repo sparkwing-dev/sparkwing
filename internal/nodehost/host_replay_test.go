@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -160,7 +161,7 @@ func TestGeneratorReplay(t *testing.T) {
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return input.Engine, nil
 				},
-				CanonicalHash: expansionHash, Mask: func(text string) string { return text },
+				CanonicalHash: expansionHash, Masker: secrets.NewMasker(),
 				ReadFailure: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 					if recovery == nil || ref != s.nodes["peer"].Ref || runspec.ClaimGeneration(generation) != s.nodes["peer"].Generation {
 						return nil, errors.New("undeclared recovery read")

@@ -123,7 +123,7 @@ func (s *ProcessServices) secret(request *http.Request, auth capability.Authoriz
 		return nil, serviceUnavailable()
 	}
 	if masked {
-		if err := s.Masks.Register(value); err != nil {
+		if err := s.Masks.registerIssued(value); err != nil {
 			return nil, err
 		}
 	}
@@ -151,7 +151,7 @@ func (s *ProcessServices) oidc(request *http.Request, auth capability.Authorized
 	if token.Token == "" || token.ExpiresAt.IsZero() {
 		return nil, executorError(apierr.ProtocolError, "OIDC returned no token or expiry")
 	}
-	if err := s.Masks.Register(token.Token); err != nil {
+	if err := s.Masks.registerIssued(token.Token); err != nil {
 		return nil, err
 	}
 	return token, nil
@@ -181,7 +181,7 @@ func (s *ProcessServices) awaitChild(request *http.Request, auth capability.Auth
 		}
 	}
 	if result.Error != nil {
-		masked := maskHostError(result.Error, s.Masks.mask)
+		masked := maskHostError(result.Error, s.Masks.masker)
 		if !errors.As(masked, &result.Error) {
 			return nil, executorError(apierr.Internal, "child error could not be encoded")
 		}

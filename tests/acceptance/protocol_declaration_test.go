@@ -77,9 +77,13 @@ func testGoSDKDeclarationServices(t *testing.T) {
 	for _, service := range []string{"secret", "variable", "output", "latest", "child", "oidc", "mask", "annotation"} {
 		t.Run(service, func(t *testing.T) {
 			_, err := host.Plan(t.Context(), "acceptance-declaration-services", map[string]string{"service": service})
+			code := apierr.PlanFailed
+			if service == "output" || service == "latest" || service == "annotation" {
+				code = apierr.SDKError
+			}
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed {
-				t.Fatalf("plan-time %s access = %v, want plan_failed", service, err)
+			if !errors.As(err, &failure) || failure.Code != code {
+				t.Fatalf("plan-time %s access = %v, want %s", service, err, code)
 			}
 		})
 	}

@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 )
 
 // WithArgs is the embedded helper a job uses to declare typed args.
 // T uses the pipeline Inputs tag vocabulary: a field becomes a flag
 // only with a `flag:"name"` tag, and `desc`, `default`, `required`,
 // `enum` and `short` behave as they do on Inputs. The framework
-// resolves T from the run's flags before any step runs; a missing
+// decodes the host-prepared flags before any step runs; a missing
 // required arg or a value outside `enum` fails the run. `secret` masks
 // argument values; `flag:",extra"` is pipeline-only.
 //
@@ -34,7 +35,7 @@ import (
 // A job may not declare a flag or short alias that another job in the
 // plan or the pipeline's Inputs declare.
 type WithArgs[T any] struct {
-	bound *T
+	bound atomic.Pointer[T]
 }
 
 // Args returns the resolved typed args for the current run. Panics
@@ -43,13 +44,14 @@ type WithArgs[T any] struct {
 // outside the framework's lifecycle).
 func (w *WithArgs[T]) Args(ctx context.Context) T {
 	_ = ctx
-	if w.bound == nil {
+	bound := w.bound.Load()
+	if bound == nil {
 		panic("sparkwing.WithArgs.Args: called before the framework bound args; " +
 			"this usually means Args() was invoked from Plan or a goroutine " +
 			"that escaped the Work lifecycle. Read args inside Step bodies " +
 			"or methods Work calls synchronously.")
 	}
-	return *w.bound
+	return *bound
 }
 
 // BindFromAny stores resolved args. The framework calls it before the
@@ -61,7 +63,7 @@ func (w *WithArgs[T]) bindFromAny(val any) error {
 		var zero T
 		return fmt.Errorf("sparkwing.WithArgs[%T].BindFromAny: type mismatch (got %T)", zero, val)
 	}
-	w.bound = &v
+	w.bound.Store(&v)
 	return nil
 }
 

@@ -46,7 +46,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 				var failure string
 				if placement == "fresh" {
 					state, host, input := newOwnerFixture(t, false)
-					host.Masks, host.Mask = masks, masks.masker.Mask
+					host.Masks, host.Masker = masks, masks.masker
 					request := &state.snapshot.Run.Request.Request
 					request.RequestedArgs = map[string]string{"token": value}
 					request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
@@ -79,6 +79,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					spec.Request.Request.SecretArgs = runspec.Optional[[]string]{}
 					spec.Resolved.Args = map[string]string{"default_token": value}
 					spec.Resolved.SecretArgs = []string{"default_token"}
+					spec.Resolved.SecretRegistration, _ = runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 					input.Accepted.Spec, _ = json.Marshal(spec)
 					persistNativeAcceptance(t, state, input.Accepted)
 					authorities, parent, lookup, delegation, services := processAuthorityFixture(t)
@@ -111,7 +112,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 						}
 					} else {
 						ownerState, host, run := newOwnerFixture(t, true)
-						host.Masks, host.Mask = masks, masks.masker.Mask
+						host.Masks, host.Masker = masks, masks.masker
 						ownerState.snapshot.Run.Spec = spec
 						ownerState.snapshot.Run.PlanHash = string(spec.PlanHash)
 						ownerState.snapshot.Run.Plan, _ = json.Marshal(input.Accepted.Plan)
@@ -201,7 +202,7 @@ func TestSealedMaskStreamChild(t *testing.T) {
 		case nodeproto.OpHello:
 			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: request.Engine.Version}, Features: []string{}}
 		case nodeproto.OpDescribe:
-			result = nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{}}}}
+			result = nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}}}}}
 		case nodeproto.OpPlan:
 			if request.Run != nil && request.Run.Pipeline == "build" {
 				reply.OK = false

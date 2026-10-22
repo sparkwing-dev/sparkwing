@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -57,7 +58,7 @@ type EvaluationDependencies struct {
 	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation    nodeproto.ValidationContext
 	ReadOutput    func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
-	Mask          func(string) string
+	Masker        *secrets.Masker
 	Masks         *MaskRegistry
 }
 
@@ -70,8 +71,14 @@ type OwnerEvaluator struct {
 
 // NewOwnerEvaluator requires explicit authority, output and process adapters.
 func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
-	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
+	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("owner evaluator requires store, process, engine and masking adapters")
+	}
+	if deps.Masks == nil {
+		deps.Masks = NewMaskRegistry(deps.Masker)
+	}
+	if deps.Masks.masker != deps.Masker {
+		return nil, errors.New("host requires one shared masking registry")
 	}
 	if deps.ValidatePlan == nil {
 		deps.ValidatePlan = nodeproto.ValidatePlan
@@ -88,24 +95,24 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 // Expand evaluates every declared generator from the source's recorded output
 // in one reconstructed SDK process. Failed evaluation returns only a masked
 // failure; cancellation and stale input leave the barrier to the live owner.
-func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (body json.RawMessage, failure *store.ExpansionFailure, err error) {
-	defer func() { err = maskHostError(err, h.deps.Mask) }()
+func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (body json.RawMessage, registration runspec.SecretRegistration, failure *store.ExpansionFailure, err error) {
+	defer func() { err = maskHostError(err, h.deps.Masker) }()
 	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
-		return nil, nil, err
+		return nil, runspec.SecretRegistration{}, nil, err
 	}
 	if err := context.Cause(ctx); err != nil {
-		return nil, nil, err
+		return nil, runspec.SecretRegistration{}, nil, err
 	}
 	spec, row, job, err := h.accepted(ctx, input)
 	if err != nil {
-		return nil, nil, err
+		return nil, runspec.SecretRegistration{}, nil, err
 	}
 	if row.Generation < 0 || row.Status != store.StatusDone || (row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized) || row.Expansion != store.ExpansionExpected || len(job.Closures.Generate) == 0 {
-		return nil, nil, executorError(apierr.IllegalTransition, "expansion requires a successful source with expected generators")
+		return nil, runspec.SecretRegistration{}, nil, executorError(apierr.IllegalTransition, "expansion requires a successful source with expected generators")
 	}
 	bounded, cancel, err := h.deps.ChildContext(ctx, row.Execution.Timeout.Value, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, runspec.SecretRegistration{}, nil, err
 	}
 	defer cancel()
 	output, err := h.readResult(bounded, row, input.Storage)
@@ -113,10 +120,10 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (bod
 		err = executorError(apierr.ProtocolError, "generator source output is missing or invalid JSON")
 	}
 	if err == nil {
-		body, err = h.expand(bounded, input, spec, job, output)
+		body, registration, err = h.expand(bounded, input, spec, job, output)
 	}
 	if cause := context.Cause(ctx); cause != nil {
-		return nil, nil, errors.Join(cause, err)
+		return nil, runspec.SecretRegistration{}, nil, errors.Join(cause, err)
 	}
 	if cause := context.Cause(bounded); cause != nil {
 		err = errors.Join(executorError(apierr.DeadlineExceeded, "generator evaluation exceeded its job timeout"), cause, err)
@@ -127,9 +134,9 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (bod
 		if errors.As(err, &structured) {
 			code = structured.Code
 		}
-		return nil, &store.ExpansionFailure{Code: code, MaskedError: boundedNodeErrText(h.deps.Mask(err.Error()))}, nil
+		return nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: code, MaskedError: generatorFailureMessage}, nil
 	}
-	return body, nil, nil
+	return body, registration, nil, nil
 }
 
 func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (runspec.Spec, store.NodeRow, nodeproto.JobSpec, error) {
@@ -178,24 +185,24 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	return spec, row, job, nil
 }
 
-func (h *OwnerEvaluator) expand(ctx context.Context, input EvaluationInput, spec runspec.Spec, job nodeproto.JobSpec, output json.RawMessage) (body json.RawMessage, err error) {
+func (h *OwnerEvaluator) expand(ctx context.Context, input EvaluationInput, spec runspec.Spec, job nodeproto.JobSpec, output json.RawMessage) (body json.RawMessage, registration runspec.SecretRegistration, err error) {
 	err = h.withProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
-		body, err = h.expansionBody(ctx, session, code, job, output)
+		body, registration, err = h.expansionBody(ctx, session, code, spec, job, output)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, runspec.SecretRegistration{}, err
 	}
-	return body, nil
+	return body, registration, nil
 }
 
-func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSession, code NodeInput, job nodeproto.JobSpec, output json.RawMessage) (json.RawMessage, error) {
+func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSession, code NodeInput, spec runspec.Spec, job nodeproto.JobSpec, output json.RawMessage) (json.RawMessage, runspec.SecretRegistration, error) {
 	snapshot, err := h.Store.ReadSnapshot(ctx, code.Accepted.RunID)
 	if err != nil {
-		return nil, err
+		return nil, runspec.SecretRegistration{}, err
 	}
 	if snapshot.Run.ID != code.Accepted.RunID {
-		return nil, executorError(apierr.SpecDrift, "expansion snapshot belongs to another run")
+		return nil, runspec.SecretRegistration{}, executorError(apierr.SpecDrift, "expansion snapshot belongs to another run")
 	}
 	validation := h.Validation
 	validation.Expansion, validation.SourceJob = true, code.NodeID
@@ -204,16 +211,31 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	for _, row := range snapshot.Nodes {
 		var existing nodeproto.JobSpec
 		if err := json.Unmarshal(row.Spec, &existing); err != nil || row.Ref.RunID != runspec.RunID(code.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(existing.ID) {
-			return nil, executorError(apierr.PlanDrift, "expansion snapshot has invalid declarations")
+			return nil, runspec.SecretRegistration{}, executorError(apierr.PlanDrift, "expansion snapshot has invalid declarations")
 		}
 		validation.ExistingJobs = append(validation.ExistingJobs, existing)
 	}
 	body, err := h.generate(ctx, session, code, job, output)
 	if err != nil {
-		return nil, err
+		return nil, runspec.SecretRegistration{}, err
 	}
-	_, err = h.ValidatePlan(body, validation)
-	return body, err
+	plan, err := h.ValidatePlan(body, validation)
+	if err != nil {
+		return nil, runspec.SecretRegistration{}, err
+	}
+	if err := nodeproto.ValidateJobArgumentNamespace(spec.Resolved.ArgumentDeclarations, append(validation.ExistingJobs, plan.Jobs...)); err != nil {
+		return nil, runspec.SecretRegistration{}, err
+	}
+	if err := nodeproto.VisitPlanIdentifiers(plan, func(value, path string) error {
+		if h.deps.Masker.ContainsSecret(value) {
+			return identifierMaskError(path)
+		}
+		return nil
+	}); err != nil {
+		return nil, runspec.SecretRegistration{}, err
+	}
+	registration, err := generatorRegistration(spec, session.arguments)
+	return body, registration, err
 }
 
 var _ EvaluationStore = (*store.Tenant)(nil)

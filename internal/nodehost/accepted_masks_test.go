@@ -45,6 +45,7 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 							spec.Resolved.SecretArgs = []string{"default_token"}
 							spec.Resolved.Args = map[string]string{"default_token": value}
 						}
+						spec.Resolved.SecretRegistration, _ = runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 						input.Accepted.Spec, _ = json.Marshal(spec)
 						_, claimed, _, buildErr := NewNativeHost(config)
 						if buildErr != nil {
@@ -54,7 +55,7 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 						err = claimed.Execute(t.Context(), input)
 					} else {
 						state, host, input := newOwnerFixture(t, placement == "resumed")
-						host.Masks, host.Mask = masks, masks.masker.Mask
+						host.Masks, host.Masker = masks, masks.masker
 						request := &state.snapshot.Run.Request.Request
 						request.RequestedArgs = map[string]string{"token": value}
 						request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
@@ -66,6 +67,7 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 							spec.Request.Request.RequestedArgs = nil
 							spec.Resolved.Args = map[string]string{"default_token": value}
 							spec.Resolved.SecretArgs = []string{"default_token"}
+							spec.Resolved.SecretRegistration, _ = runspec.BuildSecretRegistration(spec.Request.Request, spec.Resolved)
 							state.snapshot.Run.Request = spec.Request
 							input.SealedRequest, _ = json.Marshal(spec.Request.Request)
 							accepted, acceptErr := ownerAccepted(state.snapshot.Run)
@@ -90,5 +92,18 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDescribeRegistersTypedSecretListParts(t *testing.T) {
+	masker := secrets.NewMasker()
+	planner := SDKPlanner{Masker: masker, Masks: NewMaskRegistry(masker)}
+	raw := json.RawMessage(`{"pipelines":[{"name":"list","args":[{"name":"tokens","type":"[]string","secret":true,"default":"default-first-secret,default-second-secret"},{"name":"token","type":"string","secret":true}]}]}`)
+	_, complete, err := planner.describe(raw, PlanningProcessInput{Entrypoint: "list", Args: map[string]string{"tokens": "supplied-first-secret,supplied-second-secret", "token": "pw,1"}}, false)
+	if err != nil || !complete {
+		t.Fatalf("describe complete=%v err=%v", complete, err)
+	}
+	if got := masker.Mask("default-first-secret default-second-secret supplied-first-secret supplied-second-secret pw,1 revision 1"); got != "*** *** *** *** *** revision 1" {
+		t.Fatalf("list masking=%q", got)
 	}
 }

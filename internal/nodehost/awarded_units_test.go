@@ -61,11 +61,11 @@ func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 		state.record("acquire")
 		return &source.Entry{Engine: engine.Resolved{Identity: spec.Resolved.Engine}}, context.Cause(ctx)
 	}
-	host.Expand = func(_ context.Context, evaluation EvaluationInput, observed store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+	host.Expand = func(_ context.Context, evaluation EvaluationInput, observed store.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		if evaluation.Generation != 0 || runspec.NodeID(evaluation.NodeID) != row.Ref.NodeID || evaluation.SpecHash != row.SpecHash || observed.Generation != 0 {
 			t.Fatal("eval replaced the source identity with its lease or a work attempt")
 		}
-		return json.RawMessage(`{"jobs":[]}`), nil, nil
+		return json.RawMessage(`{"jobs":[]}`), runspec.SecretRegistration{Version: 1}, nil, nil
 	}
 	if err := host.Evaluate(t.Context(), input, string(row.Ref.NodeID), int64(row.Generation), fence); err != nil {
 		t.Fatal(err)
