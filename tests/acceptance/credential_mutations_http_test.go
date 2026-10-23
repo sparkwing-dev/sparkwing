@@ -81,12 +81,19 @@ func (f *credentialMutationFake) record(a capability.Authorized) error {
 	return f.err
 }
 
-func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Authorized, sealed store.SealedSecret) error {
+func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Authorized, sealed store.SealedSecret) (store.Secret, error) {
 	row := sealed.Row()
 	if err := f.record(a); err != nil {
-		return err
+		return store.Secret{}, err
 	}
-	return teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store))
+	if err := teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store)); err != nil {
+		return store.Secret{}, err
+	}
+	stored, err := f.Tenant.GetSecretRow(row.Name, row.Pipeline)
+	if err != nil {
+		return store.Secret{}, err
+	}
+	return *stored, nil
 }
 
 func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
