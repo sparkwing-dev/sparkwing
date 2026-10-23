@@ -1036,3 +1036,7 @@ separate operations; no database transaction stays open across a provider call.
 
 - Claim ranking (here, personal, github-actions, self-hosted, cloud) is enforced by holding a ready job, not by per-job asks. A job that names no runner is held for the best-ranked tier that has a live claimant of the same team which matches the job's labels and currently has a free slot; lower tiers skip it until that claimant takes it or the 5-second ranking window ends, after which any eligible claimant may take it. A busy or offline better tier causes no wait. The unit_asks table and per-poll ask writes are deleted; a claim is one indexed lookup.
 - Choosing a runner for a job stays: Prefers orders placement for that job and its holds still apply. Choosing a job for a runner is removed: a claimant takes the next eligible job by fair share and arrival, with no per-runner preference scoring.
+
+## 2026-10-23 Korey decision 53: SDK support packages stay internal
+
+- Packages the Go SDK needs (error codes, limits, the plan protocol, the SDK server and small helpers) stay under internal/, where Go keeps customers from importing them. The depguard "SDK imports no internal packages" rule becomes "the SDK imports only these named internal leaf packages", an explicit list whose members may never import the controller, the store or other server packages. pkg/ is not widened: it remains the deliberate public API with VERSIONING.md's stability promise.
