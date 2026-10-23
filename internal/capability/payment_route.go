@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 const paymentDeploymentMetadata = "sparkwing_deployment"
@@ -55,7 +55,7 @@ func moneyEvent(kind PaymentEventKind) bool {
 // deployment's stamp is foreign unless we recorded the object, which is an integrity fault whatever its outcome; our
 // stamp or a committed parent is local, retried while a money event's parent is unrecorded; an unstamped child needs
 // our stamp on its intent.
-func (a *paymentAuthenticator) classify(ctx context.Context, policy PaymentEventPolicy, body []byte, scope PaymentScope) (PaymentRoute, bool, error) {
+func (a *paymentAuthenticator) classify(ctx context.Context, policy paymentEventPolicy, body []byte, scope PaymentScope) (PaymentRoute, bool, error) {
 	var head struct {
 		ID            string           `json:"id"`
 		Object        string           `json:"object"`

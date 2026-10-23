@@ -32,7 +32,7 @@ type Spec struct {
 	Prompt string
 }
 
-func (s Spec) HasGuards() bool { return len(s.GuardRequire) > 0 || len(s.GuardReject) > 0 }
+func (s Spec) hasGuards() bool { return len(s.GuardRequire) > 0 || len(s.GuardReject) > 0 }
 
 func LoadCorpus(fsys fs.FS, root string) ([]Spec, error) {
 	entries, err := fs.ReadDir(fsys, root)

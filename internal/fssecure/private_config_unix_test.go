@@ -26,7 +26,7 @@ func TestPrivateConfigOpenerDoesNotFollowSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.yaml")
 	link := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(target, []byte("token: private\n"), FileMode); err != nil {
+	if err := os.WriteFile(target, []byte("token: private\n"), fileMode); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, link); err != nil {

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // Plan holds the job graph populated by a pipeline's Plan method.

@@ -15,8 +15,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func readOutput(routes nodeproto.ProcessRoutes, node string) error {

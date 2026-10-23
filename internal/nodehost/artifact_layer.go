@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // Prepare implements the artifact portion of ExecutorDependencies.PrepareArtifacts.

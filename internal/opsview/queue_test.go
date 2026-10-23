@@ -1,4 +1,4 @@
-package opsview_test
+package opsview
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -21,7 +20,7 @@ func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Resources: wingwire.HostResources{Cores: 5}}},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -52,7 +51,7 @@ func TestExternalAmountDistinguishesUnknownAndUnattributed(t *testing.T) {
 		{name: "unattributed", source: wingwire.ExternalUnattributed, external: 1.25, want: "1.25 (unattributed)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := opsview.ExternalAmount(wingwire.ResourceState{Key: "cores", External: tc.external, ExternalSource: tc.source})
+			got := externalAmount(wingwire.ResourceState{Key: "cores", External: tc.external, ExternalSource: tc.source})
 			if got != tc.want {
 				t.Fatalf("ExternalAmount() = %q, want %q", got, tc.want)
 			}
@@ -83,7 +82,7 @@ func TestRenderQueuePretty_UsesDisplayRunID(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -129,7 +128,7 @@ func TestRenderQueuePretty_ShowsAdmissionWaitingRunOnce(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -169,7 +168,7 @@ func TestRenderQueuePretty_ShowsConnectedRunWhileItsNodeWaits(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -207,7 +206,7 @@ func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueue(&buf, qs, "plain"); err != nil {
+	if err := RenderQueue(&buf, qs, "plain"); err != nil {
 		t.Fatalf("render plain: %v", err)
 	}
 	out := buf.String()
@@ -253,7 +252,7 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Priority: 25}},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueue(&buf, want, "json"); err != nil {
+	if err := RenderQueue(&buf, want, "json"); err != nil {
 		t.Fatalf("render json: %v", err)
 	}
 	var got wingwire.QueueState
@@ -281,7 +280,7 @@ func TestRenderQueue_SeparatesConnectionsFromResourceHolders(t *testing.T) {
 	}}
 
 	var pretty bytes.Buffer
-	if err := opsview.RenderQueuePretty(&pretty, qs); err != nil {
+	if err := RenderQueuePretty(&pretty, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := pretty.String()
@@ -292,7 +291,7 @@ func TestRenderQueue_SeparatesConnectionsFromResourceHolders(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	if err := opsview.RenderQueue(&plain, qs, "plain"); err != nil {
+	if err := RenderQueue(&plain, qs, "plain"); err != nil {
 		t.Fatalf("render plain: %v", err)
 	}
 	if !strings.Contains(plain.String(), "connected\tconnected-run") || !strings.Contains(plain.String(), "holder\tholding-run") {
@@ -313,7 +312,7 @@ func TestRenderQueuePretty_CountsARunningPipelineOnce(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -331,7 +330,7 @@ func TestRenderQueuePretty_ShowsCapacityChangeAndRunners(t *testing.T) {
 		Runners:        []wingwire.RunnerHeadroom{{Name: "host-7", Cores: 3.5, QueueDepth: 2}},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -354,7 +353,7 @@ func TestRenderQueuePretty_ExplainsSoftCoreAllowance(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -387,7 +386,7 @@ func TestRenderQueuePretty_NoSoftCoreNoteWithinCapacity(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if strings.Contains(buf.String(), "soft-core") {
@@ -405,7 +404,7 @@ func TestRenderQueuePretty_NoSoftCoreNoteForPinnedOvercommit(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if strings.Contains(buf.String(), "soft-core") {
@@ -423,7 +422,7 @@ func TestRenderQueuePlain_OmitsSoftCoreNote(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderLocalQueue(&buf, qs, opsview.Serving(), "plain"); err != nil {
+	if err := renderLocalQueue(&buf, qs, serving(), "plain"); err != nil {
 		t.Fatalf("render plain: %v", err)
 	}
 	if strings.Contains(buf.String(), "soft-core") {

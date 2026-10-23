@@ -70,7 +70,7 @@ func TestInstallerPrefixRebuildsTheTrustedKeys(t *testing.T) {
 	prefix := match[1]
 
 	for _, encoded := range installerTrustedKeys(t) {
-		want, err := PublicKey(encoded)
+		want, err := publicKey(encoded)
 		if err != nil {
 			t.Fatalf("installer key %q: %v", encoded, err)
 		}

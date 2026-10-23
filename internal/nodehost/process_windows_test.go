@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
 func TestSDKProcessWindowsChild(t *testing.T) {

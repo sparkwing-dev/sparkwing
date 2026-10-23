@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -16,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -25,11 +24,11 @@ type s3HTTP func(*http.Request) (*http.Response, error)
 func (f s3HTTP) Do(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestS3SigningAndCommit(t *testing.T) {
-	object := blob.Blob{Team: "team", Digest: digest("hello"), Size: 5}
+	object := Blob{Team: "team", Digest: digest("hello"), Size: 5}
 	raw, _ := hex.DecodeString(string(object.Digest))
 	checksum := base64.StdEncoding.EncodeToString(raw)
 	pending := "teams/team/pending/ticket"
-	final, err := blob.ObjectKey(object.Team, object.Digest)
+	final, err := ObjectKey(object.Team, object.Digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +79,7 @@ func TestS3SigningAndCommit(t *testing.T) {
 			return response, nil
 		}),
 	})
-	backend, err := blob.NewS3(client, "bucket", "")
+	backend, err := NewS3(client, "bucket", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,12 +107,12 @@ func TestS3SigningAndCommit(t *testing.T) {
 	if err := backend.DeleteObject(t.Context(), pending); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, blob.ErrNotFound) {
+	if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("commit without this ticket's staging: %v", err)
 	}
 	objects[pending] = checksum
 	objects[final] = "different checksum"
-	if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, blob.ErrIntegrity) {
+	if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("corrupt final: %v", err)
 	}
 	get, err := backend.Sign(t.Context(), capability.ObjectToSign{Method: http.MethodGet, Key: final, Size: 5, SHA256: string(object.Digest), ExpiresAt: time.Now().Add(time.Minute)})

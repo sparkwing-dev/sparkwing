@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -19,8 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestHostLifecycleEvents(t *testing.T) {
@@ -89,7 +89,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				result, err := FollowReconciliation(ctx, fixture.Tenant, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: runstate.SourceResume}, nil)
+				result, err := followReconciliation(ctx, fixture.Tenant, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: runstate.SourceResume}, nil)
 				if err != nil || result.Kind != runstate.KeepTerminal || result.Claim != nil || len(result.Bearer) != 0 {
 					t.Fatalf("adopted terminal result=%+v, error=%v", result, err)
 				}

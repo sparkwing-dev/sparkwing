@@ -10,11 +10,11 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestRawStdoutCountsAsProgress(t *testing.T) {
@@ -27,7 +27,7 @@ func TestRawStdoutCountsAsProgress(t *testing.T) {
 	var progress int
 	var output []nodeproto.FrameLog
 	logs := &planningLogs{known: true, masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodeproto.FrameLog) error { output = append(output, frame); return nil }}
-	session := &ProtocolSession{logCtx: t.Context(), cfg: ProtocolSessionConfig{output: logs, Activity: ExecutorActivity{Progress: func() { progress++ }}}}
+	session := &protocolSession{logCtx: t.Context(), cfg: ProtocolSessionConfig{output: logs, Activity: ExecutorActivity{Progress: func() { progress++ }}}}
 	session.streams.Add(1)
 	go session.readProtocolText(r, "info")
 	if _, err := w.Write([]byte("raw line\n")); err != nil {
@@ -122,7 +122,7 @@ func TestGeneratedDeclarationsRegisterRawDefaultsAndListItemsBeforeRelease(t *te
 	masker := secrets.NewMasker()
 	var output strings.Builder
 	logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { output.WriteString(frame.Message); return nil }}
-	session := ProtocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
+	session := protocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
 	raw := " first-private , second-private "
 	spec := runspec.Spec{Request: runspec.SealedRequest{Request: runspec.Request{RequestedArgs: map[string]string{"later": raw}}}, Resolved: runspec.Resolved{Args: map[string]string{"later": "first-private,second-private"}}}
 	def := "default-first, default-second"
@@ -159,7 +159,7 @@ func TestFailedGeneratorWithholdsUnclassifiedOutputAndError(t *testing.T) {
 	var output strings.Builder
 	masker := secrets.NewMasker()
 	logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { output.WriteString(frame.Message); return nil }}
-	session := ProtocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
+	session := protocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
 	session.gateDeclarations()
 	if err := logs.text(t.Context(), "info", "unknown-private-value\n", false); err != nil {
 		t.Fatal(err)

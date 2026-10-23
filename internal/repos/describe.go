@@ -16,16 +16,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-// SessionTimeout bounds one conversation with a pipeline binary, from start
+// sessionTimeout bounds one conversation with a pipeline binary, from start
 // to its last reply.
-const SessionTimeout = 30 * time.Second
+const sessionTimeout = 30 * time.Second
 
-// Session is one pipeline process answering requests in turn.
-type Session struct {
+// session is one pipeline process answering requests in turn.
+type session struct {
 	requests *nodeproto.Writer
 	frames   *nodeproto.Reader
 	next     int
@@ -34,10 +34,10 @@ type Session struct {
 	gate     *runspec.DeclarationGate
 }
 
-// Call sends req with the next request id and decodes the reply's result into
+// call sends req with the next request id and decodes the reply's result into
 // result. A failed reply returns its [*apierr.Error]; the process stays up
 // for the next request.
-func (s *Session) Call(req nodeproto.Request, result any) error {
+func (s *session) call(req nodeproto.Request, result any) error {
 	if s.broken != nil {
 		return s.broken
 	}
@@ -51,10 +51,10 @@ func (s *Session) Call(req nodeproto.Request, result any) error {
 	return reply.Decode(result)
 }
 
-// Describe sends describe after the session's protocol handshake.
-func (s *Session) Describe() (*runspec.DeclarationGate, error) {
+// describe sends describe after the session's protocol handshake.
+func (s *session) describe() (*runspec.DeclarationGate, error) {
 	var doc nodeproto.DescribeDoc
-	err := s.Call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc)
+	err := s.call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc)
 	if err != nil {
 		return nil, err
 	}
@@ -68,22 +68,22 @@ func (s *Session) Describe() (*runspec.DeclarationGate, error) {
 // Describe starts the pipeline entry in dir and returns its describe reply.
 func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (*runspec.DeclarationGate, error) {
 	var doc *runspec.DeclarationGate
-	err := Converse(ctx, entry, dir, func(s *Session) (err error) {
-		doc, err = s.Describe()
+	err := converse(ctx, entry, dir, func(s *session) (err error) {
+		doc, err = s.describe()
 		return err
 	})
 	return doc, err
 }
 
-// Converse starts the pipeline entry in dir with --sw-node-protocol and hands
-// talk a [Session] on it. A process that has not finished within
-// [SessionTimeout] is killed with every process it started.
-func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk func(*Session) error) (result error) {
-	ctx, cancel := context.WithTimeoutCause(ctx, SessionTimeout,
-		fmt.Errorf("%s: no reply within %s: %w", entry[len(entry)-1], SessionTimeout, context.DeadlineExceeded))
+// converse starts the pipeline entry in dir with --sw-node-protocol and hands
+// talk a [session] on it. A process that has not finished within
+// [sessionTimeout] is killed with every process it started.
+func converse(ctx context.Context, entry pipelineentry.Command, dir string, talk func(*session) error) (result error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, sessionTimeout,
+		fmt.Errorf("%s: no reply within %s: %w", entry[len(entry)-1], sessionTimeout, context.DeadlineExceeded))
 	defer cancel()
 	masker := secrets.NewMasker()
-	var s *Session
+	var s *session
 	defer func() {
 		if result != nil {
 			var gate *runspec.DeclarationGate
@@ -126,9 +126,9 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 		close(killed)
 	})
 
-	s = &Session{requests: nodeproto.NewWriter(reqW), frames: nodeproto.NewReader(frameR), masker: masker}
+	s = &session{requests: nodeproto.NewWriter(reqW), frames: nodeproto.NewReader(frameR), masker: masker}
 	var hello nodeproto.HelloResult
-	talkErr := s.Call(nodeproto.Request{
+	talkErr := s.call(nodeproto.Request{
 		Op: nodeproto.OpHello, Protocol: nodeproto.Version,
 		Engine: &nodeproto.EngineIdentity{Version: buildinfo.Read("sparkwing", "").Version},
 		Runner: &nodeproto.RunnerIdentity{Name: "describe", Type: "local", Labels: []string{}},

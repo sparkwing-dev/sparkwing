@@ -1,4 +1,4 @@
-package crons_test
+package crons
 
 import (
 	"context"
@@ -7,21 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestRefuseBelowMinInterval(t *testing.T) {
-	if err := crons.RefuseBelowMinInterval("*/5 * * * *", "UTC", 0); err != nil {
+	if err := refuseBelowMinInterval("*/5 * * * *", "UTC", 0); err != nil {
 		t.Fatalf("an unset guard refused %v", err)
 	}
-	if err := crons.RefuseBelowMinInterval("", "UTC", 900); err != nil {
+	if err := refuseBelowMinInterval("", "UTC", 900); err != nil {
 		t.Fatalf("an empty expression refused %v", err)
 	}
-	if err := crons.RefuseBelowMinInterval("0 * * * *", "UTC", 900); err != nil {
+	if err := refuseBelowMinInterval("0 * * * *", "UTC", 900); err != nil {
 		t.Fatalf("an hourly schedule refused %v", err)
 	}
-	err := crons.RefuseBelowMinInterval("*/5 * * * *", "UTC", 900)
+	err := refuseBelowMinInterval("*/5 * * * *", "UTC", 900)
 	var refused *store.ComputeLimitError
 	if !errors.As(err, &refused) || refused.Limit != store.ComputeLimitCronSeconds {
 		t.Fatalf("a five-minute schedule under a fifteen-minute guard = %v", err)

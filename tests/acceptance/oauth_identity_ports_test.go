@@ -10,7 +10,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestOAuthHTTPGitHubPrimaryEmailProperty(t *testing.T) {

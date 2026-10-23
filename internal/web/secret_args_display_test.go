@@ -50,7 +50,7 @@ func TestSecretArgs_ListRunsHandlerRedacts(t *testing.T) {
 		},
 	}
 	rec := httptest.NewRecorder()
-	ListRunsHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil))
+	listRunsHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -67,7 +67,7 @@ func TestSecretArgs_GetRunHandlerRedacts(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/r1", nil)
 	req.SetPathValue("id", "r1")
 	rec := httptest.NewRecorder()
-	GetRunHandler(b)(rec, req)
+	getRunHandler(b)(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -76,7 +76,7 @@ func TestSecretArgs_GetRunHandlerRedacts(t *testing.T) {
 	reqNodes := httptest.NewRequest(http.MethodGet, "/api/v1/runs/r1?include=nodes", nil)
 	reqNodes.SetPathValue("id", "r1")
 	recNodes := httptest.NewRecorder()
-	GetRunHandler(b)(recNodes, reqNodes)
+	getRunHandler(b)(recNodes, reqNodes)
 	assertWebRedacted(t, "dashboard GET /api/v1/runs/{id}?include=nodes", recNodes.Body.String())
 }
 
@@ -87,7 +87,7 @@ func TestSecretArgs_GetRunHandlerLeavesBackendRunUntouched(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/r1", nil)
 	req.SetPathValue("id", "r1")
-	GetRunHandler(b)(httptest.NewRecorder(), req)
+	getRunHandler(b)(httptest.NewRecorder(), req)
 
 	if shared.Args["token"] != runspec.RedactedArgValue {
 		t.Errorf("handler mutated the shared run: Args[token] = %q", shared.Args["token"])

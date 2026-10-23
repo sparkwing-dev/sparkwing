@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
 func goSDKCommandPipes(command *exec.Cmd, request, frame *os.File) error {

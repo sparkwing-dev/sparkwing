@@ -3,12 +3,11 @@ package logpretty
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 )
 
-type QuietRenderer struct {
+type quietRenderer struct {
 	mu       sync.Mutex
 	w        io.Writer
 	errW     io.Writer
@@ -17,15 +16,7 @@ type QuietRenderer struct {
 	pendingSummary *Record
 }
 
-func NewQuietRenderer() *QuietRenderer {
-	return &QuietRenderer{
-		w:        os.Stdout,
-		errW:     os.Stderr,
-		useColor: os.Getenv("NO_COLOR") == "",
-	}
-}
-
-func (q *QuietRenderer) color(s, code string) string {
+func (q *quietRenderer) color(s, code string) string {
 	if !q.useColor {
 		return s
 	}
@@ -33,16 +24,16 @@ func (q *QuietRenderer) color(s, code string) string {
 }
 
 // safety: pipeline output reaches the terminal here, so escape sequences are filtered before printing.
-func (q *QuietRenderer) sanitize(s string) string {
+func (q *quietRenderer) sanitize(s string) string {
 	if q.useColor {
-		return SanitizeANSI(s)
+		return sanitizeANSI(s)
 	}
 	return StripANSI(s)
 }
 
-func (q *QuietRenderer) sanitizeInline(s string) string { return foldLines(q.sanitize(s)) }
+func (q *quietRenderer) sanitizeInline(s string) string { return foldLines(q.sanitize(s)) }
 
-func (q *QuietRenderer) emit(rec Record) {
+func (q *quietRenderer) emit(rec Record) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	switch rec.Event {
@@ -57,7 +48,7 @@ func (q *QuietRenderer) emit(rec Record) {
 	}
 }
 
-func (q *QuietRenderer) Flush() {
+func (q *quietRenderer) Flush() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.pendingSummary != nil {
@@ -66,7 +57,7 @@ func (q *QuietRenderer) Flush() {
 	}
 }
 
-func (q *QuietRenderer) writeStart(rec Record) {
+func (q *quietRenderer) writeStart(rec Record) {
 	pipeline, _ := rec.Attrs["pipeline"].(string)
 	if pipeline == "" {
 		pipeline = "pipeline"
@@ -92,7 +83,7 @@ func profileName(attrs map[string]any) string {
 	return name
 }
 
-func (q *QuietRenderer) writeFinish(finish Record) {
+func (q *quietRenderer) writeFinish(finish Record) {
 	runID, _ := finish.Attrs["run_id"].(string)
 	status, _ := finish.Attrs["status"].(string)
 
@@ -128,7 +119,7 @@ func (q *QuietRenderer) writeFinish(finish Record) {
 	}
 }
 
-func (q *QuietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID string) {
+func (q *quietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID string) {
 	for _, n := range nodes {
 		m, ok := n.(map[string]any)
 		if !ok || m["outcome"] != "failed" {

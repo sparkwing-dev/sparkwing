@@ -31,7 +31,7 @@ func (Gate) ShortHelp() string {
 }
 
 func (Gate) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged) apart from internal/store, which cannot finish inside the step's budget and races in pre-release instead, runs the internal/store suite against an embedded Postgres when that change touches internal/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through pkg/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It runs the architecture guards (`go run ./internal/guardcheck .`: the depguard and F1 forbidigo rules in .golangci-guards.yml and the internal/ unexport-candidate counts) over the whole tree, with no origin/main baseline, against the allow-lists in .guards/. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged) apart from internal/store, which cannot finish inside the step's budget and races in pre-release instead, runs the internal/store suite against an embedded Postgres when that change touches internal/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It runs the architecture guards (`go run ./internal/guardcheck .`: the depguard and F1 forbidigo rules in .golangci-guards.yml and the internal/ unexport-candidate counts) over the whole tree, with no origin/main baseline, against the allow-lists in .guards/. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push."
 }
 
 func (Gate) Examples() []sparkwing.Example {
@@ -281,20 +281,20 @@ var homeRules = []homeRule{
 		label:   "read SPARKWING_HOME from the environment",
 		pattern: homeEnvRead,
 		allowed: map[string]string{
-			"pkg/paths/paths.go":                "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
+			"internal/paths/paths.go":           "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
 			"internal/storage/storeurl/spec.go": "storage URL configuration carries its own test-sandbox redirect",
 		},
-		advice: "Call pkg/paths.DefaultPaths() instead, which honors SPARKWING_HOME the same way and adds the test-sandbox redirect that keeps a test binary out of the developer's real ~/.sparkwing.",
+		advice: "Call internal/paths.DefaultPaths() instead, which honors SPARKWING_HOME the same way and adds the test-sandbox redirect that keeps a test binary out of the developer's real ~/.sparkwing.",
 	},
 	{
 		label:   "build the sparkwing home from a home directory",
 		pattern: homeDirJoin,
 		allowed: map[string]string{
-			"pkg/paths/paths.go":                  "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
+			"internal/paths/paths.go":             "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
 			"internal/storage/storeurl/spec.go":   "storage URL configuration carries its own test-sandbox redirect",
 			"internal/configguard/configguard.go": "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
 		},
-		advice: "Call pkg/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
+		advice: "Call internal/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
 	},
 }
 
@@ -348,7 +348,7 @@ func checkHomeResolution(ctx context.Context) error {
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the sparkwing home must be resolved through pkg/paths:\n\n%s",
+	return fmt.Errorf("the sparkwing home must be resolved through internal/paths:\n\n%s",
 		strings.Join(failures, "\n\n"))
 }
 
@@ -603,7 +603,7 @@ func productTestScript(cmd, home string) string {
 }
 
 // safety: a helper binary a suite starts is not a *.test binary, so
-// pkg/paths resolves the operator's home for it rather than a per-pid
+// internal/paths resolves the operator's home for it rather than a per-pid
 // sandbox, and it opens the real runs store. A home of the step's own is what
 // the suite reaches instead.
 func withProductTestHome(run func(home string) error) error {

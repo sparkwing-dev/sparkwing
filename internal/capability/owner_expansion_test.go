@@ -1,33 +1,31 @@
-package capability_test
+package capability
 
 import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func ownerExpansionDelegation() (capability.Principal, capability.DelegateSpec) {
-	parent := capability.Principal{
-		Class:     capability.CredentialBearer,
-		Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"},
-		Capability: capability.Capability{
-			Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
-			Prefix:  "owner", Audience: capability.Controller, Team: "team", Unit: capability.UnitTrigger, UnitID: "trigger",
-			Purpose: capability.PurposeTrigger, Issuance: capability.Award, Grants: []capability.Grant{capability.ExpansionSubmit, capability.DataRead, capability.NodeResult},
-			Binding: capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Generation: 9, Holder: "host"},
-			Data:    &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "github.com/team/repo", RunID: "run", Generation: 9, WriteRef: "manual:main", ReadRefs: []string{"main", "manual:main"}, VerifiedDefaultOnly: true},
+func ownerExpansionDelegation() (Principal, DelegateSpec) {
+	parent := Principal{
+		Class:     CredentialBearer,
+		Authority: AuthorityRef{Kind: AuthorityCapability, ID: "owner"},
+		Capability: Capability{
+			Subject: Subject{Kind: SubjectMachine, ID: "host"},
+			Prefix:  "owner", Audience: Controller, Team: "team", Unit: UnitTrigger, UnitID: "trigger",
+			Purpose: PurposeTrigger, Issuance: Award, Grants: []Grant{ExpansionSubmit, DataRead, NodeResult},
+			Binding: Binding{Kind: BindingTrigger, RunID: "run", Generation: 9, Holder: "host"},
+			Data:    &DataScope{Use: DataClaim, RepositoryKey: "github.com/team/repo", RunID: "run", Generation: 9, WriteRef: "manual:main", ReadRefs: []string{"main", "manual:main"}, VerifiedDefaultOnly: true},
 		},
 	}
-	child := capability.DelegateSpec{
-		Parent: parent.Authority, Audience: capability.Controller,
-		Grants: []capability.Grant{capability.ExpansionSubmit, capability.DataRead},
-		Binding: capability.Binding{
-			Kind: capability.BindingNode, RunID: "run", NodeID: "source", Generation: 4, Holder: "source-runner", Attempt: 2,
-			Expansion: &capability.LeaseRef{Kind: capability.UnitTrigger, ID: "trigger", Generation: 9, Holder: "host"},
+	child := DelegateSpec{
+		Parent: parent.Authority, Audience: Controller,
+		Grants: []Grant{ExpansionSubmit, DataRead},
+		Binding: Binding{
+			Kind: BindingNode, RunID: "run", NodeID: "source", Generation: 4, Holder: "source-runner", Attempt: 2,
+			Expansion: &LeaseRef{Kind: UnitTrigger, ID: "trigger", Generation: 9, Holder: "host"},
 		},
-		Data: &capability.DataScope{Use: capability.DataExpansion, RepositoryKey: "github.com/team/repo", RunID: "run", NodeID: "source", Generation: 4, Attempt: 2, ReadRefs: []string{"main"}, VerifiedDefaultOnly: true},
+		Data: &DataScope{Use: DataExpansion, RepositoryKey: "github.com/team/repo", RunID: "run", NodeID: "source", Generation: 4, Attempt: 2, ReadRefs: []string{"main"}, VerifiedDefaultOnly: true},
 	}
 	return parent, child
 }
@@ -35,18 +33,18 @@ func ownerExpansionDelegation() (capability.Principal, capability.DelegateSpec) 
 func TestOwnerExpansionDataIsReadOnly(t *testing.T) {
 	parent, child := ownerExpansionDelegation()
 	principal := parent
-	principal.Capability.Issuance = capability.Delegate
+	principal.Capability.Issuance = Delegate
 	principal.Capability.Binding, principal.Capability.Data, principal.Capability.Grants = child.Binding, child.Data, child.Grants
-	a := capability.Authorized{
-		Principal: principal, Binding: child.Binding, Target: capability.Target{Team: "team"},
-		Access: capability.AccessRule{Grants: []capability.Grant{capability.DataRead}, Binding: capability.BindData, Liveness: capability.LiveExpansion},
+	a := Authorized{
+		Principal: principal, Binding: child.Binding, Target: Target{Team: "team"},
+		Access: AccessRule{Grants: []Grant{DataRead}, Binding: BindData, Liveness: LiveExpansion},
 	}
 	calls := 0
-	edges := dataCheck(func(context.Context, capability.Authorized, capability.DataTarget) error { calls++; return nil })
-	if err := capability.AuthorizeData(t.Context(), edges, a, capability.DataTarget{Operation: capability.DataDownload, Digest: "source-output"}); err != nil || calls != 1 {
+	edges := dataCheck(func(context.Context, Authorized, DataTarget) error { calls++; return nil })
+	if err := AuthorizeData(t.Context(), edges, a, DataTarget{Operation: DataDownload, Digest: "source-output"}); err != nil || calls != 1 {
 		t.Fatalf("source data read: calls=%d, err=%v", calls, err)
 	}
-	if err := capability.AuthorizeData(t.Context(), edges, a, capability.DataTarget{Operation: capability.DataUpload}); err == nil || calls != 1 {
+	if err := AuthorizeData(t.Context(), edges, a, DataTarget{Operation: DataUpload}); err == nil || calls != 1 {
 		t.Fatalf("expansion data write: calls=%d, err=%v", calls, err)
 	}
 }
@@ -54,7 +52,7 @@ func TestOwnerExpansionDataIsReadOnly(t *testing.T) {
 func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	parent, child := ownerExpansionDelegation()
-	if err := capability.ValidateDelegation(parent, child, now); err != nil {
+	if err := ValidateDelegation(parent, child, now); err != nil {
 		t.Fatalf("source expansion narrowing refused: %v", err)
 	}
 	for _, name := range []string{"another run", "another lease", "another holder", "another generation", "eval lease", "nodehost expansion", "missing source", "negative source generation", "added reporting", "added discovery", "added source access", "without expansion grant", "unbound root", "work claim", "expired owner", "later deadline", "later claim window", "lost reservation", "source widening", "foreign data repo", "extra ref", "data writes", "claim data", "wrong data source", "wrong data generation", "wrong data attempt", "lost default guard", "parent data restricted"} {
@@ -70,28 +68,28 @@ func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 			case "another generation":
 				child.Binding.Expansion.Generation++
 			case "eval lease":
-				child.Binding.Expansion.Kind = capability.UnitEval
+				child.Binding.Expansion.Kind = UnitEval
 			case "nodehost expansion":
-				child.Audience = capability.NodeHost
+				child.Audience = NodeHost
 			case "missing source":
 				child.Binding.NodeID = ""
 			case "negative source generation":
 				child.Binding.Generation = -1
 			case "added reporting":
-				child.Grants = append(child.Grants, capability.NodeResult)
+				child.Grants = append(child.Grants, NodeResult)
 			case "added discovery":
-				parent.Capability.Grants = append(parent.Capability.Grants, capability.RunsRead)
-				child.Grants = append(child.Grants, capability.RunsRead)
+				parent.Capability.Grants = append(parent.Capability.Grants, RunsRead)
+				child.Grants = append(child.Grants, RunsRead)
 			case "added source access":
-				parent.Capability.Grants = append(parent.Capability.Grants, capability.SourceRead)
-				child.Grants = append(child.Grants, capability.SourceRead)
+				parent.Capability.Grants = append(parent.Capability.Grants, SourceRead)
+				child.Grants = append(child.Grants, SourceRead)
 			case "without expansion grant":
-				parent.Capability.Grants = []capability.Grant{capability.DataRead}
-				child.Grants = []capability.Grant{capability.DataRead}
+				parent.Capability.Grants = []Grant{DataRead}
+				child.Grants = []Grant{DataRead}
 			case "unbound root":
-				parent.Capability.Binding.Kind = capability.BindingNone
+				parent.Capability.Binding.Kind = BindingNone
 			case "work claim":
-				parent.Capability.Unit, parent.Capability.Purpose = capability.UnitNode, capability.PurposeWork
+				parent.Capability.Unit, parent.Capability.Purpose = UnitNode, PurposeWork
 			case "expired owner":
 				parent.Capability.ExpiresAt = &now
 			case "later deadline":
@@ -113,7 +111,7 @@ func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 				child.Data.WriteRef = "manual:main"
 			case "claim data":
 				parent.Capability.Data.Generation = 0
-				child.Data.Use = capability.DataClaim
+				child.Data.Use = DataClaim
 			case "wrong data source":
 				child.Data.NodeID = "sibling"
 			case "wrong data generation":
@@ -125,17 +123,17 @@ func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 			case "parent data restricted":
 				parent.Capability.Data.NodeID = "sibling"
 			}
-			if err := capability.ValidateDelegation(parent, child, now); err == nil {
+			if err := ValidateDelegation(parent, child, now); err == nil {
 				t.Fatal("widened source expansion delegation accepted")
 			}
 		})
 	}
 	parent, child = ownerExpansionDelegation()
 	window := now.Add(time.Minute)
-	parent.Capability.Purpose = capability.PurposeHere
+	parent.Capability.Purpose = PurposeHere
 	parent.Capability.Binding.Reservation, child.Binding.Reservation = "here:run", "here:run"
 	parent.Capability.Binding.ClaimBy, child.Binding.ClaimBy = &window, &window
-	if err := capability.ValidateDelegation(parent, child, now); err != nil {
+	if err := ValidateDelegation(parent, child, now); err != nil {
 		t.Fatalf("claimed here owner expansion refused: %v", err)
 	}
 }
@@ -155,7 +153,7 @@ func FuzzOwnerExpansionKeepsSourceAndOwnerFencesSeparate(f *testing.F) {
 		if widenData {
 			child.Data.Generation++
 		}
-		err := capability.ValidateDelegation(parent, child, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+		err := ValidateDelegation(parent, child, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
 		want := generation >= 0 && ownerGeneration > 0 && !widenData
 		if (err == nil) != want {
 			t.Fatalf("source=%d owner=%d widen=%v: err=%v", generation, ownerGeneration, widenData, err)
@@ -166,13 +164,13 @@ func FuzzOwnerExpansionKeepsSourceAndOwnerFencesSeparate(f *testing.F) {
 		parent.Authority.ID = "expansion"
 		parent.Capability.Binding, parent.Capability.Data = child.Binding, child.Data
 		parent.Capability.Grants = child.Grants
-		parent.Capability.Issuance = capability.Delegate
+		parent.Capability.Issuance = Delegate
 		child.Parent = parent.Authority
 		child.Binding.Generation++
 		data := *child.Data
 		data.Generation++
 		child.Data = &data
-		if err := capability.ValidateDelegation(parent, child, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)); err == nil {
+		if err := ValidateDelegation(parent, child, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)); err == nil {
 			t.Fatal("delegated terminal source generation widened")
 		}
 	})

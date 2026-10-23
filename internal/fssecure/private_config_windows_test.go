@@ -13,14 +13,14 @@ import (
 
 func TestSecurePrivateDirRestrictsInheritedWindowsAccess(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "snapshot")
-	if err := os.Mkdir(root, DirMode); err != nil {
+	if err := os.Mkdir(root, dirMode); err != nil {
 		t.Fatal(err)
 	}
 	if err := SecurePrivateDir(root); err != nil {
 		t.Fatal(err)
 	}
 	child := filepath.Join(root, "bundle")
-	if err := os.WriteFile(child, []byte("private"), FileMode); err != nil {
+	if err := os.WriteFile(child, []byte("private"), fileMode); err != nil {
 		t.Fatal(err)
 	}
 	sd, err := windows.GetNamedSecurityInfo(child, windows.SE_FILE_OBJECT,
@@ -63,7 +63,7 @@ func TestSecurePrivateDirRestrictsInheritedWindowsAccess(t *testing.T) {
 
 func TestOpenPrivateConfigEnforcesProtectedWindowsDACL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("token: private\n"), FileMode); err != nil {
+	if err := os.WriteFile(path, []byte("token: private\n"), fileMode); err != nil {
 		t.Fatal(err)
 	}
 	if err := SecurePrivateConfig(path); err != nil {

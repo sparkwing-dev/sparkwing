@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 //go:generate go run . --write-protocol-schemas ../../docs
@@ -229,11 +229,11 @@ func buildProtocolSchemas() map[string]protocolSchema {
 	wrap := func(title, description string, b *protocolSchemaBuilder) protocolSchema {
 		return protocolSchema{"$schema": "https://json-schema.org/draft/2020-12/schema", "title": title, "description": description, "$defs": b.defs}
 	}
-	describe := wrap("Sparkwing node protocol v2: describe and plan", "Generated from pkg/nodeproto by go generate ./internal/doccheck. Plan shapes are strict; graph, secret, presence and placement checks belong to ValidatePlan.", doc)
+	describe := wrap("Sparkwing node protocol v2: describe and plan", "Generated from internal/nodeproto by go generate ./internal/doccheck. Plan shapes are strict; graph, secret, presence and placement checks belong to ValidatePlan.", doc)
 	describe["$ref"] = "#/$defs/describe"
 	record := wrap("Sparkwing node protocol v2: SDK log record", "Generated from FrameLog. Host assigns job attribution and masks before persistence. Unknown additive fields and events remain readable.", logs)
 	record["$ref"] = "#/$defs/frameLog"
-	protocol := wrap("Sparkwing node protocol v2: requests and replies", "Generated from pkg/nodeproto. Select a $defs entry for each message. Hello negotiates once; other messages carry no version. Stateful ordering, correlation and duplicate-key checks belong to the protocol reader.", wire)
+	protocol := wrap("Sparkwing node protocol v2: requests and replies", "Generated from internal/nodeproto. Select a $defs entry for each message. Hello negotiates once; other messages carry no version. Stateful ordering, correlation and duplicate-key checks belong to the protocol reader.", wire)
 	protocol["oneOf"] = []any{protocolSchema{"$ref": "#/$defs/request"}, protocolSchema{"$ref": "#/$defs/reply"}}
 	return map[string]protocolSchema{"describe": describe, "node-protocol": protocol, "log-record": record}
 }

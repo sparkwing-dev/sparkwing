@@ -19,16 +19,16 @@ type CapacityStore interface {
 	RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error
 }
 
-// AdmissionFailure carries a refusal committed by the store before execution.
-type AdmissionFailure struct {
+// admissionFailure carries a refusal committed by the store before execution.
+type admissionFailure struct {
 	Outcome   runstate.NodeState
 	Reason    string
 	Err       error
 	committed bool
 }
 
-func (e *AdmissionFailure) Error() string { return e.Err.Error() }
-func (e *AdmissionFailure) Unwrap() error { return e.Err }
+func (e *admissionFailure) Error() string { return e.Err.Error() }
+func (e *admissionFailure) Unwrap() error { return e.Err }
 
 func awaitStart(ctx context.Context, state CapacityStore, binding runstate.CapacityBinding, actor runstate.Actor, queued func(runstate.AcquireSlotResponse) error) error {
 	tick := time.NewTicker(waiterPoll)
@@ -45,13 +45,13 @@ func awaitStart(ctx context.Context, state CapacityStore, binding runstate.Capac
 		case runstate.AcquireGranted, runstate.AcquireCancellingOthers:
 			return nil
 		case runstate.AcquireSkipped:
-			return &AdmissionFailure{Outcome: runstate.NodeSkipped, Err: errors.New("concurrency capacity is full"), committed: true}
+			return &admissionFailure{Outcome: runstate.NodeSkipped, Err: errors.New("concurrency capacity is full"), committed: true}
 		case runstate.AcquireFailed:
 			failure := errors.New("concurrency capacity is full")
 			if response.FailureReason == store.FailureQueueTimeout {
 				failure = errQueueTimeout
 			}
-			return &AdmissionFailure{Outcome: runstate.NodeFailed, Reason: string(response.FailureReason), Err: failure, committed: true}
+			return &admissionFailure{Outcome: runstate.NodeFailed, Reason: string(response.FailureReason), Err: failure, committed: true}
 		case runstate.AcquireQueued:
 			if queued != nil {
 				if err := queued(response); err != nil {

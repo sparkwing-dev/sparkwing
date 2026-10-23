@@ -31,11 +31,11 @@ func testRetrySourceProbe(t *testing.T, kind runstate.ReconcileKind) {
 	h.Store = probe
 	sourceResult := &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &runstate.MaterializedResultSource{Ref: runspec.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 8}}
 	f.snapshot.Run.Retry = &runstate.RetrySelection{Mode: "failed", Results: map[string]runstate.MaterializedResultSource{"job": *sourceResult.Result}}
-	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		if layer.Name == "admission" && kind == runstate.Materialize {
 			t.Fatal("copied result entered compute admission")
 		}
-		return OwnerLayerResult{}, nil
+		return ownerLayerResult{}, nil
 	})
 	dispatched, err := releasedRequest(&h, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
 	if err != nil || dispatched != nil || !probe.request.MaterializeOnly || probe.request.Policy != runstate.SourceManualRetry || !reflect.DeepEqual(probe.request.Source, sourceResult) {

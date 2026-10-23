@@ -1,12 +1,10 @@
-package chaos_test
+package chaos
 
 import (
 	"os"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/chaos"
 )
 
 func seedFromEnv(t *testing.T) int64 {
@@ -25,7 +23,7 @@ func TestChaos_CI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("chaos CI run skipped in -short")
 	}
-	cfg := chaos.CIConfig(seedFromEnv(t))
+	cfg := ciConfig(seedFromEnv(t))
 	if raw := os.Getenv("SPARKWING_CHAOS_CI_DURATION"); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil {
@@ -33,7 +31,7 @@ func TestChaos_CI(t *testing.T) {
 		}
 		cfg.Duration = d
 	}
-	chaos.Run(t, cfg)
+	run(t, cfg)
 }
 
 func TestChaos_Soak(t *testing.T) {
@@ -45,5 +43,5 @@ func TestChaos_Soak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bad SPARKWING_CHAOS_SOAK %q: %v", raw, err)
 	}
-	chaos.Run(t, chaos.SoakConfig(seedFromEnv(t), d))
+	run(t, soakConfig(seedFromEnv(t), d))
 }

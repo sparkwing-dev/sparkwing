@@ -21,7 +21,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const DefaultGoProxy = "https://proxy.golang.org"
+const defaultGoProxy = "https://proxy.golang.org"
 
 var proxyClient = &http.Client{Timeout: 30 * time.Second}
 
@@ -38,11 +38,6 @@ type Resolver struct {
 	Dir string
 }
 
-func Resolve(ctx context.Context, m *Manifest) (map[string]string, error) {
-	r := NewResolverFromEnv(ctx)
-	return r.Resolve(ctx, m)
-}
-
 // NewResolverFromEnv selects module proxies from the captured toolchain environment.
 func NewResolverFromEnv(ctx context.Context) *Resolver {
 	environment := gotoolchain.Environment(ctx)
@@ -55,7 +50,7 @@ func NewResolverFromEnv(ctx context.Context) *Resolver {
 		proxies = append(proxies, strings.TrimRight(p, "/"))
 	}
 	if len(proxies) == 0 {
-		proxies = []string{DefaultGoProxy}
+		proxies = []string{defaultGoProxy}
 	}
 	var private []string
 	for _, p := range strings.Split(goEnvValue(ctx, environment, "GOPRIVATE"), ",") {
@@ -254,7 +249,7 @@ func (r *Resolver) activeProxies() []string {
 	if len(r.Proxies) > 0 {
 		return r.Proxies
 	}
-	return []string{DefaultGoProxy}
+	return []string{defaultGoProxy}
 }
 
 func (r *Resolver) proxyGET(ctx context.Context, rawURL string) ([]byte, error) {

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]string, error) {

@@ -1,4 +1,4 @@
-package bincache_test
+package bincache
 
 import (
 	"testing"

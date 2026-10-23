@@ -129,7 +129,7 @@ func TestPullRequestFields(t *testing.T) {
 	if !reflect.DeepEqual(got.Spec.Value, s) || !reflect.DeepEqual(got.Request, s.Request) || got.Lineage.RetryOf != "source" || got.Lineage.Retrier.Value.ID != "retrier" {
 		t.Fatal("retry changed sealed inputs")
 	}
-	ctx := got.Spec.Value.RunContext()
+	ctx := got.Spec.Value.runContext()
 	if ctx.Actor.ID != "original" || ctx.PullRequest.Value.Number != 3 || ctx.PullRequest.Value.Action != "synchronize" || ctx.PullRequest.Value.BaseSHA != "base-sha" || ctx.PullRequest.Value.BaseRef != "main" || ctx.PullRequest.Value.HeadRef != "feature" || ctx.PullRequest.Value.HeadSHA != strings.Repeat("a", 40) || !ctx.Git.App.Value.DefaultBranchPush || ctx.Git.SHA != strings.Repeat("a", 40) {
 		t.Fatal("lost original facts")
 	}
@@ -191,7 +191,7 @@ func TestSecretClassificationCannotShrinkAtSecondSeal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(raw), "private-token") || strings.Contains(strings.Join(malformed.Reproducer(), " "), "private-token") {
+		if strings.Contains(string(raw), "private-token") || strings.Contains(strings.Join(malformed.reproducer(), " "), "private-token") {
 			t.Error("inconsistent classification exposed an intake secret")
 		}
 	}
@@ -269,7 +269,7 @@ func TestProjectionAndContext(t *testing.T) {
 	s := fixture(t)
 	s.Resolved.Settings.Options.DryRun = Setting[bool]{Optional: Optional[bool]{Set: true, Value: true}}
 	s.Resolved.Entrypoint = "ci/main.go"
-	p := Project(s)
+	p := project(s)
 	if p.RepoKey != "gh:42" || p.SHA != strings.Repeat("a", 40) || p.DefaultBranch != "main" || p.RequestHash != s.Request.Hash || p.SpecHash != s.Hash || p.PlanHash != s.PlanHash {
 		t.Fatalf("projection lost inputs: %+v", p)
 	}
@@ -277,7 +277,7 @@ func TestProjectionAndContext(t *testing.T) {
 	if s.Request.AllowedPools[0] != "private" {
 		t.Fatal("projection aliases seal")
 	}
-	c := s.RunContext()
+	c := s.runContext()
 	if !c.DryRun || c.Source.Entrypoint != "ci/main.go" || !reflect.DeepEqual(c, s.GuardContext()) {
 		t.Fatal("context did not use sealed winners")
 	}
@@ -287,7 +287,7 @@ func TestProjectionAndContext(t *testing.T) {
 		t.Fatal("origin HEAD manufactured App trust")
 	}
 	s.Resolved.DefaultBranch = Optional[string]{}
-	if Project(s).DefaultBranch != "main" {
+	if project(s).DefaultBranch != "main" {
 		t.Fatal("lost intake default branch")
 	}
 }
@@ -330,11 +330,11 @@ func TestSealRefusals(t *testing.T) {
 
 func TestReproducerSeparatesPipelineFlags(t *testing.T) {
 	s := fixture(t)
-	if got := s.Reproducer(); !reflect.DeepEqual(got, []string{"sparkwing", "run", "build", "--", "--count=42"}) {
+	if got := s.reproducer(); !reflect.DeepEqual(got, []string{"sparkwing", "run", "build", "--", "--count=42"}) {
 		t.Fatalf("wrong reproducer argv: %v", got)
 	}
 	s.Resolved.SecretArgs = nil
-	if got := s.Reproducer(); !reflect.DeepEqual(got, []string{"sparkwing", "run", "build"}) {
+	if got := s.reproducer(); !reflect.DeepEqual(got, []string{"sparkwing", "run", "build"}) {
 		t.Fatalf("unclassified reproducer: %v", got)
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 type replayFixture struct{}

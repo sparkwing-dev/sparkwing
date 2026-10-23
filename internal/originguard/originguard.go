@@ -19,7 +19,7 @@ type Policy struct {
 	// loopback host or the host of an AllowOrigins entry.
 	AllowRemote bool
 	// BindHost is the server's own non-wildcard bind address; see
-	// [BindOriginHost]. It anchors the Origin check under AllowRemote,
+	// [bindOriginHost]. It anchors the Origin check under AllowRemote,
 	// where the request Host is the caller's to choose.
 	BindHost string
 	// LoopbackPorts are the ports whose loopback origins count as this
@@ -42,7 +42,7 @@ func NewPolicy(addr string, allowRemote bool, allowOrigins []string) Policy {
 	}
 	return Policy{
 		AllowRemote:   allowRemote,
-		BindHost:      BindOriginHost(addr),
+		BindHost:      bindOriginHost(addr),
 		LoopbackPorts: ports,
 		AllowOrigins:  allowOrigins,
 	}
@@ -183,9 +183,9 @@ func LoopbackHost(hostport string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// BindOriginHost returns addr as an origin host, or "" for a wildcard bind,
+// bindOriginHost returns addr as an origin host, or "" for a wildcard bind,
 // which names no interface and so must not widen the Origin check.
-func BindOriginHost(addr string) string {
+func bindOriginHost(addr string) string {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil || host == "" {
 		return ""

@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -153,7 +153,7 @@ func checkoutPlanningSettings(input CheckoutPlanningInput) (settings.Inputs, str
 	if cfg.Defaults != nil {
 		inputs.Defaults = settings.Values{Args: cfg.Defaults.Args, Guards: cfg.Defaults.Guards}
 	}
-	selection := ResolvePipeline(cfg, input.Request.Request.Pipeline)
+	selection := resolvePipeline(cfg, input.Request.Request.Pipeline)
 	for _, pipeline := range cfg.Pipelines {
 		if pipeline.Name == input.Request.Request.Pipeline {
 			entrypoint = selection.Entrypoint

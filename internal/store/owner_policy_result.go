@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func policyOutcome(p runstate.OwnerPolicyResult) runstate.NodeState {

@@ -11,7 +11,7 @@ func resolveSetting[T any](in Inputs, resolver func(Inputs) (T, Origin, error), 
 	if err != nil {
 		return err
 	}
-	projected, err := ProjectOrigin(origin)
+	projected, err := projectOrigin(origin)
 	if err != nil {
 		return err
 	}
@@ -25,7 +25,7 @@ func ResolveIntake(options runspec.Options, operator OperatorInputs, ctx Context
 		switch origin.Layer {
 		case "", runspec.LayerFlag, runspec.LayerEnv, runspec.LayerSealed, runspec.LayerMachine, runspec.LayerDefault:
 		default:
-			return runspec.Options{}, invalid(origin.Key, Origin{Source: Run, Key: origin.Key}, "request setting has an invalid intake origin")
+			return runspec.Options{}, invalid(origin.Key, Origin{Source: sourceRun, Key: origin.Key}, "request setting has an invalid intake origin")
 		}
 	}
 	return ResolveRequest(Inputs{Sealed: Values{Options: options}, Operator: operator, Context: ctx})
@@ -42,82 +42,82 @@ func ResolveRequest(in Inputs) (runspec.Options, error) {
 	flags, sealed, machine := in.Flags.Options, in.Sealed.Options, in.Machine.Options
 	out := runspec.Options{}
 	var err error
-	if err = resolveSetting(in, RunnerSelection, &out.Runner); err != nil {
+	if err = resolveSetting(in, runnerSelection, &out.Runner); err != nil {
 		return runspec.Options{}, err
 	}
 	if err = resolveSetting(in, OwnerExecution, &out.OwnerExecutionTimeout); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Workers, &out.Workers); err != nil {
+	if err = resolveSetting(in, workers, &out.Workers); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Output, &out.Output); err != nil {
+	if err = resolveSetting(in, output, &out.Output); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, StartAt, &out.StartAt); err != nil {
+	if err = resolveSetting(in, startAt, &out.StartAt); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, StopAt, &out.StopAt); err != nil {
+	if err = resolveSetting(in, stopAt, &out.StopAt); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Only, &out.Only); err != nil {
+	if err = resolveSetting(in, only, &out.Only); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, DryRun, &out.DryRun); err != nil {
+	if err = resolveSetting(in, dryRun, &out.DryRun); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, NoMemo, &out.NoMemo); err != nil {
+	if err = resolveSetting(in, noMemo, &out.NoMemo); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, AllowRisk, &out.AllowRisk); err != nil {
+	if err = resolveSetting(in, allowRisk, &out.AllowRisk); err != nil {
 		return runspec.Options{}, err
 	}
 	out.Pause, err = pauseSetting(in)
 	if err != nil {
 		return out, err
 	}
-	if err = resolveSetting(in, PauseTimeout, &out.PauseTimeout); err != nil {
+	if err = resolveSetting(in, pauseTimeout, &out.PauseTimeout); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Debug, &out.Debug); err != nil {
+	if err = resolveSetting(in, debug, &out.Debug); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Publish, &out.Publish); err != nil {
+	if err = resolveSetting(in, publish, &out.Publish); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, CacheFrom, &out.CacheFrom); err != nil {
+	if err = resolveSetting(in, cacheFrom, &out.CacheFrom); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, SubmitEnvAllow, &out.SubmitEnvAllow); err != nil {
+	if err = resolveSetting(in, submitEnvAllow, &out.SubmitEnvAllow); err != nil {
 		return runspec.Options{}, err
 	}
 	if flags.RepoLocation.Set || sealed.RepoLocation.Set || machine.RepoLocation.Set || in.Context.ParentCheckout != "" || len(in.Context.RegisteredCheckouts) > 0 || len(in.Context.FallbackPaths) > 0 {
-		if err = resolveSetting(in, RepoLocation, &out.RepoLocation); err != nil {
+		if err = resolveSetting(in, repoLocation, &out.RepoLocation); err != nil {
 			return runspec.Options{}, err
 		}
 	}
 	if flags.Priority.Set || sealed.Priority.Set {
-		if err = resolveSetting(in, Priority, &out.Priority); err != nil {
+		if err = resolveSetting(in, priority, &out.Priority); err != nil {
 			return runspec.Options{}, err
 		}
 	}
 	if flags.Profile.Set || sealed.Profile.Set {
-		if err = resolveSetting(in, Profile, &out.Profile); err != nil {
+		if err = resolveSetting(in, profile, &out.Profile); err != nil {
 			return runspec.Options{}, err
 		}
 	}
 	if flags.Requires.Set || sealed.Requires.Set {
-		if err = resolveSetting(in, Requires, &out.Requires); err != nil {
+		if err = resolveSetting(in, requires, &out.Requires); err != nil {
 			return runspec.Options{}, err
 		}
 	}
 	if flags.Prefers.Set || sealed.Prefers.Set {
-		if err = resolveSetting(in, Prefers, &out.Prefers); err != nil {
+		if err = resolveSetting(in, prefers, &out.Prefers); err != nil {
 			return runspec.Options{}, err
 		}
 	}
 	if sealed.AdmissionClass.Set {
-		if err = resolveSetting(in, AdmissionClass, &out.AdmissionClass); err != nil {
+		if err = resolveSetting(in, admissionClass, &out.AdmissionClass); err != nil {
 			return runspec.Options{}, err
 		}
 	}
@@ -137,7 +137,7 @@ func ResolveRequest(in Inputs) (runspec.Options, error) {
 		}
 	}
 	if sealed.JobDefaults.NoProgressTimeout.Set {
-		if err = resolveSetting(in, NoProgressTimeout, &out.JobDefaults.NoProgressTimeout); err != nil {
+		if err = resolveSetting(in, noProgressTimeout, &out.JobDefaults.NoProgressTimeout); err != nil {
 			return runspec.Options{}, err
 		}
 	}
@@ -147,7 +147,7 @@ func ResolveRequest(in Inputs) (runspec.Options, error) {
 		}
 	}
 	if sealed.JobDefaults.RetryBackoff.Set {
-		if err = resolveSetting(in, RetryBackoff, &out.JobDefaults.RetryBackoff); err != nil {
+		if err = resolveSetting(in, retryBackoff, &out.JobDefaults.RetryBackoff); err != nil {
 			return runspec.Options{}, err
 		}
 	}
@@ -171,7 +171,7 @@ func milliseconds(value *int64, key string) (*time.Duration, error) {
 		return nil, nil
 	}
 	if *value < 0 || *value > int64((1<<63-1)/time.Millisecond) {
-		return nil, invalid(key, Origin{Source: Code, Key: key}, "duration is negative or overflows")
+		return nil, invalid(key, Origin{Source: code, Key: key}, "duration is negative or overflows")
 	}
 	return pointer(time.Duration(*value) * time.Millisecond), nil
 }

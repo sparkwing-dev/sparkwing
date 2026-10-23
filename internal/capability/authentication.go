@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 type authenticator struct{ reader AuthenticationReader }
@@ -96,7 +96,7 @@ func ValidateAuthority(chain []AuthorityState, now time.Time) (Principal, error)
 	seen := make(map[AuthorityRef]bool, len(chain))
 	for i, state := range chain {
 		p, c := state.Principal, state.Principal.Capability
-		local := p.Class == CredentialPeer || p.Class == CredentialAnonymous
+		local := p.Class == CredentialPeer || p.Class == credentialAnonymous
 		if !validIdentity(p) || !CredentialAlive(c, now) ||
 			local && (len(chain) != 1 || c.Parent != nil) || !local && seen[p.Authority] {
 			return Principal{}, unauthenticated()
@@ -146,7 +146,7 @@ func validIdentity(p Principal) bool {
 		return p.Authority.Kind == AuthoritySession && p.Authority.ID != "" && c.Subject.Kind == SubjectAccount
 	case CredentialPeer:
 		return c.Subject.Kind == SubjectLocal && c.Binding.Kind == BindingNone && c.Unit == ""
-	case CredentialAnonymous:
+	case credentialAnonymous:
 		return c.Subject.Kind == SubjectAnonymous && c.Binding.Kind == BindingNone && c.Unit == ""
 	}
 	return false
@@ -189,7 +189,7 @@ func credentialLookup(p Presentation) (CredentialLookup, error) {
 			return key, unauthenticated()
 		}
 		key.Peer = p.Peer
-	case CredentialAnonymous:
+	case credentialAnonymous:
 		if p.Raw != "" || p.Peer != (Subject{}) {
 			return key, unauthenticated()
 		}
@@ -210,7 +210,7 @@ func matchesLookup(p Principal, key CredentialLookup) bool {
 		return p.Authority.ID == hex.EncodeToString(key.Digest[:])
 	case CredentialPeer:
 		return p.Capability.Subject == key.Peer
-	case CredentialAnonymous:
+	case credentialAnonymous:
 		return p.Capability.Subject.Kind == SubjectAnonymous
 	}
 	return false
@@ -242,9 +242,9 @@ func liveAccess(p Principal, state BindingState, evidence RequestEvidence, class
 	}
 	active := state.FinishedAt == nil && !state.RunFinished && now.Before(state.LeaseExpiresAt)
 	switch class {
-	case LiveSensitive, LiveProcess:
+	case LiveSensitive, liveProcess:
 		return LiveAccess{}, active && !state.RunCancelled
-	case LiveCredential, LiveReporting, LiveHereClaim:
+	case LiveCredential, LiveReporting, liveHereClaim:
 		return LiveAccess{}, active
 	case LiveResult:
 		if active {
@@ -252,7 +252,7 @@ func liveAccess(p Principal, state BindingState, evidence RequestEvidence, class
 		}
 		replay := state.FinishedAt != nil && resultMatches(p, state.Result, evidence)
 		return LiveAccess{ResultReplay: replay}, replay
-	case LiveLogTail:
+	case liveLogTail:
 		if active {
 			return LiveAccess{}, true
 		}
@@ -273,10 +273,10 @@ func hereLive(b Binding, state BindingState, class Liveness, now time.Time) bool
 		b.Reservation != "here:"+b.RunID || b.Reservation != state.Current.Reservation {
 		return false
 	}
-	if class == LiveHereClaim || class == LiveCredential {
+	if class == liveHereClaim || class == LiveCredential {
 		return !state.RunCancelled && (state.HereClaimed || b.ClaimBy != nil && now.Before(*b.ClaimBy))
 	}
-	if class == LiveSensitive || class == LiveProcess {
+	if class == LiveSensitive || class == liveProcess {
 		if state.RunCancelled {
 			return false
 		}

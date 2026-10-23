@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 const (
-	LevelInfo = "info"
-	LevelWarn = "warn"
+	levelInfo = "info"
 )
 
 var reapTimeout = 10 * time.Second

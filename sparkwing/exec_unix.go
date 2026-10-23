@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/execdiag"
-	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 func commandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {

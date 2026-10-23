@@ -11,10 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// TickStaleAfter is how long a host with an enabled timer may go without a
+// tickStaleAfter is how long a host with an enabled timer may go without a
 // tick before the tick counts as stale. It is three minutes because the timer
 // fires every minute and a busy host may lose one.
-const TickStaleAfter = 3 * time.Minute
+const tickStaleAfter = 3 * time.Minute
 
 // Health is the host-level view of the scheduler: the OS timer, the last tick,
 // and what this home has armed.
@@ -43,12 +43,12 @@ type Health struct {
 	Remedy string `json:"remedy,omitempty"`
 }
 
-// Healthy reports whether this host is evaluating what it armed. A host with
+// healthy reports whether this host is evaluating what it armed. A host with
 // nothing armed is healthy: there is nothing for the timer to do. A recent
 // tick counts as evidence on its own, so a host driving the tick from its own
 // scheduler passes without a sparkwing timer. A tick that landed but reported
 // a failure is not health: something armed here was not evaluated.
-func (h Health) Healthy() bool {
+func (h Health) healthy() bool {
 	if h.Armed == 0 {
 		return true
 	}
@@ -58,11 +58,11 @@ func (h Health) Healthy() bool {
 	return h.Timer.Enabled || !h.LastTick.At.IsZero()
 }
 
-// Health reads the timer and the store and says whether this host is
+// health reads the timer and the store and says whether this host is
 // evaluating what it armed. A timer the service manager cannot be asked about
 // is reported through the returned Health rather than as an error, because the
 // counts and the last tick still answer the question.
-func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, error) {
+func (s *Service) health(ctx context.Context, timer crontimer.Host) (Health, error) {
 	rows, err := s.List(ctx)
 	if err != nil {
 		return Health{}, err
@@ -87,7 +87,7 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 		health.Timer.Detail = terr.Error()
 	}
 	now := s.now()
-	health.TickStale = (state.Enabled || !tick.At.IsZero()) && now.Sub(tick.At) > TickStaleAfter
+	health.TickStale = (state.Enabled || !tick.At.IsZero()) && now.Sub(tick.At) > tickStaleAfter
 	health.Detail = health.describe(now)
 	health.Remedy = health.remedy()
 	return health, nil
@@ -95,20 +95,20 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 
 func (h *Health) count(r Row) {
 	switch r.State {
-	case StateArmed:
+	case stateArmed:
 		h.Armed++
-	case StatePaused:
+	case statePaused:
 		h.Paused++
-	case StateUndeclared:
+	case stateUndeclared:
 		h.Undeclared++
 	}
 	switch r.Lock.State {
-	case LockFollows:
+	case lockFollows:
 		h.Following++
-	case LockAhead:
+	case lockAhead:
 		h.Locked++
 		h.Ahead++
-	case LockMissing:
+	case lockMissing:
 		h.Locked++
 		h.MissingBinary++
 	default:

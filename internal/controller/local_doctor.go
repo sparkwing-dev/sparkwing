@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 // WithLocalSessions binds the private controller's step session ledger.
@@ -46,15 +46,15 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 		case sessionledger.VerdictLive:
 			continue
 		case sessionledger.VerdictWouldReap:
-			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Record.Run})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Run})
 			continue
 		}
 		for _, recordErr := range sessionledger.RecordOutcomes(r.Context(), tenant, "doctor", []sessionledger.Outcome{outcome}) {
-			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Record.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
 		}
 		if outcome.Err != nil {
 			failure = errors.Join(failure, outcome.Err)
-			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "step_cleanup_failed", Unit: outcome.Record.Run, Message: outcome.Err.Error()})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "step_cleanup_failed", Unit: outcome.Run, Message: outcome.Err.Error()})
 		}
 	}
 	result := localhostwire.LocalDoctor{Findings: findings}

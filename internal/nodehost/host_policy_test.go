@@ -10,12 +10,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestOwnerApprovalPolicies(t *testing.T) {
@@ -41,7 +41,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 				value = json.RawMessage("null")
 			}
 			process := newPolicySDK(plan, value, mode == "predicate_error")
-			host, err := NewOwnerEvaluator(EvaluationDependencies{
+			host, err := newOwnerEvaluator(evaluationDependencies{
 				Store: st,
 				Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil },
 				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {

@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -29,7 +28,7 @@ func TestReadMemoClosesEveryReturnedReader(t *testing.T) {
 			if fault == "close" {
 				reader.closeErr = refused
 			}
-			get := func(context.Context, blob.Digest) (blob.VerifiedReader, error) {
+			get := func(context.Context, Digest) (VerifiedReader, error) {
 				if fault == "nil" {
 					return nil, nil
 				}
@@ -38,8 +37,8 @@ func TestReadMemoClosesEveryReturnedReader(t *testing.T) {
 				}
 				return reader, nil
 			}
-			hit := blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: digest("output")}}
-			output, manifest, err := blob.ReadMemo(t.Context(), get, "team", hit)
+			hit := MemoHit{Found: true, Output: runspec.Optional[Digest]{Set: true, Value: digest("output")}}
+			output, manifest, err := ReadMemo(t.Context(), get, "team", hit)
 			if (err == nil) != (fault == "none") || fault != "nil" && !reader.closed || len(manifest) != 0 {
 				t.Fatalf("fault=%s output=%s closed=%v error=%v", fault, output, reader.closed, err)
 			}
@@ -58,30 +57,30 @@ func TestReadMemoReturnsVerifiedManifestAndEmptyOutput(t *testing.T) {
 	memberDigest := digest(artifact)
 	manifest := fmt.Sprintf(`{"entries":[{"path":"first","digest":"%s","size":8,"mode":420},{"path":"second","digest":"%s","size":8,"mode":420}]}`, memberDigest, memberDigest)
 	manifestDigest := digest(manifest)
-	bodies := map[blob.Digest]string{digest(""): "", memberDigest: artifact, manifestDigest: manifest}
-	reads := make(map[blob.Digest]int)
-	get := func(_ context.Context, digest blob.Digest) (blob.VerifiedReader, error) {
+	bodies := map[Digest]string{digest(""): "", memberDigest: artifact, manifestDigest: manifest}
+	reads := make(map[Digest]int)
+	get := func(_ context.Context, digest Digest) (VerifiedReader, error) {
 		reads[digest]++
 		return &memoReader{Reader: strings.NewReader(bodies[digest]), verified: true}, nil
 	}
-	hit := blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: digest("")}, Manifest: runspec.Optional[blob.Digest]{Set: true, Value: manifestDigest}, Members: []blob.Member{
+	hit := MemoHit{Found: true, Output: runspec.Optional[Digest]{Set: true, Value: digest("")}, Manifest: runspec.Optional[Digest]{Set: true, Value: manifestDigest}, Members: []Member{
 		{Team: "team", ManifestDigest: manifestDigest, Digest: memberDigest, Path: "first", Size: 8, Mode: 0o644},
 		{Team: "team", ManifestDigest: manifestDigest, Digest: memberDigest, Path: "second", Size: 8, Mode: 0o644},
 	}}
-	output, body, err := blob.ReadMemo(t.Context(), get, "team", hit)
+	output, body, err := ReadMemo(t.Context(), get, "team", hit)
 	if err != nil || len(output) != 0 || string(body) != manifest || reads[memberDigest] != 1 {
 		t.Fatalf("output=%s manifest=%s reads=%v error=%v", output, body, reads, err)
 	}
 	for _, mutation := range []string{"foreign_team", "member_size"} {
 		t.Run(mutation, func(t *testing.T) {
 			broken := hit
-			broken.Members = append([]blob.Member(nil), hit.Members...)
+			broken.Members = append([]Member(nil), hit.Members...)
 			if mutation == "foreign_team" {
 				broken.Members[0].Team = "foreign"
 			} else {
 				bodies[memberDigest] = artifact + "x"
 			}
-			if _, _, err := blob.ReadMemo(t.Context(), get, "team", broken); !errors.Is(err, blob.ErrIntegrity) {
+			if _, _, err := ReadMemo(t.Context(), get, "team", broken); !errors.Is(err, ErrIntegrity) {
 				t.Fatal("invalid member accepted:", err)
 			}
 		})
@@ -90,17 +89,17 @@ func TestReadMemoReturnsVerifiedManifestAndEmptyOutput(t *testing.T) {
 
 func TestCacheMissPreservesJoinedRefusals(t *testing.T) {
 	refusal := errors.New("claim fence refused")
-	for _, absent := range []error{blob.ErrNotFound, blob.ErrIntegrity, blob.ErrBudget} {
-		if !blob.IsCacheMiss(fmt.Errorf("cache read: %w", absent)) {
+	for _, absent := range []error{ErrNotFound, ErrIntegrity, ErrBudget} {
+		if !IsCacheMiss(fmt.Errorf("cache read: %w", absent)) {
 			t.Fatalf("miss rejected: %v", absent)
 		}
-		for _, err := range []error{errors.Join(absent, refusal), errors.Join(absent, blob.ErrDigestNotReadable), fmt.Errorf("cache read: %w", errors.Join(absent, refusal))} {
-			if blob.IsCacheMiss(err) {
+		for _, err := range []error{errors.Join(absent, refusal), errors.Join(absent, ErrDigestNotReadable), fmt.Errorf("cache read: %w", errors.Join(absent, refusal))} {
+			if IsCacheMiss(err) {
 				t.Fatalf("refusal became a miss: %v", err)
 			}
 		}
 	}
-	if blob.IsCacheMiss(nil) {
+	if IsCacheMiss(nil) {
 		t.Fatal("nil became a miss")
 	}
 }

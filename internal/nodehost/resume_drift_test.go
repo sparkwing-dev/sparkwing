@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {

@@ -9,31 +9,31 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// StateReader supplies consistent persisted views for owners and holder followers.
-type StateReader interface {
+// stateReader supplies consistent persisted views for owners and holder followers.
+type stateReader interface {
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 }
 
-// StateSubscription carries wake-ups for one run. Close must join the subscription
+// stateSubscription carries wake-ups for one run. Close must join the subscription
 // after its context is cancelled. Notifications grant no authority and must cover
 // every committed state change, including changes made by another process.
-type StateSubscription struct {
+type stateSubscription struct {
 	Changed <-chan struct{}
 	Close   func() error
 }
 
-// StateFollower catches up from persistence after subscribing, closing the race
+// stateFollower catches up from persistence after subscribing, closing the race
 // between an owner's last snapshot and its wait. Subscribe must be armed before
 // returning; its context bounds setup and remains live until Close.
 // Assign Wait to OwnerHost.Wait and WaitNode to OwnerHost.WaitNode.
-type StateFollower struct {
-	Store     StateReader
-	Subscribe func(context.Context, string) (StateSubscription, error)
+type stateFollower struct {
+	Store     stateReader
+	Subscribe func(context.Context, string) (stateSubscription, error)
 }
 
-// Wait returns after persisted state or the owner's current execution eligibility changes.
-func (f StateFollower) Wait(ctx context.Context, before store.RunSnapshot) error {
+// wait returns after persisted state or the owner's current execution eligibility changes.
+func (f stateFollower) wait(ctx context.Context, before store.RunSnapshot) error {
 	previous, err := snapshotVersion(before)
 	if err != nil {
 		return err
@@ -51,9 +51,9 @@ func (f StateFollower) Wait(ctx context.Context, before store.RunSnapshot) error
 	})
 }
 
-// WaitNode follows the node's state sequence rather than the run event cursor.
+// waitNode follows the node's state sequence rather than the run event cursor.
 // A requeue wakes reconciliation but does not itself authorize execution.
-func (f StateFollower) WaitNode(ctx context.Context, ref runspec.NodeRef, after int64) error {
+func (f stateFollower) waitNode(ctx context.Context, ref runspec.NodeRef, after int64) error {
 	if ref.RunID == "" || ref.NodeID == "" || after < 0 {
 		return errors.New("state follower requires a node and nonnegative sequence")
 	}
@@ -69,7 +69,7 @@ func (f StateFollower) WaitNode(ctx context.Context, ref runspec.NodeRef, after 
 	})
 }
 
-func (f StateFollower) follow(parent context.Context, run string, changed func(context.Context) (bool, error)) (err error) {
+func (f stateFollower) follow(parent context.Context, run string, changed func(context.Context) (bool, error)) (err error) {
 	if cause := context.Cause(parent); cause != nil {
 		return cause
 	}
@@ -177,4 +177,4 @@ func (v stateVersion) after(previous stateVersion) (bool, error) {
 	return changed, nil
 }
 
-var _ StateReader = (*store.Tenant)(nil)
+var _ stateReader = (*store.Tenant)(nil)

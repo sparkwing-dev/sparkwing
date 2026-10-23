@@ -52,7 +52,7 @@ func busyLedger(t *testing.T) (*Ledger, Lease, Lease) {
 		t.Fatalf("winner = %+v", d)
 	}
 	mustQueue(t, l, Request{ID: "waiter-1", Cores: 4})
-	mustQueue(t, l, Request{ID: "waiter-2", Cores: 4, Semaphores: []SemaphoreClaim{sem("deploy", 2, 1, PolicyFail)}})
+	mustQueue(t, l, Request{ID: "waiter-2", Cores: 4, Semaphores: []SemaphoreClaim{sem("deploy", 2, 1, policyFail)}})
 	if _, err := l.SetHeadroom(3, 512); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestAttachAfterParentReleaseUsesLiveAncestor(t *testing.T) {
 	if err := l.Attach(other.ID, "other-child", "other"); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Attach(lease.ID, "cross-lease", "other-child"); !errors.Is(err, ErrUnknownMember) {
+	if err := l.Attach(lease.ID, "cross-lease", "other-child"); !errors.Is(err, errUnknownMember) {
 		t.Fatalf("cross-lease attach = %v, want unknown member", err)
 	}
 	if _, err := l.Release(other.ID, "other-child"); err != nil {
@@ -331,8 +331,8 @@ func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 			l, _, _ := busyLedger(t)
 			snap := l.Snapshot()
 			tc.corrupt(&snap)
-			if _, err := Restore(snap, nil); !errors.Is(err, ErrInvalidSnapshot) {
-				t.Fatalf("Restore error = %v, want %v", err, ErrInvalidSnapshot)
+			if _, err := Restore(snap, nil); !errors.Is(err, errInvalidSnapshot) {
+				t.Fatalf("Restore error = %v, want %v", err, errInvalidSnapshot)
 			}
 		})
 	}

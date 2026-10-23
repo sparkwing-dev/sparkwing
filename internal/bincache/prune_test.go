@@ -72,7 +72,7 @@ func TestConfiguredLimits_DefaultWithoutTheSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (Limits{MaxBytes: DefaultMaxCacheBytes, MaxEntries: DefaultMaxCacheEntries}) {
+	if got != (Limits{MaxBytes: defaultMaxCacheBytes, MaxEntries: defaultMaxCacheEntries}) {
 		t.Fatalf("limits = %+v, want the defaults; the environment is no longer read", got)
 	}
 }

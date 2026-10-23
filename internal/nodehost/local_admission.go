@@ -102,13 +102,13 @@ func (a *LocalAdmission) hold(parent context.Context, ref runspec.NodeRef, reque
 	joined := make(chan error, 1)
 	go func() {
 		err := held.Watch(func(evicted wingwire.Evicted) {
-			cancel(&AdmissionFailure{Outcome: runstate.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
+			cancel(&admissionFailure{Outcome: runstate.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
 		}, func(stopped wingwire.Cancel) {
 			cancel(&lease.CancelError{Reason: stopped.Reason})
 		})
 		if err != nil {
 			if errors.Is(err, wingdclient.ErrReattachRejected) {
-				cancel(&AdmissionFailure{Outcome: runstate.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
+				cancel(&admissionFailure{Outcome: runstate.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
 			} else {
 				cancel(err)
 			}
@@ -131,9 +131,9 @@ func localAdmissionFailure(err error) error {
 	if errors.As(err, &refused) {
 		switch refused.Policy {
 		case wingwire.PolicySkip:
-			return errors.Join(&AdmissionFailure{Outcome: runstate.NodeSkipped, Err: err}, waitFailure(err, refused))
+			return errors.Join(&admissionFailure{Outcome: runstate.NodeSkipped, Err: err}, waitFailure(err, refused))
 		case wingwire.PolicyFail:
-			return errors.Join(&AdmissionFailure{Outcome: runstate.NodeFailed, Err: err}, waitFailure(err, refused))
+			return errors.Join(&admissionFailure{Outcome: runstate.NodeFailed, Err: err}, waitFailure(err, refused))
 		}
 	}
 	return err

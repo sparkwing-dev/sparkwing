@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func paymentSignature(body []byte, secret string, at time.Time) string {
@@ -165,7 +165,7 @@ func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) 
 		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted || proof.Event().Fingerprint != "fp_ch_fixture" {
 			t.Fatalf("%q: proof=%+v err=%v", result, proof, err)
 		}
-		if len(versions) != 2 || versions[0] != PaymentProviderAPIVersion || versions[1] != PaymentProviderAPIVersion {
+		if len(versions) != 2 || versions[0] != paymentProviderAPIVersion || versions[1] != paymentProviderAPIVersion {
 			t.Fatalf("provider reads used Stripe versions %q", versions)
 		}
 	}

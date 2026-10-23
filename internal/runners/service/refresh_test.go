@@ -21,7 +21,7 @@ func TestRefreshRegistrationLeavesForeignAndOtherRegistrationsUntouched(t *testi
 		name string
 		host func(*testing.T, *fakeExec) Host
 		path func(Host) string
-	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, PlistPath}} {
+	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, plistPath}} {
 		t.Run(fixture.name, func(t *testing.T) {
 			for _, foreign := range []bool{false, true} {
 				exec := &fakeExec{}
@@ -61,7 +61,7 @@ func TestServiceOperationsRefuseAnotherLoadedFile(t *testing.T) {
 		name string
 		host func(*testing.T, *fakeExec) Host
 		path func(Host) string
-	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, PlistPath}} {
+	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, plistPath}} {
 		t.Run(fixture.name, func(t *testing.T) {
 			h := fixture.host(t, &fakeExec{})
 			state, err := Install(t.Context(), h)
@@ -98,7 +98,7 @@ func TestRegistrationConfigUsesTheFinalFlag(t *testing.T) {
 		name string
 		host func(*testing.T, *fakeExec) Host
 		path func(Host) string
-	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, PlistPath}} {
+	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, plistPath}} {
 		t.Run(fixture.name, func(t *testing.T) {
 			exec := &fakeExec{}
 			h := fixture.host(t, exec)
@@ -146,7 +146,7 @@ func TestRegistrationConfigConsumesValuesUsingTheRunnerGrammar(t *testing.T) {
 		"start --checkout --config=" + h.ConfigPath,
 		"start --repos --config=" + h.ConfigPath,
 	} {
-		body := []byte("# " + Marker + "\n[Service]\nExecStart=" + unitfile.SystemdWord(h.Binary) + " " + args + "\n")
+		body := []byte("# " + marker + "\n[Service]\nExecStart=" + unitfile.SystemdWord(h.Binary) + " " + args + "\n")
 		if err := os.WriteFile(UnitPath(h), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -205,7 +205,7 @@ func TestInspectRefusesMalformedManagedRegistration(t *testing.T) {
 	}
 	valid := "ExecStart=" + unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}) + "\n"
 	for _, command := range []string{"", ":", `"unfinished`, `trailing\`, `"bad\q"`} {
-		body := []byte("# " + Marker + "\n[Service]\nExecStart=" + command + "\n")
+		body := []byte("# " + marker + "\n[Service]\nExecStart=" + command + "\n")
 		if command != "" {
 			body = append(body, valid...)
 		}

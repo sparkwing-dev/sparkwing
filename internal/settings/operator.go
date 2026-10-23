@@ -6,15 +6,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func operatorPick[T any](in OperatorInputs, key string, field func(OperatorValues) *T, fallback *T) (*T, Origin) {
 	for _, layer := range []struct {
 		value  OperatorValues
 		source Source
-	}{{in.Flags, Flag}, {in.Team, TeamDB}, {in.Global, GlobalDB}, {in.Profile, LimitsProfile}} {
+	}{{in.Flags, Flag}, {in.Team, teamDB}, {in.Global, GlobalDB}, {in.Profile, limitsProfile}} {
 		if v := field(layer.value); v != nil {
 			copy := *v
 			origin := layer.value.Origins[key]
@@ -30,7 +30,7 @@ func operatorPick[T any](in OperatorInputs, key string, field func(OperatorValue
 
 func pointer[T any](value T) *T { return &value }
 
-// ControllerCeilings resolves each operator key with OperatorPrecedence. Shared
+// ControllerCeilings resolves each operator key with operatorPrecedence. Shared
 // store quota reservations enforce deployment guards; replica guards only shed.
 func ControllerCeilings(in OperatorInputs) (OperatorValues, error) {
 	out := OperatorValues{Origins: map[string]Origin{}}

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Event size limits, named so a refusal says which one it hit.

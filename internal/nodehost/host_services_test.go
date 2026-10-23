@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type processServiceRoutes struct {
@@ -31,7 +31,7 @@ func TestHostServices(t *testing.T) {
 	masker := secrets.NewMasker()
 	registry := NewMaskRegistry(masker)
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "step"}}}
-	if err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}, func() error { return nil }); err != nil {
+	if err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	service := &ProcessServices{RunID: "run", Job: job, Masks: registry}

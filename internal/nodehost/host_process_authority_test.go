@@ -13,8 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestProcessAuthority(t *testing.T) {
@@ -57,7 +57,7 @@ func TestProcessAuthority(t *testing.T) {
 	masker := secrets.NewMasker()
 	writes := 0
 	service := &ProcessServices{RunID: "run", Job: nodeproto.JobSpec{ID: "job"}, Masks: NewMaskRegistry(masker), Summary: func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error { writes++; return nil }}
-	issued, revoke, err := authorities.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := authorities.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestProcessAuthority(t *testing.T) {
 					parent.snapshot.Authorities[0].Principal.Capability.Binding = binding
 					parent.snapshot.Binding.Current = binding
 					spec.Binding, service.Job = binding, in.Accepted.Plan.Jobs[0]
-					child, revoke, err := authorities.Delegate(ctx, lookup, spec, service)
+					child, revoke, err := authorities.delegate(ctx, lookup, spec, service)
 					if err != nil {
 						return ProcessGrant{}, err
 					}

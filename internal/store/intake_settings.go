@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // IntakeSettings reads deployment guards and funding from the admission transaction.

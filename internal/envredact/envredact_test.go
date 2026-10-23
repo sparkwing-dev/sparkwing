@@ -87,7 +87,7 @@ func TestCredentialValue(t *testing.T) {
 		{"empty", "", false},
 	}
 	for _, c := range cases {
-		if got := CredentialValue(c.value); got != c.want {
+		if got := credentialValue(c.value); got != c.want {
 			t.Errorf("%s: CredentialValue(%q) = %v, want %v", c.name, c.value, got, c.want)
 		}
 	}
@@ -211,7 +211,7 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 			{"lowercase dotenv-looking flag", "run --opt secret=abc", false},
 		}
 		for _, c := range cases {
-			if got := CredentialValue(c.value); got != c.want {
+			if got := credentialValue(c.value); got != c.want {
 				t.Errorf("%s: CredentialValue(%q) = %v, want %v", c.name, c.value, got, c.want)
 			}
 		}

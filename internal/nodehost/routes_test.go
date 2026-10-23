@@ -1,4 +1,4 @@
-package nodehost_test
+package nodehost
 
 import (
 	"context"

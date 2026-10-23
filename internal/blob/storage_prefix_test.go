@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"net/http"
@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -23,7 +22,7 @@ func FuzzS3StoragePrefix(f *testing.F) {
 			t.Fatal("signing performed network I/O")
 			return nil, nil
 		})
-		backend, err := blob.NewS3(client, "bucket", prefix)
+		backend, err := NewS3(client, "bucket", prefix)
 		if err != nil {
 			return
 		}

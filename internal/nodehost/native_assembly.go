@@ -11,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -23,9 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // NativeServices supplies the per-award host services and their joined cleanup.
@@ -189,15 +189,15 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		upload.Key.Kind, upload.Key.Name, upload.Key.Scope.Key = blob.KindDepcache, key.Name, key.Key
 		return upload, err
 	}, Resolve: func(ctx context.Context, input NodeInput, cache nodeproto.CacheSpec) (string, error) {
-		return processes.Session.Environments.CacheDirectory(ctx, input, cache)
+		return processes.Session.Environments.cacheDirectory(ctx, input, cache)
 	}}
-	follower := StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
+	follower := stateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := NativeHostConfig{
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
 		Admission:  cfg.Admission,
-		Owner:      OwnerOperations{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
+		Owner:      OwnerOperations{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.wait, WaitNode: follower.waitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
 		PlanningLog: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		},
@@ -253,7 +253,7 @@ func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.H
 	}
 }
 
-func localStateSubscription(ctx context.Context, _ string) (StateSubscription, error) {
+func localStateSubscription(ctx context.Context, _ string) (stateSubscription, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	changed, done := make(chan struct{}, 1), make(chan struct{})
 	go func() {
@@ -272,7 +272,7 @@ func localStateSubscription(ctx context.Context, _ string) (StateSubscription, e
 			}
 		}
 	}()
-	return StateSubscription{Changed: changed, Close: func() error { cancel(); <-done; return nil }}, nil
+	return stateSubscription{Changed: changed, Close: func() error { cancel(); <-done; return nil }}, nil
 }
 
 // safety: a remote base inherits the hosting process's tool environment, which

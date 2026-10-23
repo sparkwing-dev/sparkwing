@@ -1,4 +1,4 @@
-package secretsource_test
+package secretsource
 
 import (
 	"context"
@@ -11,14 +11,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
 func TestFactory_EnvSource_HitAndMiss(t *testing.T) {
 	t.Setenv("SW_DEPLOY_TOKEN", "swu_real")
 	t.Setenv("SW_EMPTY", "")
-	r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeEnv, Prefix: "SW_"})
+	r, err := fromSpec(backends.Spec{Type: backends.TypeEnv, Prefix: "SW_"})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -29,17 +28,17 @@ func TestFactory_EnvSource_HitAndMiss(t *testing.T) {
 	if v != "swu_real" || !masked {
 		t.Errorf("got %q masked=%v", v, masked)
 	}
-	if _, _, err := r.Resolve(context.Background(), "ABSENT"); !errors.Is(err, secretsource.ErrMissing) {
+	if _, _, err := r.Resolve(context.Background(), "ABSENT"); !errors.Is(err, ErrMissing) {
 		t.Errorf("missing env should be ErrSecretMissing, got %v", err)
 	}
-	if _, _, err := r.Resolve(context.Background(), "EMPTY"); !errors.Is(err, secretsource.ErrMissing) {
+	if _, _, err := r.Resolve(context.Background(), "EMPTY"); !errors.Is(err, ErrMissing) {
 		t.Errorf("empty env should be ErrSecretMissing, got %v", err)
 	}
 }
 
 func TestFactory_EnvSource_NoPrefix(t *testing.T) {
 	t.Setenv("ABSOLUTE_NAME", "val")
-	r, _ := secretsource.FromSpec(backends.Spec{Type: backends.TypeEnv})
+	r, _ := fromSpec(backends.Spec{Type: backends.TypeEnv})
 	v, _, err := r.Resolve(context.Background(), "ABSOLUTE_NAME")
 	if err != nil || v != "val" {
 		t.Errorf("Resolve = %q err=%v", v, err)
@@ -52,7 +51,7 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 	if err := os.WriteFile(path, []byte("FOO=bar\n# comment\nBAZ=\"quoted\"\nEMPTY=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	r, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -66,23 +65,23 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 			t.Errorf("%s = %q, want %q", name, v, want)
 		}
 	}
-	if _, _, err := r.Resolve(context.Background(), "MISSING"); !errors.Is(err, secretsource.ErrMissing) {
+	if _, _, err := r.Resolve(context.Background(), "MISSING"); !errors.Is(err, ErrMissing) {
 		t.Errorf("expected ErrSecretMissing, got %v", err)
 	}
 }
 
 func TestFactory_FileSource_MissingFileTreatedAsEmpty(t *testing.T) {
-	r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: filepath.Join(t.TempDir(), "absent.env")})
+	r, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: filepath.Join(t.TempDir(), "absent.env")})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	if _, _, err := r.Resolve(context.Background(), "ANY"); !errors.Is(err, secretsource.ErrMissing) {
+	if _, _, err := r.Resolve(context.Background(), "ANY"); !errors.Is(err, ErrMissing) {
 		t.Errorf("absent file should resolve to ErrSecretMissing, got %v", err)
 	}
 }
 
 func TestFactory_FileSource_RequiresPath(t *testing.T) {
-	if _, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem}); err == nil {
+	if _, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem}); err == nil {
 		t.Fatal("expected path-required error")
 	}
 }
@@ -107,7 +106,7 @@ func TestFactory_ControllerSource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController, URL: srv.URL, Token: "testtoken"})
+	r, err := fromSpec(backends.Spec{Type: backends.TypeController, URL: srv.URL, Token: "testtoken"})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -118,7 +117,7 @@ func TestFactory_ControllerSource(t *testing.T) {
 	if v != "vault-secret" || !masked {
 		t.Errorf("got %q masked=%v", v, masked)
 	}
-	if _, _, err := r.Resolve(context.Background(), "MISSING"); !errors.Is(err, secretsource.ErrMissing) {
+	if _, _, err := r.Resolve(context.Background(), "MISSING"); !errors.Is(err, ErrMissing) {
 		t.Errorf("expected ErrSecretMissing for 404, got %v", err)
 	}
 	if called < 2 {
@@ -136,7 +135,7 @@ func TestFactory_ControllerSource_TokenFromEnv(t *testing.T) {
 	}))
 	defer srv.Close()
 	t.Setenv("SWTEST_CTRL_TOKEN", "envtoken")
-	r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController, URL: srv.URL, TokenEnv: "SWTEST_CTRL_TOKEN"})
+	r, err := fromSpec(backends.Spec{Type: backends.TypeController, URL: srv.URL, TokenEnv: "SWTEST_CTRL_TOKEN"})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -147,21 +146,21 @@ func TestFactory_ControllerSource_TokenFromEnv(t *testing.T) {
 }
 
 func TestFactory_ControllerSource_RequiresURL(t *testing.T) {
-	_, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController})
+	_, err := fromSpec(backends.Spec{Type: backends.TypeController})
 	if err == nil || !strings.Contains(err.Error(), "url is empty") {
 		t.Fatalf("expected url-required error, got %v", err)
 	}
 }
 
 func TestFactory_UnknownTypeRejected(t *testing.T) {
-	_, err := secretsource.FromSpec(backends.Spec{Type: "vault-pro"})
+	_, err := fromSpec(backends.Spec{Type: "vault-pro"})
 	if err == nil || !strings.Contains(err.Error(), "unsupported type") {
 		t.Fatalf("expected unsupported-type error, got %v", err)
 	}
 }
 
 func TestFactory_EmptyTypeRejected(t *testing.T) {
-	_, err := secretsource.FromSpec(backends.Spec{Type: ""})
+	_, err := fromSpec(backends.Spec{Type: ""})
 	if err == nil || !strings.Contains(err.Error(), "type is required") {
 		t.Fatalf("expected type-required error, got %v", err)
 	}
@@ -176,7 +175,7 @@ func TestFactory_FileSource_UnescapesQuotedValues(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	r, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -203,13 +202,13 @@ func TestFactory_FileSource_EmptyValuesAreMissing(t *testing.T) {
 	if err := os.WriteFile(path, []byte("EMPTY=\nSPACE=   \nQUOTED=\"\"\nSINGLE=''\nCLEARED=old\nCLEARED=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	resolver, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"EMPTY", "SPACE", "QUOTED", "SINGLE", "CLEARED"} {
 		value, masked, err := resolver.Resolve(t.Context(), key)
-		if value != "" || masked || !errors.Is(err, secretsource.ErrMissing) {
+		if value != "" || masked || !errors.Is(err, ErrMissing) {
 			t.Errorf("%s: value=%q masked=%v err=%v", key, value, masked, err)
 		}
 	}
@@ -227,7 +226,7 @@ SINGLE='value # literal' # explanation
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	resolver, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +237,7 @@ SINGLE='value # literal' # explanation
 		}
 	}
 	value, _, err := resolver.Resolve(t.Context(), "EMPTY")
-	if value != "" || !errors.Is(err, secretsource.ErrMissing) {
+	if value != "" || !errors.Is(err, ErrMissing) {
 		t.Fatalf("comment-only value = %q, %v", value, err)
 	}
 }
@@ -250,7 +249,7 @@ func TestFactory_ControllerSource_ErrorsOmitURLCredentials(t *testing.T) {
 	defer srv.Close()
 	withCreds := strings.Replace(srv.URL, "http://", "http://user-cred:pass-cred@", 1)
 	for _, raw := range []string{withCreds, withCreds + "/%zz"} {
-		r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController, URL: raw})
+		r, err := fromSpec(backends.Spec{Type: backends.TypeController, URL: raw})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -262,7 +261,7 @@ func TestFactory_ControllerSource_ErrorsOmitURLCredentials(t *testing.T) {
 }
 
 func TestControllerSourceMalformedURLDoesNotLeakQueryCredential(t *testing.T) {
-	resolver, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController, URL: "https://example.test/%zz?token=private-query-token"})
+	resolver, err := fromSpec(backends.Spec{Type: backends.TypeController, URL: "https://example.test/%zz?token=private-query-token"})
 	if err != nil {
 		t.Fatal(err)
 	}

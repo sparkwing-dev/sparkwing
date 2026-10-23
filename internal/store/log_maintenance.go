@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 const abandonedLogStreamSQL = `l.sealed_at IS NULL

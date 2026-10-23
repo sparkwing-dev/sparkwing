@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -40,7 +40,7 @@ func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
 		}
 		return p, err
 	}
-	evaluator, err := NewOwnerEvaluator(deps)
+	evaluator, err := newOwnerEvaluator(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

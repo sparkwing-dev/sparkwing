@@ -18,20 +18,20 @@ type FlagNames struct {
 // Unprefixed flag names, which are also what a refusal names when a
 // Config carries no FlagNames of its own.
 const (
-	FlagDailyAlarmBytes = "--egress-daily-alarm-bytes"
-	FlagMaxLogStreams   = "--egress-max-log-streams"
-	FlagMaxDownloads    = "--egress-max-downloads"
+	flagDailyAlarmBytes = "--egress-daily-alarm-bytes"
+	flagMaxLogStreams   = "--egress-max-log-streams"
+	flagMaxDownloads    = "--egress-max-downloads"
 )
 
 func (f FlagNames) orDefault() FlagNames {
 	if f.DailyAlarmBytes == "" {
-		f.DailyAlarmBytes = FlagDailyAlarmBytes
+		f.DailyAlarmBytes = flagDailyAlarmBytes
 	}
 	if f.MaxLogStreams == "" {
-		f.MaxLogStreams = FlagMaxLogStreams
+		f.MaxLogStreams = flagMaxLogStreams
 	}
 	if f.MaxDownloads == "" {
-		f.MaxDownloads = FlagMaxDownloads
+		f.MaxDownloads = flagMaxDownloads
 	}
 	return f
 }
@@ -48,9 +48,9 @@ type Named struct {
 // Bind registers the controller's egress flags and returns their validated configuration.
 func Bind(fs *flag.FlagSet) func() (Config, Named, error) {
 	names := FlagNames{
-		DailyAlarmBytes: FlagDailyAlarmBytes,
-		MaxLogStreams:   FlagMaxLogStreams,
-		MaxDownloads:    FlagMaxDownloads,
+		DailyAlarmBytes: flagDailyAlarmBytes,
+		MaxLogStreams:   flagMaxLogStreams,
+		MaxDownloads:    flagMaxDownloads,
 	}
 	dailyFlag := fs.Int64("egress-daily-alarm-bytes", 0,
 		"bytes this process may send in a UTC day before it raises the egress alarm, which "+
@@ -76,7 +76,7 @@ func Bind(fs *flag.FlagSet) func() (Config, Named, error) {
 			MaxDownloadsPerPrincipal: int(*downloadsFlag),
 			MaxStreamsPerPrincipal:   int(*streamsFlag),
 		}
-		return cfg, named, cfg.Validate()
+		return cfg, named, cfg.validate()
 	}
 }
 
@@ -86,9 +86,9 @@ func trimFlag(name string) string {
 	return strings.TrimPrefix(name, "--")
 }
 
-// Validate reports a budget spelled with a negative number, which is
+// validate reports a budget spelled with a negative number, which is
 // neither a limit nor "unlimited" and so is refused rather than guessed.
-func (c Config) Validate() error {
+func (c Config) validate() error {
 	names := c.Flags.orDefault()
 	for _, b := range []struct {
 		flag  string

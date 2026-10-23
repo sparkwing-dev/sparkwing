@@ -63,11 +63,7 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func Tracer(name string) trace.Tracer {
-	return otel.Tracer(name)
-}
-
-func Meter(name string) metric.Meter {
+func meter(name string) metric.Meter {
 	return otel.Meter(name)
 }
 
@@ -205,7 +201,7 @@ func WrapHandler(serviceName string, h http.Handler) http.Handler {
 	return otelhttp.NewHandler(h, serviceName)
 }
 
-func WrapTransport(base http.RoundTripper) http.RoundTripper {
+func wrapTransport(base http.RoundTripper) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
 	}

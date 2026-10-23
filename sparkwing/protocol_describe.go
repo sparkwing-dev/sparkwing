@@ -8,8 +8,8 @@ import (
 	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/internal/swtags"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error) {

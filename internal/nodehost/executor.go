@@ -9,20 +9,20 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // NodeTransitionStore is the executor's fenced state boundary.
@@ -370,7 +370,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 	}
 	if ctx.Err() != nil {
 		result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
-		var admission *AdmissionFailure
+		var admission *admissionFailure
 		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == runstate.NodeSuperseded {
 			result.Outcome, result.Reason = admission.Outcome, admission.Reason
 		}

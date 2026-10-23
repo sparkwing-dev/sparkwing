@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -71,7 +71,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: runstate.SourceNone}, nil)
+		result, err := followReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: runstate.SourceNone}, nil)
 		if err != nil || result.Kind != runstate.KeepTerminal || result.Node.Outcome != runstate.NodeSuccess || result.Node.StateSeq != before.StateSeq || result.Node.Attempt != 1 || result.Node.Generation != input.Generation {
 			t.Fatalf("adopted = %+v, error %v", result, err)
 		}

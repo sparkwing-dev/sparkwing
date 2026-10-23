@@ -3,9 +3,8 @@
 // config directory rather than in SPARKWING_HOME, so a copied or backed-up
 // state.db carries only ciphertext.
 //
-// Every local process that seals or opens a stored secret builds its cipher
-// here: the admission daemon's controller API, the dashboard (`sparkwing serve`), a run's
-// loopback controller, and a run that reads the store without a daemon.
+// The controller that owns the local store seals and opens its secrets through
+// this package. Clients use its API instead of opening the store.
 package localsecrets
 
 import (
@@ -28,12 +27,12 @@ import (
 )
 
 const (
-	// KeyEnv carries the key as base64 of 32 bytes, as it does for
+	// keyEnv carries the key as base64 of 32 bytes, as it does for
 	// sparkwing-controller. It overrides the key file.
-	KeyEnv = "SPARKWING_SECRETS_KEY"
-	// PreviousKeyEnv carries a retired key that values may still be sealed
+	keyEnv = "SPARKWING_SECRETS_KEY"
+	// previousKeyEnv carries a retired key that values may still be sealed
 	// under, until `sparkwing secrets rotate` reseals them.
-	PreviousKeyEnv = "SPARKWING_SECRETS_PREVIOUS_KEY"
+	previousKeyEnv = "SPARKWING_SECRETS_PREVIOUS_KEY"
 	// KeyFileEnv names the key file in place of secrets.key in the config
 	// directory.
 	KeyFileEnv = "SPARKWING_SECRETS_KEY_FILE"
@@ -43,34 +42,33 @@ const (
 	sealedProbeTimeout = 10 * time.Second
 )
 
-// ErrNoKey reports a stored secret that cannot be opened because this
+// errNoKey reports a stored secret that cannot be opened because this
 // machine has no secrets key yet.
-var ErrNoKey = errors.New("no local secrets key")
+var errNoKey = errors.New("no local secrets key")
 
-// KeyPath reports where this machine's secrets key file lives:
+// keyPath reports where this machine's secrets key file lives:
 // $SPARKWING_SECRETS_KEY_FILE when set, else secrets.key in the sparkwing
 // config directory.
-func KeyPath() (string, error) {
+func keyPath() (string, error) {
 	if v := os.Getenv(KeyFileEnv); v != "" {
 		return v, nil
 	}
 	return fssecure.ConfigFile(keyFileName)
 }
 
-// ErrNoKeyToCreate reports a seal in a process that may not create the
+// errNoKeyToCreate reports a seal in a process that may not create the
 // machine's key; only the sparkwing daemon creates it.
-var ErrNoKeyToCreate = errors.New("no local secrets key")
+var errNoKeyToCreate = errors.New("no local secrets key")
 
 // KeyringOptions choose how [LoadKeyring] treats this process.
 type KeyringOptions struct {
 	// Create lets the first seal create the key file. Only the process that
-	// owns the machine's store may: the daemon, or a run on a machine with
-	// no daemon at all.
+	// owns the machine's store may create it.
 	Create bool
 }
 
 // Keyring holds this process's view of the machine's secrets key. The key
-// comes from [KeyEnv] or the key file; a keyring with neither creates the
+// comes from [keyEnv] or the key file; a keyring with neither creates the
 // file on its first seal when [KeyringOptions.Create] allows it.
 type Keyring struct {
 	path      string
@@ -83,18 +81,18 @@ type Keyring struct {
 	cipher *secrets.Cipher
 }
 
-// LoadKeyring reads the key from [KeyEnv], or from the key file when the
+// LoadKeyring reads the key from [keyEnv], or from the key file when the
 // variable is unset; a missing file is not an error.
 func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
-	path, err := KeyPath()
+	path, err := keyPath()
 	if err != nil {
 		return nil, err
 	}
-	current, err := decodeEnvKey(KeyEnv, os.Getenv("SPARKWING_SECRETS_KEY"))
+	current, err := decodeEnvKey(keyEnv, os.Getenv("SPARKWING_SECRETS_KEY"))
 	if err != nil {
 		return nil, err
 	}
-	previous, err := decodeEnvKey(PreviousKeyEnv, os.Getenv("SPARKWING_SECRETS_PREVIOUS_KEY"))
+	previous, err := decodeEnvKey(previousKeyEnv, os.Getenv("SPARKWING_SECRETS_PREVIOUS_KEY"))
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +106,7 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	if current == nil {
 		if previous != nil {
 			return nil, fmt.Errorf("%s is set without a current key; set %s, or keep %s, to the key values are sealed under now",
-				PreviousKeyEnv, KeyEnv, path)
+				previousKeyEnv, keyEnv, path)
 		}
 		return k, nil
 	}
@@ -197,9 +195,6 @@ func ownerOnlyKey(f *os.File, path string) error {
 	return nil
 }
 
-// Path reports the key file this keyring reads and creates.
-func (k *Keyring) Path() string { return k.path }
-
 // For returns the cipher the controller serving st seals and opens secrets
 // with. st is what the cipher asks, before it creates a key, whether any
 // value is already sealed under another one; nil skips that question.
@@ -243,7 +238,7 @@ func (k *Keyring) ensure(ctx context.Context, st *store.Operator) (*secrets.Ciph
 	if !k.mayCreate {
 		return nil, fmt.Errorf("%w: %s does not exist, and only the sparkwing daemon creates it. Store the first "+
 			"local secret with `sparkwing secrets set`, which starts the daemon; if the daemon runs with %s, "+
-			"set it for this process too%.0w", ErrNoKeyToCreate, k.path, KeyEnv, secrets.ErrKeyRefused)
+			"set it for this process too%.0w", errNoKeyToCreate, k.path, keyEnv, secrets.ErrKeyRefused)
 	}
 	// safety: a store keyring's file sits beside the database the process
 	// already writes, so only the machine key in the config directory is guarded.
@@ -305,7 +300,7 @@ func (k *Keyring) create() ([]byte, error) {
 	if err := os.Link(tmp.Name(), k.path); err != nil {
 		if !errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("install the local secrets key at %s: %w; creating it safely needs a filesystem "+
-				"with hard links, so set %s or point %s at a local disk", k.path, err, KeyEnv, KeyFileEnv)
+				"with hard links, so set %s or point %s at a local disk", k.path, err, keyEnv, KeyFileEnv)
 		}
 		winner, rerr := readKeyFile(k.path)
 		if rerr != nil {
@@ -350,10 +345,10 @@ func (k *Keyring) missingLocked(ctx context.Context, st *store.Operator) error {
 	}
 	if k.restore != "" {
 		return fmt.Errorf("%w: the secrets store holds values sealed under a key this process does not have, "+
-			"so it will not create a new one at %s. %s%.0w", ErrNoKey, k.path, k.restore, secrets.ErrKeyRefused)
+			"so it will not create a new one at %s. %s%.0w", errNoKey, k.path, k.restore, secrets.ErrKeyRefused)
 	}
 	return fmt.Errorf("%w: the local secrets store holds values sealed under a key this process does not have, "+
 		"so it will not create a new one. Restore that key to %s, or set %s to it (base64 of its 32 bytes) "+
 		"in the environment the sparkwing daemon starts in, then run `sparkwing daemon restart`%.0w",
-		ErrNoKey, k.path, KeyEnv, secrets.ErrKeyRefused)
+		errNoKey, k.path, keyEnv, secrets.ErrKeyRefused)
 }

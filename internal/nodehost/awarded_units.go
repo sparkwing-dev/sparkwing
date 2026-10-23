@@ -6,13 +6,13 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
@@ -149,7 +149,7 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row runstate.NodeRow, a
 		if err := json.Unmarshal(body, &plan); err != nil {
 			return err
 		}
-		return h.Masks.Accept(plan, commit)
+		return h.Masks.acceptPlan(plan, commit)
 	}
 	return commit()
 }
@@ -162,7 +162,7 @@ func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accept
 	if entry != nil {
 		defer func() { err = errors.Join(err, entry.Close()) }()
 	}
-	var result OwnerLayerResult
+	var result ownerLayerResult
 	if err != nil || entry == nil {
 		if context.Cause(ctx) != nil {
 			return errors.Join(err, context.Cause(ctx))

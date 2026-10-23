@@ -16,14 +16,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func protocolTestCodec(line []byte) (nodeproto.Frame, error) {
@@ -45,7 +45,7 @@ func protocolTestCodec(line []byte) (nodeproto.Frame, error) {
 	return nodeproto.Frame{Log: &log}, nil
 }
 
-func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionConfig)) *ProtocolSession {
+func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionConfig)) *protocolSession {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -55,7 +55,7 @@ func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionCo
 	if edit != nil {
 		edit(&cfg)
 	}
-	session, err := StartProtocolSession(t.Context(), cfg)
+	session, err := startProtocolSession(t.Context(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionCo
 	return session
 }
 
-func protocolTestHello(t *testing.T, session *ProtocolSession) {
+func protocolTestHello(t *testing.T, session *protocolSession) {
 	t.Helper()
 	reply, err := session.Request(t.Context(), nodeproto.Request{ID: "caller-hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: "job", Routes: nodeproto.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}}})
 	if err != nil || !reply.OK || reply.ID != "caller-hello" {
@@ -617,13 +617,13 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 		logs = append(logs, record)
 		return nil
 	}
-	var sessions []*ProtocolSession
+	var sessions []*protocolSession
 	cleaned := 0
 	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error { cleaned++; return nil }}
 	p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 		process, err := cfg.StartPlanning(ctx, input, log)
 		if process != nil {
-			sessions = append(sessions, process.(*ProtocolSession))
+			sessions = append(sessions, process.(*protocolSession))
 		}
 		return process, err
 	}
@@ -632,7 +632,7 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan)
+		result, err := planInitial(t.Context(), prepared.Input, prepared.Plan)
 		if err != nil {
 			t.Fatalf("plan %d = %+v, %v", i, result, err)
 		}
@@ -673,13 +673,13 @@ func TestProtocolSessionFailedStartupRevokesDelegatedRoute(t *testing.T) {
 			}
 			var err error
 			if mode == "adapter" {
-				process, startErr := cfg.Start(ctx, NodeInput{Entry: &source.Entry{Command: cfg.Command}}, ExecutorActivity{})
+				process, startErr := cfg.startNode(ctx, NodeInput{Entry: &source.Entry{Command: cfg.Command}}, ExecutorActivity{})
 				err = startErr
 				if process != nil {
 					t.Fatal("failed startup returned a typed nil process")
 				}
 			} else {
-				session, startErr := StartProtocolSession(ctx, cfg)
+				session, startErr := startProtocolSession(ctx, cfg)
 				err = startErr
 				if session != nil {
 					_ = session.Close()
@@ -742,7 +742,7 @@ func executorPolicyNativeSkip(t *testing.T, mode string) {
 			return nil
 		},
 	}
-	deps.Start = cfg.Start
+	deps.Start = cfg.startNode
 	host, spec, job := executorPolicyHost(t, deps, in)
 	result, err := host.skipIf(t.Context(), in, spec, job)
 	if mode != "continue" {
@@ -779,11 +779,11 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 		return nil
 	}}
 	deps.Start = cfg.StartEvaluation
-	h, err := NewOwnerEvaluator(deps)
+	h, err := newOwnerEvaluator(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _, failure, err := h.Expand(t.Context(), in)
+	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 	if err != nil || failure != nil {
 		t.Fatalf("failure = %+v, error = %v", failure, err)
 	}
@@ -832,9 +832,9 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				switch adapter {
 				case "direct":
 					cfg.Debug = debug
-					process, err = StartProtocolSession(t.Context(), cfg)
+					process, err = startProtocolSession(t.Context(), cfg)
 				case "attempt":
-					process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+					process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 				case "evaluation":
 					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 				case "planning":
@@ -844,7 +844,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = process.Close() })
-				session := process.(*ProtocolSession)
+				session := process.(*protocolSession)
 				protocolTestHello(t, session)
 				if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err != nil {
 					t.Fatal(err)

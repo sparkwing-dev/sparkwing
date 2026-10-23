@@ -259,8 +259,8 @@ func TestLocalRegistrationCommitFailureRestoresFiles(t *testing.T) {
 				t.Fatalf("commit: %v", err)
 			}
 			for _, entry := range input.Schedules {
-				id := ScheduleID(input.RepoPath, entry.Pipeline, entry.Name)
-				for _, path := range []string{filepath.Join(h.svc.PinRoot, id, PinnedBinaryName), filepath.Join(h.home, "schedule-registrations", id+".json")} {
+				id := scheduleID(input.RepoPath, entry.Pipeline, entry.Name)
+				for _, path := range []string{filepath.Join(h.svc.PinRoot, id, pinnedBinaryName), filepath.Join(h.home, "schedule-registrations", id+".json")} {
 					got, err := os.ReadFile(path)
 					if existing {
 						if err != nil || !bytes.Equal(got, before[path]) {

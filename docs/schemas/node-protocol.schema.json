@@ -1134,7 +1134,7 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Generated from pkg/nodeproto. Select a $defs entry for each message. Hello negotiates once; other messages carry no version. Stateful ordering, correlation and duplicate-key checks belong to the protocol reader.",
+  "description": "Generated from internal/nodeproto. Select a $defs entry for each message. Hello negotiates once; other messages carry no version. Stateful ordering, correlation and duplicate-key checks belong to the protocol reader.",
   "oneOf": [
     {
       "$ref": "#/$defs/request"

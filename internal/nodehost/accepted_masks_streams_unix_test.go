@@ -15,13 +15,13 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
@@ -61,7 +61,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					host.Acquire = func(ctx context.Context, _ RunInput) (*source.Entry, error) {
 						prepared, err := planner.Prepare(ctx, planning, fixture.input)
 						if err == nil {
-							_, err = PlanInitial(ctx, prepared.Input, prepared.Plan)
+							_, err = planInitial(ctx, prepared.Input, prepared.Plan)
 						}
 						return nil, err
 					}

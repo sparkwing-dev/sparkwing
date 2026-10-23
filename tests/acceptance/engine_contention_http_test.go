@@ -10,7 +10,7 @@ import (
 	"testing/quick"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestEngineTransactionContentionProperty(t *testing.T) {

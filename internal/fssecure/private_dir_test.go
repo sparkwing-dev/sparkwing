@@ -1,12 +1,10 @@
-package fssecure_test
+package fssecure
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func TestSecurePrivateDirRejectsLinksAndFiles(t *testing.T) {
@@ -14,7 +12,7 @@ func TestSecurePrivateDirRejectsLinksAndFiles(t *testing.T) {
 	if err := os.Mkdir(root, 0o777); err != nil {
 		t.Fatal(err)
 	}
-	if err := fssecure.SecurePrivateDir(root); err != nil {
+	if err := SecurePrivateDir(root); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Lstat(root)
@@ -29,7 +27,7 @@ func TestSecurePrivateDirRejectsLinksAndFiles(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := fssecure.SecurePrivateDir(file); err == nil {
+	if err := SecurePrivateDir(file); err == nil {
 		t.Fatal("SecurePrivateDir accepted a regular file")
 	}
 
@@ -40,14 +38,14 @@ func TestSecurePrivateDirRejectsLinksAndFiles(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	if err := fssecure.SecurePrivateDir(link); err == nil {
+	if err := SecurePrivateDir(link); err == nil {
 		t.Fatal("SecurePrivateDir accepted a directory link")
 	}
 }
 
 func TestMkdirPrivateTempCreatesOnePrivateDirectoryUnderParent(t *testing.T) {
 	parent := t.TempDir()
-	directory, err := fssecure.MkdirPrivateTemp(parent, "probe-")
+	directory, err := MkdirPrivateTemp(parent, "probe-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +60,7 @@ func TestMkdirPrivateTempCreatesOnePrivateDirectoryUnderParent(t *testing.T) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf("private temporary path mode = %s", info.Mode())
 	}
-	if _, err := fssecure.MkdirPrivateTemp(parent, "nested/probe-"); err == nil {
+	if _, err := MkdirPrivateTemp(parent, "nested/probe-"); err == nil {
 		t.Fatal("MkdirPrivateTemp accepted a multi-component prefix")
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func ListRunsHandler(b backend.Backend) http.HandlerFunc {
+func listRunsHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		filter, parseErr := store.ParseRunFilterValidated(r.URL.Query())
 		if parseErr != nil {
@@ -31,7 +31,7 @@ func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-func GetRunHandler(b backend.Backend) http.HandlerFunc {
+func getRunHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
 		run, err := b.GetRun(r.Context(), runID)

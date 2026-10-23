@@ -310,9 +310,9 @@ func parseNodeLogFilter(r *http.Request) (backend.ReadOpts, bool, int, error) {
 	return f, numbered, maxMatches, nil
 }
 
-// NumberedLogLine is one line a numbered grep matched, with its 1-based
+// numberedLogLine is one line a numbered grep matched, with its 1-based
 // position in the node's whole log.
-type NumberedLogLine struct {
+type numberedLogLine struct {
 	LineNo int    `json:"line_no"`
 	Line   string `json:"line"`
 }
@@ -332,7 +332,7 @@ func serveNumberedGrep(b backend.Backend, w http.ResponseWriter, r *http.Request
 		if !strings.Contains(sc.Text(), pattern) {
 			continue
 		}
-		if enc.Encode(NumberedLogLine{LineNo: lineNo, Line: sc.Text()}) != nil {
+		if enc.Encode(numberedLogLine{LineNo: lineNo, Line: sc.Text()}) != nil {
 			return
 		}
 		if found++; maxMatches > 0 && found >= maxMatches {

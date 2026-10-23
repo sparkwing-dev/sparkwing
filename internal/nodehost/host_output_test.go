@@ -15,13 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 var outputRefused = errors.New("output backend refused")
@@ -176,7 +176,7 @@ func TestOutputRecordRead(t *testing.T) {
 				b.value = []byte(`"` + strings.Repeat("x", int(limits.NodeOutputBytes)-2) + `"`)
 			}
 			request := blob.RecordLookup{Authority: b.upload.Authority, Key: b.upload.Key}
-			value, err := adapter.ReadOutput(t.Context(), request)
+			value, err := adapter.readOutput(t.Context(), request)
 			ok := mode == "success" || mode == "null" || mode == "at_limit"
 			if ok {
 				if err != nil || !bytes.Equal(value, b.value) || b.lookup == nil || *b.lookup != request || b.get == nil || b.get.Authority != request.Authority || b.get.Digest != outputDigest(b.value) {

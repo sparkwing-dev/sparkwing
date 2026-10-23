@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 

@@ -31,8 +31,8 @@ import (
 // AppID is the App the fake serves.
 const AppID = 4242
 
-// WebhookSecret signs the deliveries [Sign] produces.
-const WebhookSecret = "fake-app-webhook-secret"
+// webhookSecret signs the deliveries [Sign] produces.
+const webhookSecret = "fake-app-webhook-secret"
 
 // Repo is a repository an installation covers.
 type Repo struct {
@@ -62,8 +62,8 @@ type MintedToken struct {
 	Permissions   map[string]string
 }
 
-// Status records one commit status the fake accepted.
-type Status struct {
+// status records one commit status the fake accepted.
+type status struct {
 	Repo    string
 	SHA     string
 	State   string
@@ -117,7 +117,7 @@ type GitHub struct {
 	failContents     int
 	failInstallRepos int
 	minted           []MintedToken
-	stats            []Status
+	stats            []status
 	checks           []CheckRunCall
 	checkRuns        map[int64]CheckRunCall
 	failChecks       int
@@ -172,7 +172,7 @@ func New(t testing.TB) *GitHub {
 func (g *GitHub) Config() githubapp.Config {
 	return githubapp.Config{
 		AppID: AppID, Slug: "sparkwing-test", ClientID: "Iv1.fake", ClientSecret: "fake-client-secret",
-		WebhookSecret: WebhookSecret, PrivateKey: g.Key, WebURL: g.URL, APIURL: g.URL,
+		WebhookSecret: webhookSecret, PrivateKey: g.Key, WebURL: g.URL, APIURL: g.URL,
 	}
 }
 
@@ -354,19 +354,6 @@ func (g *GitHub) FailCheckRuns(n int) {
 	g.failChecks = n
 }
 
-// HoldCheckRunCreates holds every check run create until release is called.
-// arrived receives as each held create reaches the fake, and minted as each
-// installation token is minted from now on, so a test can see a second writer
-// start before it lets the first one finish.
-func (g *GitHub) HoldCheckRunCreates() (arrived, minted <-chan struct{}, release func()) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.createHold, g.createArrived, g.mintArrived = make(chan struct{}), make(chan struct{}, 16), make(chan struct{}, 16)
-	hold := g.createHold
-	var once sync.Once
-	return g.createArrived, g.mintArrived, func() { once.Do(func() { close(hold) }) }
-}
-
 // CheckRunCalls lists the check run writes accepted so far.
 func (g *GitHub) CheckRunCalls() []CheckRunCall {
 	g.mu.Lock()
@@ -392,13 +379,6 @@ func (g *GitHub) Minted() []MintedToken {
 	return append([]MintedToken(nil), g.minted...)
 }
 
-// Statuses lists the commit statuses accepted so far.
-func (g *GitHub) Statuses() []Status {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return append([]Status(nil), g.stats...)
-}
-
 // TokenCovers reports whether token is a live installation token that may
 // read repo's contents.
 func (g *GitHub) TokenCovers(token, repo string) bool {
@@ -411,7 +391,7 @@ func (g *GitHub) TokenCovers(token, repo string) bool {
 
 // Sign is the X-Hub-Signature-256 header GitHub sends with body.
 func Sign(body []byte) string {
-	return SignWith(WebhookSecret, body)
+	return SignWith(webhookSecret, body)
 }
 
 // SignWith signs body with secret.
@@ -728,7 +708,7 @@ func (g *GitHub) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.mu.Lock()
-	g.stats = append(g.stats, Status{Repo: full, SHA: r.PathValue("sha"), State: req.State, Context: req.Context})
+	g.stats = append(g.stats, status{Repo: full, SHA: r.PathValue("sha"), State: req.State, Context: req.Context})
 	g.mu.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]string{"state": req.State})
 }

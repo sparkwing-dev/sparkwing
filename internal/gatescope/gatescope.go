@@ -26,13 +26,13 @@ var skipDirs = map[string]bool{
 	".claude-scratch": true,
 }
 
-// SkipDir reports whether a directory holds code no source gate judges.
-func SkipDir(name string) bool {
+// skipDir reports whether a directory holds code no source gate judges.
+func skipDir(name string) bool {
 	return skipDirs[name]
 }
 
 // Walk calls visit for every file under root whose path ends in suffix,
-// skipping the directories SkipDir names. It hands visit the walked path and
+// skipping the directories skipDir names. It hands visit the walked path and
 // that path relative to root in slash form, which is the spelling git uses and
 // the one a baseline file records.
 func Walk(root, suffix string, visit func(path, rel string)) error {
@@ -41,7 +41,7 @@ func Walk(root, suffix string, visit func(path, rel string)) error {
 			return err
 		}
 		if d.IsDir() {
-			if SkipDir(d.Name()) {
+			if skipDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil

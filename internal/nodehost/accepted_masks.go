@@ -6,10 +6,10 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodeproto.PlanDoc, nodes []runstate.NodeRow) error {
@@ -25,7 +25,7 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 		return err
 	}
 	for _, value := range projection.Values {
-		if err := r.Register(value); err != nil {
+		if err := r.registerValue(value); err != nil {
 			return err
 		}
 	}
@@ -104,7 +104,7 @@ func (r *MaskRegistry) initializeSnapshot(snapshot store.RunSnapshot, accepted A
 	}
 	for _, expansion := range snapshot.Expansions {
 		for _, value := range expansion.Registration.Values {
-			if err := r.Register(value); err != nil {
+			if err := r.registerValue(value); err != nil {
 				return err
 			}
 		}

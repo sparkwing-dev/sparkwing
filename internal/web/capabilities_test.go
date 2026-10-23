@@ -104,7 +104,7 @@ func TestCapabilitiesHandler_ServesBackendCaps(t *testing.T) {
 			b := &fakeBackend{caps: tc.caps}
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil)
-			CapabilitiesHandler(b)(rec, req)
+			capabilitiesHandler(b)(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d", rec.Code)
 			}
@@ -133,7 +133,7 @@ func TestListRunsHandler_AppliesParseRunFilter(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs?pipeline=p,q&status=succeeded&limit=7", nil)
 	rec := httptest.NewRecorder()
-	ListRunsHandler(b)(rec, req)
+	listRunsHandler(b)(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -167,7 +167,7 @@ func TestGetRunHandler_IncludeNodes(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/abc", nil)
 	req.SetPathValue("id", "abc")
 	rec := httptest.NewRecorder()
-	GetRunHandler(b)(rec, req)
+	getRunHandler(b)(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -182,7 +182,7 @@ func TestGetRunHandler_IncludeNodes(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/runs/abc?include=nodes", nil)
 	req2.SetPathValue("id", "abc")
 	rec2 := httptest.NewRecorder()
-	GetRunHandler(b)(rec2, req2)
+	getRunHandler(b)(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec2.Code)
 	}
@@ -218,7 +218,7 @@ func TestGetRunHandler_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/missing", nil)
 	req.SetPathValue("id", "missing")
 	rec := httptest.NewRecorder()
-	GetRunHandler(b)(rec, req)
+	getRunHandler(b)(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}

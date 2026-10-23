@@ -1,4 +1,4 @@
-package logseg_test
+package logseg
 
 import (
 	"context"
@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 type logPutSigner struct {
@@ -40,7 +39,7 @@ func TestLogSigningBindsOneExactObject(t *testing.T) {
 				t.Run(fmt.Sprint(subject, class, index), func(t *testing.T) {
 					backend := &logPutSigner{}
 					var checked []string
-					signer := logseg.Signer{Objects: backend, Now: func() time.Time { return now }, ClassReady: func(_ context.Context, class string) error {
+					signer := Signer{Objects: backend, Now: func() time.Time { return now }, ClassReady: func(_ context.Context, class string) error {
 						checked = append(checked, class)
 						return nil
 					}}
@@ -86,7 +85,7 @@ func TestLogSigningRejectsBeforeSigning(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			backend := &logPutSigner{}
-			signer := logseg.Signer{Objects: backend, ClassReady: func(context.Context, string) error { t.Fatal("checked invalid request"); return nil }}
+			signer := Signer{Objects: backend, ClassReady: func(context.Context, string) error { t.Fatal("checked invalid request"); return nil }}
 			req, class := blob.LogSigningRequest{Subject: jobSubject(), Index: 1, Size: 1, Digest: signingDigest}, "r90"
 			change(&req, &class)
 			if _, err := signer.Sign(t.Context(), req, class); err == nil || len(backend.keys) != 0 {
@@ -99,7 +98,7 @@ func TestLogSigningRejectsBeforeSigning(t *testing.T) {
 func TestLogSigningRequiresLifecycleAndPreservesErrors(t *testing.T) {
 	request := blob.LogSigningRequest{Subject: jobSubject(), Index: 1, Size: 1, Digest: signingDigest}
 	backend := &logPutSigner{}
-	signer := logseg.Signer{Objects: backend}
+	signer := Signer{Objects: backend}
 	if _, err := signer.Sign(t.Context(), request, "r90"); err == nil {
 		t.Fatal("signed without lifecycle check")
 	}

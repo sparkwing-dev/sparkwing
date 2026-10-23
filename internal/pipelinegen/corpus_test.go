@@ -74,7 +74,7 @@ func TestParseSpecReadsGuardTokens(t *testing.T) {
 	if len(s.GuardReject) != 1 || s.GuardReject[0] != "profile:controller" {
 		t.Errorf("GuardReject = %q (a trailing comma must not yield a blank token)", s.GuardReject)
 	}
-	if !s.HasGuards() {
+	if !s.hasGuards() {
 		t.Error("HasGuards() = false for a spec declaring guards")
 	}
 }

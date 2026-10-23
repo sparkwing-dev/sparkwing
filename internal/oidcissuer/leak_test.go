@@ -1,4 +1,4 @@
-package oidcissuer_test
+package oidcissuer
 
 import (
 	"testing"

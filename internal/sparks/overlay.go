@@ -16,7 +16,7 @@ import (
 
 const OverlayModfileName = ".resolved.mod"
 
-const OverlaySumfileName = ".resolved.sum"
+const overlaySumfileName = ".resolved.sum"
 
 const goModFilename = "go.mod"
 
@@ -27,7 +27,7 @@ func goBin() string {
 	return "go"
 }
 
-func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]string) (bool, error) {
+func writeOverlay(ctx context.Context, sparkwingDir string, resolved map[string]string) (bool, error) {
 	ctx = gotoolchain.WithSession(ctx, nil, nil)
 	if sparkwingDir == "" {
 		return false, errors.New("sparks: sparkwingDir must not be empty")
@@ -45,7 +45,7 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 	}
 
 	overlayPath := filepath.Join(sparkwingDir, OverlayModfileName)
-	sumPath := filepath.Join(sparkwingDir, OverlaySumfileName)
+	sumPath := filepath.Join(sparkwingDir, overlaySumfileName)
 
 	existing, err := os.ReadFile(overlayPath)
 	if err == nil && bytes.Equal(existing, overlayBytes) {
@@ -216,7 +216,7 @@ func ensureGitignore(sparkwingDir string) error {
 	// safety: an ancestor's .git belongs to someone else, and an anchored pattern
 	// written there would not match this project's files anyway.
 	target := filepath.Join(sparkwingDir, ".gitignore")
-	lines := []string{OverlayModfileName, OverlaySumfileName}
+	lines := []string{OverlayModfileName, overlaySumfileName}
 	if projectRoot := filepath.Dir(sparkwingDir); isGitCheckoutRoot(projectRoot) {
 		target = filepath.Join(projectRoot, ".gitignore")
 		if filepath.Base(sparkwingDir) == ".sparkwing" {
@@ -224,7 +224,7 @@ func ensureGitignore(sparkwingDir string) error {
 		} else {
 			lines = []string{
 				filepath.Join(filepath.Base(sparkwingDir), OverlayModfileName),
-				filepath.Join(filepath.Base(sparkwingDir), OverlaySumfileName),
+				filepath.Join(filepath.Base(sparkwingDir), overlaySumfileName),
 			}
 		}
 	}

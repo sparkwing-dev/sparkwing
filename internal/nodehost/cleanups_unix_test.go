@@ -1,6 +1,6 @@
 //go:build !windows
 
-package nodehost_test
+package nodehost
 
 import (
 	"bytes"
@@ -14,8 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 // safety: the child ignores SIGTERM so only the escalation to SIGKILL ends it.
@@ -44,12 +43,12 @@ func requireChildGone(t *testing.T, pidFile string) {
 }
 
 func TestCleanupsBackgroundChildDoesNotOutliveIt(t *testing.T) {
-	cleanups := &nodehost.ProcessCleanups{}
+	cleanups := &ProcessCleanups{}
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "child.pid")
 	mustRegisterCleanup(t, cleanups, "sh", "-c", stubbornChild+"exit 0", "sh", pidFile, cleanupPipe(t, dir, "hold").Name())
 	var log bytes.Buffer
-	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); err != nil {
+	if err := cleanups.run(cleanupContext(t), CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); err != nil {
 		t.Fatal(err)
 	}
 	requireChildGone(t, pidFile)
@@ -73,7 +72,7 @@ func cleanupPipe(t *testing.T, dir, name string) *os.File {
 }
 
 func TestCancelledCleanupTakesItsBackgroundChildWithIt(t *testing.T) {
-	cleanups := &nodehost.ProcessCleanups{}
+	cleanups := &ProcessCleanups{}
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "child.pid")
 	hold, ready := cleanupPipe(t, dir, "hold"), cleanupPipe(t, dir, "ready")
@@ -91,7 +90,7 @@ func TestCancelledCleanupTakesItsBackgroundChildWithIt(t *testing.T) {
 		cancel()
 	}()
 	var log bytes.Buffer
-	if err := cleanups.Run(ctx, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); !errors.Is(err, context.Canceled) {
+	if err := cleanups.run(ctx, CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cleanup cancellation error=%v", err)
 	}
 	if err := <-read; err != nil {
@@ -104,14 +103,14 @@ func TestCancelledCleanupTakesItsBackgroundChildWithIt(t *testing.T) {
 }
 
 func TestCleanupIsKilledAtItsDeadline(t *testing.T) {
-	cleanups := &nodehost.ProcessCleanups{}
+	cleanups := &ProcessCleanups{}
 	dir := t.TempDir()
 	hold := cleanupPipe(t, dir, "hold")
 	mustRegisterCleanup(t, cleanups, "sh", "-c", `exec cat "$1"`, "sh", hold.Name(), "s3cret-arg")
 	var log bytes.Buffer
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
-	if err := cleanups.Run(ctx, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); !errors.Is(err, context.DeadlineExceeded) {
+	if err := cleanups.run(ctx, CleanupScope{Dir: dir, Log: &log, Env: shellEnv(t)}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("cleanup deadline error=%v", err)
 	}
 	if out := log.String(); !strings.Contains(out, "cleanup sh failed: timed out") || strings.Contains(out, "s3cret-arg") {

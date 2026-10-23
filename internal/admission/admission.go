@@ -6,7 +6,7 @@ import "errors"
 const DefaultChargeCores = 1.0
 
 var (
-	ErrInvalidConfig = errors.New("admission: invalid config")
+	errInvalidConfig = errors.New("admission: invalid config")
 
 	ErrInvalidRequest = errors.New("admission: invalid request")
 
@@ -14,17 +14,17 @@ var (
 
 	ErrDuplicateID = errors.New("admission: participant id already holds or waits")
 
-	ErrUnknownLease = errors.New("admission: unknown lease")
+	errUnknownLease = errors.New("admission: unknown lease")
 
-	ErrUnknownMember = errors.New("admission: unknown lease member")
+	errUnknownMember = errors.New("admission: unknown lease member")
 
-	ErrUnknownToken = errors.New("admission: unknown re-attach token")
+	errUnknownToken = errors.New("admission: unknown re-attach token")
 
-	ErrInvalidHeadroom = errors.New("admission: invalid headroom")
+	errInvalidHeadroom = errors.New("admission: invalid headroom")
 
-	ErrInvalidResize = errors.New("admission: invalid resize")
+	errInvalidResize = errors.New("admission: invalid resize")
 
-	ErrInvalidSnapshot = errors.New("admission: invalid snapshot")
+	errInvalidSnapshot = errors.New("admission: invalid snapshot")
 )
 
 type Policy string
@@ -32,9 +32,9 @@ type Policy string
 const (
 	PolicyQueue Policy = "queue"
 
-	PolicyFail Policy = "fail"
+	policyFail Policy = "fail"
 
-	PolicySkip Policy = "skip"
+	policySkip Policy = "skip"
 
 	PolicyCancelOthers Policy = "cancel_others"
 )

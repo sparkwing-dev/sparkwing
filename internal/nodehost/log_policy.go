@@ -3,8 +3,8 @@ package nodehost
 import (
 	"encoding/json"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func acceptedDebug(accepted AcceptedRun) (bool, error) {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/pkg/gitcmd"
+	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 )
 
 type gitClient struct {

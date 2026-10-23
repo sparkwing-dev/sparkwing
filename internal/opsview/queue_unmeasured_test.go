@@ -1,4 +1,4 @@
-package opsview_test
+package opsview
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -30,10 +29,10 @@ func TestRenderQueuePretty_UnmeasuredExternalPrintsTheWordNotAFigure(t *testing.
 	measured, unmeasured := memoryRows()
 
 	var mb, ub bytes.Buffer
-	if err := opsview.RenderQueuePretty(&mb, measured); err != nil {
+	if err := RenderQueuePretty(&mb, measured); err != nil {
 		t.Fatalf("render measured: %v", err)
 	}
-	if err := opsview.RenderQueuePretty(&ub, unmeasured); err != nil {
+	if err := RenderQueuePretty(&ub, unmeasured); err != nil {
 		t.Fatalf("render unmeasured: %v", err)
 	}
 	measuredOut, unmeasuredOut := mb.String(), ub.String()
@@ -73,10 +72,10 @@ func TestRenderQueuePlain_UnmeasuredExternalIsAddressable(t *testing.T) {
 	measured, unmeasured := memoryRows()
 
 	var mb, ub bytes.Buffer
-	if err := opsview.RenderQueue(&mb, measured, "plain"); err != nil {
+	if err := RenderQueue(&mb, measured, "plain"); err != nil {
 		t.Fatalf("render measured: %v", err)
 	}
-	if err := opsview.RenderQueue(&ub, unmeasured, "plain"); err != nil {
+	if err := RenderQueue(&ub, unmeasured, "plain"); err != nil {
 		t.Fatalf("render unmeasured: %v", err)
 	}
 	if want := "external\tunmeasured\tmemory\n"; !strings.Contains(ub.String(), want) {
@@ -90,7 +89,7 @@ func TestRenderQueuePlain_UnmeasuredExternalIsAddressable(t *testing.T) {
 func TestRenderQueueJSON_CarriesExternalSource(t *testing.T) {
 	_, unmeasured := memoryRows()
 	var buf bytes.Buffer
-	if err := opsview.RenderQueue(&buf, unmeasured, "json"); err != nil {
+	if err := RenderQueue(&buf, unmeasured, "json"); err != nil {
 		t.Fatalf("render json: %v", err)
 	}
 	var got wingwire.QueueState
@@ -107,10 +106,10 @@ func TestExternalAgeNote_ShowsHowOldTheReadingIs(t *testing.T) {
 		Resources:           []wingwire.ResourceState{{Key: "cores", Capacity: 8, Available: 6.4, ExternalSource: wingwire.ExternalMeasured}},
 		ExternalSampleAgeMS: 45000,
 	}
-	if got, want := opsview.ExternalAgeNote(qs), "external reading: 45s old"; got != want {
+	if got, want := externalAgeNote(qs), "external reading: 45s old"; got != want {
 		t.Fatalf("age note = %q, want %q", got, want)
 	}
-	if got := opsview.ExternalAgeNote(wingwire.QueueState{}); got != "" {
+	if got := externalAgeNote(wingwire.QueueState{}); got != "" {
 		t.Fatalf("age note = %q for a daemon that reports no age, want empty", got)
 	}
 }
@@ -120,7 +119,7 @@ func TestExternalAgeNote_DistinguishesMeasurementFromEffectiveValue(t *testing.T
 		ExternalSampleAgeMS:      45000,
 		ExternalMeasurementAgeMS: 3000,
 	}
-	if got, want := opsview.ExternalAgeNote(qs), "external reading: 45s old (host sampled 3s ago)"; got != want {
+	if got, want := externalAgeNote(qs), "external reading: 45s old (host sampled 3s ago)"; got != want {
 		t.Fatalf("ExternalAgeNote = %q, want %q", got, want)
 	}
 }
@@ -141,28 +140,28 @@ func TestExternalAttributionNote_SaysWhichWayTheFigureIsWrong(t *testing.T) {
 	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
 		" so external reads high and available reads low by it" +
 		" (-o plain breaks the readings down by cause)"
-	if got := opsview.ExternalAttributionNote(qs); got != want {
+	if got := externalAttributionNote(qs); got != want {
 		t.Fatalf("attribution note = %q, want %q: the note reports a condition holding now, so lifetime counts belong in the rows that are labelled as lifetime",
 			got, want)
 	}
 }
 
 func TestExternalAttributionNote_IsSilentOnceTheFigureIsClean(t *testing.T) {
-	if got := opsview.ExternalAttributionNote(wingwire.QueueState{}); got != "" {
+	if got := externalAttributionNote(wingwire.QueueState{}); got != "" {
 		t.Fatalf("attribution note = %q for a daemon that predates the field, want empty", got)
 	}
 	clean := wingwire.QueueState{
 		Resources:           []wingwire.ResourceState{{Key: "cores", ExternalSource: wingwire.ExternalMeasured}},
 		ExternalAttribution: &wingwire.ExternalAttribution{Samples: 900, SamplerUnreadable: 1},
 	}
-	if got := opsview.ExternalAttributionNote(clean); got != "" {
+	if got := externalAttributionNote(clean); got != "" {
 		t.Fatalf("attribution note = %q, want empty: one bad reading at boot must not print on every queue for the daemon's life", got)
 	}
 }
 
 func TestExternalAttributionNote_IsSilentBeforeAnyReading(t *testing.T) {
 	qs := coresUnattributed(&wingwire.ExternalAttribution{})
-	if got := opsview.ExternalAttributionNote(qs); got != "" {
+	if got := externalAttributionNote(qs); got != "" {
 		t.Fatalf("attribution note = %q, want empty: a daemon that has read nothing yet has no reading to describe", got)
 	}
 }
@@ -170,7 +169,7 @@ func TestExternalAttributionNote_IsSilentBeforeAnyReading(t *testing.T) {
 func TestExternalAttributionNote_IsSilentWhenExternalIsIgnored(t *testing.T) {
 	qs := coresUnattributed(&wingwire.ExternalAttribution{Samples: 40, RunsWithoutProcess: 2})
 	qs.IgnoreExternal = true
-	if got := opsview.ExternalAttributionNote(qs); got != "" {
+	if got := externalAttributionNote(qs); got != "" {
 		t.Fatalf("attribution note = %q, want empty: admission subtracts no external load at all here, so nothing reads low by it", got)
 	}
 }
@@ -183,7 +182,7 @@ func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
 		},
 	}
 	var out strings.Builder
-	if err := opsview.RenderQueue(&out, qs, "plain"); err != nil {
+	if err := RenderQueue(&out, qs, "plain"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	for _, want := range []string{

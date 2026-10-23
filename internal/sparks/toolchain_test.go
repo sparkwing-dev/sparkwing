@@ -1,4 +1,4 @@
-package sparks_test
+package sparks
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 )
 
 func resolveFloorFixture(t *testing.T, setting, floor, listBody, downloadBody string) (string, string) {
@@ -36,15 +35,15 @@ func resolveFloorFixture(t *testing.T, setting, floor, listBody, downloadBody st
 	return dir, log
 }
 
-func privateManifest() *sparks.Manifest {
-	return &sparks.Manifest{Libraries: []sparks.Library{{Name: "private", Source: "example.com/private", Version: "latest"}}}
+func privateManifest() *Manifest {
+	return &Manifest{Libraries: []Library{{Name: "private", Source: "example.com/private", Version: "latest"}}}
 }
 
 func TestResolveAndWriteUsesFloorForListAndDownload(t *testing.T) {
 	dir, log := resolveFloorFixture(t, "go1.26.6", "1.26.8", "printf 'go: downloading toolchain\\n' >&2; printf '{\"Version\":\"v1.2.3\"}\\n'; exit 0", "exit 0")
 	var notices []string
 	ctx := gotoolchain.WithSession(context.Background(), os.Environ(), func(s string) { notices = append(notices, s) })
-	changed, err := sparks.ResolveAndWrite(ctx, dir, privateManifest())
+	changed, err := ResolveAndWrite(ctx, dir, privateManifest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +65,7 @@ func TestResolveAndWriteUsesFloorForListAndDownload(t *testing.T) {
 	if os.Getenv("GOTOOLCHAIN") != "go1.26.6" {
 		t.Fatal("changed process runtime pin")
 	}
-	if _, err := os.Stat(filepath.Join(dir, sparks.OverlaySumfileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, overlaySumfileName)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -82,7 +81,7 @@ func TestResolveAndWriteExplainsLocalDependencyFloor(t *testing.T) {
 				downloadBody = failure
 			}
 			dir, _ := resolveFloorFixture(t, "local", "1.26.0", listBody, downloadBody)
-			_, err := sparks.ResolveAndWrite(context.Background(), dir, privateManifest())
+			_, err := ResolveAndWrite(context.Background(), dir, privateManifest())
 			var floorErr *gotoolchain.Error
 			if !errors.As(err, &floorErr) {
 				t.Fatalf("resolve error = %v", err)
@@ -99,14 +98,14 @@ func TestResolveAndWriteExplainsLocalDependencyFloor(t *testing.T) {
 func TestResolveAndWriteIgnoresTheFloorOfTheOverlayItReplaces(t *testing.T) {
 	dir, _ := resolveFloorFixture(t, "local", "1.26.0", "printf '{\"Version\":\"v1.2.3\"}\\n'; exit 0", "exit 0")
 	stale := "module example.com/pipeline\ngo 1.27.0\n"
-	if err := os.WriteFile(filepath.Join(dir, sparks.OverlayModfileName), []byte(stale), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, OverlayModfileName), []byte(stale), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ctx := gotoolchain.WithSession(context.Background(), os.Environ(), func(string) {})
-	if _, err := sparks.ResolveAndWrite(ctx, dir, privateManifest()); err != nil {
+	if _, err := ResolveAndWrite(ctx, dir, privateManifest()); err != nil {
 		t.Fatalf("a stale overlay blocked its own regeneration: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, sparks.OverlayModfileName))
+	data, err := os.ReadFile(filepath.Join(dir, OverlayModfileName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +116,7 @@ func TestResolveAndWriteIgnoresTheFloorOfTheOverlayItReplaces(t *testing.T) {
 
 func TestResolverWithDirUsesTheModuleFloor(t *testing.T) {
 	dir, log := resolveFloorFixture(t, "go1.26.6", "1.26.8", "printf '{\"Version\":\"v1.2.3\"}\\n'; exit 0", "exit 0")
-	resolver := sparks.NewResolverFromEnv(t.Context())
+	resolver := NewResolverFromEnv(t.Context())
 	resolver.Dir = dir
 	ctx := gotoolchain.WithSession(context.Background(), os.Environ(), func(string) {})
 	if _, err := resolver.Resolve(ctx, privateManifest()); err != nil {

@@ -1,8 +1,0 @@
-# pkg/nodeproto/conformance
-
-func LoadSchema(path string) (*Schema, error)
-type Schema struct {
-	Root map[string]any
-}
-func (s *Schema) Def(name string) (map[string]any, bool)
-func (s *Schema) Validate(schema map[string]any, value any, at string) []string

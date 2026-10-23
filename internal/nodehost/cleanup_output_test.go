@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func FuzzNativeCleanupMasksAcrossWriteBoundaries(f *testing.F) {
@@ -30,7 +30,7 @@ func FuzzNativeCleanupMasksAcrossWriteBoundaries(f *testing.F) {
 			messages = append(messages, record.Message)
 			return nil
 		}}
-		writer := logs.writer(t.Context(), LevelInfo)
+		writer := logs.writer(t.Context(), levelInfo)
 		text := strings.Repeat("p", (1<<20)-len(content)/2) + content + "\r\n" + content
 		width := 256 + int(chunk)
 		for len(text) > 0 {

@@ -41,9 +41,9 @@ var embeddedKey string
 // Errors Verify returns. Startup refuses a supplied license that fails with
 // any of them.
 var (
-	ErrMalformed    = errors.New("license: malformed")
-	ErrBadSignature = errors.New("license: signature does not verify")
-	ErrExpired      = errors.New("license: expired")
+	errMalformed    = errors.New("license: malformed")
+	errBadSignature = errors.New("license: signature does not verify")
+	errExpired      = errors.New("license: expired")
 )
 
 // safety: a license is a few hundred bytes and can arrive through an environment variable, so decoding is bounded.
@@ -64,9 +64,6 @@ type License struct {
 	issuedAt  time.Time
 	expiresAt time.Time
 }
-
-// IssuedTo names who the license was issued to.
-func (l *License) IssuedTo() string { return l.issuedTo }
 
 // ExpiresAt is when the license stops granting anything.
 func (l *License) ExpiresAt() time.Time { return l.expiresAt }
@@ -97,37 +94,37 @@ func EmbeddedKey() (ed25519.PublicKey, error) {
 func Verify(raw string, key ed25519.PublicKey, now time.Time) (*License, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > maxLicenseLen {
-		return nil, ErrMalformed
+		return nil, errMalformed
 	}
 	if len(key) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("license: public key is %d bytes, want %d", len(key), ed25519.PublicKeySize)
 	}
 	encPayload, encSig, ok := strings.Cut(raw, ".")
 	if !ok {
-		return nil, ErrMalformed
+		return nil, errMalformed
 	}
 	body, err := base64.RawURLEncoding.DecodeString(encPayload)
 	if err != nil {
-		return nil, ErrMalformed
+		return nil, errMalformed
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(encSig)
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return nil, ErrMalformed
+		return nil, errMalformed
 	}
 	// safety: the signature is checked before the payload is parsed, so an
 	// unsigned document never reaches the JSON decoder.
 	if !ed25519.Verify(key, body, sig) {
-		return nil, ErrBadSignature
+		return nil, errBadSignature
 	}
 	var p payload
 	if err := json.Unmarshal(body, &p); err != nil {
-		return nil, ErrMalformed
+		return nil, errMalformed
 	}
 	if p.ExpiresAt.IsZero() {
-		return nil, ErrMalformed
+		return nil, errMalformed
 	}
 	if !now.Before(p.ExpiresAt) {
-		return nil, ErrExpired
+		return nil, errExpired
 	}
 	return &License{
 		features:  slices.Clone(p.Features),

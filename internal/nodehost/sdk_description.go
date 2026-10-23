@@ -3,10 +3,10 @@ package nodehost
 import (
 	"encoding/json"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput, declarationsOnly bool) (PreparedPlanning, bool, error) {

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // CredentialPrefixLength is the persisted bearer lookup prefix length.
@@ -136,7 +136,7 @@ const (
 	CredentialSession   CredentialClass = "session"
 	CredentialConsole   CredentialClass = "operator_console"
 	CredentialPeer      CredentialClass = "local_peer"
-	CredentialAnonymous CredentialClass = "anonymous"
+	credentialAnonymous CredentialClass = "anonymous"
 )
 
 // Principal is the common policy input for reference tokens, sessions and local peers.

@@ -25,9 +25,9 @@ import (
 // Google's published endpoints. Config carries them as fields so a test can
 // point a client at a local issuer.
 const (
-	GoogleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
-	GoogleTokenURL = "https://oauth2.googleapis.com/token"
-	GoogleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
+	googleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenURL = "https://oauth2.googleapis.com/token"
+	googleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
 )
 
 var googleIssuers = []string{"https://accounts.google.com", "accounts.google.com"}
@@ -62,7 +62,7 @@ type Config struct {
 func Google(clientID, clientSecret string) Config {
 	return Config{
 		ClientID: clientID, ClientSecret: clientSecret,
-		AuthURL: GoogleAuthURL, TokenURL: GoogleTokenURL, JWKSURL: GoogleJWKSURL,
+		AuthURL: googleAuthURL, TokenURL: googleTokenURL, JWKSURL: googleJWKSURL,
 		Issuers: googleIssuers,
 	}
 }
@@ -153,7 +153,7 @@ func (c *Client) Exchange(ctx context.Context, code, verifier, redirectURI strin
 	if body.IDToken == "" {
 		return Claims{}, fmt.Errorf("%w: google returned no id token", ErrRejected)
 	}
-	return c.Verify(ctx, body.IDToken)
+	return c.verify(ctx, body.IDToken)
 }
 
 type idClaims struct {
@@ -170,9 +170,9 @@ type idClaims struct {
 	HD            string        `json:"hd"`
 }
 
-// Verify checks an ID token's signature, issuer, audience, expiry and email
+// verify checks an ID token's signature, issuer, audience, expiry and email
 // verification, in that order, and returns its claims.
-func (c *Client) Verify(ctx context.Context, token string) (Claims, error) {
+func (c *Client) verify(ctx context.Context, token string) (Claims, error) {
 	var cl idClaims
 	if err := c.keys.Verify(ctx, token, &cl); err != nil {
 		if errors.Is(err, jwks.ErrRejected) {

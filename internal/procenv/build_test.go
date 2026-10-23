@@ -155,7 +155,7 @@ func TestValidateAssignments(t *testing.T) {
 
 func TestServiceAndInstallPolicies(t *testing.T) {
 	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=yes", "SPARKWING_DEBUG=1", "SPARKWING_HOME=/sw", "XDG_CACHE_HOME=/cache", "GOCACHE=/go", "AWS_REGION=west", "KUBECONFIG=/kube", "SPARKWING_TOOLCHAIN_ACTIVE=1", "SPARKWING_NODE_URL=old"}}
-	for _, kind := range []Kind{DaemonSpawn, Controller, Runner, Launcher, JobContainer, Install, RunHost, NodeHost, HostChild, CLI} {
+	for _, kind := range []Kind{daemonSpawn, controller, runner, launcher, jobContainer, Install, runHost, nodeHost, HostChild, CLI} {
 		env, err := buildEntries(kind, b, Runtime{RunID: "run"})
 		if err != nil {
 			t.Fatal(err)
@@ -164,7 +164,7 @@ func TestServiceAndInstallPolicies(t *testing.T) {
 		if _, ok := got["SPARKWING_NODE_URL"]; ok {
 			t.Fatal("removed protocol inherited")
 		}
-		if kind == RunHost || kind == NodeHost {
+		if kind == runHost || kind == nodeHost {
 			if got["SPARKWING_RUN_ID"] != "run" || got["PATH"] != "" {
 				t.Fatal(got)
 			}
@@ -187,7 +187,7 @@ func TestServiceAndInstallPolicies(t *testing.T) {
 
 func TestLookupExactBeforePrefix(t *testing.T) {
 	row, ok := Lookup("SPARKWING_REPO")
-	if !ok || row.Class != RuntimeClass {
+	if !ok || row.Class != runtimeClass {
 		t.Fatal(row)
 	}
 	row, ok = Lookup("SPARKWING_REPO_OLD")
@@ -195,7 +195,7 @@ func TestLookupExactBeforePrefix(t *testing.T) {
 		t.Fatal(row)
 	}
 	row, ok = Lookup("UNREGISTERED")
-	if ok || row.Owner != "user" || row.Class != User {
+	if ok || row.Owner != "user" || row.Class != user {
 		t.Fatal(row)
 	}
 }

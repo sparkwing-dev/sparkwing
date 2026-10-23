@@ -26,7 +26,7 @@ func (PreCommit) Help() string {
 		"every untracked Go file, no test that sleeps or reads the wall clock as a wait, and repo-wide, no tracked " +
 		"ELF, Mach-O or PE executable, an embedded pkg/docs/ mirror that matches docs/ and CHANGELOG.md, " +
 		"live links in released changelog entries, and no product file that resolves the sparkwing home " +
-		"itself instead of through pkg/paths.DefaultPaths. Every step reads files; none compiles, " +
+		"itself instead of through internal/paths.DefaultPaths. Every step reads files; none compiles, " +
 		"links, or reaches the network, which is what keeps the git pre-commit hook under ten seconds. " +
 		"The push boundary adds the contract gates and a compile of the touched packages in `pre-push`; " +
 		"go vet, go build, go test, golangci-lint, the race gate and the dashboard suites run in `gate`, " +

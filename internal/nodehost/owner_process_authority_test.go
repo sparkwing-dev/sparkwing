@@ -43,7 +43,7 @@ func TestOwnerProcessKeepsOwnerLeaseAndSeparateSDKJob(t *testing.T) {
 	for _, evaluation := range []bool{false, true} {
 		t.Run(map[bool]string{false: "owner", true: "eval"}[evaluation], func(t *testing.T) {
 			registry, parent, lookup, spec, service := ownerProcessAuthorityFixture(t, evaluation)
-			issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+			issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,7 +90,7 @@ func FuzzOwnerProcessCannotOutliveItsAuthority(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, change uint8, evaluation, auxiliary bool) {
 		registry, parent, lookup, spec, service := ownerProcessAuthorityFixture(t, evaluation)
-		issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+		issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,11 +146,11 @@ func TestEvaluationAuxiliaryServicesKeepSourceLease(t *testing.T) {
 			parent.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.ExpansionSubmit, capability.DataRead}
 			spec.Grants = parent.snapshot.Authorities[0].Principal.Capability.Grants
 			service.Cleanups = &ProcessCleanups{}
-			cleanup, err := service.Cleanups.Register([]string{"true"}, "")
+			cleanup, err := service.Cleanups.register([]string{"true"}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+			issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 			if err != nil {
 				t.Fatal(err)
 			}

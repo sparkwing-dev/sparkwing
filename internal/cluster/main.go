@@ -15,8 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// Runtime supplies the shared service bindings used by every runner command.
-type Runtime struct {
+// clusterRuntime supplies the shared service bindings used by every runner command.
+type clusterRuntime struct {
 	Runner    RunnerCLI
 	Launcher  LauncherFactory
 	Bootstrap BootstrapRuntime
@@ -24,11 +24,11 @@ type Runtime struct {
 
 // MainWithVersion runs the runner CLI with its linker-stamped release version.
 func MainWithVersion(version string) {
-	MainWithRuntime(version, ProductionRuntime(version))
+	mainWithRuntime(version, productionRuntime(version))
 }
 
-// MainWithRuntime runs the executable with its capability, source and native host bindings.
-func MainWithRuntime(version string, runtime Runtime) {
+// mainWithRuntime runs the executable with its capability, source and native host bindings.
+func mainWithRuntime(version string, runtime clusterRuntime) {
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
 		os.Exit(2)

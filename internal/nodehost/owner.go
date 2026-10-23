@@ -9,23 +9,23 @@ import (
 	"slices"
 	"sync/atomic"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // OwnerStore is the transactional boundary used by every run-host placement.
 // Its methods are the Tenant contracts; hosts never append lifecycle events.
 type OwnerStore interface {
-	Reconciler
-	ExpansionStore
+	reconciler
+	expansionStore
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
 	ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error)
@@ -44,8 +44,8 @@ type OwnerPlanning struct {
 	Resolve      func(nodeproto.PlanDoc) (runspec.Resolved, error)
 }
 
-// OwnerLayerResult proposes a store transition that ends this scheduling pass.
-type OwnerLayerResult struct {
+// ownerLayerResult proposes a store transition that ends this scheduling pass.
+type ownerLayerResult struct {
 	Transition store.NodeCommand
 }
 
@@ -288,7 +288,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if h.Masks != nil {
 		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}
 	}
-	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Plan)
+	plan, err := planInitial(ctx, prepared.Planning, prepared.Plan)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
@@ -316,7 +316,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 		return err
 	}
 	if h.Masks != nil {
-		err = h.Masks.Accept(plan.Plan, commit)
+		err = h.Masks.acceptPlan(plan.Plan, commit)
 	} else {
 		err = commit()
 	}
@@ -375,4 +375,4 @@ func ownerAccepted(row store.RunRow) (AcceptedRun, error) {
 }
 
 // OwnerPolicy evaluates one owner decision before dispatch.
-type OwnerPolicy func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (OwnerLayerResult, error)
+type OwnerPolicy func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (ownerLayerResult, error)

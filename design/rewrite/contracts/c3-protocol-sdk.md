@@ -155,7 +155,7 @@ consumer's heartbeat loop and unused runner-host helpers. The consumer now uses
 the shared keeper. Native placement migration remains open.
 
 [The process transport cut](../w3-process-transport-cut-progress.md) removes
-Session and StartSession. Retained planners and attempts use ProtocolSession.
+Session and StartSession. Retained planners and attempts use the private protocol session.
 Native service and placement cutovers remain open.
 
 [The envelope consolidation](../w3-envelope-consolidation-progress.md) removes
@@ -301,8 +301,8 @@ Capabilities remain declarative; owner and executor operations encode lifecycle 
 
 | Concern | Owner and source |
 |---|---|
-| Hello, operations, frames, describe, flat plan and shared validation | `pkg/nodeproto/*_contract.go` |
-| Windows inherited-handle argv spelling | `pkg/protofd/transport_contract.go` |
+| Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
+| Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
 | Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
@@ -352,12 +352,11 @@ are part of this contract.
 | `nodehost.LocalAdmission` | Supply the optional machine compute client. The shared admission owner holds CPU and memory for each execution or evaluation through joined cleanup. |
 | `nodehost.CapacityStore`, `StartGate`, `ComposeStartGate` | Compose tenant concurrency and optional machine compute from explicit placement inputs. The thin client presents only its current job award. Unit renewal keeps holders and waiters live. Terminal transitions release capacity. |
 | `nodehost.NativeHostConfig.Admission`, `NativeConfig.Admission` | Carry one composed admission value. Required requester compute is independent of placement eligibility. Runners may omit compute while retaining the supplied capacity store. |
-| `nodehost.AdmissionFailure` | Preserve the store decision while terminal settlement remains store-owned. |
 | `store.Tenant.ReleaseEvaluation`, ready transitions | Commit plan admission with release permission. Reconciliation starts immediately and settles released work while new releases wait. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
-| `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
+| `nodehost.OwnerPlanning` | Supply checkout planning inputs without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
-| `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks, bounded by its persisted job timeout and parent deadline. |
+| `nodehost.OwnerEvaluator`, `EvaluationInput`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks, bounded by its persisted job timeout and parent deadline. |
 | `nodehost.ProcessGrant` | Transfers a process binding and its idempotent revoker to the executor or owner evaluator. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
 | `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through canonical validation and acceptance. |
@@ -374,16 +373,12 @@ are part of this contract.
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
 | `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
 | `nodehost.DepcacheRecords`, `DepcacheRecords.Prepare` | Restore declared directories once and save cold successful caches after retries through the current storage binding. |
-| `nodehost.SDKEnvironment.CacheDirectory` | Resolve Go/npm cache directories with the captured environment, persisted job values and platform tool invocation. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
-| `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
+| `nodehost.ProtocolSessionConfig` | Configure protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
 | `nodehost.SDKEnvironment`, `ProtocolSessionConfig.Environments` | Project captured host inputs, sealed run facts and persisted job environment through the shared process policy before native SDK startup. |
 | `nodehost.FileEnvironmentSnapshots`, `NewFileEnvironmentSnapshots`, `CapturedEnvironmentLoader` | Store private local values and verify the request's environment identity before source acquisition or SDK startup. |
 | `nodehost.OwnerOperations`, `ExecutionOperations`, `EvaluationOperations` | Supply placement callbacks to `NativeHostConfig`, which takes shared dependencies once. |
-| `nodehost.Reconciler.ReconcileNode` | Follows a holder and repeats atomic reconciliation after terminal or requeue events. |
-| `nodehost.StateFollower`, `StateReader`, `StateSubscription` | Share persisted catch-up and joined subscriptions between owner graph waits and node reconciliation. |
-| `nodehost.ExpansionStore` | Gives owner/eval hosts the Tenant's expansion persistence boundary. |
 | `store.ScheduleNode` | Projects accepted graph and lifecycle facts into the pure decider. |
 | `store.ScheduleExpansion` | Preserves generator-to-source/member mapping, including empty expansions. |
 | `store.ScheduleSnapshot` | Supplies a consistent graph, expansions and cancellation state. |
@@ -524,7 +519,7 @@ resolves a write destination for the current attempt and the derived
 `blob.DepcacheKey`. It must return a `JobUpload` whose authority, repository,
 ref, pipeline, job, cache name and key match those inputs. The controller still
 reauthorizes every write. `Resolve` handles ecosystem directories and can use
-`SDKEnvironment.CacheDirectory`. Explicit paths retain relative and absolute
+the private `SDKEnvironment.cacheDirectory` helper. Explicit paths retain relative and absolute
 directory support.
 
 Lockfiles are opened inside the acquired workspace. The first readable regular
@@ -558,7 +553,7 @@ context. `PlannedInitial` carries the validated declarations, canonical bytes
 and hash to `AcceptPlan`, which validates again in its acceptance transaction.
 Resumes use the persisted accepted plan.
 
-`SDKPlanner`, `ExecutorDependencies` and `EvaluationDependencies` accept external
+`SDKPlanner`, `ExecutorDependencies` and the private evaluator dependencies accept
 process and storage adapters. They cannot replace validation or hashing.
 Execution and generator replay call the same canonical algorithms as planning.
 
@@ -722,7 +717,7 @@ runner identity comes from the award. Only SplitJobEnv's Startup assignments
 reach process startup. The SDK applies Body after a successful replan.
 
 Environment construction errors discard partial output and revoke the delegated
-route before returning. The low-level StartProtocolSession transport still takes
+route before returning. The private `startProtocolSession` transport takes
 an explicit Environment. Native adapters always replace that transport input with
 the built result. Native tests launch real SDK fixture processes and verify that
 exact environment. The environment acceptance cell uses store and procenv fakes
@@ -766,7 +761,7 @@ A hit ends the release without admission or an execution attempt. A record miss
 continues through the existing owner layers. Restart never rescans the source
 run for newly successful jobs. C1 rechecks the committed selection before copying.
 
-`ExecutorDependencies.Bind` and `EvaluationDependencies.Bind` delegate a new
+`ExecutorDependencies.Bind` and the evaluator's private Bind adapter delegate a new
 nodehost route bearer before each process startup. The factory uses authenticated
 owner or claim authority. The returned binding must keep the input's run and job
 identity and must not reuse that input bearer. Start receives the delegated
@@ -882,7 +877,7 @@ leaves settlement to live authority. `OwnerHost` submits the body or failure onc
 through `AcceptExpansion`, including the private registration projection returned
 with a successful body. The evaluator writes no topology or lifecycle state.
 
-`EvaluationDependencies.Start` supplies the environment and delegated route
+The evaluator's private Start adapter supplies the environment and delegated route
 binding. `ProtocolSessionConfig.StartEvaluation` provides the native process
 transport. Its log callback attributes owner eval output to run logs. The output
 reader must verify the source generation and authorize the recorded bytes. These
@@ -1014,7 +1009,7 @@ decider against ordinary and generated prerequisites, failed/nonfailed parents
 and optional recovery verdicts. These do not prove native placement or store
 transactions. The remaining work is listed in [the merge continuation](w3-merge-continuation.md).
 
-`StateFollower.Wait` and `WaitNode` supply the shared state follower for
+The private `stateFollower.Wait` and `WaitNode` methods supply the shared state follower for
 `OwnerHost.Wait` and `WaitNodeChange`. Each wait arms its run subscription before
 reading persistence because a holder can finish between reconciliation and
 subscription. A notification prompts another read. A committed state sequence,
@@ -1024,7 +1019,7 @@ Regressed sequences, missing jobs and replaced accepted expansions fail loudly.
 Every exit cancels and joins the subscription, including failed setup. Owner waits
 retain subscription failures when another job completes or the owner is cancelled.
 
-The placement supplies `StateFollower.Subscribe`. It must deliver wake-ups for
+The placement supplies `stateFollower.Subscribe`. It must deliver wake-ups for
 commits from other processes and return only after the subscription is armed.
 Its Close function joins subscription work after cancellation. The shared follower
 owns catch-up and progress checks. It adds no polling interval or lease inference.

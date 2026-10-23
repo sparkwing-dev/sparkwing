@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// HereProofLifetime bounds how long a here proof stays acceptable after it is made.
-const HereProofLifetime = 5 * time.Minute
+// hereProofLifetime bounds how long a here proof stays acceptable after it is made.
+const hereProofLifetime = 5 * time.Minute
 
 // HereProof signs one intake request with a key derived from the runner credential.
 // The stored public verifier cannot mint proofs.
@@ -20,7 +20,7 @@ func HereProof(raw, idempotencyKey string, now time.Time) string {
 		return ""
 	}
 	key := hereProofPrivateKey(raw)
-	expires := strconv.FormatInt(now.Add(HereProofLifetime).Unix(), 10)
+	expires := strconv.FormatInt(now.Add(hereProofLifetime).Unix(), 10)
 	return raw[:CredentialPrefixLength] + "." + expires + "." + hex.EncodeToString(ed25519.Sign(key, hereMessage(raw[:CredentialPrefixLength], idempotencyKey, expires)))
 }
 
@@ -55,7 +55,7 @@ func VerifyHereProof(proof, publicKeyHex, idempotencyKey string, now time.Time) 
 		return false
 	}
 	expires, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || !now.Before(time.Unix(expires, 0)) || time.Unix(expires, 0).After(now.Add(HereProofLifetime)) {
+	if err != nil || !now.Before(time.Unix(expires, 0)) || time.Unix(expires, 0).After(now.Add(hereProofLifetime)) {
 		return false
 	}
 	signature, err := hex.DecodeString(parts[2])

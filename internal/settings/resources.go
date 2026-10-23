@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func clonePointer[T any](value *T) *T {
@@ -49,9 +49,9 @@ func sourceField[T any](in Inputs, key string, field func(nodeproto.SourceSpec) 
 
 func checkoutSetting(in Inputs) (runspec.Setting[runspec.CheckoutPolicy], error) {
 	if !in.Context.Submitter {
-		sealed := in.options(Run).Checkout
+		sealed := in.options(sourceRun).Checkout
 		if !sealed.Set || validateSource(sealed.Value.Policy, true) != nil {
-			return runspec.Setting[runspec.CheckoutPolicy]{}, invalid("source", Origin{Source: Run, Key: "source"}, "sealed checkout policy is absent or incomplete")
+			return runspec.Setting[runspec.CheckoutPolicy]{}, invalid("source", Origin{Source: sourceRun, Key: "source"}, "sealed checkout policy is absent or incomplete")
 		}
 	}
 	out := runspec.CheckoutPolicy{Origins: map[string]runspec.SettingOrigin{}}
@@ -103,7 +103,7 @@ func checkoutSetting(in Inputs) (runspec.Setting[runspec.CheckoutPolicy], error)
 
 func sourceSetting(source nodeproto.SourceSpec, origin Origin) runspec.Setting[runspec.CheckoutPolicy] {
 	out := runspec.CheckoutPolicy{Policy: cloneSource(source), Origins: map[string]runspec.SettingOrigin{}}
-	projected := runspec.SettingOrigin{Layer: OriginLayers[origin.Source], File: origin.File, Key: origin.Key, Line: origin.Line}
+	projected := runspec.SettingOrigin{Layer: originLayers[origin.Source], File: origin.File, Key: origin.Key, Line: origin.Line}
 	fields := map[string]bool{"full_history": source.FullHistory != nil, "depth": source.Depth != nil, "tags": source.Tags != nil, "submodules": source.Submodules != nil, "lfs": source.LFS != nil}
 	for field, present := range fields {
 		if present {

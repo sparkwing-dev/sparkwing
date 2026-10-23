@@ -227,13 +227,13 @@ func CredentialName(name string) bool {
 	return credentialShaped(trimmed)
 }
 
-// CredentialValue reports whether a value carries a credential that
+// credentialValue reports whether a value carries a credential that
 // cannot be rewritten in place: a bearer header, a PEM block, a JSON
 // document or array with a credential-shaped field, a KEY=VALUE
 // assignment named like one, or a URL whose query or path names one.
 // Every line of a multi-line value is examined. Such values must be
 // dropped.
-func CredentialValue(value string) bool {
+func credentialValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
 		return false

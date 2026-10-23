@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 // safety: bounds the kill of what a cleanup left behind once it exits or times out.

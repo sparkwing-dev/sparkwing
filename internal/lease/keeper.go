@@ -8,7 +8,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // Beat carries cancellation and watch demand on the existing renewal cadence.

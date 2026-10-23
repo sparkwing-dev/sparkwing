@@ -1,4 +1,4 @@
-package opsview_test
+package opsview
 
 import (
 	"bytes"
@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -67,7 +66,7 @@ func etaFixture() wingwire.QueueState {
 
 func TestRenderQueueAt_PrettyShowsRemainingAndFinish(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderQueueAt(&buf, etaFixture(), "pretty", etaFixtureNow()); err != nil {
+	if err := renderQueueAt(&buf, etaFixture(), "pretty", etaFixtureNow()); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -107,7 +106,7 @@ func TestRenderQueueAt_PrettySaysPastP50WhenAHolderOutlivesItsProfile(t *testing
 	qs := etaFixture()
 	qs.Holders[0].ElapsedMS = 600_000
 	var buf bytes.Buffer
-	if err := opsview.RenderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
+	if err := renderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	line := lineWith(t, buf.String(), "hold-profiled")
@@ -120,7 +119,7 @@ func TestRenderQueueAt_PrettySaysUnknownWhenNoStartCanBeProjected(t *testing.T) 
 	qs := etaFixture()
 	qs.Waiters[0].ExpectedStartMS = nil
 	var buf bytes.Buffer
-	if err := opsview.RenderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
+	if err := renderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -140,7 +139,7 @@ func TestRenderQueueAt_PrettyNamesTheYearOfADistantFinish(t *testing.T) {
 	qs := etaFixture()
 	qs.Holders[0].ExpectedDurationMS = 200 * 24 * 60 * 60 * 1000
 	var buf bytes.Buffer
-	if err := opsview.RenderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
+	if err := renderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if line := lineWith(t, buf.String(), "hold-profiled"); !strings.Contains(line, "2027") {
@@ -153,7 +152,7 @@ func TestRenderQueueAt_PrettyDatesAFinishPastMidnight(t *testing.T) {
 	qs.Holders[0].ExpectedDurationMS = 20 * 60 * 60 * 1000
 	var buf bytes.Buffer
 	now := time.Date(2026, 9, 10, 23, 0, 0, 0, time.UTC)
-	if err := opsview.RenderQueueAt(&buf, qs, "pretty", now); err != nil {
+	if err := renderQueueAt(&buf, qs, "pretty", now); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	line := lineWith(t, buf.String(), "hold-profiled")
@@ -168,7 +167,7 @@ func TestRenderQueueAt_PrettyDatesAFinishPastMidnight(t *testing.T) {
 func TestRenderQueueAt_JSONCarriesMillisecondsAndRFC3339(t *testing.T) {
 	var buf bytes.Buffer
 	now := etaFixtureNow()
-	if err := opsview.RenderQueueAt(&buf, etaFixture(), "json", now); err != nil {
+	if err := renderQueueAt(&buf, etaFixture(), "json", now); err != nil {
 		t.Fatalf("render json: %v", err)
 	}
 	var got struct {
@@ -226,7 +225,7 @@ func TestRenderQueueAt_JSONCarriesMillisecondsAndRFC3339(t *testing.T) {
 
 func TestRenderQueueAt_PlainKeepsOneTabSeparatedRecordPerRow(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderQueueAt(&buf, etaFixture(), "plain", etaFixtureNow()); err != nil {
+	if err := renderQueueAt(&buf, etaFixture(), "plain", etaFixtureNow()); err != nil {
 		t.Fatalf("render plain: %v", err)
 	}
 	out := buf.String()

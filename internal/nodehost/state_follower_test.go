@@ -32,14 +32,14 @@ func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 			ref := runspec.NodeRef{RunID: "run", NodeID: "build"}
 			row := runstate.NodeRow{Ref: ref, StateSeq: 7, Status: runstate.StatusRunning, Generation: 2, Attempt: 5}
 			subscribed, closed := false, false
-			f := StateFollower{
+			f := stateFollower{
 				Store: followerReader{node: func(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 					if !subscribed {
 						t.Fatal("read preceded subscription")
 					}
 					return row, nil
 				}},
-				Subscribe: func(_ context.Context, run string) (StateSubscription, error) {
+				Subscribe: func(_ context.Context, run string) (stateSubscription, error) {
 					if runspec.RunID(run) != ref.RunID {
 						t.Fatalf("subscribed to %q", run)
 					}
@@ -49,10 +49,10 @@ func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 					if terminal {
 						row.Status, row.Outcome = runstate.StatusDone, runstate.NodeSuccess
 					}
-					return StateSubscription{Changed: make(chan struct{}), Close: func() error { closed = true; return nil }}, nil
+					return stateSubscription{Changed: make(chan struct{}), Close: func() error { closed = true; return nil }}, nil
 				},
 			}
-			if err := f.WaitNode(t.Context(), ref, 7); err != nil || !closed {
+			if err := f.waitNode(t.Context(), ref, 7); err != nil || !closed {
 				t.Fatalf("wait = %v; closed = %v", err, closed)
 			}
 		})
@@ -68,7 +68,7 @@ func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	cause := errors.New("owner lost")
-	f := StateFollower{
+	f := stateFollower{
 		Store: followerReader{node: func(ctx context.Context, _ runspec.NodeRef) (runstate.NodeRow, error) {
 			select {
 			case reads <- 1:
@@ -77,11 +77,11 @@ func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
 			expired := time.Unix(0, 0)
 			return runstate.NodeRow{Ref: ref, StateSeq: 7, Status: runstate.StatusRunning, LeaseExpiresAt: &expired}, nil
 		}},
-		Subscribe: func(context.Context, string) (StateSubscription, error) {
-			return StateSubscription{Changed: changed, Close: func() error { return nil }}, nil
+		Subscribe: func(context.Context, string) (stateSubscription, error) {
+			return stateSubscription{Changed: changed, Close: func() error { return nil }}, nil
 		},
 	}
-	go func() { done <- f.WaitNode(ctx, ref, 7) }()
+	go func() { done <- f.waitNode(ctx, ref, 7) }()
 	<-reads
 	<-reads
 	cancel(cause)
@@ -95,7 +95,7 @@ func TestStateFollowerReadsCommittedChangeAfterNotification(t *testing.T) {
 	changed, read := make(chan struct{}, 1), make(chan struct{}, 1)
 	var mu sync.Mutex
 	sequence := int64(7)
-	f := StateFollower{
+	f := stateFollower{
 		Store: followerReader{node: func(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 			mu.Lock()
 			row := runstate.NodeRow{Ref: ref, StateSeq: sequence, Status: runstate.StatusRunning}
@@ -106,12 +106,12 @@ func TestStateFollowerReadsCommittedChangeAfterNotification(t *testing.T) {
 			}
 			return row, nil
 		}},
-		Subscribe: func(context.Context, string) (StateSubscription, error) {
-			return StateSubscription{Changed: changed, Close: func() error { return nil }}, nil
+		Subscribe: func(context.Context, string) (stateSubscription, error) {
+			return stateSubscription{Changed: changed, Close: func() error { return nil }}, nil
 		},
 	}
 	done := make(chan error, 1)
-	go func() { done <- f.WaitNode(t.Context(), ref, 7) }()
+	go func() { done <- f.waitNode(t.Context(), ref, 7) }()
 	<-read
 	mu.Lock()
 	sequence++
@@ -155,17 +155,17 @@ func TestStateFollowerWaitsForPersistedGraphChanges(t *testing.T) {
 			case "store clock":
 				current.StoreNow = time.Unix(60, 0)
 			}
-			f := StateFollower{
+			f := stateFollower{
 				Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) {
 					return current, nil
 				}},
-				Subscribe: func(context.Context, string) (StateSubscription, error) {
+				Subscribe: func(context.Context, string) (stateSubscription, error) {
 					changed := make(chan struct{})
 					close(changed)
-					return StateSubscription{Changed: changed, Close: func() error { return nil }}, nil
+					return stateSubscription{Changed: changed, Close: func() error { return nil }}, nil
 				},
 			}
-			err := f.Wait(t.Context(), before)
+			err := f.wait(t.Context(), before)
 			if mode == "reordered jobs" || mode == "store clock" {
 				if err == nil || !strings.Contains(err.Error(), "subscription ended") {
 					t.Fatalf("unchanged snapshot became progress: %v", err)
@@ -185,7 +185,7 @@ func TestStateFollowerJoinsSubscriptionOnEveryExit(t *testing.T) {
 			cause := errors.New("reader failed")
 			closeErr := errors.New("subscription join failed")
 			closed := 0
-			f := StateFollower{
+			f := stateFollower{
 				Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) {
 					if mode == "read failure" {
 						return store.RunSnapshot{}, cause
@@ -199,7 +199,7 @@ func TestStateFollowerJoinsSubscriptionOnEveryExit(t *testing.T) {
 					}
 					return current, nil
 				}},
-				Subscribe: func(ctx context.Context, _ string) (StateSubscription, error) {
+				Subscribe: func(ctx context.Context, _ string) (stateSubscription, error) {
 					changed := make(chan struct{})
 					if mode == "closed stream" {
 						close(changed)
@@ -207,14 +207,14 @@ func TestStateFollowerJoinsSubscriptionOnEveryExit(t *testing.T) {
 					var wg sync.WaitGroup
 					wg.Add(1)
 					go func() { defer wg.Done(); <-ctx.Done() }()
-					s := StateSubscription{Changed: changed, Close: func() error { wg.Wait(); closed++; return closeErr }}
+					s := stateSubscription{Changed: changed, Close: func() error { wg.Wait(); closed++; return closeErr }}
 					if mode == "subscribe failure" {
 						return s, cause
 					}
 					return s, nil
 				},
 			}
-			err := f.Wait(ctx, followerSnapshot())
+			err := f.wait(ctx, followerSnapshot())
 			if closed != 1 || !errors.Is(err, closeErr) || err == nil {
 				t.Fatalf("wait = %v; closes = %d", err, closed)
 			}
@@ -248,13 +248,13 @@ func TestStateFollowerRejectsRegressedOrForeignState(t *testing.T) {
 				before.Expansions = []runstate.AcceptedExpansionRow{{Source: before.Nodes[0].Ref, BodyHash: "old"}}
 				current.Expansions = []runstate.AcceptedExpansionRow{{Source: current.Nodes[0].Ref, BodyHash: "replaced"}}
 			}
-			f := StateFollower{
+			f := stateFollower{
 				Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) { return current, nil }},
-				Subscribe: func(context.Context, string) (StateSubscription, error) {
-					return StateSubscription{Changed: make(chan struct{}), Close: func() error { return nil }}, nil
+				Subscribe: func(context.Context, string) (stateSubscription, error) {
+					return stateSubscription{Changed: make(chan struct{}), Close: func() error { return nil }}, nil
 				},
 			}
-			if err := f.Wait(t.Context(), before); err == nil {
+			if err := f.wait(t.Context(), before); err == nil {
 				t.Fatal("invalid persistence view accepted")
 			}
 		})

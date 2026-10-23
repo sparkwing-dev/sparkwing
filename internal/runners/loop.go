@@ -11,8 +11,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // ClaimController claims through the shared queue and must honor context cancellation.
@@ -52,7 +52,7 @@ type Loop struct {
 }
 
 // Drain may be called before or during Run and is safe to repeat.
-func (l *Loop) Drain() {
+func (l *Loop) startDrain() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.initDrain()

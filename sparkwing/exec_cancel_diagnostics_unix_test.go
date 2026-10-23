@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/execdiag"
+	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
 )
 
 const cancellationDiagnosticMarker = "cancellation diagnostic captured"

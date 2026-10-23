@@ -14,10 +14,10 @@ import (
 // It must catch up from persistence before waiting for notification.
 type WaitNodeChange func(context.Context, runspec.NodeRef, int64) error
 
-// FollowReconciliation waits for persisted holder changes and repeats the atomic
+// followReconciliation waits for persisted holder changes and repeats the atomic
 // store decision. It never converts elapsed wall time or an executor's previous
 // result into permission to execute or finish a node.
-func FollowReconciliation(ctx context.Context, reconciler Reconciler, request store.ReconcileRequest, wait WaitNodeChange) (runstate.ReconciledNode, error) {
+func followReconciliation(ctx context.Context, reconciler reconciler, request store.ReconcileRequest, wait WaitNodeChange) (runstate.ReconciledNode, error) {
 	if reconciler == nil {
 		return runstate.ReconciledNode{}, errors.New("reconciliation requires a store")
 	}

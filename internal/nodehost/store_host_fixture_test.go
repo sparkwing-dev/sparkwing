@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -22,7 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type hostIntakePolicy struct{}
@@ -55,7 +55,7 @@ func (s *hostState) notify() {
 	}
 }
 
-func (s *hostState) subscribe(context.Context, string) (StateSubscription, error) {
+func (s *hostState) subscribe(context.Context, string) (stateSubscription, error) {
 	changed := make(chan struct{}, 1)
 	s.mu.Lock()
 	if s.subscriptions == nil {
@@ -63,7 +63,7 @@ func (s *hostState) subscribe(context.Context, string) (StateSubscription, error
 	}
 	s.subscriptions[changed] = true
 	s.mu.Unlock()
-	return StateSubscription{Changed: changed, Close: func() error {
+	return stateSubscription{Changed: changed, Close: func() error {
 		s.mu.Lock()
 		delete(s.subscriptions, changed)
 		s.mu.Unlock()
@@ -218,11 +218,11 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 		}
 		return beat, err
 	}, Local: func(runstate.NodeRow) bool { return true }, AdoptClaim: func(context.Context, runstate.ReconciledNode) error { return nil }}
-	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, runstate.NodeRow, StorageBinding) (OwnerLayerResult, error) {
-		return OwnerLayerResult{}, nil
+	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, runstate.NodeRow, StorageBinding) (ownerLayerResult, error) {
+		return ownerLayerResult{}, nil
 	})
-	follower := StateFollower{Store: f.State, Subscribe: f.State.subscribe}
-	f.Host.Wait, f.Host.WaitNode = follower.Wait, follower.WaitNode
+	follower := stateFollower{Store: f.State, Subscribe: f.State.subscribe}
+	f.Host.Wait, f.Host.WaitNode = follower.wait, follower.waitNode
 	f.Host.Delegator = database.AsOperator()
 	return f
 }

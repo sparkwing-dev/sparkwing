@@ -9,11 +9,11 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
 )
 
 func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
@@ -104,7 +104,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = PlanInitial(t.Context(), prepared.Input, prepared.Plan)
+			_, err = planInitial(t.Context(), prepared.Input, prepared.Plan)
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || failure.Message != "initial plan argument declarations differ from SDK describe" {
 				t.Fatalf("conditional plan host error = %v", err)

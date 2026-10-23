@@ -9,12 +9,9 @@ import (
 // from s, including the C1 range U+0080 through U+009F in both its raw and its UTF-8 form.
 func StripANSI(s string) string { return sanitize(s, false) }
 
-// SanitizeANSI removes every escape sequence except SGR codes on the allow-list shared with the
+// sanitizeANSI removes every escape sequence except SGR codes on the allow-list shared with the
 // web log viewer, and every control character other than tab and newline, from s.
-func SanitizeANSI(s string) string { return sanitize(s, true) }
-
-// StripInline is StripANSI with newlines folded to spaces, for a value rendered inside a line.
-func StripInline(s string) string { return foldLines(StripANSI(s)) }
+func sanitizeANSI(s string) string { return sanitize(s, true) }
 
 var allowedSGRCodes = map[string]bool{
 	"0": true, "1": true, "2": true, "4": true,

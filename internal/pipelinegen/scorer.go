@@ -17,11 +17,11 @@ type CheckName string
 const (
 	CheckFormat CheckName = "format"
 
-	CheckCompile CheckName = "compile"
+	checkCompile CheckName = "compile"
 
 	CheckVet CheckName = "vet"
 
-	CheckExplain CheckName = "explain"
+	checkExplain CheckName = "explain"
 
 	CheckLint CheckName = "lint"
 )
@@ -75,9 +75,9 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 
 	checks := []CheckResult{
 		runFormatCheck(ctx, jobsDir),
-		runCheck(ctx, CheckCompile, proj, "go", "build", "./..."),
+		runCheck(ctx, checkCompile, proj, "go", "build", "./..."),
 		runCheck(ctx, CheckVet, proj, "go", "vet", "./..."),
-		runCheck(ctx, CheckExplain, tmp, s.Sparkwing, "pipeline", "plan", "--static", "--all", "-o", "json"),
+		runCheck(ctx, checkExplain, tmp, s.Sparkwing, "pipeline", "plan", "--static", "--all", "-o", "json"),
 		runCheck(ctx, CheckLint, tmp, s.Sparkwing, "pipeline", "lint", "--all", "-o", "json"),
 	}
 	return checks, nil
@@ -86,7 +86,7 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 func pipelineYAML(spec Spec) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "pipelines:\n  - name: %s\n    entrypoint: %s\n", spec.Name, spec.Entrypoint)
-	if !spec.HasGuards() {
+	if !spec.hasGuards() {
 		return b.String()
 	}
 	b.WriteString("    guards:\n")

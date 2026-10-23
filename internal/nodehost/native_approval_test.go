@@ -14,9 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -24,8 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -41,7 +41,7 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 	selected := engine.Resolved{Identity: spec.Resolved.Engine}
 	daemon := newFakeDaemon()
 	var process *executorProcess
-	evaluator, err := NewOwnerEvaluator(EvaluationDependencies{
+	evaluator, err := newOwnerEvaluator(evaluationDependencies{
 		Store: f.State, Masker: testMasker(),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
@@ -73,7 +73,7 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Host.executionAdmission = ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: daemon}, false)
-	f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
 	}
 	result, err := f.Host.Run(ctx, f.Input)
@@ -129,7 +129,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 			}
 			selected := engine.Resolved{Identity: accepted.Resolved.Engine}
 			var process *executorProcess
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := newOwnerEvaluator(evaluationDependencies{Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			}, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) {
 				if state, err := f.Tenant.GetConcurrencyState(ctx, "job:global:approval"); !errors.Is(err, store.ErrNotFound) && (err != nil || len(state.Holders) != 0) {
@@ -149,7 +149,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
 			}
 			f.Host.executionAdmission.compute = &LocalAdmission{Daemon: admissionAcquireFunc(func(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error) {
@@ -259,15 +259,15 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				}
 				return service, err
 			}}
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Bind: claims.evaluate, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := newOwnerEvaluator(evaluationDependencies{Store: f.State, Bind: claims.evaluate, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			}, Start: func(ctx context.Context, in EvaluationInput) (ExecutorProcess, error) {
-				return StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH")), Revoke: in.processRevoke})
+				return startProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH")), Revoke: in.processRevoke})
 			}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
 			}
 			if placement == "controller" {

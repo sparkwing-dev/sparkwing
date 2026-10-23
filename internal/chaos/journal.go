@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-type Event struct {
+type event struct {
 	Seq    int64          `json:"seq"`
 	AtMS   int64          `json:"at_ms"`
 	Kind   string         `json:"kind"`
@@ -17,7 +17,7 @@ type Event struct {
 	Fields map[string]any `json:"fields,omitempty"`
 }
 
-type Journal struct {
+type journal struct {
 	mu    sync.Mutex
 	f     *os.File
 	enc   *json.Encoder
@@ -26,17 +26,17 @@ type Journal struct {
 	path  string
 }
 
-func NewJournal(path string) (*Journal, error) {
+func newJournal(path string) (*journal, error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, err
 	}
-	return &Journal{f: f, enc: json.NewEncoder(f), start: time.Now(), path: path}, nil
+	return &journal{f: f, enc: json.NewEncoder(f), start: time.Now(), path: path}, nil
 }
 
-func (j *Journal) Path() string { return j.path }
+func (j *journal) filename() string { return j.path }
 
-func (j *Journal) Append(e Event) {
+func (j *journal) append(e event) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.seq++
@@ -45,11 +45,11 @@ func (j *Journal) Append(e Event) {
 	_ = j.enc.Encode(&e)
 }
 
-func (j *Journal) Log(kind, run, detail string) {
-	j.Append(Event{Kind: kind, Run: run, Detail: detail})
+func (j *journal) log(kind, run, detail string) {
+	j.append(event{Kind: kind, Run: run, Detail: detail})
 }
 
-func (j *Journal) Close() error {
+func (j *journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.f.Close()

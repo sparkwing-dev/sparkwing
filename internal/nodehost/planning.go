@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // PlanningInput supplies current validation for initial SDK planning.
@@ -18,54 +18,54 @@ type PlanningInput struct {
 	argumentDeclarations []nodeproto.ArgumentDescription
 }
 
-// PlannedInitial contains validated declarations for AcceptPlan.
-type PlannedInitial struct {
+// plannedInitial contains validated declarations for AcceptPlan.
+type plannedInitial struct {
 	Plan          nodeproto.PlanDoc
 	CanonicalPlan json.RawMessage
 	PlanHash      runspec.Hash
 }
 
-// PlanInitial runs and validates SDK planning before acceptance.
-func PlanInitial(ctx context.Context, input PlanningInput, planSDK func(context.Context) (json.RawMessage, error)) (result PlannedInitial, err error) {
+// planInitial runs and validates SDK planning before acceptance.
+func planInitial(ctx context.Context, input PlanningInput, planSDK func(context.Context) (json.RawMessage, error)) (result plannedInitial, err error) {
 	defer func() {
 		if err != nil && input.declarations != nil && context.Cause(ctx) == nil {
 			err = input.declarations.Error(err)
 		}
 	}()
 	if err := context.Cause(ctx); err != nil {
-		return PlannedInitial{}, err
+		return plannedInitial{}, err
 	}
 	if err := initialPlanningContext(input.Validation); err != nil {
-		return PlannedInitial{}, err
+		return plannedInitial{}, err
 	}
 	if planSDK == nil {
-		return PlannedInitial{}, errors.New("initial planning requires an SDK planner")
+		return plannedInitial{}, errors.New("initial planning requires an SDK planner")
 	}
 	raw, err := planSDK(ctx)
 	if context.Cause(ctx) != nil {
-		return PlannedInitial{}, context.Cause(ctx)
+		return plannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
-		return PlannedInitial{}, err
+		return plannedInitial{}, err
 	}
 	plan, err := nodeproto.ValidatePlan(raw, input.Validation)
 	if context.Cause(ctx) != nil {
-		return PlannedInitial{}, context.Cause(ctx)
+		return plannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
-		return PlannedInitial{}, err
+		return plannedInitial{}, err
 	}
 	if err := nodeproto.ValidateInitialJobArguments(input.argumentDeclarations, plan.Jobs); err != nil {
-		return PlannedInitial{}, err
+		return plannedInitial{}, err
 	}
 	canonical, hash, err := canonicalPlanningDocument(raw)
 	if context.Cause(ctx) != nil {
-		return PlannedInitial{}, context.Cause(ctx)
+		return plannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
-		return PlannedInitial{}, err
+		return plannedInitial{}, err
 	}
-	return PlannedInitial{Plan: plan, CanonicalPlan: canonical, PlanHash: hash}, nil
+	return plannedInitial{Plan: plan, CanonicalPlan: canonical, PlanHash: hash}, nil
 }
 
 func initialPlanningContext(validation nodeproto.ValidationContext) error {

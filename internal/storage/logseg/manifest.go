@@ -9,28 +9,28 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
-// ManifestVersion is the manifest format this package writes and reads.
-const ManifestVersion = 1
+// manifestVersion is the manifest format this package writes and reads.
+const manifestVersion = 1
 
 // Manifest statuses describe the writer's final payload.
 const (
 	StatusComplete   = "complete"
-	StatusIncomplete = "incomplete"
-	StatusCutOff     = "cut_off"
+	statusIncomplete = "incomplete"
+	statusCutOff     = "cut_off"
 )
 
 // Reasons a manifest gives for any status but complete.
 const (
-	ReasonUploadFailed = "upload failed"
-	ReasonByteCap      = "byte cap"
-	ReasonSequenceGap  = "sequence gap"
-	ReasonDropped      = "writer dropped lines"
-	ReasonUnsealed     = "writer did not seal"
-	ReasonStopped      = "node stopped before its log was finished"
+	reasonUploadFailed = "upload failed"
+	reasonByteCap      = "byte cap"
+	reasonSequenceGap  = "sequence gap"
+	reasonDropped      = "writer dropped lines"
+	reasonUnsealed     = "writer did not seal"
+	reasonStopped      = "node stopped before its log was finished"
 )
 
-// SealedByNode identifies the writer of a physical manifest.
-const SealedByNode = "node"
+// sealedByNode identifies the writer of a physical manifest.
+const sealedByNode = "node"
 
 // Manifest describes one subject's final segments; persisted records and seals govern reads.
 type Manifest struct {
@@ -72,10 +72,10 @@ type Gap struct {
 // Marshal encodes m for upload.
 func (m Manifest) Marshal() ([]byte, error) {
 	if m.Subject == nil {
-		return nil, ErrBadManifest
+		return nil, errBadManifest
 	}
 	if err := m.Subject.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBadManifest, err)
+		return nil, fmt.Errorf("%w: %w", errBadManifest, err)
 	}
 	if m.Gaps == nil {
 		m.Gaps = []Gap{}
@@ -86,33 +86,33 @@ func (m Manifest) Marshal() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// ErrBadManifest marks a manifest object that does not decode, or that
+// errBadManifest marks a manifest object that does not decode, or that
 // names a version or status this package does not know.
-var ErrBadManifest = errors.New("logseg: unreadable manifest")
+var errBadManifest = errors.New("logseg: unreadable manifest")
 
-// ParseManifest decodes a manifest object and checks its shape.
-func ParseManifest(raw []byte) (*Manifest, error) {
+// parseManifest decodes a manifest object and checks its shape.
+func parseManifest(raw []byte) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBadManifest, err)
+		return nil, fmt.Errorf("%w: %w", errBadManifest, err)
 	}
-	if m.Version != ManifestVersion {
-		return nil, fmt.Errorf("%w: version %d", ErrBadManifest, m.Version)
+	if m.Version != manifestVersion {
+		return nil, fmt.Errorf("%w: version %d", errBadManifest, m.Version)
 	}
 	if m.Subject == nil {
-		return nil, ErrBadManifest
+		return nil, errBadManifest
 	}
 	if err := m.Subject.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBadManifest, err)
+		return nil, fmt.Errorf("%w: %w", errBadManifest, err)
 	}
 	switch m.Status {
-	case StatusComplete, StatusIncomplete, StatusCutOff:
+	case StatusComplete, statusIncomplete, statusCutOff:
 	default:
-		return nil, fmt.Errorf("%w: status %q", ErrBadManifest, m.Status)
+		return nil, fmt.Errorf("%w: status %q", errBadManifest, m.Status)
 	}
 	for i, seg := range m.Segments {
 		if seg.N != i+1 {
-			return nil, fmt.Errorf("%w: segment %d listed at position %d", ErrBadManifest, seg.N, i+1)
+			return nil, fmt.Errorf("%w: segment %d listed at position %d", errBadManifest, seg.N, i+1)
 		}
 	}
 	return &m, nil
@@ -126,9 +126,9 @@ const (
 	StateComplete = "complete"
 	// StateIncomplete identifies a persisted seal reporting missing lines; unreadable bytes fail reads.
 	StateIncomplete = "incomplete"
-	// StateCutOff: the log stopped before its writer finished: the node
+	// stateCutOff: the log stopped before its writer finished: the node
 	// was stopped, or the byte cap ended it.
-	StateCutOff = "cut_off"
+	stateCutOff = "cut_off"
 	// StateUnknown: the log store does not track completeness.
 	StateUnknown = "unknown"
 )
@@ -141,13 +141,4 @@ type Completeness struct {
 	Lines        int64  `json:"lines"`
 	MissingLines int64  `json:"missing_lines,omitempty"`
 	Message      string `json:"message,omitempty"`
-}
-
-// SyntheticLine renders c's message as the line a reader shows after the
-// log, or "" when there is nothing to show. It is never stored.
-func (c Completeness) SyntheticLine() string {
-	if c.Message == "" {
-		return ""
-	}
-	return "[" + c.Message + "]"
 }

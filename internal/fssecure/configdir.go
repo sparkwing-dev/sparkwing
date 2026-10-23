@@ -47,7 +47,7 @@ var foreignConfigDirWarned sync.Map
 // other-reachable one keeps the mode it has and the divergence is reported on
 // stderr once per path.
 func EnsureConfigDir(path string) error {
-	if info, err := os.Lstat(path); err == nil && info.Mode().Perm()&^DirMode != 0 && !UnderConfigDir(path) {
+	if info, err := os.Lstat(path); err == nil && info.Mode().Perm()&^dirMode != 0 && !underConfigDir(path) {
 		if _, warned := foreignConfigDirWarned.LoadOrStore(path, true); !warned {
 			fmt.Fprintf(os.Stderr, "sparkwing: %s sits outside the sparkwing config directory; leaving its permissions alone\n", path)
 		}
@@ -56,8 +56,8 @@ func EnsureConfigDir(path string) error {
 	return EnsureDir(path)
 }
 
-// UnderConfigDir reports whether path is [ConfigDir] or sits inside it.
-func UnderConfigDir(path string) bool {
+// underConfigDir reports whether path is [ConfigDir] or sits inside it.
+func underConfigDir(path string) bool {
 	root, err := ConfigDir()
 	if err != nil {
 		return false

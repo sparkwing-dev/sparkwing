@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestSDKPlanningIntakeSecretDefaultsAreMaskedBeforeLogRelease(t *testing.T) {

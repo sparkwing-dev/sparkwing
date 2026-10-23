@@ -1,4 +1,4 @@
-package logseg_test
+package logseg
 
 import (
 	"bytes"
@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 const testPrefix = "logs/r90/teams/acme/runs/run-1/jobs/build/a1-g1/"
@@ -47,7 +46,7 @@ func (m *manualTimer) fire() bool {
 	return true
 }
 
-func newSink(t *testing.T, up logseg.Uploader, opts logseg.Options) *logseg.Sink {
+func newSink(t *testing.T, up Uploader, opts Options) *Sink {
 	t.Helper()
 	opts.SpoolDir = t.TempDir()
 	if opts.Subject.Kind == "" {
@@ -57,7 +56,7 @@ func newSink(t *testing.T, up logseg.Uploader, opts logseg.Options) *logseg.Sink
 		opts.AfterFunc = (&manualTimer{}).after
 	}
 	opts.RetryBase, opts.RetryMax = time.Millisecond, time.Millisecond
-	s, err := logseg.NewSink(t.Context(), up, opts)
+	s, err := NewSink(t.Context(), up, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,10 +65,10 @@ func newSink(t *testing.T, up logseg.Uploader, opts logseg.Options) *logseg.Sink
 
 func line(i int) string { return fmt.Sprintf(`{"msg":"line %03d"}`+"\n", i) }
 
-func readLog(t *testing.T, objs *memObjects, opts storage.ReadOpts) (logseg.ReadResult, []byte, error) {
+func readLog(t *testing.T, objs *memObjects, opts storage.ReadOpts) (ReadResult, []byte, error) {
 	t.Helper()
 	var out bytes.Buffer
-	reader := logseg.CommittedReader{Records: objs, Objects: objs}
+	reader := CommittedReader{Records: objs, Objects: objs}
 	result, err := reader.Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: objs.view.Subject}, &out)
 	if err != nil {
 		return result, out.Bytes(), err
@@ -78,7 +77,7 @@ func readLog(t *testing.T, objs *memObjects, opts storage.ReadOpts) (logseg.Read
 	return result, body, err
 }
 
-func readAll(t *testing.T, objs *memObjects, opts storage.ReadOpts) (logseg.ReadResult, string) {
+func readAll(t *testing.T, objs *memObjects, opts storage.ReadOpts) (ReadResult, string) {
 	t.Helper()
 	result, body, err := readLog(t, objs, opts)
 	if err != nil {
@@ -99,7 +98,7 @@ func waitStored(t *testing.T, up *memUploader, n int) {
 func TestSinkCutsBySizeAndSealsComplete(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
-	s := newSink(t, up, logseg.Options{SegmentBytes: 64})
+	s := newSink(t, up, Options{SegmentBytes: 64})
 	var want strings.Builder
 	for i := 1; i <= 20; i++ {
 		if err := s.Append([]byte(line(i)), "st", int64(i), int64(i)); err != nil {
@@ -107,12 +106,12 @@ func TestSinkCutsBySizeAndSealsComplete(t *testing.T) {
 		}
 		want.WriteString(line(i))
 	}
-	s.WriterSealed("st", 20, 0)
-	m, err := s.Close(context.Background(), logseg.End{})
+	s.writerSealed("st", 20, 0)
+	m, err := s.Close(context.Background(), End{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Status != logseg.StatusComplete || m.Lines != 20 || len(m.Segments) < 2 {
+	if m.Status != StatusComplete || m.Lines != 20 || len(m.Segments) < 2 {
 		t.Fatalf("manifest = %+v", m)
 	}
 	l, got := readAll(t, objs, storage.ReadOpts{})
@@ -128,7 +127,7 @@ func TestSinkCutsOnIntervalOnlyWithBytesPending(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
 	clock := &manualTimer{}
-	s := newSink(t, up, logseg.Options{AfterFunc: clock.after})
+	s := newSink(t, up, Options{AfterFunc: clock.after})
 	if clock.fire() {
 		t.Fatal("an idle sink armed the interval cut")
 	}
@@ -142,7 +141,7 @@ func TestSinkCutsOnIntervalOnlyWithBytesPending(t *testing.T) {
 	if clock.fire() {
 		t.Fatal("the interval cut rearmed with nothing pending")
 	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
+	if _, err := s.Close(context.Background(), End{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, got := readAll(t, objs, storage.ReadOpts{}); got != line(1) {
@@ -153,7 +152,7 @@ func TestSinkCutsOnIntervalOnlyWithBytesPending(t *testing.T) {
 func TestKilledRunnerRetainsOnlyCommittedSegments(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
-	s := newSink(t, up, logseg.Options{SegmentBytes: 1})
+	s := newSink(t, up, Options{SegmentBytes: 1})
 	if err := s.Append([]byte(line(1)), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func TestKilledRunnerRetainsOnlyCommittedSegments(t *testing.T) {
 	if err := s.Append([]byte(line(2)), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Close(t.Context(), logseg.End{}); err == nil {
+	if _, err := s.Close(t.Context(), End{}); err == nil {
 		t.Fatal("dead runner sealed")
 	}
 	result, got := readAll(t, objs, storage.ReadOpts{})
@@ -173,21 +172,21 @@ func TestKilledRunnerRetainsOnlyCommittedSegments(t *testing.T) {
 
 func TestSinkRecordsWriterGapsAndIgnoresRetries(t *testing.T) {
 	objs := newMemObjects()
-	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{})
+	s := newSink(t, newMemUploader(objs, testPrefix), Options{})
 	for _, r := range [][2]int64{{1, 2}, {1, 2}, {5, 5}} {
 		if err := s.Append([]byte(strings.Repeat("x\n", int(r[1]-r[0]+1))), "st", r[0], r[1]); err != nil {
 			t.Fatal(err)
 		}
 	}
-	s.WriterSealed("st", 6, 0)
-	m, err := s.Close(context.Background(), logseg.End{})
+	s.writerSealed("st", 6, 0)
+	m, err := s.Close(context.Background(), End{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Status != logseg.StatusIncomplete || m.Reason != logseg.ReasonSequenceGap || m.Lines != 3 {
+	if m.Status != statusIncomplete || m.Reason != reasonSequenceGap || m.Lines != 3 {
 		t.Fatalf("manifest = %+v", m)
 	}
-	if len(m.Gaps) != 2 || m.Gaps[0] != (logseg.Gap{From: 3, To: 4}) || m.Gaps[1] != (logseg.Gap{From: 6, To: 6}) {
+	if len(m.Gaps) != 2 || m.Gaps[0] != (Gap{From: 3, To: 4}) || m.Gaps[1] != (Gap{From: 6, To: 6}) {
 		t.Fatalf("gaps = %+v", m.Gaps)
 	}
 }
@@ -195,26 +194,26 @@ func TestSinkRecordsWriterGapsAndIgnoresRetries(t *testing.T) {
 func TestSinkStatusForUnsealedAndStoppedWriters(t *testing.T) {
 	for name, tc := range map[string]struct {
 		seal bool
-		end  logseg.End
+		end  End
 		want string
 	}{
-		"numbered writer never sealed": {end: logseg.End{}, want: logseg.ReasonUnsealed},
-		"writer stopped":               {seal: true, end: logseg.End{Stopped: true}, want: logseg.ReasonStopped},
+		"numbered writer never sealed": {end: End{}, want: reasonUnsealed},
+		"writer stopped":               {seal: true, end: End{Stopped: true}, want: reasonStopped},
 	} {
 		t.Run(name, func(t *testing.T) {
 			objs := newMemObjects()
-			s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{})
+			s := newSink(t, newMemUploader(objs, testPrefix), Options{})
 			if err := s.Append([]byte("x\n"), "st", 1, 1); err != nil {
 				t.Fatal(err)
 			}
 			if tc.seal {
-				s.WriterSealed("st", 1, 0)
+				s.writerSealed("st", 1, 0)
 			}
 			m, err := s.Close(context.Background(), tc.end)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m.Status != logseg.StatusCutOff || m.Reason != tc.want {
+			if m.Status != statusCutOff || m.Reason != tc.want {
 				t.Fatalf("manifest = %+v", m)
 			}
 		})
@@ -223,20 +222,20 @@ func TestSinkStatusForUnsealedAndStoppedWriters(t *testing.T) {
 
 func TestSinkStopsAtTheByteCap(t *testing.T) {
 	objs := newMemObjects()
-	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{MaxBytes: 30})
+	s := newSink(t, newMemUploader(objs, testPrefix), Options{MaxBytes: 30})
 	for i := 1; i <= 4; i++ {
 		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	m, err := s.Close(context.Background(), logseg.End{})
+	m, err := s.Close(context.Background(), End{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Status != logseg.StatusCutOff || m.Reason != logseg.ReasonByteCap || m.DroppedLines != 3 {
+	if m.Status != statusCutOff || m.Reason != reasonByteCap || m.DroppedLines != 3 {
 		t.Fatalf("manifest = %+v", m)
 	}
-	if _, got := readAll(t, objs, storage.ReadOpts{}); got != line(1)+logseg.TruncationMarker {
+	if _, got := readAll(t, objs, storage.ReadOpts{}); got != line(1)+truncationMarker {
 		t.Fatalf("read %q", got)
 	}
 }
@@ -245,17 +244,17 @@ func TestSinkReportsFailedUploads(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
 	up.failSeg = func(n int) bool { return n == 2 }
-	s := newSink(t, up, logseg.Options{SegmentBytes: int64(len(line(0)))})
+	s := newSink(t, up, Options{SegmentBytes: int64(len(line(0)))})
 	for i := 1; i <= 3; i++ {
 		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	m, err := s.Close(context.Background(), logseg.End{})
+	m, err := s.Close(context.Background(), End{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Status != logseg.StatusIncomplete || m.Reason != logseg.ReasonUploadFailed || len(m.Segments) != 1 || m.DroppedLines != 2 {
+	if m.Status != statusIncomplete || m.Reason != reasonUploadFailed || len(m.Segments) != 1 || m.DroppedLines != 2 {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if _, got := readAll(t, objs, storage.ReadOpts{}); got != line(1) {
@@ -265,13 +264,13 @@ func TestSinkReportsFailedUploads(t *testing.T) {
 
 func TestReaderStopsAtASegmentFailingItsDigest(t *testing.T) {
 	objs := newMemObjects()
-	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{SegmentBytes: int64(len(line(0)))})
+	s := newSink(t, newMemUploader(objs, testPrefix), Options{SegmentBytes: int64(len(line(0)))})
 	for i := 1; i <= 3; i++ {
 		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
+	if _, err := s.Close(context.Background(), End{}); err != nil {
 		t.Fatal(err)
 	}
 	objs.put(blob.LogSegmentKey(testPrefix, 2), []byte("tampered"))
@@ -283,13 +282,13 @@ func TestReaderStopsAtASegmentFailingItsDigest(t *testing.T) {
 
 func TestSegmentReadsApplyFiltersAcrossCuts(t *testing.T) {
 	objs := newMemObjects()
-	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{SegmentBytes: 1})
+	s := newSink(t, newMemUploader(objs, testPrefix), Options{SegmentBytes: 1})
 	for _, body := range []string{"alpha", "keep one\n", "beta\n", "keep two", "gamma\n"} {
 		if err := s.Append([]byte(body), "", 0, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Close(t.Context(), logseg.End{}); err != nil {
+	if _, err := s.Close(t.Context(), End{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
@@ -320,24 +319,24 @@ func TestSinkHandsTheLiveViewEachAppendAtItsOffset(t *testing.T) {
 	objs := newMemObjects()
 	var pushed []string
 	var offsets []int64
-	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{
+	s := newSink(t, newMemUploader(objs, testPrefix), Options{
 		MaxBytes: 2 * int64(len(line(0))),
 		Live: func(off int64, data []byte) {
 			offsets = append(offsets, off)
 			pushed = append(pushed, string(data))
 		},
 	})
-	s.SetWatched(true)
+	s.setWatched(true)
 	for i := 1; i <= 3; i++ {
 		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
+	if _, err := s.Close(context.Background(), End{}); err != nil {
 		t.Fatal(err)
 	}
 	n := int64(len(line(0)))
-	if len(offsets) != 3 || offsets[0] != 0 || offsets[1] != n || offsets[2] != 2*n || pushed[2] != logseg.TruncationMarker {
+	if len(offsets) != 3 || offsets[0] != 0 || offsets[1] != n || offsets[2] != 2*n || pushed[2] != truncationMarker {
 		t.Fatalf("live view got %q at %v", pushed, offsets)
 	}
 }
@@ -353,7 +352,7 @@ func TestSinkPushesLiveOnlyWhileWatched(t *testing.T) {
 	var pushed []string
 	var offsets []int64
 	n := int64(len(line(0)))
-	s := newSink(t, up, logseg.Options{
+	s := newSink(t, up, Options{
 		SegmentBytes: 2 * n,
 		Live: func(off int64, data []byte) {
 			mu.Lock()
@@ -368,15 +367,15 @@ func TestSinkPushesLiveOnlyWhileWatched(t *testing.T) {
 		}
 	}
 	waitStored(t, up, 1)
-	s.SetWatched(true)
+	s.setWatched(true)
 	if err := s.Append([]byte(line(4)), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	s.SetWatched(false)
+	s.setWatched(false)
 	if err := s.Append([]byte(line(5)), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
+	if _, err := s.Close(context.Background(), End{}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -395,7 +394,7 @@ type stalledUploader struct {
 	started chan struct{}
 }
 
-func (u stalledUploader) PutSegment(ctx context.Context, _ logseg.Segment, _ []byte) error {
+func (u stalledUploader) PutSegment(ctx context.Context, _ Segment, _ []byte) error {
 	select {
 	case u.started <- struct{}{}:
 	default:
@@ -409,19 +408,19 @@ func (u stalledUploader) PutSegment(ctx context.Context, _ logseg.Segment, _ []b
 func TestCloseGivesUpOnAStalledUploadWhenItsContextEnds(t *testing.T) {
 	up := stalledUploader{memUploader: newMemUploader(newMemObjects(), testPrefix), started: make(chan struct{}, 1)}
 	timer := &manualTimer{}
-	s := newSink(t, up, logseg.Options{SegmentBytes: int64(len(line(0))), AfterFunc: timer.after})
+	s := newSink(t, up, Options{SegmentBytes: int64(len(line(0))), AfterFunc: timer.after})
 	if err := s.Append([]byte(line(1)), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	<-up.started
 	ctx, cancel := context.WithCancel(context.Background())
-	closed := make(chan logseg.Manifest, 1)
+	closed := make(chan Manifest, 1)
 	go func() {
-		m, _ := s.Close(ctx, logseg.End{})
+		m, _ := s.Close(ctx, End{})
 		closed <- m
 	}()
 	cancel()
-	if m := <-closed; m.Status != logseg.StatusIncomplete || m.Reason != logseg.ReasonUploadFailed || len(m.Segments) != 0 {
+	if m := <-closed; m.Status != statusIncomplete || m.Reason != reasonUploadFailed || len(m.Segments) != 0 {
 		t.Fatalf("manifest after a stalled upload = %+v, want incomplete with the segment missing", m)
 	}
 }
@@ -429,16 +428,16 @@ func TestCloseGivesUpOnAStalledUploadWhenItsContextEnds(t *testing.T) {
 func TestSinkRecordsWriterLoss(t *testing.T) {
 	objects := newMemObjects()
 	upload := newMemUploader(objects, testPrefix)
-	sink := newSink(t, upload, logseg.Options{})
+	sink := newSink(t, upload, Options{})
 	if err := sink.Append([]byte(line(1)), "host", 1, 1); err != nil {
 		t.Fatal(err)
 	}
-	sink.WriterSealed("host", 1, 2)
-	manifest, err := sink.Close(t.Context(), logseg.End{})
+	sink.writerSealed("host", 1, 2)
+	manifest, err := sink.Close(t.Context(), End{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Status != logseg.StatusIncomplete || manifest.DroppedLines != 2 {
+	if manifest.Status != statusIncomplete || manifest.DroppedLines != 2 {
 		t.Fatalf("lost log sealed as complete: %+v", manifest)
 	}
 }

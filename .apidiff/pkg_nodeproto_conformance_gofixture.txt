@@ -1,6 +1,0 @@
-# pkg/nodeproto/conformance/gofixture
-
-
-# methods on un-declared receiver types (likely a bug)
-func (pipeline) Plan(ctx context.Context, plan *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error
-func (pipeline) ShortHelp() string

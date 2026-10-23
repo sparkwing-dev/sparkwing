@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestProtocolSessionUsesProcessAuthorityUntilClose(t *testing.T) {
@@ -21,7 +21,7 @@ func TestProtocolSessionUsesProcessAuthorityUntilClose(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			registry, _, lookup, spec, service := processAuthorityFixture(t)
-			issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+			issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +45,7 @@ func TestProtocolSessionUsesProcessAuthorityUntilClose(t *testing.T) {
 			if mode == "missing" {
 				cfg.Command = []string{"/missing-sdk-entry"}
 			}
-			session, err := StartProtocolSession(ctx, cfg)
+			session, err := startProtocolSession(ctx, cfg)
 			if mode == "missing" {
 				if err == nil || session != nil {
 					t.Fatal("missing SDK started")

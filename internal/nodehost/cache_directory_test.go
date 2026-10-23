@@ -9,9 +9,9 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -47,7 +47,7 @@ func TestCacheDirectoryOnASharedHostIgnoresTheJobsEnvironment(t *testing.T) {
 			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: "/etc/sparkwing/credentials"}}}
 			state.row.Spec, _ = json.Marshal(job)
 			environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{name + "=" + host, "PATH="}, SubmitEnvAllow: []string{name}, Masker: secrets.NewMasker()}}
-			got, err := environments.CacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
+			got, err := environments.cacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
 			if err != nil || got != host {
 				t.Fatalf("resolved cache=%q, %v", got, err)
 			}
@@ -61,7 +61,7 @@ func TestCacheDirectoryDefaultsUseCapturedHome(t *testing.T) {
 	home := t.TempDir()
 	environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{"HOME=" + home, "USERPROFILE=" + home, "PATH="}, Masker: secrets.NewMasker()}}
 	for _, resolver := range []string{"go-modules", "npm"} {
-		got, err := environments.CacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
+		got, err := environments.cacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
 		want := filepath.Join(home, "go", "pkg", "mod")
 		if resolver == "npm" {
 			want = filepath.Join(home, ".npm")

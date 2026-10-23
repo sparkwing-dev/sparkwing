@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
 // BuildGoSDKFixture builds the public SDK probe and returns its cleanup.

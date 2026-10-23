@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
@@ -198,7 +198,7 @@ func FuzzOwnerBindingRevocation(f *testing.F) {
 			}
 			return p, err
 		}
-		host, err := NewOwnerEvaluator(deps)
+		host, err := newOwnerEvaluator(deps)
 		if err != nil {
 			t.Fatal(err)
 		}

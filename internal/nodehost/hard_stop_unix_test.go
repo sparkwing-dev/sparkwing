@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
@@ -47,7 +47,7 @@ func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 			ctx, stop := keeper.Run(t.Context())
 			defer stop()
 			<-ready
-			session, err := StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...), grace: time.Minute, Log: func(_ context.Context, log nodeproto.FrameLog) error {
+			session, err := startProtocolSession(ctx, ProtocolSessionConfig{Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...), grace: time.Minute, Log: func(_ context.Context, log nodeproto.FrameLog) error {
 				if pid, err := strconv.Atoi(log.Message); err == nil {
 					entered <- pid
 				}
@@ -118,13 +118,13 @@ func TestFundedBoundKillsUncooperativeCleanupTree(t *testing.T) {
 			if leaderExits {
 				script = `trap '' TERM; sleep 100 & echo $!; exit 0`
 			}
-			if _, err := cleanups.Register([]string{"/bin/sh", "-c", script}, ""); err != nil {
+			if _, err := cleanups.register([]string{"/bin/sh", "-c", script}, ""); err != nil {
 				t.Fatal(err)
 			}
 			pids := make(chan int, 1)
 			done := make(chan error, 1)
 			go func() {
-				done <- cleanups.Run(lease.ExecutionContext(ctx), CleanupScope{Env: testProcessEnv(t, os.Environ()...), Log: cleanupPIDLog{pids: pids}})
+				done <- cleanups.run(lease.ExecutionContext(ctx), CleanupScope{Env: testProcessEnv(t, os.Environ()...), Log: cleanupPIDLog{pids: pids}})
 			}()
 			pid := <-pids
 			select {

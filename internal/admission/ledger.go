@@ -132,7 +132,7 @@ const maxMilliCores = int64(1) << 50
 func New(cfg Config) (*Ledger, error) {
 	mc, err := toMilliCores(cfg.TotalCores)
 	if err != nil {
-		return nil, fmt.Errorf("%w: total cores %v", ErrInvalidConfig, cfg.TotalCores)
+		return nil, fmt.Errorf("%w: total cores %v", errInvalidConfig, cfg.TotalCores)
 	}
 	gen := cfg.TokenGen
 	if gen == nil {
@@ -272,12 +272,12 @@ func (l *Ledger) submitWithAging(s spec) (Decision, []Event, error) {
 
 func (l *Ledger) terminalClaimDecision(s spec) (Decision, bool) {
 	for _, c := range s.claims {
-		if c.policy != PolicyFail && c.policy != PolicySkip {
+		if c.policy != policyFail && c.policy != policySkip {
 			continue
 		}
 		if l.fifoBlockedOnKey(c.key) || !l.semBudgetFits(c) {
 			kind := DecisionFailed
-			if c.policy == PolicySkip {
+			if c.policy == policySkip {
 				kind = DecisionSkipped
 			}
 			return Decision{Kind: kind, Key: c.key}, true
@@ -313,7 +313,7 @@ func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
 		l.mustHoldInvariants()
 		return events, nil
 	}
-	return nil, ErrUnknownMember
+	return nil, errUnknownMember
 }
 
 func (l *Ledger) CancelWaiter(id string) []Event {
@@ -343,7 +343,7 @@ func (l *Ledger) Attach(id LeaseID, memberID, parentID string) error {
 	}
 	le, ok := l.leases[id]
 	if !ok {
-		return fmt.Errorf("%w: %s", ErrUnknownLease, id)
+		return fmt.Errorf("%w: %s", errUnknownLease, id)
 	}
 	if err := l.checkFreshID(memberID); err != nil {
 		return err
@@ -365,7 +365,7 @@ func (l *Ledger) ResolveParent(id LeaseID, parentID string) (string, error) {
 	defer l.mu.Unlock()
 	le, ok := l.leases[id]
 	if !ok {
-		return "", fmt.Errorf("%w: %s", ErrUnknownLease, id)
+		return "", fmt.Errorf("%w: %s", errUnknownLease, id)
 	}
 	return l.resolveParent(le, parentID)
 }
@@ -379,7 +379,7 @@ func (l *Ledger) resolveParent(le *lease, parentID string) (string, error) {
 		if id, live := l.memberOf[parentID]; live {
 			if id != le.id {
 				if parentID != le.ownerID {
-					return "", fmt.Errorf("%w: parent %q on %s", ErrUnknownMember, parentID, le.id)
+					return "", fmt.Errorf("%w: parent %q on %s", errUnknownMember, parentID, le.id)
 				}
 			}
 			return parentID, nil
@@ -395,7 +395,7 @@ func (l *Ledger) resolveParent(le *lease, parentID string) (string, error) {
 			if other.id != le.id {
 				_, known := other.parents[parentID]
 				if known || parentID == other.requestID {
-					return "", fmt.Errorf("%w: parent %q on %s", ErrUnknownMember, parentID, le.id)
+					return "", fmt.Errorf("%w: parent %q on %s", errUnknownMember, parentID, le.id)
 				}
 			}
 		}
@@ -410,10 +410,10 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 
 	le, ok := l.leases[id]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownLease, id)
+		return nil, fmt.Errorf("%w: %s", errUnknownLease, id)
 	}
 	if _, ok := le.members[memberID]; !ok {
-		return nil, fmt.Errorf("%w: %q on %s", ErrUnknownMember, memberID, id)
+		return nil, fmt.Errorf("%w: %q on %s", errUnknownMember, memberID, id)
 	}
 	delete(le.members, memberID)
 	delete(l.memberOf, memberID)
@@ -506,12 +506,12 @@ func (l *Ledger) Depend(memberID string, leases []LeaseID) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, ok := l.memberOf[memberID]; !ok {
-		return fmt.Errorf("%w: %q", ErrUnknownMember, memberID)
+		return fmt.Errorf("%w: %q", errUnknownMember, memberID)
 	}
 	for _, id := range leases {
 		le, ok := l.leases[id]
 		if !ok {
-			return fmt.Errorf("%w: %s", ErrUnknownLease, id)
+			return fmt.Errorf("%w: %s", errUnknownLease, id)
 		}
 		if le.dependents == nil {
 			le.dependents = map[string]struct{}{}
@@ -528,7 +528,7 @@ func (l *Ledger) Reattach(token string) (LeaseID, error) {
 
 	id, ok := l.tokens[token]
 	if !ok {
-		return "", ErrUnknownToken
+		return "", errUnknownToken
 	}
 	return id, nil
 }
@@ -550,7 +550,7 @@ func (l *Ledger) SetHeadroom(cores float64, memoryBytes uint64) ([]Event, error)
 
 	mc, err := toMilliCores(cores)
 	if err != nil {
-		return nil, fmt.Errorf("%w: cores %v", ErrInvalidHeadroom, cores)
+		return nil, fmt.Errorf("%w: cores %v", errInvalidHeadroom, cores)
 	}
 	l.headroomMilliCores = mc
 	l.headroomMemory = memoryBytes
@@ -565,20 +565,20 @@ func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 
 	mc, err := toMilliCores(cores)
 	if err != nil {
-		return fmt.Errorf("%w: cores %v", ErrInvalidResize, cores)
+		return fmt.Errorf("%w: cores %v", errInvalidResize, cores)
 	}
 	if l.usedMilliCores > mc && !l.softCoreOvercommit() && !l.burstCoreOvercommitAt(mc) {
-		return fmt.Errorf("%w: granted cores %d exceed total %d", ErrInvalidResize, l.usedMilliCores, mc)
+		return fmt.Errorf("%w: granted cores %d exceed total %d", errInvalidResize, l.usedMilliCores, mc)
 	}
 	if l.usedMemory > memoryBytes {
-		return fmt.Errorf("%w: granted memory %d exceeds total %d", ErrInvalidResize, l.usedMemory, memoryBytes)
+		return fmt.Errorf("%w: granted memory %d exceeds total %d", errInvalidResize, l.usedMemory, memoryBytes)
 	}
 	for _, w := range l.waiters {
 		if w.spec.milliCores > mc {
-			return fmt.Errorf("%w: waiter %q cores %d exceed total %d", ErrInvalidResize, w.spec.id, w.spec.milliCores, mc)
+			return fmt.Errorf("%w: waiter %q cores %d exceed total %d", errInvalidResize, w.spec.id, w.spec.milliCores, mc)
 		}
 		if w.spec.memory > memoryBytes {
-			return fmt.Errorf("%w: waiter %q memory %d exceeds total %d", ErrInvalidResize, w.spec.id, w.spec.memory, memoryBytes)
+			return fmt.Errorf("%w: waiter %q memory %d exceeds total %d", errInvalidResize, w.spec.id, w.spec.memory, memoryBytes)
 		}
 	}
 
@@ -787,7 +787,7 @@ func normalizeClaim(key string, capacity, cost int, policy Policy) (claim, error
 		policy = PolicyQueue
 	}
 	switch policy {
-	case PolicyQueue, PolicyFail, PolicySkip, PolicyCancelOthers:
+	case PolicyQueue, policyFail, policySkip, PolicyCancelOthers:
 	default:
 		return claim{}, fmt.Errorf("%w: semaphore %q policy %q", ErrInvalidRequest, key, policy)
 	}

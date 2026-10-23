@@ -105,20 +105,20 @@ func TestDeclaredSchedulesReadsEveryEntryWithItsNameWhereAndArgs(t *testing.T) {
 		t.Fatalf("declared %d entries, want 3: %+v", len(declared), declared)
 	}
 	quick := declared[0]
-	if quick.Name != "quick" || quick.Selector() != "sweep/quick" || quick.DisplayName() != "svc/sweep/quick" {
+	if quick.Name != "quick" || quick.selector() != "sweep/quick" || quick.displayName() != "svc/sweep/quick" {
 		t.Errorf("first entry: %+v", quick)
 	}
-	if !quick.Local() || quick.Trigger.Args["depth"] != "shallow" {
+	if !quick.local() || quick.Trigger.Args["depth"] != "shallow" {
 		t.Errorf("first entry's where and args: %+v", quick.Trigger)
 	}
-	if declared[1].Local() || declared[1].Name != "cluster" {
+	if declared[1].local() || declared[1].Name != "cluster" {
 		t.Errorf("second entry should fire from the controller: %+v", declared[1])
 	}
 	lone := declared[2]
-	if lone.Name != store.CronScheduleDefaultName || lone.DisplayName() != "svc/nightly" {
+	if lone.Name != store.CronScheduleDefaultName || lone.displayName() != "svc/nightly" {
 		t.Errorf("a lone entry: %+v", lone)
 	}
-	if lone.ID() != ScheduleID(root, "nightly", "") {
+	if lone.ID() != scheduleID(root, "nightly", "") {
 		t.Errorf("id = %q", lone.ID())
 	}
 }
@@ -139,19 +139,19 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if len(report.Controller) != 1 || report.Controller[0] != "svc/sweep/cluster" {
 		t.Fatalf("controller entries: %+v", report.Controller)
 	}
-	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "sweep", "cluster")); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "sweep", "cluster")); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a controller entry was armed here: %v", err)
 	}
 
 	head := git(t, root, "rev-parse", "HEAD")
-	quick, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "sweep", "quick"))
+	quick, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "sweep", "quick"))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
 	if quick.LockedRef != head {
 		t.Errorf("locked ref = %q, want HEAD %q", quick.LockedRef, head)
 	}
-	wantBinary := filepath.Join(h.svc.PinRoot, quick.ID, PinnedBinaryName)
+	wantBinary := filepath.Join(h.svc.PinRoot, quick.ID, pinnedBinaryName)
 	if quick.LockedBinary != wantBinary {
 		t.Errorf("locked binary = %q, want %q", quick.LockedBinary, wantBinary)
 	}
@@ -237,7 +237,7 @@ func TestArmOnlyRestrictsTheEntriesAndRefusesAnUnknownName(t *testing.T) {
 	if report.Armed != 1 || len(report.Schedules) != 1 {
 		t.Fatalf("armed: %+v", report)
 	}
-	if report.Schedules[0].ID != ScheduleID(root, "sweep", "quick") {
+	if report.Schedules[0].ID != scheduleID(root, "sweep", "quick") {
 		t.Fatalf("armed the wrong entry: %+v", report.Schedules[0])
 	}
 	if report.Withdrawn != 0 {
@@ -254,7 +254,7 @@ func TestArmFollowLeavesTheScheduleOnTheCheckout(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true, Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestArmFollowLeavesTheScheduleOnTheCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if rows[0].Lock.State != LockFollows || rows[0].StateDetail != "" {
+	if rows[0].Lock.State != lockFollows || rows[0].StateDetail != "" {
 		t.Errorf("lock: %+v", rows[0].Lock)
 	}
 }
@@ -280,7 +280,7 @@ func TestArmWithoutProofPinsNothing(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestDisarmRemovesOneScheduleAndItsPin(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	quick := ScheduleID(root, "sweep", "quick")
+	quick := scheduleID(root, "sweep", "quick")
 	pinDir := filepath.Join(h.svc.PinRoot, quick)
 	if _, err := os.Stat(pinDir); err != nil {
 		t.Fatalf("the arm wrote no pin: %v", err)
@@ -312,7 +312,7 @@ func TestDisarmRemovesOneScheduleAndItsPin(t *testing.T) {
 	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, quick); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("the row survived: %v", err)
 	}
-	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "nightly", "")); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "nightly", "")); err != nil {
 		t.Errorf("disarming one entry took a sibling with it: %v", err)
 	}
 }
@@ -325,7 +325,7 @@ func TestLockAndUnlockMoveTheScheduleBetweenPinAndCheckout(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 
 	locked, err := h.svc.Lock(ctx, id, compiler.prove)
 	if err != nil {
@@ -358,16 +358,16 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 
 	rows, err := h.svc.List(ctx)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if rows[0].Lock.State != LockPinned {
+	if rows[0].Lock.State != lockPinned {
 		t.Fatalf("a freshly pinned schedule: %+v", rows[0].Lock)
 	}
-	if want := "locked " + rows[0].Lock.ShortRef(); rows[0].StateDetail != want {
+	if want := "locked " + rows[0].Lock.shortRef(); rows[0].StateDetail != want {
 		t.Errorf("state detail = %q, want %q", rows[0].StateDetail, want)
 	}
 
@@ -375,7 +375,7 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 4 * * *"`, 1)), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	report, err := h.svc.Refresh(ctx)
+	report, err := h.svc.refresh(ctx)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 	if rows, err = h.svc.List(ctx); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if rows[0].Lock.State != LockDirty || rows[0].StateDetail != "locked, checkout dirty" {
+	if rows[0].Lock.State != lockDirty || rows[0].StateDetail != "locked, checkout dirty" {
 		t.Fatalf("an edited working tree: %+v (%q)", rows[0].Lock, rows[0].StateDetail)
 	}
 
@@ -401,7 +401,7 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 	if rows, err = h.svc.List(ctx); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if rows[0].Lock.State != LockAhead || rows[0].StateDetail != "locked, checkout ahead" {
+	if rows[0].Lock.State != lockAhead || rows[0].StateDetail != "locked, checkout ahead" {
 		t.Fatalf("a checkout ahead of the pin: %+v (%q)", rows[0].Lock, rows[0].StateDetail)
 	}
 
@@ -411,7 +411,7 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 	if rows, err = h.svc.List(ctx); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if rows[0].Lock.State != LockPinned || rows[0].Cron != "0 4 * * *" {
+	if rows[0].Lock.State != lockPinned || rows[0].Cron != "0 4 * * *" {
 		t.Fatalf("re-arming did not re-pin the new commit: %+v", rows[0])
 	}
 
@@ -421,7 +421,7 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 	if rows, err = h.svc.List(ctx); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if rows[0].Lock.State != LockMissing || rows[0].StateDetail != "locked, binary missing" {
+	if rows[0].Lock.State != lockMissing || rows[0].StateDetail != "locked, binary missing" {
 		t.Fatalf("a pin whose binary is gone: %+v (%q)", rows[0].Lock, rows[0].StateDetail)
 	}
 }
@@ -437,14 +437,14 @@ func TestRefreshFollowsTheCheckoutForAnUnlockedSchedule(t *testing.T) {
 		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 4 * * *"`, 1)), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	report, err := h.svc.Refresh(ctx)
+	report, err := h.svc.refresh(ctx)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 	if report.Updated != 1 || report.Locked != 0 {
 		t.Fatalf("refresh: %+v", report)
 	}
-	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -460,11 +460,11 @@ func TestOverrideRunsTheHostsValuesAndGoesStaleWhenTheRepoMoves(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 
 	cron := "*/5 * * * *"
 	catchUp := 6 * time.Hour
-	row, err := h.svc.SetOverride(ctx, id, Override{
+	row, err := h.svc.setOverride(ctx, id, override{
 		Cron:    &cron,
 		CatchUp: &catchUp,
 		Args:    map[string]string{"depth": "deep"},
@@ -486,7 +486,7 @@ func TestOverrideRunsTheHostsValuesAndGoesStaleWhenTheRepoMoves(t *testing.T) {
 	}
 
 	tz := "America/Denver"
-	if row, err = h.svc.SetOverride(ctx, id, Override{TZ: &tz}); err != nil {
+	if row, err = h.svc.setOverride(ctx, id, override{TZ: &tz}); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
 	if row.Effective.Cron != cron || row.Effective.TZ != tz {
@@ -497,7 +497,7 @@ func TestOverrideRunsTheHostsValuesAndGoesStaleWhenTheRepoMoves(t *testing.T) {
 		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 2 * * *"`, 1)), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	if _, err := h.svc.Refresh(ctx); err != nil {
+	if _, err := h.svc.refresh(ctx); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 	rows, err := h.svc.List(ctx)
@@ -524,7 +524,7 @@ func TestOverrideRunsTheHostsValuesAndGoesStaleWhenTheRepoMoves(t *testing.T) {
 		t.Errorf("re-arming dropped the override: %q", rows[0].Effective.Cron)
 	}
 
-	if row, err = h.svc.ClearOverride(ctx, id); err != nil {
+	if row, err = h.svc.clearOverride(ctx, id); err != nil {
 		t.Fatalf("ClearOverride: %v", err)
 	}
 	if row.Effective.Cron != "0 2 * * *" || len(row.OverrideFields) != 0 {
@@ -539,9 +539,9 @@ func TestSetOverrideRefusesACadenceThatWouldNotEvaluate(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	bad := "not a cron"
-	if _, err := h.svc.SetOverride(ctx, id, Override{Cron: &bad}); err == nil {
+	if _, err := h.svc.setOverride(ctx, id, override{Cron: &bad}); err == nil {
 		t.Fatal("an unparseable cron was accepted")
 	}
 	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
@@ -568,9 +568,9 @@ func TestTickFiresTheEffectiveCadenceAndRecordsItsArgs(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "sweep", "")
+	id := scheduleID(root, "sweep", "")
 	cron := "* * * * *"
-	if _, err := h.svc.SetOverride(ctx, id, Override{
+	if _, err := h.svc.setOverride(ctx, id, override{
 		Cron: &cron,
 		Args: map[string]string{"depth": "deep", "dry-run": "true"},
 	}); err != nil {
@@ -607,7 +607,7 @@ func TestTickRecordsAnOverrideThatStoppedEvaluating(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	// safety: the store takes any zone string, so an override naming a zone
 	// this host cannot load is what a tick has to survive.
 	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronOverride(ctx, id, store.CronOverride{TZ: "Mars/Olympus"}); err != nil {
@@ -657,7 +657,7 @@ func TestTickFailsAScheduleWhosePinnedBinaryIsGone(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
@@ -700,7 +700,7 @@ func TestResolveTakesAnEntrySelectorAndNamesAmbiguousCandidates(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	quick := ScheduleID(root, "sweep", "quick")
+	quick := scheduleID(root, "sweep", "quick")
 	for _, name := range []string{quick, "svc/sweep/quick", "sweep/quick", "sweep"} {
 		got, err := h.svc.Resolve(ctx, name)
 		if err != nil {
@@ -716,7 +716,7 @@ func TestResolveTakesAnEntrySelectorAndNamesAmbiguousCandidates(t *testing.T) {
 		t.Fatalf("Arm other: %v", err)
 	}
 	_, err := h.svc.Resolve(ctx, "sweep/quick")
-	if !errors.Is(err, ErrAmbiguousName) {
+	if !errors.Is(err, errAmbiguousName) {
 		t.Fatalf("Resolve error = %v, want ErrAmbiguousName", err)
 	}
 	for _, want := range []string{"other/sweep/quick", "svc/sweep/quick"} {
@@ -741,19 +741,19 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 	git(t, pinned, "commit", "--quiet", "--allow-empty", "-m", "move past the pin")
 
 	cron := "*/5 * * * *"
-	id := ScheduleID(following, "every-minute", "")
-	if _, err := h.svc.SetOverride(ctx, id, Override{Cron: &cron}); err != nil {
+	id := scheduleID(following, "every-minute", "")
+	if _, err := h.svc.setOverride(ctx, id, override{Cron: &cron}); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(following, ".sparkwing", "sparkwing.yaml"),
 		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 6 * * *"`, 1)), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	if _, err := h.svc.Refresh(ctx); err != nil {
+	if _, err := h.svc.refresh(ctx); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 
-	health, err := h.svc.Health(ctx, fakeTimerHost(t, h.home, true))
+	health, err := h.svc.health(ctx, fakeTimerHost(t, h.home, true))
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestArmFollowDropsAnExistingPinnedBinary(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	pinDir := filepath.Join(h.svc.PinRoot, id)
 	if _, err := os.Stat(pinDir); err != nil {
 		t.Fatalf("the first arm wrote no pin: %v", err)
@@ -802,7 +802,7 @@ func TestArmWithoutProofDropsAnExistingPinnedBinary(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("re-Arm without proof: %v", err)
 	}
@@ -818,7 +818,7 @@ func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	// safety: only a pin the refresh does not skip can prove the lock is
 	// carried through, and Refresh skips a row with a pinned binary, so the
 	// row carries a ref alone -- the shape `crons install --no-prove` leaves.
@@ -830,7 +830,7 @@ func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
 		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 4 * * *"`, 1)), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	report, err := h.svc.Refresh(ctx)
+	report, err := h.svc.refresh(ctx)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -856,9 +856,9 @@ func TestArmReportsTheOverridesItReBased(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	cron := "*/5 * * * *"
-	if _, err := h.svc.SetOverride(ctx, id, Override{Cron: &cron}); err != nil {
+	if _, err := h.svc.setOverride(ctx, id, override{Cron: &cron}); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
@@ -902,7 +902,7 @@ func TestPushedRepoAcceptsEveryCloneURLFormAndNoLocalPath(t *testing.T) {
 		"deploy@git.example.com:acme/widgets.git",
 		"ci-bot@git.internal.example:srv/widgets",
 	} {
-		if !PushedRepo(url) {
+		if !pushedRepo(url) {
 			t.Errorf("PushedRepo(%q) = false, want true", url)
 		}
 	}
@@ -910,7 +910,7 @@ func TestPushedRepoAcceptsEveryCloneURLFormAndNoLocalPath(t *testing.T) {
 		"/home/korey/code/widgets", "./widgets", "widgets",
 		"/tmp/a@b", "git@github.com", "-flag@host:path",
 	} {
-		if PushedRepo(path) {
+		if pushedRepo(path) {
 			t.Errorf("PushedRepo(%q) = true, want false", path)
 		}
 	}
@@ -923,7 +923,7 @@ func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 
 	// safety: a controller row that reached this store fires from the
 	// controller, never from the host's timer.

@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // FilesystemOptions binds a private directory and controller URL to a shared signing key.
@@ -124,12 +124,6 @@ func (f *Filesystem) transferPath(object capability.ObjectToSign) string {
 		return "/api/v1/data/uploads/" + path.Base(object.Key)
 	}
 	return "/api/v1/data/objects/" + object.Key
-}
-
-// VerifyTransfer checks the signed method, path, object and expiry before transfer.
-func (f *Filesystem) VerifyTransfer(r *http.Request) error {
-	_, err := f.signedRequest(r)
-	return err
 }
 
 // ServeHTTP accepts signed PUT and GET only. Raw object paths never authorize access.

@@ -28,4 +28,4 @@ func verifyOpenedPrivateConfig(path string, _ *os.File, info os.FileInfo) error 
 }
 
 // SecurePrivateConfig restricts a config to its owner on POSIX filesystems.
-func SecurePrivateConfig(path string) error { return os.Chmod(path, FileMode) }
+func SecurePrivateConfig(path string) error { return os.Chmod(path, fileMode) }

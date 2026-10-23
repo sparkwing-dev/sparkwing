@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"testing"

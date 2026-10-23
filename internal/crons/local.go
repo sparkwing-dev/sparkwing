@@ -48,7 +48,7 @@ func ReadLocalRegistration(ctx context.Context, home, id string) (_ LocalRegistr
 	if err != nil {
 		return result, errors.New("local schedule registration is unreadable")
 	}
-	if json.Unmarshal(data, &result) != nil || !filepath.IsAbs(result.RepoPath) || result.Project == nil || result.Environment.Digest == "" || result.Pipeline == "" || ScheduleID(result.RepoPath, result.Pipeline, result.ScheduleName) != id || projectconfig.Validate(*result.Project) != nil {
+	if json.Unmarshal(data, &result) != nil || !filepath.IsAbs(result.RepoPath) || result.Project == nil || result.Environment.Digest == "" || result.Pipeline == "" || scheduleID(result.RepoPath, result.Pipeline, result.ScheduleName) != id || projectconfig.Validate(*result.Project) != nil {
 		return LocalRegistration{}, errors.New("local schedule registration is malformed")
 	}
 	return result, nil
@@ -68,7 +68,7 @@ func (s *Service) RegisterLocal(ctx context.Context, input controllerwire.LocalS
 		for _, entry := range pipeline.On.Schedule {
 			if entry.Where == pipelines.ScheduleWhereLocal {
 				d := Declared{RepoPath: root, Pipeline: pipeline.Name, Name: entry.EffectiveName(), Trigger: entry, Team: s.team()}
-				available[d.Selector()] = d
+				available[d.selector()] = d
 			}
 		}
 	}

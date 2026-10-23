@@ -151,57 +151,57 @@ func Registry() []Command {
 			{Name: "first-time"},
 		}},
 		{Path: "sparkwing operator", Flags: []Flag{}},
-		{Path: "sparkwing operator teams", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator teams show", Authority: DeploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template.", "The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes."}, Flags: []Flag{
+		{Path: "sparkwing operator teams", Authority: deploymentAdmin, Flags: []Flag{}},
+		{Path: "sparkwing operator teams show", Authority: deploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template.", "The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes."}, Flags: []Flag{
 			{Name: "team", Argument: "SLUG", Required: true},
 			{Name: "job-namespace", Argument: "NAMESPACE", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator teams create", Authority: DeploymentAdmin, Rules: []string{"Create a new team and its first team-admin credential atomically under operator authority. Existing or retired team slugs are refused.", "JSON includes the one-time capability and account metadata. Plain and pretty print the capability once. This operation is never retried automatically."}, Flags: []Flag{
+		{Path: "sparkwing operator teams create", Authority: deploymentAdmin, Rules: []string{"Create a new team and its first team-admin credential atomically under operator authority. Existing or retired team slugs are refused.", "JSON includes the one-time capability and account metadata. Plain and pretty print the capability once. This operation is never retried automatically."}, Flags: []Flag{
 			{Name: "team", Argument: "SLUG", Required: true},
 			{Name: "display-name", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator limits", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator limits set", Authority: DeploymentAdmin, Rules: []string{"Operational ceilings and signup settings only; values above ceilings are refused, never silently clamped."}, Flags: []Flag{
+		{Path: "sparkwing operator limits", Authority: deploymentAdmin, Flags: []Flag{}},
+		{Path: "sparkwing operator limits set", Authority: deploymentAdmin, Rules: []string{"Operational ceilings and signup settings only; values above ceilings are refused, never silently clamped."}, Flags: []Flag{
 			{Name: "setting", Argument: "GUARD", Required: true},
 			{Name: "value", Argument: "N", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator limits show", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator limits show", Authority: deploymentAdmin, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator object-store", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator object-store reset-breaker", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator object-store", Authority: deploymentAdmin, Flags: []Flag{}},
+		{Path: "sparkwing operator object-store reset-breaker", Authority: deploymentAdmin, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator object-store status", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator object-store status", Authority: deploymentAdmin, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator secrets", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator secrets rotate", Authority: DeploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts, previous_key_only and each unreadable row's purpose, team and name; values never appear.", "--verify writes nothing and counts the rows that still open only under the previous key; retire the previous key when it reports zero and nothing unreadable."}, Flags: []Flag{
+		{Path: "sparkwing operator secrets", Authority: deploymentAdmin, Flags: []Flag{}},
+		{Path: "sparkwing operator secrets rotate", Authority: deploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts, previous_key_only and each unreadable row's purpose, team and name; values never appear.", "--verify writes nothing and counts the rows that still open only under the previous key; retire the previous key when it reports zero and nothing unreadable."}, Flags: []Flag{
 			{Name: "verify"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator tokens create", Authority: DeploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens", Authority: deploymentAdmin, Flags: []Flag{}},
+		{Path: "sparkwing operator tokens create", Authority: deploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens list", Authority: DeploymentAdmin, Rules: []string{"Read deployment credential metadata. JSON emits one record per token, with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens list", Authority: deploymentAdmin, Rules: []string{"Read deployment credential metadata. JSON emits one record per token, with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX"},
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "include-revoked"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens revoke", Authority: DeploymentAdmin, Rules: []string{"Revoke through the deployment token route. JSON retains the confirmed revocation; plain emits the prefix."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens revoke", Authority: deploymentAdmin, Rules: []string{"Revoke through the deployment token route. JSON retains the confirmed revocation; plain emits the prefix."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens rotate", Authority: DeploymentAdmin, Rules: []string{"Rotate through the deployment token route. JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens rotate", Authority: deploymentAdmin, Rules: []string{"Rotate through the deployment token route. JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "grace", Argument: "DURATION"},
 			{Name: "ttl", Argument: "DURATION"},
@@ -282,31 +282,31 @@ func Registry() []Command {
 		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
-		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. Plain prints the boolean and the comma-separated ranking."}, Flags: []Flag{
+		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. Plain prints the boolean and the comma-separated ranking."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing team settings set", Authority: TeamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or both. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.", "--claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it."}, Flags: []Flag{
+		{Path: "sparkwing team settings set", Authority: teamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or both. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.", "--claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}},
 			{Name: "claim-ranking", Argument: "TIERS"},
 		}},
-		{Path: "sparkwing overflow show", Authority: TeamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
+		{Path: "sparkwing overflow show", Authority: teamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing overflow set", Authority: TeamCredential, Rules: []string{"Set your monthly Cloud allowance with --minutes, or remove your saved cap with --uncapped. Exactly one is required. Zero prevents new Cloud overflow while local and registered-machine work remain eligible. Running work finishes. JSON returns the saved allowance and usage. Plain prints the allowance in minutes or uncapped."}, Flags: []Flag{
+		{Path: "sparkwing overflow set", Authority: teamCredential, Rules: []string{"Set your monthly Cloud allowance with --minutes, or remove your saved cap with --uncapped. Exactly one is required. Zero prevents new Cloud overflow while local and registered-machine work remain eligible. Running work finishes. JSON returns the saved allowance and usage. Plain prints the allowance in minutes or uncapped."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
 			{Name: "uncapped", Conflicts: []string{"minutes"}},
 		}},
-		{Path: "sparkwing billing standing", Authority: TeamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
+		{Path: "sparkwing billing standing", Authority: teamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing billing request-tier", Authority: TeamCredential, Rules: []string{"Contact the Sparkwing operators for High standing, higher limits or payments above $1,000. Describe what you need in the message, including if the team already has High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
+		{Path: "sparkwing billing request-tier", Authority: teamCredential, Rules: []string{"Contact the Sparkwing operators for High standing, higher limits or payments above $1,000. Describe what you need in the message, including if the team already has High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "tier", Argument: "TIER", Values: []string{"high"}, Required: true},
 			{Name: "message", Argument: "TEXT", Required: true},
 		}},
-		{Path: "sparkwing billing refill", Authority: TeamCredential, Rules: []string{"Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the refill caps its payment history allows, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $1,000 at every standing tier. Contact us through sparkwing billing request-tier for larger payments. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off."}, Flags: []Flag{
+		{Path: "sparkwing billing refill", Authority: teamCredential, Rules: []string{"Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the refill caps its payment history allows, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $1,000 at every standing tier. Contact us through sparkwing billing request-tier for larger payments. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "enable", Conflicts: []string{"disable"}, Meaning: "Turn automatic refill on; the team needs a saved card."},
 			{Name: "disable", Conflicts: []string{"enable"}, Meaning: "Turn automatic refill off, keeping its settings."},
@@ -316,7 +316,7 @@ func Registry() []Command {
 			{Name: "month-limit", Argument: "DOLLARS", Meaning: "Most dollars refilled in any 30 days; 0 is no limit."},
 		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
-		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
+		{Path: "sparkwing pools allow", Authority: teamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
 			{Name: "repo", Argument: "REPO", Repeatable: true, CommaList: true, Required: true},
 			{Name: "branch", Argument: "BRANCH", Repeatable: true, CommaList: true},
@@ -324,12 +324,12 @@ func Registry() []Command {
 			{Name: "route"},
 			{Name: "profile", Argument: "PROFILE"},
 		}},
-		{Path: "sparkwing pools disallow", Authority: TeamCredential, Rules: []string{"Delete the selected pool rule through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the rule ID."}, Flags: []Flag{
+		{Path: "sparkwing pools disallow", Authority: teamCredential, Rules: []string{"Delete the selected pool rule through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the rule ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
 			{Name: "rule", Argument: "RULE", Required: true},
 			{Name: "profile", Argument: "PROFILE"},
 		}},
-		{Path: "sparkwing pools list", Authority: TeamCredential, Rules: []string{"Read controller-granted reservations and access rules. JSON emits each pool with its runners and rules; plain emits pool names."}, Flags: []Flag{
+		{Path: "sparkwing pools list", Authority: teamCredential, Rules: []string{"Read controller-granted reservations and access rules. JSON emits each pool with its runners and rules; plain emits pool names."}, Flags: []Flag{
 			{Name: "profile", Argument: "PROFILE"},
 		}},
 		{Path: "sparkwing profiles", Flags: []Flag{}},
@@ -418,7 +418,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools require launcher credentials. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools require launcher credentials. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
@@ -433,11 +433,11 @@ func Registry() []Command {
 			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 		}},
-		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
+		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners remove", Authority: TeamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
@@ -694,7 +694,7 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
-		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days."}, Flags: []Flag{
+		{Path: "sparkwing tokens create", Authority: teamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"member"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
@@ -702,17 +702,17 @@ func Registry() []Command {
 			{Name: "allow-team-admin"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens list", Authority: TeamCredential, Rules: []string{"JSON emits one metadata record per token with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix. Deployment credentials use operator tokens."}, Flags: []Flag{
+		{Path: "sparkwing tokens list", Authority: teamCredential, Rules: []string{"JSON emits one metadata record per token with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix. Deployment credentials use operator tokens."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX"},
 			{Name: "type", Argument: "KIND", Values: []string{"member", "runner"}},
 			{Name: "include-revoked"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens revoke", Authority: TeamCredential, Rules: []string{"JSON retains the confirmed revocation; plain emits the prefix. A failed or unconfirmed revocation returns an error."}, Flags: []Flag{
+		{Path: "sparkwing tokens revoke", Authority: teamCredential, Rules: []string{"JSON retains the confirmed revocation; plain emits the prefix. A failed or unconfirmed revocation returns an error."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens rotate", Authority: TeamCredential, Rules: []string{"JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
+		{Path: "sparkwing tokens rotate", Authority: teamCredential, Rules: []string{"JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "grace", Argument: "DURATION"},
 			{Name: "ttl", Argument: "DURATION"},
@@ -803,12 +803,12 @@ func Registry() []Command {
 			{Name: "deadline", Argument: "DURATION"},
 		}},
 		{Path: "sparkwing-controller admin", Flags: []Flag{}},
-		{Path: "sparkwing-controller admin freeze", Authority: InPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Not an admin-token console bypass."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin freeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Not an admin-token console bypass."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "credentials-dir", Argument: "PATH"},
 		}},
-		{Path: "sparkwing-controller admin unfreeze", Authority: InPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin unfreeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "credentials-dir", Argument: "PATH"},

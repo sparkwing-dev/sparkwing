@@ -10,13 +10,13 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
@@ -25,10 +25,10 @@ func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
 			m := secrets.NewMasker()
 			registry := NewMaskRegistry(m)
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Groups: []string{"group"}, Steps: []nodeproto.StepSpec{{ID: "body"}, {ID: "encoded-YnVpbGQ="}}}}}
-			if err := registry.Accept(plan, func() error { return nil }); err != nil {
+			if err := registry.acceptPlan(plan, func() error { return nil }); err != nil {
 				t.Fatal(err)
 			}
-			err := registry.Register(value)
+			err := registry.registerValue(value)
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || !strings.Contains(failure.Message, "jobs[0]") || len(m.Values()) != 0 {
 				t.Fatalf("collision=%v, registry=%v", err, m.Values())
@@ -40,18 +40,18 @@ func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
 func TestMaskRegistryProtectsLaterExpansionAndFailedAcceptance(t *testing.T) {
 	masker := secrets.NewMasker()
 	registry := NewMaskRegistry(masker)
-	if err := registry.Register("secret"); err != nil || masker.Mask("secret") != "***" || !registry.ContainsSecret("prefix-secret") {
+	if err := registry.registerValue("secret"); err != nil || masker.Mask("secret") != "***" || !registry.ContainsSecret("prefix-secret") {
 		t.Fatal("registration was not visible to all sinks and validators")
 	}
 	committed := false
-	if err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "secret-job"}}}, func() error { committed = true; return nil }); err == nil || committed {
+	if err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "secret-job"}}}, func() error { committed = true; return nil }); err == nil || committed {
 		t.Fatal("persisted a secret-bearing generated job")
 	}
 	sentinel := errors.New("store refused")
-	if err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "unused"}}}, func() error { return sentinel }); !errors.Is(err, sentinel) {
+	if err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "unused"}}}, func() error { return sentinel }); !errors.Is(err, sentinel) {
 		t.Fatal(err)
 	}
-	if err := registry.Register("unused"); err != nil {
+	if err := registry.registerValue("unused"); err != nil {
 		t.Fatal("refused transaction left phantom identifiers")
 	}
 }
@@ -150,7 +150,7 @@ func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 
 func TestProcessServicesRefuseUnknownStepsAndPropagateMaskedWrites(t *testing.T) {
 	routes, service, auth := serviceFixture(t)
-	if err := service.Masks.Register("credential"); err != nil {
+	if err := service.Masks.registerValue("credential"); err != nil {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("credential write failed")
@@ -182,11 +182,11 @@ func TestMaskRegistryJoinsRegistrationWithAcceptance(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	accepted := make(chan error, 1)
 	go func() {
-		accepted <- registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}, func() error { close(entered); <-release; return nil })
+		accepted <- registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}, func() error { close(entered); <-release; return nil })
 	}()
 	<-entered
 	registered := make(chan error, 1)
-	go func() { registered <- registry.Register("job") }()
+	go func() { registered <- registry.registerValue("job") }()
 	select {
 	case err := <-registered:
 		close(release)
@@ -222,7 +222,7 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 	if f.accepted.RunID != "run" {
 		t.Fatal("plan acceptance did not commit")
 	}
-	if err := registry.Register("persisted"); err == nil {
+	if err := registry.registerValue("persisted"); err == nil {
 		t.Fatal("accepted job was missing from process mask registry")
 	}
 }
@@ -231,7 +231,7 @@ func TestMaskRegistryIssuedValueMayMatchAcceptedIdentifier(t *testing.T) {
 	m := secrets.NewMasker()
 	registry := NewMaskRegistry(m)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build-private-token"}}}
-	if err := registry.Accept(plan, func() error { return nil }); err != nil {
+	if err := registry.acceptPlan(plan, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.registerIssued("private-token"); err != nil {
@@ -251,7 +251,7 @@ func TestMaskRegistryRefusesIssuedValueInFreshExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 	committed := false
-	err := registry.Accept(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-private-token"}}}, func() error { committed = true; return nil })
+	err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-private-token"}}}, func() error { committed = true; return nil })
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || committed {
 		t.Fatalf("fresh expansion acceptance = %v, committed = %v", err, committed)

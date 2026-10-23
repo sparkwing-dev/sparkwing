@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/pkg/execdiag"
-	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ExitNotStarted marks an ExecError where the child process never
@@ -432,7 +432,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	// safety: the child owns the write ends now; dropping the parent's copies
 	// is what lets the readers ever see EOF.
 	closeFiles(outW, errW)
-	unrecord := recordStepSession(ctx, cmd, display, job)
+	unrecord := recordStepSession(ctx, cmd, job)
 
 	var outBuf, errBuf strings.Builder
 	limiter := newDiagnosticOutputLimiter(ctx)

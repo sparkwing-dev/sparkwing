@@ -7,7 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func completeServiceFixture(_ context.Context, p capability.Principal, job nodeproto.JobSpec) (ProcessServices, error) {

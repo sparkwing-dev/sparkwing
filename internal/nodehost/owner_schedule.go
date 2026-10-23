@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type ownerExecution struct {
@@ -298,7 +298,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			probe := request
 			probe.Policy, probe.MaterializeOnly = runstate.SourceManualRetry, true
 			probe.Source = &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
-			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
+			reused, err := followReconciliation(ctx, h.Store, probe, h.WaitNode)
 			if err != nil {
 				return err
 			}
@@ -366,7 +366,7 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 		return errors.New("self execution requires a node host and acquired entry")
 	}
 
-	result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)
+	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
 		return err
 	}

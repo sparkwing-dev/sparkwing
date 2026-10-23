@@ -231,8 +231,8 @@ func stageRel(into, relPath string) (string, error) {
 	return rel, nil
 }
 
-// CheckPaths refuses output patterns and destination prefixes outside a workspace.
-func CheckPaths(globs []string, edges []Edge) error {
+// checkPaths refuses output patterns and destination prefixes outside a workspace.
+func checkPaths(globs []string, edges []Edge) error {
 	for _, g := range globs {
 		if _, err := stageRel(g, "."); err != nil {
 			return fmt.Errorf("output %q must stay inside the workspace: %w", g, err)

@@ -55,7 +55,7 @@ func sortedCopy(in []string) []string {
 	return out
 }
 
-func (p Plan) Hash() string {
+func (p Plan) hash() string {
 	c := p.canonical()
 	var b strings.Builder
 	for _, n := range c.Nodes {
@@ -81,8 +81,8 @@ type PlanDiff struct {
 	ChangedNodes []NodeChange
 }
 
-func DiffPlans(before, after Plan) PlanDiff {
-	if before.Hash() == after.Hash() {
+func diffPlans(before, after Plan) PlanDiff {
+	if before.hash() == after.hash() {
 		return PlanDiff{Identical: true}
 	}
 	b := indexNodes(before)

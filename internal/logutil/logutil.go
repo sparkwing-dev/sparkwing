@@ -9,8 +9,8 @@ import (
 
 // Flag names every service registers for its own log.
 const (
-	FormatFlag = "log-format"
-	LevelFlag  = "log-level"
+	formatFlag = "log-format"
+	levelFlag  = "log-level"
 )
 
 // Options picks how a service writes its own log: Format is text or json,
@@ -28,8 +28,8 @@ type stringFlags interface {
 // standard library or a pflag flag set, and returns the reader of the parsed
 // values.
 func Bind(fs stringFlags) func() Options {
-	format := fs.String(FormatFlag, "text", "format of this service's own log: text or json")
-	level := fs.String(LevelFlag, "info", "lowest level this service logs: debug, info, warn or error")
+	format := fs.String(formatFlag, "text", "format of this service's own log: text or json")
+	level := fs.String(levelFlag, "info", "lowest level this service logs: debug, info, warn or error")
 	return func() Options { return Options{Format: *format, Level: *level} }
 }
 
@@ -47,7 +47,7 @@ func (o Options) Handler(w io.Writer) (slog.Handler, error) {
 	case "error":
 		level = slog.LevelError
 	default:
-		return nil, fmt.Errorf("--%s %q: want debug, info, warn or error", LevelFlag, o.Level)
+		return nil, fmt.Errorf("--%s %q: want debug, info, warn or error", levelFlag, o.Level)
 	}
 	opts := &slog.HandlerOptions{Level: level}
 	switch o.Format {
@@ -56,7 +56,7 @@ func (o Options) Handler(w io.Writer) (slog.Handler, error) {
 	case "json":
 		return slog.NewJSONHandler(w, opts), nil
 	default:
-		return nil, fmt.Errorf("--%s %q: want text or json", FormatFlag, o.Format)
+		return nil, fmt.Errorf("--%s %q: want text or json", formatFlag, o.Format)
 	}
 }
 

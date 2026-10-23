@@ -1,4 +1,4 @@
-package chaos_test
+package chaos
 
 import (
 	"testing"

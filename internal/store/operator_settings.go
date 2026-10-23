@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Authorized, grant capability.Grant, operation string, write func(*storeTx, capability.Principal) error) error {

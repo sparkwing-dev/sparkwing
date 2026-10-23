@@ -1,4 +1,4 @@
-package logseg_test
+package logseg
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 type memObjects struct {
@@ -50,7 +49,7 @@ func (m *memObjects) putIfAbsent(_ context.Context, key string, body []byte) err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.objs[key]; ok {
-		return logseg.ErrSealed
+		return errSealed
 	}
 	m.objs[key] = bytes.Clone(body)
 	return nil
@@ -79,7 +78,7 @@ func newMemUploader(objs *memObjects, prefix string) *memUploader {
 
 var errUnreachable = errors.New("object store unreachable")
 
-func (u *memUploader) PutSegment(_ context.Context, seg logseg.Segment, body []byte) error {
+func (u *memUploader) PutSegment(_ context.Context, seg Segment, body []byte) error {
 	u.mu.Lock()
 	refuse := u.dead || (u.failSeg != nil && u.failSeg(seg.N))
 	u.mu.Unlock()
@@ -99,7 +98,7 @@ func (u *memUploader) PutSegment(_ context.Context, seg logseg.Segment, body []b
 	return nil
 }
 
-func (u *memUploader) PutManifest(ctx context.Context, m logseg.Manifest) error {
+func (u *memUploader) PutManifest(ctx context.Context, m Manifest) error {
 	u.mu.Lock()
 	dead := u.dead
 	u.mu.Unlock()
@@ -116,7 +115,7 @@ func (u *memUploader) PutManifest(ctx context.Context, m logseg.Manifest) error 
 	u.objs.mu.Lock()
 	defer u.objs.mu.Unlock()
 	u.objs.view.Subject = *m.Subject
-	u.objs.view.Complete = m.Status == logseg.StatusComplete
+	u.objs.view.Complete = m.Status == StatusComplete
 	u.objs.view.IncompleteReason = m.Reason
 	return nil
 }

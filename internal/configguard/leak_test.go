@@ -1,4 +1,4 @@
-package configguard_test
+package configguard
 
 import (
 	"testing"

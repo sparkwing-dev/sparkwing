@@ -207,7 +207,7 @@ commit. The subprocess adapter uses `pipeline plan --pipeline NAME`.
 | Concern | Authoritative source |
 | --- | --- |
 | Env classes, names and process policies | `internal/procenv` |
-| Typed bounds and deadline helpers | `pkg/limits` |
+| Typed bounds and deadline helpers | `internal/limits` |
 | Precedence, per-setting signatures and source table | `internal/settings` |
 | Project YAML schema | `pkg/projectconfig.Config` |
 | Machine YAML schema | `internal/userconfig.Config` |
@@ -656,25 +656,21 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`SplitJobEnv`](../../../internal/procenv/contracts.go#L117) | SplitJobEnv validates names and rejects engine-owned or credential transport names. |
 | [`Build`](../../../internal/procenv/contracts.go#L125) | Build excludes credential-class values from both local snapshots and remote inputs under the shared process policy. |
 | [`Lookup`](../../../internal/procenv/contracts.go#L128) | Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned. |
-| [`Validate`](../../../internal/procenv/contracts.go#L131) | Validate refuses invalid names and engine-owned assignments without exposing secret values in its errors. |
 | [`Registry`](../../../internal/procenv/registry.go#L5) | Registry is the single classification table for environment generation and reference documentation. |
 
-### pkg/limits
+### internal/limits
 
 | Export | Purpose |
 | --- | --- |
-| [`ErrNoTime`](../../../pkg/limits/deadline.go#L11) | ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin. |
-| [`Child`](../../../pkg/limits/deadline.go#L17) | Child derives a deadline, leaving margin before parent; a zero parent means unbounded. |
-| [`ChildContext`](../../../pkg/limits/deadline.go#L22) | ChildContext applies Child to ctx.Deadline, retaining cancellation when the result is unbounded. |
-| [`Renew`](../../../pkg/limits/deadline.go#L27) | Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper. |
-| [`CheckRenewal`](../../../pkg/limits/deadline.go#L30) | CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry. |
-| [`JobDeadline`](../../../pkg/limits/deadline.go#L35) | JobDeadline adds JobSlack to attemptDeadline and caps the result at ownerDeadline. |
-| [`Error`](../../../pkg/limits/deadline.go#L40) | Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes. |
-| [`Record`](../../../pkg/limits/deadline.go#L43) | Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note. |
-| [`Failure`](../../../pkg/limits/deadline.go#L46) | Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes. |
-| [`Class`](../../../pkg/limits/table.go#L4) | Class distinguishes author refusals, operator ceilings and internal coordination budgets. |
-| [`Limit`](../../../pkg/limits/table.go#L14) | Limit carries a typed value (duration, int64 bytes, or int count) with its documented enforcement. |
-| [`Table`](../../../pkg/limits/table.go#L22) | Table returns independent rows for every shared constant; documentation renders the typed values. |
+| [`ErrNoTime`](../../../internal/limits/deadline.go#L11) | ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin. |
+| [`Child`](../../../internal/limits/deadline.go#L17) | Child derives a deadline, leaving margin before parent; a zero parent means unbounded. |
+| [`ChildContext`](../../../internal/limits/deadline.go#L22) | ChildContext applies Child to ctx.Deadline, retaining cancellation when the result is unbounded. |
+| [`Renew`](../../../internal/limits/deadline.go#L27) | Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper. |
+| [`CheckRenewal`](../../../internal/limits/deadline.go#L30) | CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry. |
+| [`JobDeadline`](../../../internal/limits/deadline.go#L35) | JobDeadline adds JobSlack to attemptDeadline and caps the result at ownerDeadline. |
+| [`Error`](../../../internal/limits/deadline.go#L40) | Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes. |
+| [`Record`](../../../internal/limits/deadline.go#L43) | Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note. |
+| [`Failure`](../../../internal/limits/deadline.go#L46) | Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes. |
 
 ### internal/settings
 
@@ -683,19 +679,12 @@ regenerate with `go test ./tests/acceptance -run '^TestCurrentContractSymbolInve
 
 | Export | Source |
 | --- | --- |
-| `AcceptPlan` | [source](../../../internal/settings/contract.go) |
-| `AdmissionClass` | [source](../../../internal/settings/resolvers.go) |
-| `AllowRisk` | [source](../../../internal/settings/resolvers.go) |
 | `ApprovalWait` | [source](../../../internal/settings/resolvers.go) |
 | `Args` | [source](../../../internal/settings/resolvers.go) |
-| `CacheFrom` | [source](../../../internal/settings/resolvers.go) |
 | `ClaimWait` | [source](../../../internal/settings/resolvers.go) |
-| `Code` | [source](../../../internal/settings/contract.go) |
 | `Context` | [source](../../../internal/settings/contract.go) |
 | `ControllerCeilings` | [source](../../../internal/settings/operator.go) |
-| `Debug` | [source](../../../internal/settings/resolvers.go) |
 | `Default` | [source](../../../internal/settings/contract.go) |
-| `DryRun` | [source](../../../internal/settings/resolvers.go) |
 | `Env` | [source](../../../internal/settings/contract.go) |
 | `Error` | [source](../../../internal/settings/contract.go) |
 | `ExpansionInputs` | [source](../../../internal/settings/contract.go) |
@@ -703,57 +692,23 @@ regenerate with `go test ./tests/acceptance -run '^TestCurrentContractSymbolInve
 | `GlobalDB` | [source](../../../internal/settings/contract.go) |
 | `Guards` | [source](../../../internal/settings/resolvers.go) |
 | `Inputs` | [source](../../../internal/settings/contract.go) |
-| `Intake` | [source](../../../internal/settings/contract.go) |
 | `JobTimeout` | [source](../../../internal/settings/resolvers.go) |
-| `LimitsProfile` | [source](../../../internal/settings/contract.go) |
-| `Machine` | [source](../../../internal/settings/contract.go) |
 | `MemoTTL` | [source](../../../internal/settings/resolvers.go) |
-| `NoMemo` | [source](../../../internal/settings/resolvers.go) |
-| `NoProgressTimeout` | [source](../../../internal/settings/resolvers.go) |
-| `Only` | [source](../../../internal/settings/resolvers.go) |
 | `OperatorInputs` | [source](../../../internal/settings/contract.go) |
-| `OperatorPrecedence` | [source](../../../internal/settings/contract.go) |
 | `OperatorValues` | [source](../../../internal/settings/contract.go) |
 | `Origin` | [source](../../../internal/settings/contract.go) |
-| `OriginLayers` | [source](../../../internal/settings/contract.go) |
-| `Output` | [source](../../../internal/settings/resolvers.go) |
 | `OwnerExecution` | [source](../../../internal/settings/resolvers.go) |
-| `PauseTimeout` | [source](../../../internal/settings/resolvers.go) |
-| `Phase` | [source](../../../internal/settings/contract.go) |
 | `PlanInputs` | [source](../../../internal/settings/contract.go) |
-| `Precedence` | [source](../../../internal/settings/contract.go) |
-| `Prefers` | [source](../../../internal/settings/resolvers.go) |
-| `Priority` | [source](../../../internal/settings/resolvers.go) |
-| `Profile` | [source](../../../internal/settings/resolvers.go) |
 | `ProjectCeilings` | [source](../../../internal/settings/projection.go) |
 | `ProjectCheckoutDeclarations` | [source](../../../internal/settings/declarations.go) |
-| `ProjectDefaults` | [source](../../../internal/settings/contract.go) |
-| `ProjectOrigin` | [source](../../../internal/settings/projection.go) |
-| `ProjectPipeline` | [source](../../../internal/settings/contract.go) |
-| `Publish` | [source](../../../internal/settings/resolvers.go) |
-| `RepoLocation` | [source](../../../internal/settings/startup.go) |
-| `Requires` | [source](../../../internal/settings/resolvers.go) |
-| `ResolveConcurrency` | [source](../../../internal/settings/concurrency.go) |
 | `ResolveExpansion` | [source](../../../internal/settings/plan.go) |
 | `ResolveIntake` | [source](../../../internal/settings/intake.go) |
 | `ResolvePlan` | [source](../../../internal/settings/plan.go) |
 | `ResolveRequest` | [source](../../../internal/settings/intake.go) |
 | `Retry` | [source](../../../internal/settings/resolvers.go) |
-| `RetryBackoff` | [source](../../../internal/settings/resolvers.go) |
-| `Rule` | [source](../../../internal/settings/contract.go) |
-| `Run` | [source](../../../internal/settings/contract.go) |
 | `RunnerPreferences` | [source](../../../internal/settings/startup.go) |
-| `RunnerSelection` | [source](../../../internal/settings/resolvers.go) |
 | `Source` | [source](../../../internal/settings/contract.go) |
-| `StartAt` | [source](../../../internal/settings/resolvers.go) |
-| `Startup` | [source](../../../internal/settings/contract.go) |
-| `StopAt` | [source](../../../internal/settings/resolvers.go) |
-| `SubmitEnvAllow` | [source](../../../internal/settings/resolvers.go) |
-| `Table` | [source](../../../internal/settings/table.go) |
-| `TeamDB` | [source](../../../internal/settings/contract.go) |
-| `ValidateCheckoutDeclarations` | [source](../../../internal/settings/declarations.go) |
 | `Values` | [source](../../../internal/settings/contract.go) |
-| `Workers` | [source](../../../internal/settings/resolvers.go) |
 
 The restricted declaration types live in `internal/runspec` to avoid a settings
 import cycle. `CheckoutDeclarations` carries the version, file and two layers.
@@ -769,10 +724,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Command`](../../../internal/clisurface/grammar.go) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
 | [`GlobalFlags`](../../../internal/clisurface/grammar.go) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
 | [`ExitCode`](../../../internal/clisurface/grammar.go) | ExitCode keeps usage failures distinguishable from incomplete observations. |
-| [`ErrorFormat`](../../../internal/clisurface/grammar.go) | ErrorFormat delegates JSON encoding and codes to pkg/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
-| [`Errors`](../../../internal/clisurface/grammar.go) | Errors keeps diagnostics on stderr even when stdout contains records. |
 | [`CommonRules`](../../../internal/clisurface/grammar.go) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
-| [`Validate`](../../../internal/clisurface/grammar.go) | Validate catches grammar drift before a parser or help generator consumes it. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
 | [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
 | [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |
@@ -858,18 +810,18 @@ New contract and test files:
 - `internal/clisurface/grammar.go`
 - `internal/clisurface/contract_test.go`
 - `internal/clisurface/registry.go`
-- `pkg/limits/billing.go`
-- `pkg/limits/claim.go`
-- `pkg/limits/cron.go`
-- `pkg/limits/deadline.go`
-- `pkg/limits/identity.go`
-- `pkg/limits/node.go`
-- `pkg/limits/operator.go`
-- `pkg/limits/run.go`
-- `pkg/limits/storage.go`
-- `pkg/limits/table.go`
-- `pkg/limits/table_test.go`
-- `pkg/limits/wire.go`
+- `internal/limits/billing.go`
+- `internal/limits/claim.go`
+- `internal/limits/cron.go`
+- `internal/limits/deadline.go`
+- `internal/limits/identity.go`
+- `internal/limits/node.go`
+- `internal/limits/operator.go`
+- `internal/limits/run.go`
+- `internal/limits/storage.go`
+- `internal/limits/table.go`
+- `internal/limits/table_test.go`
+- `internal/limits/wire.go`
 - `internal/procenv/contracts.go`
 - `internal/procenv/contracts_test.go`
 - `internal/procenv/registry.go`

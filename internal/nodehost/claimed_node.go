@@ -8,15 +8,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // ClaimStore supplies persisted acceptance and renewal under the awarded identity.
@@ -168,7 +168,7 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 }
 
 func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (runstate.Applied, error)) error {
-	var decision *AdmissionFailure
+	var decision *admissionFailure
 	if errors.As(failure, &decision) && decision.committed {
 		if decision.Outcome == runstate.NodeSkipped {
 			return nil
@@ -188,7 +188,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 		code = structured.Code
 	}
 	result := runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
-	var refused *AdmissionFailure
+	var refused *admissionFailure
 	if errors.As(failure, &refused) && waitFailure(failure, refused) == nil {
 		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
 	}

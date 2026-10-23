@@ -106,7 +106,7 @@ func SDKPin(sparkwingDir string) (pin, replace string) {
 	return pin, replace
 }
 
-func SDKWorkspaceOverride(sparkwingDir string) string {
+func sdkWorkspaceOverride(sparkwingDir string) string {
 	body, err := os.ReadFile(filepath.Join(sparkwingDir, "go.work"))
 	if err != nil {
 		return ""

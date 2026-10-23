@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func registeredServiceRequest(t *testing.T, routes *serviceRegistrar, auth capability.Authorized, method, target, body string) *httptest.ResponseRecorder {
@@ -223,7 +223,7 @@ func TestProcessServicesCleanupRegistrationIsProcessScoped(t *testing.T) {
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("missing cleanup=%d %s", response.Code, response.Body)
 	}
-	if err := service.Cleanups.Run(t.Context(), CleanupScope{}); err != nil {
+	if err := service.Cleanups.run(t.Context(), CleanupScope{}); err != nil {
 		t.Fatal(err)
 	}
 	response = registeredServiceRequest(t, routes, auth, http.MethodPost, "/node/v1/cleanups", `{"argv":["tool"]}`)

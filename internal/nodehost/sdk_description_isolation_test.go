@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestSelectedShortSecretDefaultKeepsConfigVariableGuidance(t *testing.T) {
@@ -102,7 +102,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 						if phase == "malformed" {
 							body = json.RawMessage(`{"jobs":` + unclassified)
 						}
-						_, err = PlanInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) { return body, nil })
+						_, err = planInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) { return body, nil })
 					}
 					var failure *apierr.Error
 					if !errors.As(err, &failure) || strings.Contains(failure.Message, unclassified) || !strings.Contains(failure.Message, "details withheld: secrets not yet known") {

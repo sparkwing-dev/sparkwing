@@ -6,15 +6,15 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -103,14 +103,14 @@ func TestEvalUnitApprovalPredicateHasNoJobCapacityOrCompute(t *testing.T) {
 				t.Fatal("approval acquired compute")
 				return nil, nil
 			})}, true)
-			host.SkipPolicy = func(_ context.Context, in EvaluationInput, observed runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			host.SkipPolicy = func(_ context.Context, in EvaluationInput, observed runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 				if in.NodeID != "approval" || in.Generation != 0 || observed.Ref != row.Ref {
 					t.Fatal("approval changed source identity")
 				}
 				if !skip {
-					return OwnerLayerResult{}, nil
+					return ownerLayerResult{}, nil
 				}
-				return OwnerLayerResult{Transition: store.OwnerPolicyNode{Outcome: runstate.NodeSkipped, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalBypass, Generation: 0}, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: "skip_if"}}}, nil
+				return ownerLayerResult{Transition: store.OwnerPolicyNode{Outcome: runstate.NodeSkipped, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalBypass, Generation: 0}, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: "skip_if"}}}, nil
 			}
 			if err := host.Evaluate(t.Context(), input, "approval", 0, fence); err != nil {
 				t.Fatal(err)

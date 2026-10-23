@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -15,29 +15,29 @@ import (
 // Source preserves the origin needed to explain a refusal without leaking values.
 type Source string
 
-// Sources are ordered by Precedence; operator sources use OperatorPrecedence.
+// Sources are ordered by precedence; operator sources use operatorPrecedence.
 const (
 	Flag            Source = "flag"
 	Env             Source = "env"
-	Run             Source = "run"
-	ProjectPipeline Source = "project.pipeline"
-	ProjectDefaults Source = "project.defaults"
-	Code            Source = "code"
-	Machine         Source = "machine"
+	sourceRun       Source = "run"
+	projectPipeline Source = "project.pipeline"
+	projectDefaults Source = "project.defaults"
+	code            Source = "code"
+	machine         Source = "machine"
 	Default         Source = "default"
-	TeamDB          Source = "operator.team"
+	teamDB          Source = "operator.team"
 	GlobalDB        Source = "operator.global"
-	LimitsProfile   Source = "operator.profile"
+	limitsProfile   Source = "operator.profile"
 )
 
-// Precedence gives closer explicit sources priority; ceilings remain independent.
-func Precedence() []Source {
-	return []Source{Flag, Env, Run, ProjectPipeline, ProjectDefaults, Code, Machine, Default}
+// precedence gives closer explicit sources priority; ceilings remain independent.
+func precedence() []Source {
+	return []Source{Flag, Env, sourceRun, projectPipeline, projectDefaults, code, machine, Default}
 }
 
-// OperatorPrecedence keeps a named flag authoritative, including explicit zero.
-func OperatorPrecedence() []Source {
-	return []Source{Flag, TeamDB, GlobalDB, LimitsProfile, Default}
+// operatorPrecedence keeps a named flag authoritative, including explicit zero.
+func operatorPrecedence() []Source {
+	return []Source{Flag, teamDB, GlobalDB, limitsProfile, Default}
 }
 
 // Origin keeps source, file, key and line when a value moves into the sealed run spec.
@@ -48,21 +48,21 @@ type Origin struct {
 	Line   int    `json:"line,omitempty"`
 }
 
-// Phase prevents project and code settings from being frozen before planning.
-type Phase string
+// phase prevents project and code settings from being frozen before planning.
+type phase string
 
 // Resolution phases name when a preference is complete, not when storage seals it.
 const (
-	Startup    Phase = "startup"
-	Intake     Phase = "intake"
-	AcceptPlan Phase = "accept_plan"
+	startup    phase = "startup"
+	intake     phase = "intake"
+	acceptPlan phase = "accept_plan"
 )
 
-// Rule is the precedence-document and conformance-test source for one setting.
-type Rule struct {
+// rule is the precedence-document and conformance-test source for one setting.
+type rule struct {
 	Key     string
 	Sources []Source
-	Phase   Phase
+	Phase   phase
 }
 
 // Values supplies the settings resolved by this package.
@@ -175,11 +175,11 @@ type ExpansionInputs struct {
 	Context Context
 }
 
-// OriginLayers is the complete C4-to-C1 mapping; operator sources remain distinguishable.
-var OriginLayers = map[Source]runspec.Layer{
-	Flag: runspec.LayerFlag, Env: runspec.LayerEnv, Run: runspec.LayerSealed,
-	ProjectPipeline: runspec.LayerProjectPipeline, ProjectDefaults: runspec.LayerProjectDefaults,
-	Code: runspec.LayerCode, Machine: runspec.LayerMachine, Default: runspec.LayerDefault,
-	TeamDB: runspec.LayerOperatorTeam, GlobalDB: runspec.LayerOperatorGlobal,
-	LimitsProfile: runspec.LayerOperatorProfile,
+// originLayers is the complete C4-to-C1 mapping; operator sources remain distinguishable.
+var originLayers = map[Source]runspec.Layer{
+	Flag: runspec.LayerFlag, Env: runspec.LayerEnv, sourceRun: runspec.LayerSealed,
+	projectPipeline: runspec.LayerProjectPipeline, projectDefaults: runspec.LayerProjectDefaults,
+	code: runspec.LayerCode, machine: runspec.LayerMachine, Default: runspec.LayerDefault,
+	teamDB: runspec.LayerOperatorTeam, GlobalDB: runspec.LayerOperatorGlobal,
+	limitsProfile: runspec.LayerOperatorProfile,
 }

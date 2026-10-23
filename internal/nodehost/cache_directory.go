@@ -12,14 +12,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-// CacheDirectory resolves package-manager caches: from the persisted job environment on
+// cacheDirectory resolves package-manager caches: from the persisted job environment on
 // the run owner's own machine, and from the host's own environment everywhere else.
-func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cache nodeproto.CacheSpec) (string, error) {
+func (e SDKEnvironment) cacheDirectory(ctx context.Context, input NodeInput, cache nodeproto.CacheSpec) (string, error) {
 	if cache.Resolver != depcache.ResolverGoModules && cache.Resolver != depcache.ResolverNpm || input.Entry == nil || input.Entry.Directory == "" {
 		return "", errors.New("cache resolution requires a known resolver and workspace")
 	}

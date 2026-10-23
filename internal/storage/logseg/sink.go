@@ -17,17 +17,17 @@ import (
 )
 
 // Cutting bounds and the per-node byte cap. A segment is cut when
-// SegmentInterval has passed since the last cut with bytes pending, or
-// when SegmentBytes are pending, whichever comes first.
+// segmentInterval has passed since the last cut with bytes pending, or
+// when segmentBytes are pending, whichever comes first.
 const (
-	SegmentInterval       = 10 * time.Second
-	SegmentBytes          = 1 << 20
-	MaxNodeBytes    int64 = 64 << 20
+	segmentInterval       = 10 * time.Second
+	segmentBytes          = 1 << 20
+	maxNodeBytes    int64 = 64 << 20
 )
 
-// TruncationMarker is the last line of a log that reached
-// [MaxNodeBytes]; the sink keeps nothing after it.
-const TruncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
+// truncationMarker is the last line of a log that reached
+// [maxNodeBytes]; the sink keeps nothing after it.
+const truncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
 
 const maxTrackedGaps = 32
 
@@ -37,12 +37,12 @@ type Uploader interface {
 	// PutSegment stores seg's compressed body under segment number
 	// seg.N. Writing the same number twice writes the same bytes.
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
-	// PutManifest seals the persisted stream; identical replay succeeds and conflicting seals return ErrSealed.
+	// PutManifest seals the persisted stream; identical replay succeeds and conflicting seals return errSealed.
 	PutManifest(ctx context.Context, m Manifest) error
 }
 
-// ErrSealed rejects a final payload that conflicts with the persisted stream seal.
-var ErrSealed = errors.New("logseg: the attempt already has a manifest")
+// errSealed rejects a final payload that conflicts with the persisted stream seal.
+var errSealed = errors.New("logseg: the attempt already has a manifest")
 
 // ErrClosed refuses an append to a sink that has written its manifest.
 var ErrClosed = errors.New("logseg: the sink is closed")
@@ -58,7 +58,7 @@ type Options struct {
 	MaxBytes     int64
 	// Live, when set, receives stored appends in order with the byte
 	// offset in the log each begins at, for the controller's live view,
-	// while a viewer watches the node (see [Sink.SetWatched]). It must
+	// while a viewer watches the node (see [Sink.setWatched]). It must
 	// not block.
 	Live func(offset int64, data []byte)
 	// AfterFunc schedules the interval cut; time.AfterFunc when nil.
@@ -73,13 +73,13 @@ type Options struct {
 
 func (o *Options) defaults() {
 	if o.Interval <= 0 {
-		o.Interval = SegmentInterval
+		o.Interval = segmentInterval
 	}
 	if o.SegmentBytes <= 0 {
-		o.SegmentBytes = SegmentBytes
+		o.SegmentBytes = segmentBytes
 	}
 	if o.MaxBytes <= 0 {
-		o.MaxBytes = MaxNodeBytes
+		o.MaxBytes = maxNodeBytes
 	}
 	if o.AfterFunc == nil {
 		o.AfterFunc = func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop }
@@ -212,7 +212,7 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 	if s.written+int64(len(data)) > s.opts.MaxBytes {
 		s.truncated = true
 		s.dropped += n
-		data, n = []byte(TruncationMarker), 1
+		data, n = []byte(truncationMarker), 1
 	}
 	if _, err := s.spool.Write(data); err != nil {
 		return fmt.Errorf("logseg: write spool: %w", err)
@@ -255,9 +255,9 @@ func (s *Sink) recordGap(ws *writerStream, from, to int64) {
 	s.extraGap += to - from + 1
 }
 
-// WriterSealed records a numbering writer's own closing statement: the
+// writerSealed records a numbering writer's own closing statement: the
 // last number it assigned and how many lines it gave up on.
-func (s *Sink) WriterSealed(stream string, finalSeq, dropped int64) {
+func (s *Sink) writerSealed(stream string, finalSeq, dropped int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ws := s.stream(stream)
@@ -269,10 +269,10 @@ func (s *Sink) WriterSealed(stream string, finalSeq, dropped int64) {
 	ws.dropped = max(ws.dropped, dropped)
 }
 
-// SetWatched turns the live view on or off. Turning it on first hands
+// setWatched turns the live view on or off. Turning it on first hands
 // Live every byte after the last uploaded segment, so the live view
 // joins the segments with no gap; while it is off, nothing goes live.
-func (s *Sink) SetWatched(watched bool) {
+func (s *Sink) setWatched(watched bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if watched == s.watched || s.closed {
@@ -399,7 +399,7 @@ func (s *Sink) retry(ctx context.Context, put func() error) error {
 			}
 			delay = min(delay*2, s.opts.RetryMax)
 		}
-		if err = put(); err == nil || errors.Is(err, ErrSealed) {
+		if err = put(); err == nil || errors.Is(err, errSealed) {
 			return err
 		}
 	}
@@ -408,7 +408,7 @@ func (s *Sink) retry(ctx context.Context, put func() error) error {
 
 // Close cuts the last segment, uploads every segment still pending, and
 // writes the manifest, which seals the log. It returns the manifest it
-// wrote. ErrSealed means the controller sealed the attempt first.
+// wrote. errSealed means the controller sealed the attempt first.
 func (s *Sink) Close(ctx context.Context, end End) (Manifest, error) {
 	s.mu.Lock()
 	if s.closed {
@@ -447,8 +447,8 @@ func (s *Sink) Close(ctx context.Context, end End) (Manifest, error) {
 // safety: the caller holds mu.
 func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 	m := Manifest{
-		Version: ManifestVersion, Subject: new(cloneSubject(s.opts.Subject)),
-		SealedBy: SealedByNode, SealedAt: time.Now().UTC(),
+		Version: manifestVersion, Subject: new(cloneSubject(s.opts.Subject)),
+		SealedBy: sealedByNode, SealedAt: time.Now().UTC(),
 		Gaps: s.gaps, Segments: s.uploaded,
 	}
 	for _, seg := range s.uploaded {
@@ -470,17 +470,17 @@ func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 	}
 	switch {
 	case !allUploaded:
-		m.Status, m.Reason = StatusIncomplete, ReasonUploadFailed
+		m.Status, m.Reason = statusIncomplete, reasonUploadFailed
 	case s.truncated:
-		m.Status, m.Reason = StatusCutOff, ReasonByteCap
+		m.Status, m.Reason = statusCutOff, reasonByteCap
 	case end.Stopped:
-		m.Status, m.Reason = StatusCutOff, ReasonStopped
+		m.Status, m.Reason = statusCutOff, reasonStopped
 	case unsealed:
-		m.Status, m.Reason = StatusCutOff, ReasonUnsealed
+		m.Status, m.Reason = statusCutOff, reasonUnsealed
 	case len(s.gaps) > 0:
-		m.Status, m.Reason = StatusIncomplete, ReasonSequenceGap
+		m.Status, m.Reason = statusIncomplete, reasonSequenceGap
 	case writerDropped:
-		m.Status, m.Reason = StatusIncomplete, ReasonDropped
+		m.Status, m.Reason = statusIncomplete, reasonDropped
 	default:
 		m.Status = StatusComplete
 	}

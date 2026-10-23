@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // RemoteOwnerStore projects shared controller responses into the same owner
@@ -124,9 +124,9 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (runstate.NodeR
 	}, nil
 }
 
-// Schedule reconstructs only the store's scheduling projection; the owner calls
+// schedule reconstructs only the store's scheduling projection; the owner calls
 // the same Decide used locally. HTTP never serializes Actor or caller authority.
-func (s *RemoteOwnerStore) Schedule(ctx context.Context, runID string) (store.ScheduleSnapshot, error) {
+func (s *RemoteOwnerStore) schedule(ctx context.Context, runID string) (store.ScheduleSnapshot, error) {
 	if s.Controller == nil {
 		return store.ScheduleSnapshot{}, errors.New("scheduling requires an authenticated controller")
 	}
@@ -164,6 +164,6 @@ func (s *RemoteOwnerStore) Schedule(ctx context.Context, runID string) (store.Sc
 }
 
 var (
-	_ Reconciler     = (*RemoteOwnerStore)(nil)
-	_ ExpansionStore = (*RemoteOwnerStore)(nil)
+	_ reconciler     = (*RemoteOwnerStore)(nil)
+	_ expansionStore = (*RemoteOwnerStore)(nil)
 )

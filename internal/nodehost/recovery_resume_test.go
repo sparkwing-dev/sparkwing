@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestResumeOnlyAdoptsTerminalRecoveryResults(t *testing.T) {
@@ -18,7 +18,7 @@ func TestResumeOnlyAdoptsTerminalRecoveryResults(t *testing.T) {
 			claim, input := claimRemote(t, f, "job")
 			ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "job"}
 			waits := 0
-			result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone}, func(context.Context, runspec.NodeRef, int64) error {
+			result, err := followReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone}, func(context.Context, runspec.NodeRef, int64) error {
 				waits++
 				if terminal {
 					return f.report(t.Context(), input, runstate.NodeFailed)

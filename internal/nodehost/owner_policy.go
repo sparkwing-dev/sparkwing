@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // approvalSkipIf evaluates an approval-only guard; executable jobs evaluate under their award.
@@ -42,21 +42,21 @@ func (h *OwnerEvaluator) policyError(ctx context.Context, err error) error {
 	return maskHostError(errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}), h.deps.Masker)
 }
 
-func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row runstate.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (OwnerLayerResult, error) {
+func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row runstate.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (ownerLayerResult, error) {
 	var job nodeproto.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil {
-		return OwnerLayerResult{}, err
+		return ownerLayerResult{}, err
 	}
 	if job.Approval == nil {
-		return OwnerLayerResult{}, nil
+		return ownerLayerResult{}, nil
 	}
 	result, err := h.approvalSkipIf(ctx, input)
 	if err != nil {
 		var refusal *apierr.Error
 		if context.Cause(ctx) != nil || store.IsProtocolErr(err) || errors.As(err, &refusal) && (refusal.Code == apierr.Forbidden || refusal.Code == apierr.Unauthenticated || refusal.Code == apierr.LockHeld) {
-			return OwnerLayerResult{}, err
+			return ownerLayerResult{}, err
 		}
-		return OwnerLayerResult{Transition: store.OwnerPolicyNode{Outcome: runstate.NodeFailed, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalFail, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(apierr.SDKError), MaskedError: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}}}, nil
+		return ownerLayerResult{Transition: store.OwnerPolicyNode{Outcome: runstate.NodeFailed, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalFail, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(apierr.SDKError), MaskedError: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}}}, nil
 	}
 	for _, index := range result.TimedOut {
 		err := log(ctx, input.Accepted.RunID, input.NodeID, nodeproto.FrameLog{
@@ -64,11 +64,11 @@ func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, r
 			Attrs: json.RawMessage(fmt.Sprintf(`{"predicate":%d}`, index)),
 		})
 		if err != nil {
-			return OwnerLayerResult{}, err
+			return ownerLayerResult{}, err
 		}
 	}
 	if !result.Skip {
-		return OwnerLayerResult{}, nil
+		return ownerLayerResult{}, nil
 	}
-	return OwnerLayerResult{Transition: store.OwnerPolicyNode{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalBypass, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: "skip_if"}, Outcome: runstate.NodeSkipped}}, nil
+	return ownerLayerResult{Transition: store.OwnerPolicyNode{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalBypass, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: "skip_if"}, Outcome: runstate.NodeSkipped}}, nil
 }

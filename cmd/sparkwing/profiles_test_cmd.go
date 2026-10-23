@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type profileProbeResult struct {

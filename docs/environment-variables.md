@@ -104,8 +104,6 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `PATH` | the operating system |
 | `SHELL` | the operating system |
 | `LOCALAPPDATA` | Windows |
-| `WSL_DISTRO_NAME` | Windows Subsystem for Linux |
-| `WSL_INTEROP` | Windows Subsystem for Linux |
 | `XDG_CACHE_HOME` | XDG Base Directory specification |
 | `XDG_CONFIG_HOME` | XDG Base Directory specification |
 | `XDG_RUNTIME_DIR` | XDG Base Directory specification |

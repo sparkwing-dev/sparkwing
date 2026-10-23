@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -10,8 +10,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestS3CollectionRequiresObservedETag(t *testing.T) {
@@ -51,11 +49,11 @@ func TestS3CollectionRequiresObservedETag(t *testing.T) {
 					return response, nil
 				}),
 			})
-			backend, err := blob.NewS3(client, "bucket", "")
+			backend, err := NewS3(client, "bucket", "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = backend.DeleteBlob(t.Context(), blob.Blob{Team: "team", Digest: digest("bytes"), Size: 5})
+			err = backend.DeleteBlob(t.Context(), Blob{Team: "team", Digest: digest("bytes"), Size: 5})
 			wantErr := state == "replaced" || state == "no_etag"
 			wantDeletes := 1
 			if state == "absent" || state == "no_etag" {
@@ -78,21 +76,21 @@ func TestS3MissingReferencedBytesFail(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Request: r, Body: io.NopCloser(strings.NewReader(`<Error><Code>NoSuchKey</Code></Error>`))}, nil
 		}),
 	})
-	backend, err := blob.NewS3(client, "bucket", "")
+	backend, err := NewS3(client, "bucket", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	object := blob.Blob{Team: "team", Digest: digest("null"), Size: 4}
-	if err := backend.VerifyBlob(t.Context(), object); !errors.Is(err, blob.ErrNotFound) {
+	object := Blob{Team: "team", Digest: digest("null"), Size: 4}
+	if err := backend.VerifyBlob(t.Context(), object); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("verification: %v", err)
 	}
-	if body, err := backend.ReadOutput(t.Context(), object); body != nil || !errors.Is(err, blob.ErrNotFound) {
+	if body, err := backend.ReadOutput(t.Context(), object); body != nil || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("output: %q, %v", body, err)
 	}
-	if members, err := backend.ReadManifest(t.Context(), object.Team, object.Digest); members != nil || !errors.Is(err, blob.ErrNotFound) {
+	if members, err := backend.ReadManifest(t.Context(), object.Team, object.Digest); members != nil || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("manifest: %+v, %v", members, err)
 	}
-	if err := backend.VerifyManifest(t.Context(), object.Team, object.Digest, nil); !errors.Is(err, blob.ErrNotFound) {
+	if err := backend.VerifyManifest(t.Context(), object.Team, object.Digest, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("manifest verification: %v", err)
 	}
 }

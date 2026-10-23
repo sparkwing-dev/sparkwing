@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // safety: a failed command's error embeds its whole output, which the node's

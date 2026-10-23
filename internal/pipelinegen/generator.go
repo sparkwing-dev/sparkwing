@@ -17,7 +17,7 @@ type Generator interface {
 	Label() string
 }
 
-type Reviser interface {
+type reviser interface {
 	Revise(ctx context.Context, spec Spec, prev, feedback string) (string, error)
 }
 

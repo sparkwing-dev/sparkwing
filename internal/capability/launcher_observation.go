@@ -1,7 +1,7 @@
 package capability
 
 import (
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // Validate checks the award fence without granting authority to its reported state.

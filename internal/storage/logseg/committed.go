@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // SegmentLookup returns the currently authorized, persisted ranges of one subject.

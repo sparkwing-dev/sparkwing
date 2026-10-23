@@ -7,16 +7,16 @@ import (
 	"time"
 )
 
-// DisarmRepoURL deletes every schedule pushed for one repository URL, and their
+// disarmRepoURL deletes every schedule pushed for one repository URL, and their
 // histories, returning how many rows went.
-func (s *Service) DisarmRepoURL(ctx context.Context, repoURL string) (int, error) {
+func (s *Service) disarmRepoURL(ctx context.Context, repoURL string) (int, error) {
 	if repoURL == "" {
 		return 0, errors.New("crons: a repository URL is required to disarm pushed schedules")
 	}
 	return s.Schedules.DeleteCronSchedulesForRepo(ctx, repoURL)
 }
 
-// ControllerHealth is [Service.Health] for a process that evaluates schedules
+// ControllerHealth is [Service.health] for a process that evaluates schedules
 // from a loop of its own rather than an OS timer: the counts and the last tick
 // come from the store, and the timer state names the loop.
 func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
@@ -35,19 +35,19 @@ func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 	health.LastTick = tick
 	health.Timer.Installed = true
 	health.Timer.Enabled = true
-	health.Timer.Detail = ControllerTimerDetail
+	health.Timer.Detail = controllerTimerDetail
 	now := s.now()
 	// safety: a loop that has never ticked is as unhealthy as one that stopped,
 	// which is what the local Health already says of a timer that never fired.
-	health.TickStale = tick.At.IsZero() || now.Sub(tick.At) > TickStaleAfter
+	health.TickStale = tick.At.IsZero() || now.Sub(tick.At) > tickStaleAfter
 	health.Detail = health.describeController(now)
 	health.Remedy = health.remedy()
 	return health, nil
 }
 
-// ControllerTimerDetail is what a controller's health reports in place of an OS
+// controllerTimerDetail is what a controller's health reports in place of an OS
 // timer, because the tick comes from a loop inside the server.
-const ControllerTimerDetail = "controller loop"
+const controllerTimerDetail = "controller loop"
 
 func (h Health) describeController(now time.Time) string {
 	switch {

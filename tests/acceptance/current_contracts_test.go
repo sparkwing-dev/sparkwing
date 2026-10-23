@@ -43,6 +43,12 @@ func contractSymbols(t *testing.T, directory string) map[string]string {
 					if pointer, ok := receiver.(*ast.StarExpr); ok {
 						receiver = pointer.X
 					}
+					switch generic := receiver.(type) {
+					case *ast.IndexExpr:
+						receiver = generic.X
+					case *ast.IndexListExpr:
+						receiver = generic.X
+					}
 					id, ok := receiver.(*ast.Ident)
 					if !ok {
 						continue
@@ -91,9 +97,10 @@ func contractSymbols(t *testing.T, directory string) map[string]string {
 func TestCurrentContractSymbolInventories(t *testing.T) {
 	const root = "../../"
 	packages := map[string]map[string]string{}
-	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire", "runspec", "runstate"} {
+	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire", "runspec", "runstate", "engineid", "localhostwire", "routepolicy", "blob", "lease", "source", "engine", "nodeproto", "apierr", "controller", "protofd"} {
 		packages[name] = contractSymbols(t, root+"internal/"+name)
 	}
+	packages["client"] = contractSymbols(t, root+"internal/controller/client")
 	path := root + "design/rewrite/contracts/c4-surface-config.md"
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -129,35 +136,55 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 			t.Error("settings inventory differs from source; regenerate with -update-current-contracts")
 		}
 	}
-	data, err = os.ReadFile(root + "design/rewrite/contracts/c1-data.md")
-	if err != nil {
-		t.Fatal(err)
+	for _, document := range []string{"c1-data.md", "c4-surface-config.md"} {
+		data, err := os.ReadFile(root + "design/rewrite/contracts/" + document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, section := range strings.Split(string(data), "\n### ")[1:] {
+			heading, body, _ := strings.Cut(section, "\n")
+			if !strings.HasPrefix(heading, "internal/") && !strings.HasPrefix(heading, "pkg/") {
+				continue
+			}
+			owner := strings.TrimSuffix(heading, ".go")
+			if strings.HasSuffix(heading, ".go") {
+				if _, err := os.Stat(root + heading); err != nil {
+					t.Fatalf("inventory source %s: %v", heading, err)
+				}
+				owner = filepath.Dir(heading)
+			}
+			if packages[owner] == nil {
+				packages[owner] = contractSymbols(t, root+owner)
+			}
+			body, _, _ = strings.Cut(body, "\n## ")
+			checkContractInventory(t, body, owner, packages)
+		}
 	}
-	_, capacityInventory, ok := strings.Cut(string(data), "### internal/store/capacity_admission.go\n")
-	if !ok {
-		t.Fatal("missing capacity inventory")
+	for _, inventory := range []struct{ document, start, end, owner string }{
+		{"c3-protocol-sdk.md", "## Host and store export inventory\n", "## Host invariants", ""},
+		{"c3-engine-version.md", "## Export inventory\n", "\n## ", "engine"},
+		{"c3-protocol-notes.md", "## Exported inventory\n", "## Wire invariants", "nodeproto"},
+	} {
+		data, err := os.ReadFile(root + "design/rewrite/contracts/" + inventory.document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, body, ok := strings.Cut(string(data), inventory.start)
+		if !ok {
+			t.Fatalf("missing inventory in %s", inventory.document)
+		}
+		body, _, _ = strings.Cut(body, inventory.end)
+		checkContractInventory(t, body, inventory.owner, packages)
 	}
-	capacityInventory, _, _ = strings.Cut(capacityInventory, "### internal/store/maintenance_contract.go")
-	checkContractInventory(t, capacityInventory, "store", packages)
-	data, err = os.ReadFile(root + "design/rewrite/contracts/c3-protocol-sdk.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, inventory, ok := strings.Cut(string(data), "## Host and store export inventory\n")
-	if !ok {
-		t.Fatal("missing host inventory")
-	}
-	inventory, _, _ = strings.Cut(inventory, "## Lease and source export inventory")
-	checkContractInventory(t, inventory, "", packages)
 	data, err = os.ReadFile(root + "design/rewrite/contracts/c2-credentials.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, inventory, ok = strings.Cut(string(data), "## Exported API\n")
+	_, inventory, ok := strings.Cut(string(data), "## Exported API\n")
 	if !ok {
 		t.Fatal("missing capability inventory")
 	}
-	inventory, _, _ = strings.Cut(inventory, "| Other package API |")
+	inventory, _, _ = strings.Cut(inventory, "\nThe capability tables stay private")
 	checkContractInventory(t, inventory, "capability", packages)
 	data, err = os.ReadFile(root + "design/rewrite/contracts/c3-controller-wire.md")
 	if err != nil {
@@ -167,8 +194,48 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 	if !ok {
 		t.Fatal("missing controller wire inventory")
 	}
-	inventory, _, _ = strings.Cut(inventory, "| `controller.ExpansionForStore`")
+	inventory, _, _ = strings.Cut(inventory, "\nThe expansion adapter")
 	checkContractInventory(t, inventory, "controllerwire", packages)
+	data, err = os.ReadFile(root + "design/rewrite/contracts/c3-go-sdk-notes.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sdk, ok := strings.Cut(string(data), "### New\n")
+	if !ok {
+		t.Fatal("missing SDK inventory")
+	}
+	sdk, _, ok = strings.Cut(sdk, "### Delete\n")
+	if !ok {
+		t.Fatal("missing SDK inventory end")
+	}
+	quoted := regexp.MustCompile("`([^`]+)`")
+	for _, line := range strings.Split(sdk, "\n") {
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 {
+			continue
+		}
+		paths := quoted.FindStringSubmatch(cells[2])
+		if len(paths) == 0 {
+			continue
+		}
+		directory := filepath.Dir(paths[1])
+		owner := filepath.Base(directory)
+		if packages[owner] == nil {
+			packages[owner] = contractSymbols(t, root+directory)
+		}
+		checkContractInventory(t, line, owner, packages)
+	}
+	_, fake, ok := strings.Cut(string(data), "## Fake-host method inventory\n")
+	if !ok {
+		t.Fatal("missing fake-host inventory")
+	}
+	fake, _, ok = strings.Cut(fake, "## Retained constants")
+	if !ok {
+		t.Fatal("missing fake-host inventory end")
+	}
+	packages["sparkwingtest"] = contractSymbols(t, root+"sparkwing/sparkwingtest")
+	checkContractInventory(t, fake, "sparkwingtest", packages)
+
 }
 
 func checkContractInventory(t *testing.T, inventory, defaultOwner string, packages map[string]map[string]string) {
@@ -181,7 +248,7 @@ func checkContractInventory(t *testing.T, inventory, defaultOwner string, packag
 		}
 		owner := defaultOwner
 		for _, match := range quoted.FindAllStringSubmatch(cells[1], -1) {
-			symbol := match[1]
+			symbol := strings.NewReplacer("(*", "", ")", "").Replace(match[1])
 			if prefix, name, found := strings.Cut(symbol, "."); found && packages[prefix] != nil {
 				owner, symbol = prefix, name
 			}

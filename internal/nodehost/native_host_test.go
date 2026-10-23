@@ -10,12 +10,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type nativeHostState struct {
@@ -195,9 +195,9 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 		return ProcessGrant{}, refused
 	}
 	var layers []string
-	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		layers = append(layers, layer.Name)
-		return OwnerLayerResult{}, nil
+		return ownerLayerResult{}, nil
 	})
 	owner, _, _, err := NewNativeHost(config)
 	if err != nil {
@@ -244,7 +244,7 @@ func TestNativeHostIssuedMaskSurvivesReplanAndRunStep(t *testing.T) {
 	if err := config.Masks.initializeSeal(input.Accepted); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.Masks.Accept(input.Accepted.Plan, func() error { return nil }); err != nil {
+	if err := config.Masks.acceptPlan(input.Accepted.Plan, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.Masks.registerIssued("build"); err != nil {

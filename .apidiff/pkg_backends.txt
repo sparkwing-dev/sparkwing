@@ -2,29 +2,16 @@
 
 const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"
 type Spec struct {
-	Type string
-
-	Bucket string
+	Type   string
 	Prefix string
 	Path   string
 	URL    string
 	Token  string
 
 	TokenEnv string
-
-	Controller string
 }
 func (s *Spec) ResolvedToken() string
-func (s *Spec) ValidateFields(surface string) error
-func (s *Spec) ValidateSecrets() error
-type Surfaces struct {
-	Secrets *Spec
-	State   *Spec
-}
-func (s Surfaces) Validate(name string) error
 const TypeController = "controller"
 const TypeEnv = "env"
 const TypeFilesystem = "filesystem"
 const TypeNone = "none"
-const TypeS3 = "s3"
-const TypeSQLite = "sqlite"

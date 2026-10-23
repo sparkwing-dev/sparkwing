@@ -21,7 +21,7 @@ func TestRegistryClassifiesCredentialAndRuntimeBoundaries(t *testing.T) {
 	}
 	for _, name := range []string{"SPARKWING_JOB_ID", "SPARKWING_RUN_ID", "CI", "SPARKWING_COMMIT", "SPARKWING_TRIGGER_SOURCE"} {
 		row, ok := seen[name]
-		if !ok || row.Class != RuntimeClass || row.Owner != "engine" {
+		if !ok || row.Class != runtimeClass || row.Owner != "engine" {
 			t.Errorf("runtime name lacks authority: %s", name)
 		}
 	}

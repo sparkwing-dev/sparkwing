@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func strictExpansionJobs(mode, closure string) json.RawMessage {
@@ -110,7 +110,7 @@ func TestOwnerExpansion(t *testing.T) {
 				s.reject = refused
 			}
 			process := newExpansionSDK(plan, mode)
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := newOwnerEvaluator(evaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
 			}, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
 				if ref != s.node.Ref || generation != 4 {
@@ -137,7 +137,7 @@ func TestOwnerExpansion(t *testing.T) {
 				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || runspec.NodeID(input.NodeID) != row.Ref.NodeID || runspec.ClaimGeneration(input.Generation) != row.Generation || input.SpecHash != row.SpecHash || runspec.RunID(input.RouteBinding.RunID) != row.Ref.RunID || runspec.NodeID(input.RouteBinding.JobID) != row.Ref.NodeID {
 					t.Fatal("expansion lost acquired code or persisted evaluation identity")
 				}
-				return evaluator.Expand(ctx, input)
+				return evaluator.evaluateExpansion(ctx, input)
 			}}
 			host.Delegator = ownerDelegatorFixture{actor: runstate.Actor{Kind: runstate.ActorRunHost, Owner: owner}}
 			sealed, _ := json.Marshal(request.Request)

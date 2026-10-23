@@ -1,11 +1,10 @@
-package opsview_test
+package opsview
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -63,7 +62,7 @@ func TestBudgetNote_NamesTheSetting(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := opsview.BudgetNote(&tc.state)
+			got := BudgetNote(&tc.state)
 			for _, want := range tc.expect {
 				if !strings.Contains(got, want) {
 					t.Errorf("budget note %q does not contain %q", got, want)
@@ -74,7 +73,7 @@ func TestBudgetNote_NamesTheSetting(t *testing.T) {
 }
 
 func TestBudgetNote_UnsetSaysSo(t *testing.T) {
-	note := opsview.BudgetNote(&wingwire.BudgetState{
+	note := BudgetNote(&wingwire.BudgetState{
 		Cores: 10, MachineCores: 10,
 		MemoryBytes: 1 << 30, MachineMemoryBytes: 1 << 30,
 		Source: string(wingwire.BudgetSourceUnset),
@@ -88,11 +87,11 @@ func TestBudgetNote_UnsetSaysSo(t *testing.T) {
 }
 
 func TestBudgetNote_UnreportedBudgetClaimsNothing(t *testing.T) {
-	if note := opsview.BudgetNote(nil); note != "" {
+	if note := BudgetNote(nil); note != "" {
 		t.Errorf("budget note = %q, want empty when the daemon reported no budget state", note)
 	}
 	old := wingwire.BudgetState{Cores: 5, MachineCores: 10}
-	if note := opsview.BudgetNote(&old); !strings.Contains(note, "5.0 cores") {
+	if note := BudgetNote(&old); !strings.Contains(note, "5.0 cores") {
 		t.Errorf("budget note = %q, want an older daemon's caps still rendered", note)
 	} else if strings.Contains(note, "none set") {
 		t.Errorf("budget note = %q, want no claim about a source the daemon did not send", note)
@@ -108,13 +107,13 @@ func TestExternalIgnoredNote_NamesTheSetting(t *testing.T) {
 			Origin: "/home/op/.config/sparkwing/config.yaml admission.budget",
 		},
 	}
-	note := opsview.ExternalIgnoredNote(qs)
+	note := externalIgnoredNote(qs)
 	if !strings.Contains(note, "/home/op/.config/sparkwing/config.yaml admission.budget") {
 		t.Errorf("external note = %q, want it to name the setting that turned it on", note)
 	}
 
 	var buf bytes.Buffer
-	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if !strings.Contains(buf.String(), "/home/op/.config/sparkwing/config.yaml admission.budget") {

@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -11,9 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 type s3LogBody struct {
@@ -23,15 +21,15 @@ type s3LogBody struct {
 
 func (b *s3LogBody) Close() error { b.closed = true; return nil }
 
-func logS3(t *testing.T, request s3HTTP) *blob.S3 {
+func logS3(t *testing.T, request s3HTTP) *S3 {
 	t.Helper()
 	return logS3Prefix(t, "", request)
 }
 
-func logS3Prefix(t *testing.T, prefix string, request s3HTTP) *blob.S3 {
+func logS3Prefix(t *testing.T, prefix string, request s3HTTP) *S3 {
 	t.Helper()
 	client := logS3Client(request)
-	backend, err := blob.NewS3(client, "bucket", prefix)
+	backend, err := NewS3(client, "bucket", prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +64,7 @@ func TestS3LogReadsExactBoundedObjects(t *testing.T) {
 				})
 				got, err := backend.Get(t.Context(), key)
 				if size != 5 {
-					if got != nil || !errors.Is(err, blob.ErrIntegrity) || !body.closed {
+					if got != nil || !errors.Is(err, ErrIntegrity) || !body.closed {
 						t.Fatalf("invalid length %d = %v, %v; closed = %v", size, got, err, body.closed)
 					}
 					continue
@@ -88,7 +86,7 @@ func TestS3LogReadRefusals(t *testing.T) {
 	backend := logS3(t, func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`<Error><Code>NoSuchKey</Code></Error>`)), Request: r}, nil
 	})
-	if body, err := backend.Get(t.Context(), key); body != nil || !errors.Is(err, blob.ErrNotFound) {
+	if body, err := backend.Get(t.Context(), key); body != nil || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing log = %v, %v", body, err)
 	}
 	backend = logS3(t, func(*http.Request) (*http.Response, error) {

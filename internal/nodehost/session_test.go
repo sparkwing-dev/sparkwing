@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 // safety: set, the test binary acts as an SDK process (or, as "sleep", as a
@@ -195,10 +195,10 @@ func checkNoNewPipes(t *testing.T, before map[string]bool) {
 	}
 }
 
-func startFake(t *testing.T, ctx context.Context, sink *recorder) *ProtocolSession {
+func startFake(t *testing.T, ctx context.Context, sink *recorder) *protocolSession {
 	t.Helper()
 	before := openPipes(t)
-	s, err := StartProtocolSession(ctx, ProtocolSessionConfig{
+	s, err := startProtocolSession(ctx, ProtocolSessionConfig{
 		Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...),
 		Log: func(_ context.Context, record nodeproto.FrameLog) error { sink.Record(record); return nil }, grace: 500 * time.Millisecond,
 	})

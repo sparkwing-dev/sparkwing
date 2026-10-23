@@ -19,9 +19,9 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/pkg/paths"
-	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
-	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 )
 
 func commandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
@@ -173,7 +173,7 @@ func (j stepJob) close() {
 // ends the job when this process's handle goes away, so the record mostly
 // tells doctor what happened; it still matters when the handle outlives
 // the node's usefulness.
-func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job stepJob) func() {
+func recordStepSession(ctx context.Context, cmd *exec.Cmd, job stepJob) func() {
 	run := os.Getenv("SPARKWING_RUN_ID")
 	node := nodeFromContext(ctx)
 	if node == "" {
@@ -192,8 +192,7 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job s
 	}
 	release, err := sessionledger.Open(p.SessionLedgerDir()).Record(sessionledger.Record{
 		Run: run, Node: node, OwnerPID: os.Getpid(), OwnerBirth: ownerBirth,
-		Handle:  sessionledger.Handle{Kind: "job", LeaderPID: cmd.Process.Pid, JobName: job.job.Name},
-		Command: sessionledger.MaskCommand(ctx, display),
+		Handle: sessionledger.Handle{Kind: "job", LeaderPID: cmd.Process.Pid, JobName: job.job.Name},
 	})
 	if err != nil {
 		slog.Default().Debug("step session not recorded", "err", err)

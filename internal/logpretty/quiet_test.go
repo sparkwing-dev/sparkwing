@@ -96,6 +96,6 @@ func TestQuiet_FailureOmitsCascadeNodes(t *testing.T) {
 	}
 }
 
-func NewQuietRendererTo(w io.Writer, useColor bool) *QuietRenderer {
-	return &QuietRenderer{w: w, errW: w, useColor: useColor}
+func NewQuietRendererTo(w io.Writer, useColor bool) *quietRenderer {
+	return &quietRenderer{w: w, errW: w, useColor: useColor}
 }

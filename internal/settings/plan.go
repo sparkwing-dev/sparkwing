@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func planInputs(in PlanInputs) (Inputs, error) {
-	if err := ValidateCheckoutDeclarations(in.Declarations); err != nil {
+	if err := validateCheckoutDeclarations(in.Declarations); err != nil {
 		return Inputs{}, err
 	}
 	code, err := planOptions(in.Plan)
@@ -25,22 +25,22 @@ func planInputs(in PlanInputs) (Inputs, error) {
 
 func resolveRun(in Inputs, out runspec.Options) (runspec.Options, error) {
 	var err error
-	if err = resolveSetting(in, Priority, &out.Priority); err != nil {
+	if err = resolveSetting(in, priority, &out.Priority); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, AdmissionClass, &out.AdmissionClass); err != nil {
+	if err = resolveSetting(in, admissionClass, &out.AdmissionClass); err != nil {
 		return runspec.Options{}, err
 	}
 	if err = resolveSetting(in, ClaimWait, &out.ClaimWait); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Profile, &out.Profile); err != nil {
+	if err = resolveSetting(in, profile, &out.Profile); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Requires, &out.Requires); err != nil {
+	if err = resolveSetting(in, requires, &out.Requires); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveSetting(in, Prefers, &out.Prefers); err != nil {
+	if err = resolveSetting(in, prefers, &out.Prefers); err != nil {
 		return runspec.Options{}, err
 	}
 	out.Checkout, err = checkoutSetting(in)
@@ -66,7 +66,7 @@ func codeDuration(value *int64, key string) (runspec.Setting[time.Duration], err
 func planOptions(plan nodeproto.PlanDoc) (runspec.Options, error) {
 	out := runspec.Options{Priority: codeValue(plan.Priority, "priority"), AdmissionClass: codeValue(plan.AdmissionClass, "admission_class")}
 	if plan.Source != nil {
-		out.Checkout = sourceSetting(*plan.Source, Origin{Source: Code, Key: "source"})
+		out.Checkout = sourceSetting(*plan.Source, Origin{Source: code, Key: "source"})
 	}
 	var err error
 	out.ClaimWait, err = codeDuration(plan.ClaimWaitMS, "claim_wait")
@@ -113,18 +113,18 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 		return runspec.JobExecutionSettings{}, err
 	}
 	out := runspec.Options{}
-	if in.options(Code).JobDefaults.Timeout.Set || in.options(Run).JobDefaults.Timeout.Set {
+	if in.options(code).JobDefaults.Timeout.Set || in.options(sourceRun).JobDefaults.Timeout.Set {
 		if err = resolveSetting(in, JobTimeout, &out.JobDefaults.Timeout); err != nil {
 			return runspec.JobExecutionSettings{}, err
 		}
 	}
-	if err = resolveSetting(in, NoProgressTimeout, &out.JobDefaults.NoProgressTimeout); err != nil {
+	if err = resolveSetting(in, noProgressTimeout, &out.JobDefaults.NoProgressTimeout); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
 	if err = resolveSetting(in, Retry, &out.JobDefaults.Retry); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	if err = resolveSetting(in, RetryBackoff, &out.JobDefaults.RetryBackoff); err != nil {
+	if err = resolveSetting(in, retryBackoff, &out.JobDefaults.RetryBackoff); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
 	if job.Memo != nil {
@@ -145,13 +145,13 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 	if err = validNames("requires", out.Requires.Value, fromOrigin(out.Requires.Origin)); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	if err = resolveSetting(in, Prefers, &out.Prefers); err != nil {
+	if err = resolveSetting(in, prefers, &out.Prefers); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
 	result := out.JobDefaults
 	result.Requires = out.Requires
 	result.Prefers = out.Prefers
-	result.Concurrency, err = ResolveConcurrency(job.Concurrency)
+	result.Concurrency, err = resolveConcurrency(job.Concurrency)
 	return result, err
 }
 
@@ -173,7 +173,7 @@ func ResolvePlan(in PlanInputs) (runspec.ExecutionSettings, error) {
 	if err != nil {
 		return runspec.ExecutionSettings{}, err
 	}
-	concurrency, err := ResolveConcurrency(in.Plan.Concurrency)
+	concurrency, err := resolveConcurrency(in.Plan.Concurrency)
 	if err != nil {
 		return runspec.ExecutionSettings{}, err
 	}

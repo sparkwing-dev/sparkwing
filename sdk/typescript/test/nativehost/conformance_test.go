@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto/conformance"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 )
 
 type corpusStep struct {
@@ -54,7 +54,7 @@ func TestNativeConformance(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build SDK: %v\n%s", err, output)
 	}
-	corpusDir := filepath.Join(root, "../../pkg/nodeproto/conformance/testdata")
+	corpusDir := filepath.Join(root, "../../internal/nodeproto/conformance/testdata")
 	raw, err := os.ReadFile(filepath.Join(corpusDir, "v2-corpus.json"))
 	if err != nil {
 		t.Fatal(err)

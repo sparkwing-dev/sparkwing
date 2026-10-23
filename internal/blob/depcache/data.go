@@ -12,8 +12,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // Data supplies the host's run-bound storage clients in memory. Budget is the

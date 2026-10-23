@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-// ProjectOrigin retains file, key and line and rejects unknown source values.
+// projectOrigin retains file, key and line and rejects unknown source values.
 // A sealed winner keeps its original origin; Run maps to LayerSealed only for raw run input.
-func ProjectOrigin(origin Origin) (runspec.SettingOrigin, error) {
-	layer, ok := OriginLayers[origin.Source]
+func projectOrigin(origin Origin) (runspec.SettingOrigin, error) {
+	layer, ok := originLayers[origin.Source]
 	if !ok {
 		return runspec.SettingOrigin{}, fmt.Errorf("unknown setting source %q", origin.Source)
 	}
@@ -21,7 +21,7 @@ func ProjectOrigin(origin Origin) (runspec.SettingOrigin, error) {
 }
 
 func fromOrigin(origin runspec.SettingOrigin) Origin {
-	for source, layer := range OriginLayers {
+	for source, layer := range originLayers {
 		if layer == origin.Layer {
 			return Origin{Source: source, File: origin.File, Key: origin.Key, Line: origin.Line}
 		}
@@ -37,7 +37,7 @@ func projectValue[T any](value *T, origins map[string]Origin, key string) (runsp
 	if !ok {
 		return runspec.Setting[T]{}, invalid(key, Origin{}, "present setting has no origin")
 	}
-	projected, err := ProjectOrigin(origin)
+	projected, err := projectOrigin(origin)
 	if err != nil {
 		return runspec.Setting[T]{}, err
 	}

@@ -15,9 +15,9 @@ const (
 
 	VerdictBroken VerdictKind = "broken"
 
-	VerdictSkippedDirty VerdictKind = "skipped-dirty"
+	verdictSkippedDirty VerdictKind = "skipped-dirty"
 
-	VerdictSkippedMissing VerdictKind = "skipped-missing"
+	verdictSkippedMissing VerdictKind = "skipped-missing"
 
 	VerdictUpToDate VerdictKind = "up-to-date"
 
@@ -93,7 +93,7 @@ func (cfg UpdateConfig) progress(repo, format string, args ...any) {
 	}
 }
 
-func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
+func updateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	v := Verdict{Repo: name, Primary: dir, ToPin: cfg.Target}
 	sparkwingDir := dir + "/.sparkwing"
 	ctx := cfg.ctx()
@@ -101,12 +101,12 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	pin, replace := ops.Pin(sparkwingDir)
 	v.FromPin = pin
 	if replace != "" {
-		v.Kind = VerdictSkippedMissing
+		v.Kind = verdictSkippedMissing
 		v.Detail = "SDK is replaced with " + replace + "; nothing to bump"
 		return v
 	}
 	if pin == "" {
-		v.Kind = VerdictSkippedMissing
+		v.Kind = verdictSkippedMissing
 		v.Detail = "no SDK pin found in .sparkwing/go.mod"
 		return v
 	}
@@ -117,12 +117,12 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 
 	dirty, err := ops.Dirty(dir)
 	if err != nil {
-		v.Kind = VerdictSkippedMissing
+		v.Kind = verdictSkippedMissing
 		v.Detail = "could not read working tree: " + err.Error()
 		return v
 	}
 	if dirty {
-		v.Kind = VerdictSkippedDirty
+		v.Kind = verdictSkippedDirty
 		return v
 	}
 
@@ -196,7 +196,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 		if perr != nil {
 			return fail("plan " + p + " (after bump): " + perr.Error())
 		}
-		diff := DiffPlans(before[p], after)
+		diff := diffPlans(before[p], after)
 		if !diff.Identical {
 			allIdentical = false
 		}
@@ -250,11 +250,11 @@ func UpdateFleet(ops Ops, repos []Repo, cfg UpdateConfig) []Verdict {
 		var v Verdict
 		if r.Primary == "" {
 			v = Verdict{
-				Repo: r.Name, Kind: VerdictSkippedMissing,
+				Repo: r.Name, Kind: verdictSkippedMissing,
 				Detail: "observed in runs but no local checkout registered",
 			}
 		} else {
-			v = UpdateRepo(ops, r.Primary, r.Name, scoped)
+			v = updateRepo(ops, r.Primary, r.Name, scoped)
 		}
 		scoped.progress(r.Name, "%s", verdictLine(v))
 		out = append(out, v)
@@ -295,7 +295,7 @@ func commitMessage(target string) string {
 	return "chore: bump sparkwing SDK to " + target
 }
 
-func PinsDiverge(repos []Repo) bool {
+func pinsDiverge(repos []Repo) bool {
 	seen := map[string]bool{}
 	for _, r := range repos {
 		if r.Primary == "" || r.Pin == "" {
@@ -328,7 +328,7 @@ func SummarizeVerdicts(vs []Verdict) string {
 	}
 	order := []VerdictKind{
 		VerdictClean, VerdictPlanDiffers, VerdictBroken, VerdictInterrupted,
-		VerdictUpToDate, VerdictSkippedDirty, VerdictSkippedMissing,
+		VerdictUpToDate, verdictSkippedDirty, verdictSkippedMissing,
 	}
 	var parts []string
 	for _, k := range order {

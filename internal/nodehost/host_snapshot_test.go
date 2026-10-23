@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestCapturedHostEnvironment(t *testing.T) {
@@ -62,7 +62,7 @@ func TestCapturedHostEnvironment(t *testing.T) {
 			case "plan":
 				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: sealed, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
 			case "attempt":
-				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			case "eval":
 				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash})
 			}

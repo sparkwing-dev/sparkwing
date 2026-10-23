@@ -1,4 +1,4 @@
-package configguard_test
+package configguard
 
 import (
 	"os"
@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 )
 
 const auditEnabled = "SPARKWING_LIVE_CONFIG_AUDIT"
@@ -29,19 +27,19 @@ func TestSuiteLeavesTheLiveConfigAlone(t *testing.T) {
 	root := repoRoot(t)
 	sandbox := t.TempDir()
 
-	before, err := configguard.Fingerprint(home)
+	before, err := Fingerprint(home)
 	if err != nil {
 		t.Fatalf("fingerprint before: %v", err)
 	}
 
 	out, runErr := runSuite(t, root, sandbox)
 
-	after, err := configguard.Fingerprint(home)
+	after, err := Fingerprint(home)
 	if err != nil {
 		t.Fatalf("fingerprint after: %v", err)
 	}
 
-	leaks, err := configguard.SandboxLeaks(sandbox)
+	leaks, err := sandboxLeaks(sandbox)
 	if err != nil {
 		t.Fatalf("scan sandbox: %v", err)
 	}
@@ -52,7 +50,7 @@ func TestSuiteLeavesTheLiveConfigAlone(t *testing.T) {
 		t.Errorf("the suite wrote sparkwing configuration into the home it was given:\n  %s",
 			strings.Join(leaks, "\n  "))
 	}
-	if changed := configguard.Diff(before, after); len(changed) > 0 {
+	if changed := Diff(before, after); len(changed) > 0 {
 		t.Errorf("the suite modified the live sparkwing configuration:\n  %s",
 			strings.Join(changed, "\n  "))
 	}

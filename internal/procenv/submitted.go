@@ -48,7 +48,7 @@ func submittable(name string) bool {
 		return false
 	}
 	upper := strings.ToUpper(name)
-	if known && row.Class != User {
+	if known && row.Class != user {
 		return slices.Contains(safeToolNames, upper)
 	}
 	if strings.HasPrefix(upper, "SPARKWING_") || goEnvName.MatchString(upper) || slices.Contains(loaderNames, upper) {

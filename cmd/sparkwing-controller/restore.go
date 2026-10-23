@@ -10,9 +10,9 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 )
 
 const restoreUsage = `usage: sparkwing-controller restore prepare|acknowledge [--credentials-dir DIR] [--credential-epoch-dir DIR] [--store sqlite|postgres]

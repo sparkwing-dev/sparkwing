@@ -102,7 +102,7 @@ Reproduce acceptance from the repository root with the Go environment above:
 
 ```sh
 go test -p 4 ./tests/acceptance -run '^TestProtocol$/[^/]+/typescript' -skip 'TestProtocol/protocol-host-layers-risk-cleanup' -count=1
-go test -p 4 ./sdk/typescript/test/nativehost ./pkg/nodeproto/conformance -count=1
+go test -p 4 ./sdk/typescript/test/nativehost ./internal/nodeproto/conformance -count=1
 go test -p 4 ./internal/cluster -run '^TestTriggerLoopPreparesATypeScriptPipelineEntry$' -count=1
 ```
 

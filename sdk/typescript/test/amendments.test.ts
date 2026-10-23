@@ -9,7 +9,7 @@ import { Host, hello } from "./helpers.ts";
 import { NodeRoutes } from "../src/routes.ts";
 
 const corpus = JSON.parse(
-  readFileSync(new URL("../../../pkg/nodeproto/conformance/testdata/v2-corpus.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../internal/nodeproto/conformance/testdata/v2-corpus.json", import.meta.url), "utf8"),
 );
 
 test("shared concurrency and source vectors preserve omission and explicit defaults", () => {

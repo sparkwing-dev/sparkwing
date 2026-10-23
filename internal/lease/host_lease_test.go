@@ -1,4 +1,4 @@
-package lease_test
+package lease
 
 import (
 	"context"
@@ -9,8 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestKeeperCauses(t *testing.T) {
@@ -34,18 +33,18 @@ func checkRejectedOwnerAndNode(t *testing.T) {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
-				keeper := lease.Keeper{
+				keeper := Keeper{
 					Interval: 10 * time.Second,
 					Lease:    time.Minute,
-					Renew: func(context.Context) (lease.Beat, error) {
+					Renew: func(context.Context) (Beat, error) {
 						calls++
-						return lease.Beat{}, fmt.Errorf("renew: %w", &apierr.Error{Code: code})
+						return Beat{}, fmt.Errorf("renew: %w", &apierr.Error{Code: code})
 					},
 				}
 				unit, stop := keeper.Run(context.Background())
 				defer stop()
 				synctest.Wait()
-				if !errors.Is(context.Cause(unit), lease.ErrLeaseLost) {
+				if !errors.Is(context.Cause(unit), ErrLeaseLost) {
 					t.Fatalf("cause = %v, want lease loss", context.Cause(unit))
 				}
 				if calls != 1 {
@@ -60,19 +59,19 @@ func checkCancellationAndWatch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		parent, cancel := context.WithCancelCause(context.Background())
 		defer cancel(nil)
-		observed := make(chan lease.Beat, 1)
-		keeper := lease.Keeper{
+		observed := make(chan Beat, 1)
+		keeper := Keeper{
 			Interval: 10 * time.Second,
 			Lease:    time.Minute,
-			Renew: func(context.Context) (lease.Beat, error) {
-				return lease.Beat{CancelRequested: true, CancelReason: "operator requested stop", Watched: true, WatchedNodes: []string{"job"}}, nil
+			Renew: func(context.Context) (Beat, error) {
+				return Beat{CancelRequested: true, CancelReason: "operator requested stop", Watched: true, WatchedNodes: []string{"job"}}, nil
 			},
-			Observe: func(beat lease.Beat) { observed <- beat },
+			Observe: func(beat Beat) { observed <- beat },
 		}
 		unit, stop := keeper.Run(parent)
 		defer stop()
 		synctest.Wait()
-		var cause *lease.CancelError
+		var cause *CancelError
 		if !errors.As(context.Cause(unit), &cause) || cause.Reason != "operator requested stop" {
 			t.Fatalf("cause = %v, want requested cancellation", context.Cause(unit))
 		}
@@ -100,17 +99,17 @@ func checkSilence(t *testing.T) {
 		t.Run(fmt.Sprintf("blocked=%t", blocked), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
-				keeper := lease.Keeper{
+				keeper := Keeper{
 					Interval: 10 * time.Second,
 					Lease:    time.Minute,
-					Renew: func(ctx context.Context) (lease.Beat, error) {
+					Renew: func(ctx context.Context) (Beat, error) {
 						calls++
 						if blocked {
 							<-ctx.Done()
 						}
-						return lease.Beat{}, errors.New("controller unreachable")
+						return Beat{}, errors.New("controller unreachable")
 					},
-					Observe: func(lease.Beat) { t.Error("failed renewal reached Observe") },
+					Observe: func(Beat) { t.Error("failed renewal reached Observe") },
 				}
 				unit, stop := keeper.Run(context.Background())
 				defer stop()
@@ -120,7 +119,7 @@ func checkSilence(t *testing.T) {
 				}
 				<-time.After(time.Minute)
 				synctest.Wait()
-				if !errors.Is(context.Cause(unit), lease.ErrSilent) {
+				if !errors.Is(context.Cause(unit), ErrSilent) {
 					t.Fatalf("cause = %v, want silent at one full lease", context.Cause(unit))
 				}
 				stop()
@@ -145,19 +144,19 @@ func checkRetryAfter(t *testing.T) {
 				}
 				var calls []time.Duration
 				start := time.Now()
-				keeper := lease.Keeper{
+				keeper := Keeper{
 					Interval: 10 * time.Second,
 					Lease:    time.Minute,
-					Renew: func(context.Context) (lease.Beat, error) {
+					Renew: func(context.Context) (Beat, error) {
 						calls = append(calls, time.Since(start))
-						return lease.Beat{}, fmt.Errorf("renew: %w", &failure)
+						return Beat{}, fmt.Errorf("renew: %w", &failure)
 					},
 				}
 				unit, stop := keeper.Run(context.Background())
 				defer stop()
 				<-time.After(time.Minute)
 				synctest.Wait()
-				if !errors.Is(context.Cause(unit), lease.ErrSilent) {
+				if !errors.Is(context.Cause(unit), ErrSilent) {
 					t.Fatalf("cause = %v, want silent", context.Cause(unit))
 				}
 				if len(calls) != 3 || calls[0] != 0 || calls[1] != 25*time.Second || calls[2] != 50*time.Second {
@@ -173,17 +172,17 @@ func checkSuccessfulRenewal(t *testing.T) {
 		start := time.Now()
 		var calls []time.Duration
 		var observed int
-		keeper := lease.Keeper{
+		keeper := Keeper{
 			Interval: 10 * time.Second,
 			Lease:    time.Minute,
-			Renew: func(context.Context) (lease.Beat, error) {
+			Renew: func(context.Context) (Beat, error) {
 				calls = append(calls, time.Since(start))
 				if len(calls) <= 3 {
-					return lease.Beat{Watched: true, WatchedNodes: []string{"job"}}, nil
+					return Beat{Watched: true, WatchedNodes: []string{"job"}}, nil
 				}
-				return lease.Beat{}, errors.New("offline")
+				return Beat{}, errors.New("offline")
 			},
-			Observe: func(lease.Beat) {
+			Observe: func(Beat) {
 				observed++
 				if observed == 1 {
 					<-time.After(3 * time.Second)
@@ -199,7 +198,7 @@ func checkSuccessfulRenewal(t *testing.T) {
 		}
 		<-time.After(time.Second)
 		synctest.Wait()
-		if !errors.Is(context.Cause(unit), lease.ErrSilent) || len(calls) != 8 {
+		if !errors.Is(context.Cause(unit), ErrSilent) || len(calls) != 8 {
 			t.Fatalf("at expiry: cause=%v calls=%v", context.Cause(unit), calls)
 		}
 	})
@@ -211,17 +210,17 @@ func checkStopJoins(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				blocked := make(chan struct{})
 				release := make(chan struct{})
-				keeper := lease.Keeper{
+				keeper := Keeper{
 					Interval: 10 * time.Second,
 					Lease:    time.Minute,
-					Renew: func(context.Context) (lease.Beat, error) {
+					Renew: func(context.Context) (Beat, error) {
 						if !blockObserver {
 							close(blocked)
 							<-release
 						}
-						return lease.Beat{}, nil
+						return Beat{}, nil
 					},
-					Observe: func(lease.Beat) {
+					Observe: func(Beat) {
 						if !blockObserver {
 							t.Error("late renewal invoked Observe after stop")
 							return
@@ -259,13 +258,13 @@ func checkParentCancellation(t *testing.T) {
 		parent, cancel := context.WithCancelCause(context.Background())
 		defer cancel(nil)
 		started := make(chan struct{})
-		keeper := lease.Keeper{
+		keeper := Keeper{
 			Interval: 10 * time.Second,
 			Lease:    time.Minute,
-			Renew: func(ctx context.Context) (lease.Beat, error) {
+			Renew: func(ctx context.Context) (Beat, error) {
 				close(started)
 				<-ctx.Done()
-				return lease.Beat{CancelRequested: true}, &apierr.Error{Code: apierr.LockHeld}
+				return Beat{CancelRequested: true}, &apierr.Error{Code: apierr.LockHeld}
 			},
 		}
 		unit, stop := keeper.Run(parent)
@@ -283,15 +282,15 @@ func checkParentCancellation(t *testing.T) {
 func checkIllegalTransition(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
-		keeper := lease.Keeper{
+		keeper := Keeper{
 			Interval: 10 * time.Second,
 			Lease:    time.Minute,
-			Renew: func(context.Context) (lease.Beat, error) {
+			Renew: func(context.Context) (Beat, error) {
 				calls++
 				if calls == 1 {
-					return lease.Beat{}, &apierr.Error{Code: apierr.IllegalTransition}
+					return Beat{}, &apierr.Error{Code: apierr.IllegalTransition}
 				}
-				return lease.Beat{}, nil
+				return Beat{}, nil
 			},
 		}
 		unit, stop := keeper.Run(context.Background())

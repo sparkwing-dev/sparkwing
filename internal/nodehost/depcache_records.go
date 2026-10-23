@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
-	"github.com/sparkwing-dev/sparkwing/pkg/depcachekey"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // DepcacheRecords restores and saves declared directories through bound storage.

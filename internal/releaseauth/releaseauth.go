@@ -25,7 +25,7 @@ func TrustedPublicKey(encoded string) bool {
 func PublicKeys() ([]ed25519.PublicKey, error) {
 	keys := make([]ed25519.PublicKey, 0, len(TrustedPublicKeys()))
 	for _, encoded := range TrustedPublicKeys() {
-		key, err := PublicKey(encoded)
+		key, err := publicKey(encoded)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +55,7 @@ func PrivateKey(encoded string) (ed25519.PrivateKey, error) {
 	}
 }
 
-func PublicKey(encoded string) (ed25519.PublicKey, error) {
+func publicKey(encoded string) (ed25519.PublicKey, error) {
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("decode release public key: %w", err)

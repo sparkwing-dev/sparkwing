@@ -8,7 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // safety: Optional preserves an explicitly selected zero separately from absence.
@@ -473,8 +473,8 @@ type SealInput struct {
 	Now          time.Time
 }
 
-// safety: Projections supplies write-once indexed fields derived only from the sealed spec.
-type Projections struct {
+// safety: projections supplies write-once indexed fields derived only from the sealed spec.
+type projections struct {
 	RepoKey       RepoKey
 	RepoDisplay   string
 	Pipeline      string

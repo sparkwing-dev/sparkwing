@@ -12,13 +12,13 @@ import (
 )
 
 func RenderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
-	return RenderQueueAt(w, qs, format, time.Now())
+	return renderQueueAt(w, qs, format, time.Now())
 }
 
-// RenderQueueAt renders a queue snapshot as of now. Every expected-finish time
+// renderQueueAt renders a queue snapshot as of now. Every expected-finish time
 // is projected from that instant, so a caller holding a fixed clock gets
 // deterministic output.
-func RenderQueueAt(w io.Writer, qs wingwire.QueueState, format string, now time.Time) error {
+func renderQueueAt(w io.Writer, qs wingwire.QueueState, format string, now time.Time) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
@@ -31,64 +31,64 @@ func RenderQueueAt(w io.Writer, qs wingwire.QueueState, format string, now time.
 }
 
 const (
-	ReachServing = "serving"
+	reachServing = "serving"
 
-	ReachAbsent = "absent"
+	reachAbsent = "absent"
 
-	ReachUnreachable = "unreachable"
+	reachUnreachable = "unreachable"
 )
 
-type DaemonReach struct {
+type daemonReach struct {
 	Reachable bool   `json:"reachable"`
 	State     string `json:"state"`
 
 	Detail string `json:"detail,omitempty"`
 }
 
-func Serving() DaemonReach {
-	return DaemonReach{Reachable: true, State: ReachServing}
+func serving() daemonReach {
+	return daemonReach{Reachable: true, State: reachServing}
 }
 
-func Absent() DaemonReach {
-	return DaemonReach{State: ReachAbsent, Detail: "no admission daemon is running for this home, so nothing is queued"}
+func absent() daemonReach {
+	return daemonReach{State: reachAbsent, Detail: "no admission daemon is running for this home, so nothing is queued"}
 }
 
-func Unreachable(cause error) DaemonReach {
+func unreachable(cause error) daemonReach {
 	detail := "the admission daemon socket could not be reached"
 	if cause != nil {
 		detail = cause.Error()
 	}
-	return DaemonReach{State: ReachUnreachable, Detail: detail}
+	return daemonReach{State: reachUnreachable, Detail: detail}
 }
 
 type queueView struct {
 	queueStateView
-	Daemon DaemonReach `json:"daemon"`
+	Daemon daemonReach `json:"daemon"`
 }
 
-func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, format string) error {
-	return RenderLocalQueueAt(w, qs, reach, format, time.Now())
+func renderLocalQueue(w io.Writer, qs wingwire.QueueState, reach daemonReach, format string) error {
+	return renderLocalQueueAt(w, qs, reach, format, time.Now())
 }
 
-// RenderLocalQueueAt renders the local queue as of now, which fixes the clock
+// renderLocalQueueAt renders the local queue as of now, which fixes the clock
 // the expected-finish times are projected from.
-func RenderLocalQueueAt(w io.Writer, qs wingwire.QueueState, reach DaemonReach, format string, now time.Time) error {
+func renderLocalQueueAt(w io.Writer, qs wingwire.QueueState, reach daemonReach, format string, now time.Time) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
 		return enc.Encode(queueView{queueStateView: queueStateViewOf(qs, now), Daemon: reach})
 	case "plain":
 		fmt.Fprintf(w, "daemon\t%s\n", reach.State)
-		if reach.State != ReachServing {
+		if reach.State != reachServing {
 			return nil
 		}
 		return renderQueuePlain(w, qs, now)
 	default:
 		switch reach.State {
-		case ReachAbsent:
+		case reachAbsent:
 			fmt.Fprintln(w, "no admission daemon running; nothing is queued")
 			return nil
-		case ReachUnreachable:
+		case reachUnreachable:
 			fmt.Fprintf(w, "cannot reach the admission daemon: %s\n", reach.Detail)
 			fmt.Fprintln(w, "the local queue is unknown, not empty -- nothing here says whether runs are holding or waiting")
 			return nil
@@ -99,11 +99,11 @@ func RenderLocalQueueAt(w io.Writer, qs wingwire.QueueState, reach DaemonReach, 
 }
 
 func RenderNoDaemon(w io.Writer, format string) error {
-	return RenderLocalQueue(w, wingwire.QueueState{}, Absent(), format)
+	return renderLocalQueue(w, wingwire.QueueState{}, absent(), format)
 }
 
-func RenderUnreachableDaemon(w io.Writer, format string, cause error) error {
-	return RenderLocalQueue(w, wingwire.QueueState{}, Unreachable(cause), format)
+func renderUnreachableDaemon(w io.Writer, format string, cause error) error {
+	return renderLocalQueue(w, wingwire.QueueState{}, unreachable(cause), format)
 }
 
 func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error {
@@ -113,8 +113,8 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 	for _, r := range qs.Resources {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), ExternalAmount(r),
-			fmtAmount(r.Key, ResourceAvailable(r)))
+			fmtHeadroomCell(r.Key, r.Reserved), externalAmount(r),
+			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	if c := qs.Container; c != nil {
 		fmt.Fprintf(w, "container\t%.3f\t%.3f\t%d\t%d\n",
@@ -192,7 +192,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 }
 
 func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) error {
-	holders := RunningHolders(qs)
+	holders := runningHolders(qs)
 	connections := queueLifecycleConnections(qs)
 	clear := ""
 	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
@@ -201,7 +201,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	if d := FmtDaemonHeader(qs); d != "" {
 		fmt.Fprintln(out, d)
 	}
-	if cc := FmtCapacityChange(qs.CapacityChange); cc != "" {
+	if cc := fmtCapacityChange(qs.CapacityChange); cc != "" {
 		fmt.Fprintln(out, cc)
 	}
 	unmeasured := ""
@@ -223,8 +223,8 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	for _, r := range qs.Resources {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), ExternalAmount(r),
-			fmtAmount(r.Key, ResourceAvailable(r)))
+			fmtHeadroomCell(r.Key, r.Reserved), externalAmount(r),
+			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	_ = tw.Flush()
 	if line := resourceLegend(qs); line != "" {
@@ -240,16 +240,16 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	if b := BudgetNote(qs.Budget); b != "" {
 		fmt.Fprintf(out, "%s\n", b)
 	}
-	if line := ExternalIgnoredNote(qs); line != "" {
+	if line := externalIgnoredNote(qs); line != "" {
 		fmt.Fprintln(out, line)
 	}
-	if note := ExternalUnmeasuredNote(qs); note != "" {
+	if note := externalUnmeasuredNote(qs); note != "" {
 		fmt.Fprintln(out, note)
 	}
-	if note := ExternalAgeNote(qs); note != "" {
+	if note := externalAgeNote(qs); note != "" {
 		fmt.Fprintln(out, note)
 	}
-	if note := ExternalAttributionNote(qs); note != "" {
+	if note := externalAttributionNote(qs); note != "" {
 		fmt.Fprintln(out, note)
 	}
 	if note := ExternalPressureNote(qs); note != "" {
@@ -351,10 +351,10 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	return nil
 }
 
-// RunningHolders returns the resource-holding rows the machine view presents as
+// runningHolders returns the resource-holding rows the machine view presents as
 // active work. Connected orchestration leases and parents waiting on child
 // admission remain visible through their own queue lifecycle.
-func RunningHolders(qs wingwire.QueueState) []wingwire.Holder {
+func runningHolders(qs wingwire.QueueState) []wingwire.Holder {
 	return queueLifecycleRows(qs, false)
 }
 
@@ -387,10 +387,10 @@ func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.
 	return holders
 }
 
-// ResourceAvailable returns the grantable amount the machine view displays for
+// resourceAvailable returns the grantable amount the machine view displays for
 // one resource row, including compatibility with daemons that predate explicit
 // headroom fields.
-func ResourceAvailable(r wingwire.ResourceState) float64 {
+func resourceAvailable(r wingwire.ResourceState) float64 {
 	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0 || r.ExternalSource != "") {
 		return r.Available
 	}
@@ -455,9 +455,9 @@ func fmtHeadroomCell(key string, v float64) string {
 	return fmtAmount(key, v)
 }
 
-// ExternalAmount formats the queue view's external-load cell without turning a
+// externalAmount formats the queue view's external-load cell without turning a
 // legacy unknown or an unreadable measurement into a measured zero.
-func ExternalAmount(r wingwire.ResourceState) string {
+func externalAmount(r wingwire.ResourceState) string {
 	if !isHostResource(r.Key) {
 		return "-"
 	}
@@ -473,7 +473,7 @@ func ExternalAmount(r wingwire.ResourceState) string {
 	}
 }
 
-func ExternalUnmeasuredNote(qs wingwire.QueueState) string {
+func externalUnmeasuredNote(qs wingwire.QueueState) string {
 	if qs.IgnoreExternal {
 		return ""
 	}
@@ -490,7 +490,7 @@ func ExternalUnmeasuredNote(qs wingwire.QueueState) string {
 		" (host sensor unavailable); no external load subtracted from available"
 }
 
-func ExternalAgeNote(qs wingwire.QueueState) string {
+func externalAgeNote(qs wingwire.QueueState) string {
 	if qs.ExternalSampleAgeMS <= 0 {
 		return ""
 	}
@@ -501,7 +501,7 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 	return note
 }
 
-func ExternalAttributionNote(qs wingwire.QueueState) string {
+func externalAttributionNote(qs wingwire.QueueState) string {
 	a := qs.ExternalAttribution
 	if qs.IgnoreExternal || a == nil || a.Samples == 0 || !coresExternalUnattributed(qs) {
 		return ""
@@ -567,7 +567,7 @@ func BudgetNote(b *wingwire.BudgetState) string {
 	if b.Enforce {
 		note += "; OS-enforced"
 	}
-	if src := BudgetSourceLabel(b); src != "" {
+	if src := budgetSourceLabel(b); src != "" {
 		note += " (" + src + ")"
 	}
 	return note
@@ -580,7 +580,7 @@ func budgetOrigin(b *wingwire.BudgetState) string {
 	return b.Origin
 }
 
-func BudgetSourceLabel(b *wingwire.BudgetState) string {
+func budgetSourceLabel(b *wingwire.BudgetState) string {
 	if b == nil {
 		return ""
 	}
@@ -598,12 +598,12 @@ func BudgetSourceLabel(b *wingwire.BudgetState) string {
 	}
 }
 
-func ExternalIgnoredNote(qs wingwire.QueueState) string {
+func externalIgnoredNote(qs wingwire.QueueState) string {
 	if !qs.IgnoreExternal {
 		return ""
 	}
 	note := "external: ignored (operator setting"
-	if src := BudgetSourceLabel(qs.Budget); src != "" {
+	if src := budgetSourceLabel(qs.Budget); src != "" {
 		note += ", " + src
 	}
 	return note + ")"
@@ -664,7 +664,7 @@ func FmtDaemonHeader(qs wingwire.QueueState) string {
 	return header
 }
 
-func FmtCapacityChange(cc *wingwire.CapacityChange) string {
+func fmtCapacityChange(cc *wingwire.CapacityChange) string {
 	if cc == nil || cc.FromCores == cc.ToCores {
 		return ""
 	}

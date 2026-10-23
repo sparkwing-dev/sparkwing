@@ -14,10 +14,10 @@ import (
 	"time"
 )
 
-// MaxKeys bounds how many buckets one Limiter tracks. Keys come from
+// maxKeys bounds how many buckets one Limiter tracks. Keys come from
 // untrusted input, so a full map sheds its least recently used
 // buckets rather than growing without limit or refusing new keys.
-const MaxKeys = 50000
+const maxKeys = 50000
 
 // perf: evicting this fraction in one pass amortizes the O(n) scan across the insertions that follow it.
 const evictFraction = 16
@@ -98,15 +98,8 @@ func (l *Limiter) Penalize(key string, now time.Time) {
 	b.tokens = max(b.tokens-1, 0)
 }
 
-// GC drops buckets idle long enough to have refilled.
-func (l *Limiter) GC(now time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.gcLocked(now)
-}
-
-// Len returns the number of tracked buckets.
-func (l *Limiter) Len() int {
+// len returns the number of tracked buckets.
+func (l *Limiter) len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.buckets)
@@ -118,7 +111,7 @@ func (l *Limiter) refill(key string, now time.Time, create bool) *bucket {
 		if !create {
 			return nil
 		}
-		if len(l.buckets) >= MaxKeys {
+		if len(l.buckets) >= maxKeys {
 			l.evictLocked(now)
 		}
 		b = &bucket{tokens: l.burst, lastRefill: now}
@@ -137,7 +130,7 @@ func (l *Limiter) refill(key string, now time.Time, create bool) *bucket {
 // safety: refusing a new key would let a key flood deny every unseen client, so a full map drops its coldest buckets.
 func (l *Limiter) evictLocked(now time.Time) {
 	l.gcLocked(now)
-	if len(l.buckets) < MaxKeys {
+	if len(l.buckets) < maxKeys {
 		return
 	}
 	seen := make([]time.Time, 0, len(l.buckets))

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 const (
@@ -15,11 +15,11 @@ const (
 	segmentSuffix = ".ndjson.gz"
 )
 
-// LogClassPrefix locates every log object with one retention class.
-func LogClassPrefix(class string) string { return "logs/" + class + "/" }
+// logClassPrefix locates every log object with one retention class.
+func logClassPrefix(class string) string { return "logs/" + class + "/" }
 
-// LogRunPrefix validates the tenant and run namespace for physical logs.
-func LogRunPrefix(class, team, runID string) (string, error) {
+// logRunPrefix validates the tenant and run namespace for physical logs.
+func logRunPrefix(class, team, runID string) (string, error) {
 	if _, ok := LogClassDays(class); !ok {
 		return "", fmt.Errorf("logseg: retention class %q is not r<days>", class)
 	}
@@ -29,7 +29,7 @@ func LogRunPrefix(class, team, runID string) (string, error) {
 	if err := validLogPath(runID, false); err != nil {
 		return "", err
 	}
-	return LogClassPrefix(class) + "teams/" + team + "/runs/" + runID + "/", nil
+	return logClassPrefix(class) + "teams/" + team + "/runs/" + runID + "/", nil
 }
 
 // LogSubjectPrefix derives a distinct namespace for each tagged subject and fence.
@@ -37,7 +37,7 @@ func LogSubjectPrefix(class string, subject LogSubject) (string, error) {
 	if err := subject.Validate(); err != nil {
 		return "", err
 	}
-	run, err := LogRunPrefix(class, subject.Team, subject.RunID)
+	run, err := logRunPrefix(class, subject.Team, subject.RunID)
 	if err != nil {
 		return "", err
 	}

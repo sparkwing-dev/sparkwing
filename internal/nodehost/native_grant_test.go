@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func FuzzNativeStartupGrantIsolation(f *testing.F) {
@@ -39,7 +39,7 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 				cfg.Environments.Store = st
 				deps.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) { return grant, bindError }
 				deps.Start = cfg.StartEvaluation
-				host, buildErr := NewOwnerEvaluator(deps)
+				host, buildErr := newOwnerEvaluator(deps)
 				if buildErr != nil {
 					t.Fatal(buildErr)
 				}
@@ -49,7 +49,7 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 				input.RouteBinding.Routes.Bearer = "parent"
 				cfg.Environments.Store = st
 				deps.Bind = func(context.Context, NodeInput) (ProcessGrant, error) { return grant, bindError }
-				deps.Start = cfg.Start
+				deps.Start = cfg.startNode
 				host, buildErr := NewNodeExecutor(deps)
 				if buildErr != nil {
 					t.Fatal(buildErr)

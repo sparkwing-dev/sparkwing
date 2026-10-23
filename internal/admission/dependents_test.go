@@ -44,7 +44,7 @@ func attachedChild(t *testing.T, policy Policy) (*Ledger, LeaseID, []SemaphoreCl
 }
 
 func TestReleasingAnAncestorLeaseOrphansItsAttachedChild(t *testing.T) {
-	l, run, _ := attachedChild(t, PolicyFail)
+	l, run, _ := attachedChild(t, policyFail)
 	events, err := l.Release(run, "parent")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestEvictingAnAncestorLeaseOrphansItsAttachedChild(t *testing.T) {
 }
 
 func TestAChildThatLeavesFirstIsNotOrphaned(t *testing.T) {
-	l, run, _ := attachedChild(t, PolicyFail)
+	l, run, _ := attachedChild(t, policyFail)
 	snap := l.Snapshot()
 	var node LeaseID
 	for _, le := range snap.Leases {
@@ -87,7 +87,7 @@ func TestAChildThatLeavesFirstIsNotOrphaned(t *testing.T) {
 }
 
 func TestAnOrphanedChildIsMarkedOnItsOwnLeaseUntilItLeaves(t *testing.T) {
-	l, run, _ := attachedChild(t, PolicyFail)
+	l, run, _ := attachedChild(t, policyFail)
 	if _, err := l.Release(run, "parent"); err != nil {
 		t.Fatal(err)
 	}

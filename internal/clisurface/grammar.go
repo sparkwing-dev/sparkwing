@@ -10,9 +10,9 @@ import (
 type Authority string
 
 const (
-	TeamCredential  Authority = "team"
-	DeploymentAdmin Authority = "deployment_admin"
-	InPodBreakGlass Authority = "in_pod_break_glass"
+	teamCredential  Authority = "team"
+	deploymentAdmin Authority = "deployment_admin"
+	inPodBreakGlass Authority = "in_pod_break_glass"
 )
 
 // Flag is parser and help metadata; Argument empty means a boolean switch.
@@ -59,29 +59,8 @@ func GlobalFlags() []Flag {
 type ExitCode int
 
 const (
-	ExitOK      ExitCode = 0
-	ExitFailed  ExitCode = 1
-	ExitUsage   ExitCode = 2
-	ExitUnknown ExitCode = 3
+	ExitUsage ExitCode = 2
 )
-
-// ErrorFormat describes stderr framing owned by pkg/apierr.
-type ErrorFormat struct {
-	Text        string
-	Hint        string
-	JSONOwner   string
-	JSONFraming string
-}
-
-// Errors keeps diagnostics on stderr even when stdout contains records.
-func Errors() ErrorFormat {
-	return ErrorFormat{
-		Text:        "<binary>: <command path without binary>: <message>",
-		Hint:        "hint: <hint>",
-		JSONOwner:   "pkg/apierr",
-		JSONFraming: "one compact error envelope per line on stderr",
-	}
-}
 
 // CommonRules fixes shared meanings so a new command cannot reinterpret a flag.
 func CommonRules() map[string]string {
@@ -104,8 +83,8 @@ func CommonRules() map[string]string {
 	}
 }
 
-// Validate catches grammar drift before a parser or help generator consumes it.
-func Validate(commands []Command) error {
+// validate catches grammar drift before a parser or help generator consumes it.
+func validate(commands []Command) error {
 	paths := make(map[string]bool, len(commands))
 	for _, c := range commands {
 		if c.Path == "" || strings.TrimSpace(c.Path) != c.Path || paths[c.Path] {

@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -16,8 +16,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestS3ManifestRequiresCompleteClosedBytes(t *testing.T) {
@@ -31,10 +29,10 @@ func TestS3ManifestRequiresCompleteClosedBytes(t *testing.T) {
 		want          error
 	}{
 		{name: "verified", payload: body, length: int64(len(body))},
-		{name: "corrupt", payload: `{"entries":{}}`, length: int64(len(body)), want: blob.ErrIntegrity},
-		{name: "short", payload: body[:len(body)-1], length: int64(len(body)), want: blob.ErrIntegrity},
-		{name: "long", payload: body + " ", length: int64(len(body)), want: blob.ErrIntegrity},
-		{name: "length", payload: body, length: int64(len(body)) + 1, want: blob.ErrIntegrity},
+		{name: "corrupt", payload: `{"entries":{}}`, length: int64(len(body)), want: ErrIntegrity},
+		{name: "short", payload: body[:len(body)-1], length: int64(len(body)), want: ErrIntegrity},
+		{name: "long", payload: body + " ", length: int64(len(body)), want: ErrIntegrity},
+		{name: "length", payload: body, length: int64(len(body)) + 1, want: ErrIntegrity},
 		{name: "close", payload: body, length: int64(len(body)), closeErr: closeErr, want: closeErr},
 		{name: "canceled response", payload: body, length: int64(len(body)), cancel: true, want: context.Canceled},
 	} {
@@ -60,7 +58,7 @@ func TestS3ManifestRequiresCompleteClosedBytes(t *testing.T) {
 					}, nil
 				}),
 			})
-			objects, err := blob.NewS3(client, "bucket", "")
+			objects, err := NewS3(client, "bucket", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,11 +77,11 @@ func TestS3ManifestRequiresCompleteClosedBytes(t *testing.T) {
 	}
 }
 
-func manifestStreamObjects(t *testing.T, body string) (*blob.Filesystem, blob.Digest) {
+func manifestStreamObjects(t *testing.T, body string) (*Filesystem, Digest) {
 	t.Helper()
 	root := t.TempDir()
 	want := digest(body)
-	key, err := blob.ObjectKey("team", want)
+	key, err := ObjectKey("team", want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +92,7 @@ func manifestStreamObjects(t *testing.T, body string) (*blob.Filesystem, blob.Di
 	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: root, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("k", 32))})
+	objects, err := NewFilesystem(FilesystemOptions{Directory: root, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,12 +138,12 @@ func TestManifestAdmissionRejectsOversizedStructureWithoutBuffering(t *testing.T
 	} {
 		t.Run(name, func(t *testing.T) {
 			objects, want := manifestStreamObjects(t, body)
-			members := []blob.Member{{Team: "team", ManifestDigest: want, Digest: digest("file"), Path: "file", Size: 4, Mode: 420}}
+			members := []Member{{Team: "team", ManifestDigest: want, Digest: digest("file"), Path: "file", Size: 4, Mode: 420}}
 			var before, after runtime.MemStats
 			runtime.ReadMemStats(&before)
 			err := objects.VerifyManifest(t.Context(), "team", want, members)
 			runtime.ReadMemStats(&after)
-			if !errors.Is(err, blob.ErrIntegrity) {
+			if !errors.Is(err, ErrIntegrity) {
 				t.Fatalf("invalid structure: %v", err)
 			}
 			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 2<<20 {
@@ -161,33 +159,33 @@ func FuzzManifestVerificationMatchesSubmittedMembers(f *testing.F) {
 	f.Add("日本語", uint8(17))
 	f.Fuzz(func(t *testing.T, path string, padding uint8) {
 		path = strings.ToValidUTF8(path, "?")
-		entry := blob.ManifestEntry{Path: path, Digest: digest("file"), Size: 4, Mode: uint32(padding)}
-		encoded, err := json.MarshalIndent(blob.Manifest{Entries: []blob.ManifestEntry{entry}}, "", "\t")
+		entry := ManifestEntry{Path: path, Digest: digest("file"), Size: 4, Mode: uint32(padding)}
+		encoded, err := json.MarshalIndent(Manifest{Entries: []ManifestEntry{entry}}, "", "\t")
 		if err != nil {
 			t.Fatal(err)
 		}
 		body := strings.Repeat(" \t\r\n", int(padding)*64) + string(encoded)
 		objects, want := manifestStreamObjects(t, body)
-		member := blob.Member{Team: "team", ManifestDigest: want, Path: path, Digest: entry.Digest, Size: 4, Mode: entry.Mode}
-		if err := objects.VerifyManifest(t.Context(), "team", want, []blob.Member{member}); err != nil {
+		member := Member{Team: "team", ManifestDigest: want, Path: path, Digest: entry.Digest, Size: 4, Mode: entry.Mode}
+		if err := objects.VerifyManifest(t.Context(), "team", want, []Member{member}); err != nil {
 			t.Fatalf("matching members: %v", err)
 		}
-		for _, change := range []func(*blob.Member){
-			func(m *blob.Member) { m.Team = "foreign" },
-			func(m *blob.Member) { m.ManifestDigest = digest("different") },
-			func(m *blob.Member) { m.Digest = digest("different") },
-			func(m *blob.Member) { m.Path += "x" },
-			func(m *blob.Member) { m.Size++ },
-			func(m *blob.Member) { m.Mode++ },
+		for _, change := range []func(*Member){
+			func(m *Member) { m.Team = "foreign" },
+			func(m *Member) { m.ManifestDigest = digest("different") },
+			func(m *Member) { m.Digest = digest("different") },
+			func(m *Member) { m.Path += "x" },
+			func(m *Member) { m.Size++ },
+			func(m *Member) { m.Mode++ },
 		} {
 			bad := member
 			change(&bad)
-			if err := objects.VerifyManifest(t.Context(), "team", want, []blob.Member{bad}); !errors.Is(err, blob.ErrIntegrity) {
+			if err := objects.VerifyManifest(t.Context(), "team", want, []Member{bad}); !errors.Is(err, ErrIntegrity) {
 				t.Fatalf("mismatched members: %v", err)
 			}
 		}
-		for _, members := range [][]blob.Member{nil, {member, member}} {
-			if err := objects.VerifyManifest(t.Context(), "team", want, members); !errors.Is(err, blob.ErrIntegrity) {
+		for _, members := range [][]Member{nil, {member, member}} {
+			if err := objects.VerifyManifest(t.Context(), "team", want, members); !errors.Is(err, ErrIntegrity) {
 				t.Fatalf("mismatched membership: %v", err)
 			}
 		}
@@ -198,10 +196,10 @@ func TestManifestWhitespaceCannotJoinInvalidTokens(t *testing.T) {
 	fileDigest := digest("file")
 	for _, tc := range []struct {
 		body    string
-		members []blob.Member
+		members []Member
 	}{
 		{body: `{"entries":n ull}`},
-		{body: fmt.Sprintf(`{"entries":[{"path":"file","digest":%q,"size":1 2,"mode":420}]}`, fileDigest), members: []blob.Member{{Path: "file", Digest: fileDigest, Size: 12, Mode: 420}}},
+		{body: fmt.Sprintf(`{"entries":[{"path":"file","digest":%q,"size":1 2,"mode":420}]}`, fileDigest), members: []Member{{Path: "file", Digest: fileDigest, Size: 12, Mode: 420}}},
 		{body: `{"ent ries":[]}`},
 		{body: `{"entries":[]} {}`},
 	} {
@@ -209,7 +207,7 @@ func TestManifestWhitespaceCannotJoinInvalidTokens(t *testing.T) {
 		for i := range tc.members {
 			tc.members[i].Team, tc.members[i].ManifestDigest = "team", want
 		}
-		if err := objects.VerifyManifest(t.Context(), "team", want, tc.members); !errors.Is(err, blob.ErrIntegrity) {
+		if err := objects.VerifyManifest(t.Context(), "team", want, tc.members); !errors.Is(err, ErrIntegrity) {
 			t.Fatalf("invalid JSON accepted: %v", err)
 		}
 	}
@@ -227,8 +225,8 @@ func TestManifestVerificationAcceptsEscapedSchema(t *testing.T) {
 	fileDigest := digest("file")
 	body := fmt.Sprintf(`{%s:[{%s:%s,%s:%s,%s:9223372036854775807,%s:4294967295}]}`, escape("entries"), escape("path"), escape(path), escape("digest"), escape(string(fileDigest)), escape("size"), escape("mode"))
 	objects, want := manifestStreamObjects(t, body)
-	member := blob.Member{Team: "team", ManifestDigest: want, Path: path, Digest: fileDigest, Size: 9223372036854775807, Mode: 4294967295}
-	if err := objects.VerifyManifest(t.Context(), "team", want, []blob.Member{member}); err != nil {
+	member := Member{Team: "team", ManifestDigest: want, Path: path, Digest: fileDigest, Size: 9223372036854775807, Mode: 4294967295}
+	if err := objects.VerifyManifest(t.Context(), "team", want, []Member{member}); err != nil {
 		t.Fatalf("escaped schema: %v", err)
 	}
 }
@@ -245,7 +243,7 @@ func TestManifestAdmissionMemoryTracksSubmittedMetadata(t *testing.T) {
 		runtime.ReadMemStats(&before)
 		err := objects.VerifyManifest(t.Context(), "team", want, nil)
 		runtime.ReadMemStats(&after)
-		if malformed && !errors.Is(err, blob.ErrIntegrity) || !malformed && err != nil {
+		if malformed && !errors.Is(err, ErrIntegrity) || !malformed && err != nil {
 			return false
 		}
 		return after.TotalAlloc-before.TotalAlloc < 512<<10

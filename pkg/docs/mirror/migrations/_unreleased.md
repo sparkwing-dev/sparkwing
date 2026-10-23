@@ -1299,9 +1299,8 @@ Duplicate selectors and malformed queries fail after authentication.
 
 `Server.ResealStoredSecrets` and `LegacyCipher` are removed with the startup
 migration. Row-secret helpers require BoundCipher and never fall back to
-unbound Seal/Open methods. Plaintext
-and pre-team envelopes remain unreadable. Rewrite them through the authenticated
-credential API. Explicit key rotation remains available for bound envelopes.
+unbound Seal/Open methods. Only team-bound envelopes can be opened for stored
+rows. Explicit key rotation remains available for bound envelopes.
 
 ## Credential maintenance
 

@@ -9,12 +9,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // NativeHostStore supplies the persisted state shared by owner and claimed execution.
@@ -84,16 +84,16 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	evaluation := EvaluationDependencies{Bind: config.Evaluation.Bind, ChildContext: config.Evaluation.ChildContext, ReadOutput: config.ReadOutput}
+	evaluation := evaluationDependencies{Bind: config.Evaluation.Bind, ChildContext: config.Evaluation.ChildContext, ReadOutput: config.ReadOutput}
 	evaluation.Masks = config.Masks
 	evaluation.Store, evaluation.Masker = config.Store, config.Masks.masker
-	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
+	evaluation.Start, evaluation.EnsureEngine = processes.startEvaluation, config.Source.Engines.Ensure
 	evaluation.Validation = validation
-	evaluator, err := NewOwnerEvaluator(evaluation)
+	evaluator, err := newOwnerEvaluator(evaluation)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.StartPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker}
+	planner := SDKPlanner{Log: config.PlanningLog, Masks: config.Masks, Start: processes.startPlanning, EnsureEngine: config.Source.Engines.Ensure, Masker: config.Masks.masker}
 	owner := OwnerHost{Renew: config.Owner.Renew, Acquire: config.Owner.Acquire, Prepare: config.Owner.Prepare, Project: config.Owner.Project, Decide: config.Owner.Decide, Wait: config.Owner.Wait, WaitNode: config.Owner.WaitNode, Debug: config.Owner.Debug, Local: config.Owner.Local, AdoptClaim: config.Owner.AdoptClaim, Delegator: config.Owner.Delegator, ExpansionActor: config.Owner.ExpansionActor, Expand: config.Owner.Expand}
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
 	owner.Computing = processes.Computing
@@ -102,25 +102,25 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.executionAdmission = config.Admission
 
 	owner.Planning.Validation = validation
-	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		var spec runspec.Spec
 		var job nodeproto.JobSpec
 		if json.Unmarshal(input.Accepted.Spec, &spec) != nil || json.Unmarshal(row.Spec, &job) != nil {
-			return OwnerLayerResult{}, errors.New("debug policy requires accepted run and job declarations")
+			return ownerLayerResult{}, errors.New("debug policy requires accepted run and job declarations")
 		}
 		pause := spec.Resolved.Settings.Options.Pause.Value
 		unused := job.OnFailureOf != "" || !slices.Contains(pause.Before.Value, job.ID) && (job.Approval != nil || !slices.Contains(pause.After.Value, job.ID) && !pause.OnFailure.Value)
 		if unused || owner.Debug != nil {
-			return OwnerLayerResult{}, nil
+			return ownerLayerResult{}, nil
 		}
-		return OwnerLayerResult{}, errors.New("debug pause requires an authority-bearing boundary adapter")
+		return ownerLayerResult{}, errors.New("debug pause requires an authority-bearing boundary adapter")
 	}
-	owner.SkipPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	owner.SkipPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		return evaluator.skipLayer(ctx, input, row, processes.Log)
 	}
 	if owner.Expand == nil {
 		owner.Expand = func(ctx context.Context, input EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
-			return evaluator.Expand(ctx, input)
+			return evaluator.evaluateExpansion(ctx, input)
 		}
 	}
 	claimed := &ClaimedNodeHost{

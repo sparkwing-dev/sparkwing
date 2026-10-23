@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
@@ -187,9 +187,9 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 		}
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
-	setTestPolicies(&h, func(ctx context.Context, _ testPolicyName, _ EvaluationInput, row runstate.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(ctx context.Context, _ testPolicyName, _ EvaluationInput, row runstate.NodeRow, binding StorageBinding) (ownerLayerResult, error) {
 		_, err := f.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Outcome: runstate.NodeSkipped})
-		return OwnerLayerResult{}, errors.Join(failure, err)
+		return ownerLayerResult{}, errors.Join(failure, err)
 	})
 	_, err := h.Run(t.Context(), in)
 	if !errors.Is(err, failure) || f.finished.Transition.RunID != "" {

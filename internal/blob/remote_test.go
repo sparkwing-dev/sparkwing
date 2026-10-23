@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -11,14 +11,13 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type records struct {
-	blob.RecordStore
-	lookup func(context.Context, blob.RecordLookup) (blob.RecordLookupResult, error)
+	RecordStore
+	lookup func(context.Context, RecordLookup) (RecordLookupResult, error)
 }
 
 func TestRemoteMemoMissingReferencedBytesFailProperty(t *testing.T) {
@@ -27,44 +26,44 @@ func TestRemoteMemoMissingReferencedBytesFailProperty(t *testing.T) {
 		outputDigest, memberDigest := digest(output), digest(member)
 		manifestBody := fmt.Sprintf(`{"entries":[{"path":"out","digest":"%s","size":%d,"mode":420}]}`, memberDigest, len(member))
 		manifestDigest := digest(manifestBody)
-		bodies := map[blob.Digest]string{outputDigest: output, manifestDigest: manifestBody, memberDigest: member}
-		missing := []blob.Digest{outputDigest, manifestDigest, memberDigest}[absent%3]
-		bytes := blob.NewSignedStore(blob.SignedStoreOptions{
-			Signer: &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
-				return blob.SignedTransfer{Digest: q.Digest, Size: int64(len(bodies[q.Digest]))}, nil
+		bodies := map[Digest]string{outputDigest: output, manifestDigest: manifestBody, memberDigest: member}
+		missing := []Digest{outputDigest, manifestDigest, memberDigest}[absent%3]
+		bytes := NewSignedStore(SignedStoreOptions{
+			Signer: &signer{download: func(q GetRequest) (SignedTransfer, error) {
+				return SignedTransfer{Digest: q.Digest, Size: int64(len(bodies[q.Digest]))}, nil
 			}},
-			HTTPClient: transfer(func(_ context.Context, tr blob.SignedTransfer, _ io.Reader) (io.ReadCloser, error) {
+			HTTPClient: transfer(func(_ context.Context, tr SignedTransfer, _ io.Reader) (io.ReadCloser, error) {
 				if tr.Digest == missing {
-					return nil, blob.ErrNotFound
+					return nil, ErrNotFound
 				}
 				return io.NopCloser(strings.NewReader(bodies[tr.Digest])), nil
 			}),
 		})
-		r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+		r := records{lookup: func(_ context.Context, q RecordLookup) (RecordLookupResult, error) {
 			key := q.Key
-			key.Team, key.Scope.Ref = "team", blob.RefScope{Ref: "main", Verified: true}
-			return blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{Key: key, Digest: outputDigest, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifestDigest}}, Members: []blob.Member{{Team: "team", ManifestDigest: manifestDigest, Digest: memberDigest, Path: "out", Size: int64(len(member)), Mode: 0o644}}}, nil
+			key.Team, key.Scope.Ref = "team", RefScope{Ref: "main", Verified: true}
+			return RecordLookupResult{Found: true, VerifiedDefault: true, Record: Record{Key: key, Digest: outputDigest, ManifestDigest: runspec.Optional[Digest]{Set: true, Value: manifestDigest}}, Members: []Member{{Team: "team", ManifestDigest: manifestDigest, Digest: memberDigest, Path: "out", Size: int64(len(member)), Mode: 0o644}}}, nil
 		}}
-		cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
+		cache, err := OpenRemoteCache(RemoteCacheOptions{Profile: "ci", Team: "team", Authority: Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
 		if err != nil {
 			return false
 		}
-		hit, err := cache.Memo(t.Context(), blob.MemoKey{Repo: "gh:123", Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{})
-		if hit.Found || !errors.Is(err, blob.ErrNotFound) {
+		hit, err := cache.Memo(t.Context(), MemoKey{Repo: "gh:123", Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, Budget{})
+		if hit.Found || !errors.Is(err, ErrNotFound) {
 			return false
 		}
-		if record, err := cache.Depcache(t.Context(), blob.DepcacheKey{Repo: "gh:123", Name: "modules", Key: "lock"}, blob.Budget{}); record.Digest != "" || !errors.Is(err, blob.ErrNotFound) {
+		if record, err := cache.Depcache(t.Context(), DepcacheKey{Repo: "gh:123", Name: "modules", Key: "lock"}, Budget{}); record.Digest != "" || !errors.Is(err, ErrNotFound) {
 			return false
 		}
 		_, err = cache.Artifact(t.Context(), outputDigest)
-		return errors.Is(err, blob.ErrDigestNotReadable)
+		return errors.Is(err, ErrDigestNotReadable)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(591))}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (r records) LookupRecord(ctx context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+func (r records) LookupRecord(ctx context.Context, q RecordLookup) (RecordLookupResult, error) {
 	return r.lookup(ctx, q)
 }
 
@@ -73,24 +72,24 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	member := digest("artifact")
 	manifestBody := fmt.Sprintf(`{"entries":[{"path":"out","digest":"%s","size":8,"mode":420}]}`, member)
 	manifest := digest(manifestBody)
-	key := blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}
-	result := blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{
-		Key:    blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: blob.Scope{Repo: key.Repo, Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
-		Digest: d, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest},
-	}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "out", Size: 8, Mode: 0o644}}}
-	bodies := map[blob.Digest]string{d: "bytes", manifest: manifestBody, member: "artifact"}
-	s := &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+	key := MemoKey{Repo: "gh:123", Ref: RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}
+	result := RecordLookupResult{Found: true, VerifiedDefault: true, Record: Record{
+		Key:    RecordKey{Team: "team", Kind: KindMemo, Name: MemoRecordName, Scope: Scope{Repo: key.Repo, Ref: RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
+		Digest: d, ManifestDigest: runspec.Optional[Digest]{Set: true, Value: manifest},
+	}, Members: []Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "out", Size: 8, Mode: 0o644}}}
+	bodies := map[Digest]string{d: "bytes", manifest: manifestBody, member: "artifact"}
+	s := &signer{download: func(q GetRequest) (SignedTransfer, error) {
 		body, ok := bodies[q.Digest]
 		if !ok {
-			return blob.SignedTransfer{}, blob.ErrNotFound
+			return SignedTransfer{}, ErrNotFound
 		}
-		return blob.SignedTransfer{Digest: q.Digest, Size: int64(len(body))}, nil
+		return SignedTransfer{Digest: q.Digest, Size: int64(len(body))}, nil
 	}}
-	bytes := blob.NewSignedStore(blob.SignedStoreOptions{Signer: s, HTTPClient: transfer(func(_ context.Context, tr blob.SignedTransfer, _ io.Reader) (io.ReadCloser, error) {
+	bytes := NewSignedStore(SignedStoreOptions{Signer: s, HTTPClient: transfer(func(_ context.Context, tr SignedTransfer, _ io.Reader) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(bodies[tr.Digest])), nil
 	})})
-	r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
-		if q.Key.Name != blob.MemoRecordName {
+	r := records{lookup: func(_ context.Context, q RecordLookup) (RecordLookupResult, error) {
+		if q.Key.Name != MemoRecordName {
 			t.Fatalf("memo lookup cannot find the committed result record: %+v", q.Key)
 		}
 		if !q.VerifiedDefaultOnly || q.Authority.CapabilityRef != "user-repo-read" || q.Authority.Repo != key.Repo || q.Key.Scope.Ref.Ref != "" {
@@ -98,16 +97,16 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 		}
 		return result, nil
 	}}
-	options := blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user-repo-read", Principal: "reader", Repo: key.Repo}, Repo: key.Repo, Records: r}
-	cache, err := blob.OpenRemoteCache(options, bytes)
+	options := RemoteCacheOptions{Profile: "ci", Team: "team", Authority: Authority{CapabilityRef: "user-repo-read", Principal: "reader", Repo: key.Repo}, Repo: key.Repo, Records: r}
+	cache, err := OpenRemoteCache(options, bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = cache.Artifact(t.Context(), d); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if _, err = cache.Artifact(t.Context(), d); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("arbitrary artifact was readable")
 	}
-	budget := blob.Budget{Deadline: time.Now().Add(time.Minute)}
-	if hit, err := cache.Memo(t.Context(), key, blob.Budget{Deadline: time.Now().Add(-time.Second)}); !errors.Is(err, blob.ErrBudget) || hit.Found {
+	budget := Budget{Deadline: time.Now().Add(time.Minute)}
+	if hit, err := cache.Memo(t.Context(), key, Budget{Deadline: time.Now().Add(-time.Second)}); !errors.Is(err, ErrBudget) || hit.Found {
 		t.Fatalf("expired memo budget=%+v %v", hit, err)
 	}
 	hit, err := cache.Memo(t.Context(), key, budget)
@@ -125,7 +124,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	if !reader.Verified() {
 		t.Fatal("artifact not verified")
 	}
-	for _, digest := range []blob.Digest{manifest, member} {
+	for _, digest := range []Digest{manifest, member} {
 		reader, err := cache.Artifact(t.Context(), digest)
 		if err != nil {
 			t.Fatal(err)
@@ -136,13 +135,13 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 			t.Fatalf("cached member=%v", err)
 		}
 	}
-	if _, err = cache.Artifact(t.Context(), digest("foreign")); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if _, err = cache.Artifact(t.Context(), digest("foreign")); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("unrelated artifact was readable")
 	}
 	for _, mutation := range []string{"manual", "false_default", "foreign_team", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "foreign_name", "empty_ref", "foreign_member", "member_size", "member_path", "member_mode", "manifest_members", "corrupt"} {
 		t.Run(mutation, func(t *testing.T) {
 			bad := result
-			bad.Members = append([]blob.Member(nil), result.Members...)
+			bad.Members = append([]Member(nil), result.Members...)
 			switch mutation {
 			case "manual":
 				bad.Record.Key.Scope.Ref.Verified = false
@@ -175,8 +174,8 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 			case "corrupt":
 				bad.Record.Digest = digest("other")
 			}
-			options.Records = records{lookup: func(context.Context, blob.RecordLookup) (blob.RecordLookupResult, error) { return bad, nil }}
-			isolated, err := blob.OpenRemoteCache(options, bytes)
+			options.Records = records{lookup: func(context.Context, RecordLookup) (RecordLookupResult, error) { return bad, nil }}
+			isolated, err := OpenRemoteCache(options, bytes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +183,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 			if err == nil || hit.Found {
 				t.Fatalf("unsafe memo hit: %+v, %v", hit, err)
 			}
-			if _, err := isolated.Artifact(t.Context(), d); !errors.Is(err, blob.ErrDigestNotReadable) {
+			if _, err := isolated.Artifact(t.Context(), d); !errors.Is(err, ErrDigestNotReadable) {
 				t.Fatal("rejected record granted artifact access")
 			}
 		})
@@ -192,7 +191,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 }
 
 func TestRemoteCacheRequiresOptIn(t *testing.T) {
-	if _, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{}, nil); err == nil {
+	if _, err := OpenRemoteCache(RemoteCacheOptions{}, nil); err == nil {
 		t.Fatal("implicit remote cache")
 	}
 }
@@ -219,36 +218,36 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 			if fault == "close" {
 				body.err = errors.New("close failed")
 			}
-			bytes := blob.NewSignedStore(blob.SignedStoreOptions{
-				Signer: &signer{transfer: blob.SignedTransfer{Digest: d, Size: int64(len(output))}},
-				HTTPClient: transfer(func(context.Context, blob.SignedTransfer, io.Reader) (io.ReadCloser, error) {
+			bytes := NewSignedStore(SignedStoreOptions{
+				Signer: &signer{transfer: SignedTransfer{Digest: d, Size: int64(len(output))}},
+				HTTPClient: transfer(func(context.Context, SignedTransfer, io.Reader) (io.ReadCloser, error) {
 					if fault == "read_cancelled" {
 						cancel()
 					}
 					return body, nil
 				}),
 			})
-			records := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+			records := records{lookup: func(_ context.Context, q RecordLookup) (RecordLookupResult, error) {
 				if fault == "lookup_cancelled" {
 					cancel()
-					return blob.RecordLookupResult{}, ctx.Err()
+					return RecordLookupResult{}, ctx.Err()
 				}
 				key := q.Key
-				key.Team, key.Scope.Ref = "team", blob.RefScope{Ref: "main", Verified: true}
-				return blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{Key: key, Digest: d}}, nil
+				key.Team, key.Scope.Ref = "team", RefScope{Ref: "main", Verified: true}
+				return RecordLookupResult{Found: true, VerifiedDefault: true, Record: Record{Key: key, Digest: d}}, nil
 			}}
-			cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: records}, bytes)
+			cache, err := OpenRemoteCache(RemoteCacheOptions{Profile: "ci", Team: "team", Authority: Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: records}, bytes)
 			if err != nil {
 				t.Fatal(err)
 			}
-			hit, err := cache.Memo(ctx, blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{})
+			hit, err := cache.Memo(ctx, MemoKey{Repo: "gh:123", Ref: RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, Budget{})
 			if hit.Found || err == nil || (ctx.Err() != nil && !errors.Is(err, context.Canceled)) {
 				t.Fatalf("failed memo = %+v, %v", hit, err)
 			}
 			if fault != "lookup_cancelled" && !body.closed {
 				t.Fatal("download was not closed")
 			}
-			if _, err := cache.Artifact(t.Context(), d); !errors.Is(err, blob.ErrDigestNotReadable) {
+			if _, err := cache.Artifact(t.Context(), d); !errors.Is(err, ErrDigestNotReadable) {
 				t.Fatalf("failed memo granted artifacts: %v", err)
 			}
 		})
@@ -257,25 +256,25 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 
 func TestRemoteDepcacheArchiveIsReadableAfterTrustedLookup(t *testing.T) {
 	d := digest("archive")
-	s := &signer{transfer: blob.SignedTransfer{Digest: d, Size: 7}}
-	bytes := blob.NewSignedStore(blob.SignedStoreOptions{Signer: s, HTTPClient: transfer(func(context.Context, blob.SignedTransfer, io.Reader) (io.ReadCloser, error) {
+	s := &signer{transfer: SignedTransfer{Digest: d, Size: 7}}
+	bytes := NewSignedStore(SignedStoreOptions{Signer: s, HTTPClient: transfer(func(context.Context, SignedTransfer, io.Reader) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("archive")), nil
 	})})
-	r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
-		if !q.VerifiedDefaultOnly || q.Key.Kind != blob.KindDepcache {
+	r := records{lookup: func(_ context.Context, q RecordLookup) (RecordLookupResult, error) {
+		if !q.VerifiedDefaultOnly || q.Key.Kind != KindDepcache {
 			t.Fatal("unscoped depcache lookup")
 		}
 		key := q.Key
 		key.Team = "team"
-		key.Scope.Ref = blob.RefScope{Ref: "main", Verified: true}
-		return blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{Key: key, Digest: d}}, nil
+		key.Scope.Ref = RefScope{Ref: "main", Verified: true}
+		return RecordLookupResult{Found: true, VerifiedDefault: true, Record: Record{Key: key, Digest: d}}, nil
 	}}
-	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
+	cache, err := OpenRemoteCache(RemoteCacheOptions{Profile: "ci", Team: "team", Authority: Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := blob.DepcacheKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Name: "modules", Key: "lock-hash"}
-	record, err := cache.Depcache(t.Context(), key, blob.Budget{Deadline: time.Now().Add(time.Minute)})
+	key := DepcacheKey{Repo: "gh:123", Ref: RefScope{Ref: "feature"}, Name: "modules", Key: "lock-hash"}
+	record, err := cache.Depcache(t.Context(), key, Budget{Deadline: time.Now().Add(time.Minute)})
 	if err != nil || record.Digest != d {
 		t.Fatalf("depcache=%+v %v", record, err)
 	}
@@ -292,42 +291,42 @@ func TestRemoteDepcacheArchiveIsReadableAfterTrustedLookup(t *testing.T) {
 
 func TestOwnerAndPublicationReceipts(t *testing.T) {
 	owner := identity()
-	owner.Kind = blob.UploadOwnerUnit
+	owner.Kind = UploadOwnerUnit
 	owner.Attempt = runspec.Optional[runspec.AttemptIdentity]{}
-	owner.Unit = runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadPlanUnit, ID: "plan", Generation: 3}}
-	a := blob.Authority{Principal: owner.Principal, CapabilityRef: owner.CapabilityRef, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: owner}}
-	for _, kind := range []blob.Kind{blob.KindBinary, blob.KindSourceBundle} {
-		if err := blob.AuthorizeUpload(a, owner, kind); err != nil {
+	owner.Unit = runspec.Optional[UploadUnit]{Set: true, Value: UploadUnit{Kind: UploadPlanUnit, ID: "plan", Generation: 3}}
+	a := Authority{Principal: owner.Principal, CapabilityRef: owner.CapabilityRef, Upload: runspec.Optional[UploadIdentity]{Set: true, Value: owner}}
+	for _, kind := range []Kind{KindBinary, KindSourceBundle} {
+		if err := AuthorizeUpload(a, owner, kind); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, kind := range []blob.Kind{blob.KindOutput, blob.KindManifest, blob.KindMemo, blob.KindDepcache} {
-		if err := blob.AuthorizeUpload(a, owner, kind); !errors.Is(err, blob.ErrDigestNotReadable) {
+	for _, kind := range []Kind{KindOutput, KindManifest, KindMemo, KindDepcache} {
+		if err := AuthorizeUpload(a, owner, kind); !errors.Is(err, ErrDigestNotReadable) {
 			t.Fatalf("owner uploaded %s: %v", kind, err)
 		}
 	}
 	bad := owner
 	bad.Unit.Value.Generation++
-	if err := blob.AuthorizeUpload(a, bad, blob.KindBinary); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if err := AuthorizeUpload(a, bad, KindBinary); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("owner fence transferred")
 	}
 	job := identity()
-	edge := blob.EdgeRequest{TargetKind: blob.KindOutput, Digest: digest("bytes"), Authority: blob.Authority{Principal: job.Principal, CapabilityRef: job.CapabilityRef, Attempt: job.Attempt}, OwnReceipt: runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: owner, Digest: digest("bytes")}}}
-	if err := blob.AuthorizeEdge(edge); !errors.Is(err, blob.ErrDigestNotReadable) {
+	edge := EdgeRequest{TargetKind: KindOutput, Digest: digest("bytes"), Authority: Authority{Principal: job.Principal, CapabilityRef: job.CapabilityRef, Attempt: job.Attempt}, OwnReceipt: runspec.Optional[Receipt]{Set: true, Value: Receipt{Identity: owner, Digest: digest("bytes")}}}
+	if err := AuthorizeEdge(edge); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("owner receipt became job authority")
 	}
 	published := job
-	published.Kind = blob.UploadPublication
-	a = blob.Authority{Principal: published.Principal, CapabilityRef: published.CapabilityRef, Attempt: published.Attempt, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: published}}
-	if err := blob.AuthorizeUpload(a, published, blob.KindOutput); err != nil {
+	published.Kind = UploadPublication
+	a = Authority{Principal: published.Principal, CapabilityRef: published.CapabilityRef, Attempt: published.Attempt, Upload: runspec.Optional[UploadIdentity]{Set: true, Value: published}}
+	if err := AuthorizeUpload(a, published, KindOutput); err != nil {
 		t.Fatal(err)
 	}
-	if err := blob.AuthorizeUpload(a, published, blob.KindMemo); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if err := AuthorizeUpload(a, published, KindMemo); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("publication gained memo write")
 	}
 	bad = published
 	bad.Attempt.Value.NodeID = "other"
-	if err := blob.AuthorizeUpload(a, bad, blob.KindOutput); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if err := AuthorizeUpload(a, bad, KindOutput); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("publication gained another job")
 	}
 }

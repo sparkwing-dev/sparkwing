@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type recoveryGraph struct {
@@ -63,7 +63,7 @@ func TestRecoveryDependencies(t *testing.T) {
 				parent.Declaration.Optional = true
 				recovery.Status, recovery.Outcome, kind = "done", "failed", ""
 			}
-			graph, err := (&RemoteOwnerStore{Controller: wire}).Schedule(t.Context(), "run")
+			graph, err := (&RemoteOwnerStore{Controller: wire}).schedule(t.Context(), "run")
 			if err != nil {
 				t.Fatal(err)
 			}

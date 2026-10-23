@@ -85,7 +85,7 @@ func TestAddReplaceDirective_PreservesRequires(t *testing.T) {
 func TestVendor_RefusesExistingDest(t *testing.T) {
 	sparkwingDir := t.TempDir()
 	writeFile(t, filepath.Join(sparkwingDir, "go.mod"), "module consumer\n\ngo 1.26.0\n")
-	writeFile(t, filepath.Join(sparkwingDir, VendoredDirName, "templates", "keep.go"), "package templates\n")
+	writeFile(t, filepath.Join(sparkwingDir, vendoredDirName, "templates", "keep.go"), "package templates\n")
 
 	_, err := Vendor(context.Background(), sparkwingDir, "github.com/sparkwing-dev/sparks-core/templates")
 	if err == nil {
@@ -127,7 +127,7 @@ func TestVendor_EndToEnd(t *testing.T) {
 		t.Errorf("resolved version = %q, want %q", res.Version, modVer)
 	}
 
-	hello := filepath.Join(sparkwingDir, VendoredDirName, "fixturemod", "hello.go")
+	hello := filepath.Join(sparkwingDir, vendoredDirName, "fixturemod", "hello.go")
 	info, err := os.Stat(hello)
 	if err != nil {
 		t.Fatalf("expected vendored source at %s: %v", hello, err)

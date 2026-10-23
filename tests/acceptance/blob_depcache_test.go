@@ -22,7 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/depcachekey"
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 )
 
 func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {

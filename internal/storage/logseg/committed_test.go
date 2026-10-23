@@ -1,4 +1,4 @@
-package logseg_test
+package logseg
 
 import (
 	"bytes"
@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 type committedRecords struct {
@@ -31,7 +30,7 @@ func (f *committedRecords) ReadLogSegments(_ context.Context, actor runstate.Act
 	return f.view, f.err
 }
 
-func committedFixture(t *testing.T, subject blob.LogSubject) (logseg.CommittedReader, *committedRecords, *memObjects, string) {
+func committedFixture(t *testing.T, subject blob.LogSubject) (CommittedReader, *committedRecords, *memObjects, string) {
 	t.Helper()
 	prefix, err := blob.LogSubjectPrefix("r90", subject)
 	if err != nil {
@@ -50,7 +49,7 @@ func committedFixture(t *testing.T, subject blob.LogSubject) (logseg.CommittedRe
 		offset += seg.Bytes
 		raw.WriteString(line)
 	}
-	return logseg.CommittedReader{Records: f, Objects: objects}, f, objects, raw.String()
+	return CommittedReader{Records: f, Objects: objects}, f, objects, raw.String()
 }
 
 func TestCommittedReadsVerifyBytesAndResume(t *testing.T) {
@@ -226,7 +225,7 @@ func FuzzCommittedReadsUseOnlyAuthorizedRecords(f *testing.F) {
 			records.err = blob.ErrDigestNotReadable
 		}
 		var out bytes.Buffer
-		result, err := (logseg.CommittedReader{Records: records, Objects: objects}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: subject}, &out)
+		result, err := (CommittedReader{Records: records, Objects: objects}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: subject}, &out)
 		if denied {
 			if !errors.Is(err, blob.ErrDigestNotReadable) || objects.getCount() != 0 || out.Len() != 0 || result.Bytes != 0 {
 				t.Fatalf("denied read=%+v, %v, %q", result, err, out.Bytes())
@@ -237,7 +236,7 @@ func FuzzCommittedReadsUseOnlyAuthorizedRecords(f *testing.F) {
 	})
 }
 
-func subjectSegment(t *testing.T, n int, raw string) (logseg.Segment, []byte) {
+func subjectSegment(t *testing.T, n int, raw string) (Segment, []byte) {
 	t.Helper()
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
@@ -248,7 +247,7 @@ func subjectSegment(t *testing.T, n int, raw string) (logseg.Segment, []byte) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(b.Bytes())
-	return logseg.Segment{N: n, FirstSeq: int64(n), LastSeq: int64(n), Lines: 1, Bytes: int64(len(raw)), StoredBytes: int64(b.Len()), SHA256: hex.EncodeToString(sum[:])}, b.Bytes()
+	return Segment{N: n, FirstSeq: int64(n), LastSeq: int64(n), Lines: 1, Bytes: int64(len(raw)), StoredBytes: int64(b.Len()), SHA256: hex.EncodeToString(sum[:])}, b.Bytes()
 }
 
 type observedLogBody struct {

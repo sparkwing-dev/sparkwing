@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"golang.org/x/mod/semver"
 )
 
@@ -44,7 +44,7 @@ func (r ManagedRunner) Run(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(completedFailure, context.Cause(ctx), fmt.Errorf("runner cannot prepare its verified automatic update: %w", err))
 	}
-	updateErr := ApplySoftwareUpdate(ctx, update, r.Installation)
+	updateErr := applySoftwareUpdate(ctx, update, r.Installation)
 	return errors.Join(completedFailure, context.Cause(ctx), updateErr)
 }
 

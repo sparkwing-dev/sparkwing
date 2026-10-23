@@ -6,8 +6,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-// RepositoryPattern selects a repository by its display name.
-type RepositoryPattern string
+// repositoryPattern selects a repository by its display name.
+type repositoryPattern string
 
 // RepositoryIdentity contains the canonical identity and trusted display name.
 type RepositoryIdentity struct {
@@ -27,14 +27,14 @@ func RepositoryAllowed(scope []string, repository RepositoryIdentity) bool {
 		display = "github.com/" + display
 	}
 	for _, entry := range scope {
-		if entry == repository.Key && repository.Key != "" || repositoryPatternMatches(RepositoryPattern(entry), display) {
+		if entry == repository.Key && repository.Key != "" || repositoryPatternMatches(repositoryPattern(entry), display) {
 			return true
 		}
 	}
 	return false
 }
 
-func repositoryPatternMatches(pattern RepositoryPattern, display string) bool {
+func repositoryPatternMatches(pattern repositoryPattern, display string) bool {
 	allow, err := sourceurl.ParseRepoAllowlist([]string{string(pattern)})
 	if err != nil {
 		return false
@@ -46,8 +46,8 @@ func repositoryPatternMatches(pattern RepositoryPattern, display string) bool {
 	return named && admitted
 }
 
-// RepositoryScopeNarrows rejects unrestricted children of restricted parents.
-func RepositoryScopeNarrows(parent, child []string) bool {
+// repositoryScopeNarrows rejects unrestricted children of restricted parents.
+func repositoryScopeNarrows(parent, child []string) bool {
 	if parent == nil {
 		return true
 	}

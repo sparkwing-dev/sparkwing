@@ -44,7 +44,7 @@ func TestNativeInstallationPreservesRegistrationAndConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	update := engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: release.Version(), Release: release, Required: true}
-	if err := ApplySoftwareUpdate(t.Context(), update, installation); err != nil {
+	if err := applySoftwareUpdate(t.Context(), update, installation); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(calls, []string{"drain", "refresh", "restart"}) {
@@ -101,7 +101,7 @@ func TestNativeInstallationStopsAtFailure(t *testing.T) {
 			if step == "cancelled" {
 				cancel()
 			}
-			err = ApplySoftwareUpdate(ctx, update, installation)
+			err = applySoftwareUpdate(ctx, update, installation)
 			if err == nil {
 				t.Fatal("installation succeeded")
 			}
@@ -160,7 +160,7 @@ func TestNativeInstallationRetriesUnitRefreshWithoutReplacingAgain(t *testing.T)
 		t.Fatal(err)
 	}
 	update := engine.SoftwareUpdate{Version: release.Version(), Release: release}
-	if err := ApplySoftwareUpdate(t.Context(), update, installation); !errors.Is(err, refreshErr) {
+	if err := applySoftwareUpdate(t.Context(), update, installation); !errors.Is(err, refreshErr) {
 		t.Fatalf("first update = %v", err)
 	}
 	first, err := os.Stat(path)
@@ -168,7 +168,7 @@ func TestNativeInstallationRetriesUnitRefreshWithoutReplacingAgain(t *testing.T)
 		t.Fatal(err)
 	}
 	refreshErr = nil
-	if err := ApplySoftwareUpdate(t.Context(), update, installation); err != nil {
+	if err := applySoftwareUpdate(t.Context(), update, installation); err != nil {
 		t.Fatal(err)
 	}
 	second, err := os.Stat(path)
@@ -198,7 +198,7 @@ func TestNativeInstallationPreservesExecutableSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplySoftwareUpdate(t.Context(), engine.SoftwareUpdate{Version: release.Version(), Release: release}, installation); err != nil {
+	if err := applySoftwareUpdate(t.Context(), engine.SoftwareUpdate{Version: release.Version(), Release: release}, installation); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.Readlink(link); err != nil || got != path {

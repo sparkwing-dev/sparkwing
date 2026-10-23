@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 const maxSegmentStored = limits.LogSegmentUploadBytes

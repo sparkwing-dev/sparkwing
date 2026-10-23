@@ -8,7 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // MaxNodeMetricSamples bounds one node's stored resource samples: at the

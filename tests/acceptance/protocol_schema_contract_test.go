@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto/conformance"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 )
 
 func TestProtocolSchemaContract(t *testing.T) {

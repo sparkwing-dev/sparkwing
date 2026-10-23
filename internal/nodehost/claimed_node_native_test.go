@@ -16,18 +16,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type claimEngine struct{ resolved engine.Resolved }
@@ -94,7 +94,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			defer deadline()
 			ctx, cancel := context.WithCancelCause(testCtx)
 			defer cancel(nil)
-			var session *ProtocolSession
+			var session *protocolSession
 			var entered atomic.Bool
 			revoked, cleaned := false, false
 			cfg := ProtocolSessionConfig{
@@ -119,7 +119,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				parent.snapshot.Authorities[0].Principal.Capability.Binding = delegation.Binding
 				parent.snapshot.Binding.Current = delegation.Binding
 				services.RunID, services.Job = input.Accepted.RunID, input.Accepted.Plan.Jobs[0]
-				issued, revoke, err := authorities.Delegate(ctx, parentLookup, delegation, services)
+				issued, revoke, err := authorities.delegate(ctx, parentLookup, delegation, services)
 				if err != nil {
 					return ProcessGrant{}, err
 				}
@@ -141,9 +141,9 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				return resolved, nil
 			}
 			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-				process, err := cfg.Start(ctx, input, activity)
+				process, err := cfg.startNode(ctx, input, activity)
 				if process != nil {
-					session = process.(*ProtocolSession)
+					session = process.(*protocolSession)
 				}
 				return process, err
 			}

@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -18,8 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestNativeClosureFailures(t *testing.T) {
@@ -84,7 +84,7 @@ func TestNativeClosureFailures(t *testing.T) {
 					return nil
 				},
 			}
-			host, err := NewOwnerEvaluator(EvaluationDependencies{
+			host, err := newOwnerEvaluator(evaluationDependencies{
 				Store: st, Start: cfg.StartEvaluation, Masker: masker, Masks: masks,
 				Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
 				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
@@ -104,7 +104,7 @@ func TestNativeClosureFailures(t *testing.T) {
 			}
 			switch jobID {
 			case "source":
-				body, _, failure, err := host.Expand(ctx, input)
+				body, _, failure, err := host.evaluateExpansion(ctx, input)
 				if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.SDKError || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" {
 					t.Fatalf("failed generator became topology: body=%s failure=%+v error=%v", body, failure, err)
 				}
@@ -112,7 +112,7 @@ func TestNativeClosureFailures(t *testing.T) {
 				input := NodeInput{Accepted: accepted, NodeID: jobID, SpecHash: string(jobHash), Generation: 3, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, Engine: selected, Entry: input.Entry, GrantedRunner: runner, RouteBinding: input.RouteBinding}
 				st.node.Generation, st.node.ClaimedBy, st.node.CapabilityPrefix = input.Generation, input.Authority.Holder, input.Authority.CapabilityPrefix
 				executor, err := NewNodeExecutor(ExecutorDependencies{
-					Store: st, Start: cfg.Start, Masker: testMasker(),
+					Store: st, Start: cfg.startNode, Masker: testMasker(),
 					Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
 					EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 						return selected, nil

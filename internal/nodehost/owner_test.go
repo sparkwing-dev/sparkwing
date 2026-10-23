@@ -14,17 +14,17 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type ownerFixture struct {
@@ -369,10 +369,10 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 		},
 		Decide: func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{Outcome: "success"} },
 	}
-	follower := StateFollower{Store: f, Subscribe: func(context.Context, string) (StateSubscription, error) {
-		return StateSubscription{Changed: f.changed, Close: func() error { return nil }}, nil
+	follower := stateFollower{Store: f, Subscribe: func(context.Context, string) (stateSubscription, error) {
+		return stateSubscription{Changed: f.changed, Close: func() error { return nil }}, nil
 	}}
-	h.Wait, h.WaitNode = follower.Wait, follower.WaitNode
+	h.Wait, h.WaitNode = follower.wait, follower.waitNode
 	if resumed {
 		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: runspec.Resolved{Engine: selected.Identity, SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 		f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), json.RawMessage(`{"jobs":[]}`)
@@ -462,9 +462,9 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
 	h.Local = func(runstate.NodeRow) bool { return true }
-	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, binding StorageBinding) (ownerLayerResult, error) {
 		f.record(layer.Name)
-		return OwnerLayerResult{}, nil
+		return ownerLayerResult{}, nil
 	})
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
 		f.record("execute")
@@ -524,8 +524,8 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 					return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 				}
 				h.Local = func(runstate.NodeRow) bool { return true }
-				setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, runstate.NodeRow, StorageBinding) (OwnerLayerResult, error) {
-					return OwnerLayerResult{}, nil
+				setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, runstate.NodeRow, StorageBinding) (ownerLayerResult, error) {
+					return ownerLayerResult{}, nil
 				})
 				deadline := time.Now().Add(time.Minute)
 				started := make(chan struct{})

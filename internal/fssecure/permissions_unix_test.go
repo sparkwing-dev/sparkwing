@@ -1,6 +1,6 @@
 //go:build !windows
 
-package fssecure_test
+package fssecure
 
 import (
 	"os"
@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
@@ -51,18 +50,18 @@ func TestRepairTreeTightensDataAndPreservesPrivateExecutables(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changes, err := fssecure.RepairTree(root, fileIdentity(t, root), false)
+	changes, err := repairTree(root, fileIdentity(t, root), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(changes) < 5 {
 		t.Fatalf("changes = %+v, want private directories, data, and cached executable modes normalized", changes)
 	}
-	assertPerm(t, root, fssecure.DirMode)
-	assertPerm(t, filepath.Join(root, "runs"), fssecure.DirMode)
-	assertPerm(t, filepath.Join(root, "runs", "run-1"), fssecure.DirMode)
-	assertPerm(t, data, fssecure.FileMode)
-	assertPerm(t, bin, fssecure.DirMode)
+	assertPerm(t, root, dirMode)
+	assertPerm(t, filepath.Join(root, "runs"), dirMode)
+	assertPerm(t, filepath.Join(root, "runs", "run-1"), dirMode)
+	assertPerm(t, data, fileMode)
+	assertPerm(t, bin, dirMode)
 	assertPerm(t, outside, 0o666)
 	body, err := os.ReadFile(data)
 	if err != nil {
@@ -87,11 +86,11 @@ func TestRepairTreeStripsStrayExecuteBitsFromData(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := fssecure.RepairTree(root, fileIdentity(t, root), false); err != nil {
+	if _, err := repairTree(root, fileIdentity(t, root), false); err != nil {
 		t.Fatal(err)
 	}
-	assertPerm(t, filepath.Join(root, "state.db"), fssecure.FileMode)
-	assertPerm(t, filepath.Join(root, "runs.log"), fssecure.FileMode)
+	assertPerm(t, filepath.Join(root, "state.db"), fileMode)
+	assertPerm(t, filepath.Join(root, "runs.log"), fileMode)
 }
 
 func TestEnsureDirDoesNotBroadenExistingOwnerAccess(t *testing.T) {
@@ -99,7 +98,7 @@ func TestEnsureDirDoesNotBroadenExistingOwnerAccess(t *testing.T) {
 	if err := os.Mkdir(root, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	if err := fssecure.EnsureDir(root); err != nil {
+	if err := EnsureDir(root); err != nil {
 		t.Fatal(err)
 	}
 	assertPerm(t, root, 0o500)
@@ -134,7 +133,7 @@ func TestRepairTreeDoesNotBroadenExistingOwnerAccess(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(root, 0o700) }()
 
-	if _, err := fssecure.RepairTree(root, fileIdentity(t, root), false); err != nil {
+	if _, err := repairTree(root, fileIdentity(t, root), false); err != nil {
 		t.Fatal(err)
 	}
 	assertPerm(t, root, 0o500)
@@ -159,7 +158,7 @@ func TestRepairTreeRefusesRootReplacedAfterRecognition(t *testing.T) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fssecure.RepairTree(root, recognized, false); err == nil {
+	if _, err := repairTree(root, recognized, false); err == nil {
 		t.Fatal("RepairTree accepted a replacement root")
 	}
 	assertPerm(t, root, 0o755)
@@ -172,11 +171,11 @@ func TestPrivateCreationIgnoresPermissiveUmask(t *testing.T) {
 		if err := os.MkdirAll(root, 0o777); err != nil {
 			t.Fatal(err)
 		}
-		if err := fssecure.EnsureDir(root); err != nil {
+		if err := EnsureDir(root); err != nil {
 			t.Fatal(err)
 		}
 		opened := filepath.Join(root, "opened")
-		f, err := fssecure.OpenFile(opened, os.O_CREATE|os.O_WRONLY)
+		f, err := OpenFile(opened, os.O_CREATE|os.O_WRONLY)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,12 +186,12 @@ func TestPrivateCreationIgnoresPermissiveUmask(t *testing.T) {
 		if err := os.WriteFile(written, []byte("legacy"), 0o666); err != nil {
 			t.Fatal(err)
 		}
-		if err := fssecure.WriteFile(written, []byte("private")); err != nil {
+		if err := WriteFile(written, []byte("private")); err != nil {
 			t.Fatal(err)
 		}
-		assertPerm(t, root, fssecure.DirMode)
-		assertPerm(t, opened, fssecure.FileMode)
-		assertPerm(t, written, fssecure.FileMode)
+		assertPerm(t, root, dirMode)
+		assertPerm(t, opened, fileMode)
+		assertPerm(t, written, fileMode)
 		return
 	}
 
@@ -209,14 +208,14 @@ func TestPrivateCreationIgnoresPermissiveUmask(t *testing.T) {
 
 func TestRepairTreeRefusesUnsafeRoots(t *testing.T) {
 	for _, root := range []string{"", ".", string(filepath.Separator)} {
-		if _, err := fssecure.RepairTree(root, nil, false); err == nil {
+		if _, err := repairTree(root, nil, false); err == nil {
 			t.Fatalf("RepairTree(%q) succeeded", root)
 		}
 	}
 	userHome := t.TempDir()
 	testhome.Set(t, userHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
-	if _, err := fssecure.RepairTree(userHome, fileIdentity(t, userHome), true); err == nil {
+	if _, err := repairTree(userHome, fileIdentity(t, userHome), true); err == nil {
 		t.Fatalf("RepairTree(%q) accepted the entire user home", userHome)
 	}
 }
@@ -230,7 +229,7 @@ func TestRepairTreeRefusesEffectiveHomeThroughSymlinks(t *testing.T) {
 	}
 	testhome.Set(t, userHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
-	if _, err := fssecure.RepairTree(targetParent, fileIdentity(t, targetParent), true); err == nil {
+	if _, err := repairTree(targetParent, fileIdentity(t, targetParent), true); err == nil {
 		t.Fatal("RepairTree accepted an ancestor of the effective user home")
 	}
 
@@ -239,10 +238,10 @@ func TestRepairTreeRefusesEffectiveHomeThroughSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	viaIntermediate := filepath.Join(alias, "userhome")
-	if _, err := fssecure.RepairTree(viaIntermediate, nil, true); err == nil {
+	if _, err := repairTree(viaIntermediate, nil, true); err == nil {
 		t.Fatal("RepairTree accepted the effective user home through a symlinked ancestor")
 	}
-	if _, err := fssecure.RepairTree(alias, nil, true); err == nil {
+	if _, err := repairTree(alias, nil, true); err == nil {
 		t.Fatal("RepairTree accepted a symlink root")
 	}
 }
@@ -252,7 +251,7 @@ func TestRepairTreeDryRunReportsWithoutChanging(t *testing.T) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	changes, err := fssecure.RepairTree(root, fileIdentity(t, root), true)
+	changes, err := repairTree(root, fileIdentity(t, root), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,10 +302,10 @@ func TestRepairTreeKeepsStoredToolchainsExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := fssecure.RepairTree(root, fileIdentity(t, root), false); err != nil {
+	if _, err := repairTree(root, fileIdentity(t, root), false); err != nil {
 		t.Fatal(err)
 	}
-	assertPerm(t, bin, fssecure.DirMode)
-	assertPerm(t, manifest, fssecure.FileMode)
-	assertPerm(t, dir, fssecure.DirMode)
+	assertPerm(t, bin, dirMode)
+	assertPerm(t, manifest, fileMode)
+	assertPerm(t, dir, dirMode)
 }

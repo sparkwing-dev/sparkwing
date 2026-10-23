@@ -85,11 +85,6 @@ func (p SchedulingPolicy) backfillDelayMS(class WorkloadClass) int64 {
 	return d.Milliseconds()
 }
 
-// BackfillDelayFor reports the configured cumulative measured delay for a class.
-func (p SchedulingPolicy) BackfillDelayFor(class WorkloadClass) time.Duration {
-	return time.Duration(p.backfillDelayMS(class)) * time.Millisecond
-}
-
 func cloneSchedulingPolicy(p SchedulingPolicy) SchedulingPolicy {
 	clone := p
 	clone.BackfillDelay = cloneMap(p.BackfillDelay)

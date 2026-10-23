@@ -14,9 +14,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"

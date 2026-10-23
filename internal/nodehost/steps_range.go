@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // safety: a bound naming no step anywhere in the plan is a typo, and running

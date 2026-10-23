@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -11,26 +11,25 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type outputRecords struct {
-	blob.RecordStore
-	request     blob.CommitRecordRequest
-	lookup      blob.RecordLookup
-	result      blob.RecordLookupResult
+	RecordStore
+	request     CommitRecordRequest
+	lookup      RecordLookup
+	result      RecordLookupResult
 	err         error
 	afterCommit func()
 }
 
-func (r *outputRecords) CommitRecord(_ context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
+func (r *outputRecords) CommitRecord(_ context.Context, q CommitRecordRequest) (Record, error) {
 	r.request = q
 	if r.err != nil {
-		return blob.Record{}, r.err
+		return Record{}, r.err
 	}
-	r.result = blob.RecordLookupResult{Found: true, Record: blob.Record{Key: q.Key, Digest: q.Digest, Source: q.Source}}
+	r.result = RecordLookupResult{Found: true, Record: Record{Key: q.Key, Digest: q.Digest, Source: q.Source}}
 	if r.afterCommit != nil {
 		r.afterCommit()
 	}
@@ -44,28 +43,28 @@ func TestOutputCommitPreservesCancellationCause(t *testing.T) {
 	cause := errors.New("output writer stopped")
 	records.afterCommit = func() { cancel(cause) }
 	record, err := data.Put(ctx, []byte("result"))
-	if !errors.Is(err, cause) || record != (blob.Record{}) {
+	if !errors.Is(err, cause) || record != (Record{}) {
 		t.Fatalf("cancelled commit returned %+v: %v", record, err)
 	}
 }
 
-func (r *outputRecords) LookupRecord(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+func (r *outputRecords) LookupRecord(_ context.Context, q RecordLookup) (RecordLookupResult, error) {
 	r.lookup = q
 	return r.result, r.err
 }
 
-func newOutputData(t *testing.T) (blob.OutputData, *outputRecords, *signer) {
+func newOutputData(t *testing.T) (OutputData, *outputRecords, *signer) {
 	t.Helper()
 	i := identity()
-	objects := make(map[blob.Digest]string)
-	s := &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+	objects := make(map[Digest]string)
+	s := &signer{download: func(q GetRequest) (SignedTransfer, error) {
 		body, ok := objects[q.Digest]
 		if !ok {
-			return blob.SignedTransfer{}, blob.ErrNotFound
+			return SignedTransfer{}, ErrNotFound
 		}
-		return blob.SignedTransfer{Digest: q.Digest, Size: int64(len(body))}, nil
+		return SignedTransfer{Digest: q.Digest, Size: int64(len(body))}, nil
 	}}
-	store := blob.NewSignedStore(blob.SignedStoreOptions{Signer: s, HTTPClient: transfer(func(_ context.Context, q blob.SignedTransfer, body io.Reader) (io.ReadCloser, error) {
+	store := NewSignedStore(SignedStoreOptions{Signer: s, HTTPClient: transfer(func(_ context.Context, q SignedTransfer, body io.Reader) (io.ReadCloser, error) {
 		if body != nil {
 			raw, err := io.ReadAll(body)
 			if err != nil {
@@ -77,9 +76,9 @@ func newOutputData(t *testing.T) (blob.OutputData, *outputRecords, *signer) {
 		return io.NopCloser(strings.NewReader(objects[q.Digest])), nil
 	})})
 	r := &outputRecords{}
-	return blob.OutputData{
-		Bytes: store, Records: r, Identity: i, Pipeline: "build", Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)},
-		Authority: blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "feature"}}},
+	return OutputData{
+		Bytes: store, Records: r, Identity: i, Pipeline: "build", Budget: Budget{Deadline: time.Now().Add(time.Minute)},
+		Authority: Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:123", Ref: RefFacts{Scope: RefScope{Ref: "feature"}}},
 	}, r, s
 }
 
@@ -92,7 +91,7 @@ func TestOutputRecordRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			key := record.Key
-			if key != blob.ResultRecordKey(data.Identity.Attempt.Value, data.Authority.Repo, data.Authority.Ref.Scope, data.Pipeline, blob.KindOutput) {
+			if key != ResultRecordKey(data.Identity.Attempt.Value, data.Authority.Repo, data.Authority.Ref.Scope, data.Pipeline, KindOutput) {
 				t.Fatalf("output key = %+v", key)
 			}
 			if record.Digest != digest(body) || signer.commits != 1 || records.request.Source != data.Identity || records.request.Authority != data.Authority || records.request.ManifestDigest.Set || len(records.request.Members) != 0 {
@@ -123,11 +122,11 @@ func TestOutputWriteRefusals(t *testing.T) {
 			case "wrong_generation":
 				data.Identity.Attempt.Value.Generation++
 			case "owner":
-				data.Identity.Kind = blob.UploadOwnerUnit
+				data.Identity.Kind = UploadOwnerUnit
 				data.Identity.Attempt = runspec.Optional[runspec.AttemptIdentity]{}
-				data.Identity.Unit = runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadPlanUnit, ID: "plan", Generation: 3}}
+				data.Identity.Unit = runspec.Optional[UploadUnit]{Set: true, Value: UploadUnit{Kind: UploadPlanUnit, ID: "plan", Generation: 3}}
 				data.Authority.Attempt = runspec.Optional[runspec.AttemptIdentity]{}
-				data.Authority.Upload = runspec.Optional[blob.UploadIdentity]{Set: true, Value: data.Identity}
+				data.Authority.Upload = runspec.Optional[UploadIdentity]{Set: true, Value: data.Identity}
 			case "commit":
 				records.err = errors.New("record commit refused")
 			case "cancelled":
@@ -145,10 +144,10 @@ func TestOutputWriteRefusals(t *testing.T) {
 
 func TestOutputImportedPublication(t *testing.T) {
 	data, records, signer := newOutputData(t)
-	data.Identity.Kind = blob.UploadPublication
-	data.Authority.Upload = runspec.Optional[blob.UploadIdentity]{Set: true, Value: data.Identity}
+	data.Identity.Kind = UploadPublication
+	data.Authority.Upload = runspec.Optional[UploadIdentity]{Set: true, Value: data.Identity}
 	record, err := data.Put(t.Context(), []byte(`{"published":true}`))
-	if err != nil || record.Source != data.Identity || records.request.Source.Kind != blob.UploadPublication || signer.intent.Identity != data.Identity {
+	if err != nil || record.Source != data.Identity || records.request.Source.Kind != UploadPublication || signer.intent.Identity != data.Identity {
 		t.Fatalf("imported output = %+v, %v", record, err)
 	}
 }
@@ -171,11 +170,11 @@ func TestOutputReadRefusals(t *testing.T) {
 			case "missing_record":
 				records.result.Found = false
 			case "refused_edge":
-				records.err = blob.ErrDigestNotReadable
+				records.err = ErrDigestNotReadable
 			case "wrong_key":
 				records.result.Record.Key.Name = "other-run"
 			case "wrong_kind":
-				key.Kind = blob.KindDepcache
+				key.Kind = KindDepcache
 			case "corrupt":
 				body.Reader = strings.NewReader("wrong!")
 			case "short":
@@ -193,15 +192,15 @@ func TestOutputReadRefusals(t *testing.T) {
 			case "cancelled":
 				cancel()
 			}
-			data.Bytes = blob.NewSignedStore(blob.SignedStoreOptions{
-				Signer: &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+			data.Bytes = NewSignedStore(SignedStoreOptions{
+				Signer: &signer{download: func(q GetRequest) (SignedTransfer, error) {
 					downloads++
 					if fault == "missing_bytes" {
-						return blob.SignedTransfer{}, blob.ErrNotFound
+						return SignedTransfer{}, ErrNotFound
 					}
-					return blob.SignedTransfer{Digest: q.Digest, Size: size}, nil
+					return SignedTransfer{Digest: q.Digest, Size: size}, nil
 				}},
-				HTTPClient: transfer(func(context.Context, blob.SignedTransfer, io.Reader) (io.ReadCloser, error) { return body, nil }),
+				HTTPClient: transfer(func(context.Context, SignedTransfer, io.Reader) (io.ReadCloser, error) { return body, nil }),
 			})
 			if fault == "unverified" {
 				data.Bytes = unverifiedOutputStore{Store: data.Bytes, body: body}
@@ -221,11 +220,11 @@ func TestOutputReadRefusals(t *testing.T) {
 }
 
 type unverifiedOutputStore struct {
-	blob.Store
+	Store
 	body *remoteBody
 }
 
-func (s unverifiedOutputStore) Get(context.Context, blob.GetRequest) (blob.VerifiedReader, error) {
+func (s unverifiedOutputStore) Get(context.Context, GetRequest) (VerifiedReader, error) {
 	return unverifiedOutput{s.body}, nil
 }
 
@@ -234,11 +233,11 @@ type unverifiedOutput struct{ *remoteBody }
 func (unverifiedOutput) Verified() bool { return false }
 
 type cancelledOutputUpload struct {
-	blob.Store
+	Store
 	cancel context.CancelFunc
 }
 
-func (s cancelledOutputUpload) Put(ctx context.Context, q blob.PutRequest) (blob.Receipt, error) {
+func (s cancelledOutputUpload) Put(ctx context.Context, q PutRequest) (Receipt, error) {
 	receipt, err := s.Store.Put(ctx, q)
 	s.cancel()
 	return receipt, err
@@ -264,14 +263,14 @@ func TestResultRecordKeysKeepAttemptFence(t *testing.T) {
 		i.Attempt.Value.RunID = i.RunID
 		i.Attempt.Value.Attempt = int64(attempt) + 1
 		i.Attempt.Value.Generation = int64(generation) + 1
-		a := blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:1", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}}
-		for _, kind := range []blob.Kind{blob.KindOutput, blob.KindManifest} {
-			intent := blob.WriteScopeIntent{Kind: kind, Pipeline: "ci", Job: i.Attempt.Value.NodeID, Name: i.RunID}
-			key, err := blob.ResolveWriteKey(a, intent)
-			if err != nil || key != blob.ResultRecordKey(i.Attempt.Value, a.Repo, a.Ref.Scope, "ci", kind) {
+		a := Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:1", Ref: RefFacts{Scope: RefScope{Ref: "main"}}}
+		for _, kind := range []Kind{KindOutput, KindManifest} {
+			intent := WriteScopeIntent{Kind: kind, Pipeline: "ci", Job: i.Attempt.Value.NodeID, Name: i.RunID}
+			key, err := ResolveWriteKey(a, intent)
+			if err != nil || key != ResultRecordKey(i.Attempt.Value, a.Repo, a.Ref.Scope, "ci", kind) {
 				return false
 			}
-			namespace, err := blob.RecordNamespace(key)
+			namespace, err := RecordNamespace(key)
 			if err != nil {
 				return false
 			}
@@ -284,20 +283,20 @@ func TestResultRecordKeysKeepAttemptFence(t *testing.T) {
 			} {
 				other := i.Attempt.Value
 				change(&other)
-				otherKey := blob.ResultRecordKey(other, a.Repo, a.Ref.Scope, "ci", kind)
-				otherNamespace, err := blob.RecordNamespace(otherKey)
+				otherKey := ResultRecordKey(other, a.Repo, a.Ref.Scope, "ci", kind)
+				otherNamespace, err := RecordNamespace(otherKey)
 				if err != nil || (key.Team == otherKey.Team && namespace == otherNamespace) {
 					return false
 				}
 			}
-			for _, change := range []func(*blob.WriteScopeIntent){
-				func(q *blob.WriteScopeIntent) { q.Job += "other" },
-				func(q *blob.WriteScopeIntent) { q.Name += "other" },
-				func(q *blob.WriteScopeIntent) { q.Key = "other" },
+			for _, change := range []func(*WriteScopeIntent){
+				func(q *WriteScopeIntent) { q.Job += "other" },
+				func(q *WriteScopeIntent) { q.Name += "other" },
+				func(q *WriteScopeIntent) { q.Key = "other" },
 			} {
 				forged := intent
 				change(&forged)
-				if _, err := blob.ResolveWriteKey(a, forged); !errors.Is(err, blob.ErrDigestNotReadable) {
+				if _, err := ResolveWriteKey(a, forged); !errors.Is(err, ErrDigestNotReadable) {
 					return false
 				}
 			}

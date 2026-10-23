@@ -1,4 +1,4 @@
-package objectguard_test
+package objectguard
 
 import (
 	"context"
@@ -15,8 +15,6 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
-
-	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
 
 func bucketThatFails(t *testing.T, failFirst int64) (endpoint string, hits *atomic.Int64) {
@@ -34,7 +32,7 @@ func bucketThatFails(t *testing.T, failFirst int64) (endpoint string, hits *atom
 	return srv.URL, hits
 }
 
-func guardedClient(t *testing.T, endpoint string, l *objectguard.Limiter, maxAttempts int) *awss3.Client {
+func guardedClient(t *testing.T, endpoint string, l *Limiter, maxAttempts int) *awss3.Client {
 	t.Helper()
 	return awss3.New(awss3.Options{
 		Region:       "us-east-1",
@@ -46,10 +44,10 @@ func guardedClient(t *testing.T, endpoint string, l *objectguard.Limiter, maxAtt
 			o.MaxBackoff = time.Millisecond
 		}),
 		EndpointResolverV2: awss3.NewDefaultEndpointResolverV2(),
-	}, objectguard.WithBudget(l))
+	}, WithBudget(l))
 }
 
-func classState(t *testing.T, l *objectguard.Limiter, c objectguard.Class) objectguard.ClassState {
+func classState(t *testing.T, l *Limiter, c Class) ClassState {
 	t.Helper()
 	for _, cs := range l.State().Classes {
 		if cs.Class == c {
@@ -57,12 +55,12 @@ func classState(t *testing.T, l *objectguard.Limiter, c objectguard.Class) objec
 		}
 	}
 	t.Fatalf("the limiter reports no state for class %q", c)
-	return objectguard.ClassState{}
+	return ClassState{}
 }
 
 func TestBudgetRejectsUnknownS3StackWithoutRetry(t *testing.T) {
 	var options awss3.Options
-	objectguard.WithBudget(objectguard.New(testConfig(10, 0)))(&options)
+	WithBudget(New(testConfig(10, 0)))(&options)
 	stack := middleware.NewStack("UnexpectedS3", smithyhttp.NewStackRequest)
 	if err := options.APIOptions[0](stack); err == nil || !strings.Contains(err.Error(), "Retry") {
 		t.Fatalf("unbudgeted non-presign stack returned %v, want Retry error", err)
@@ -74,7 +72,7 @@ func TestBudgetRejectsUnknownS3StackWithoutRetry(t *testing.T) {
 // budget has to count attempts, not API calls.
 func TestBudgetSpendsOneUnitPerBilledAttempt(t *testing.T) {
 	endpoint, hits := bucketThatFails(t, 3)
-	l := objectguard.New(testConfig(100, 0))
+	l := New(testConfig(100, 0))
 	client := guardedClient(t, endpoint, l, 4)
 
 	_, err := client.PutObject(context.Background(), &awss3.PutObjectInput{
@@ -88,14 +86,14 @@ func TestBudgetSpendsOneUnitPerBilledAttempt(t *testing.T) {
 	if got := hits.Load(); got != 4 {
 		t.Fatalf("the fake bucket saw %d requests, want the 4 attempts the retryer sent", got)
 	}
-	if got := classState(t, l, objectguard.ClassPut).Allowed; got != 4 {
+	if got := classState(t, l, classPut).Allowed; got != 4 {
 		t.Fatalf("the budget spent %d units for one put the store billed 4 times", got)
 	}
 }
 
 func TestBudgetRefusesMidRetryAndTheRetryerStops(t *testing.T) {
 	endpoint, hits := bucketThatFails(t, 100)
-	l := objectguard.New(testConfig(2, 0))
+	l := New(testConfig(2, 0))
 	client := guardedClient(t, endpoint, l, 8)
 
 	_, err := client.PutObject(context.Background(), &awss3.PutObjectInput{
@@ -112,14 +110,14 @@ func TestBudgetRefusesMidRetryAndTheRetryerStops(t *testing.T) {
 	if got := hits.Load(); got != 2 {
 		t.Fatalf("the fake bucket saw %d requests, want the 2 the budget allowed", got)
 	}
-	if got := classState(t, l, objectguard.ClassPut).Refused; got != 1 {
+	if got := classState(t, l, classPut).Refused; got != 1 {
 		t.Fatalf("the budget recorded %d refusals, want the single one that ended the retry loop", got)
 	}
 }
 
 func TestBudgetClassesFollowTheOperation(t *testing.T) {
 	endpoint, _ := bucketThatFails(t, 0)
-	l := objectguard.New(testConfig(100, 0))
+	l := New(testConfig(100, 0))
 	client := guardedClient(t, endpoint, l, 1)
 	ctx := context.Background()
 
@@ -129,11 +127,11 @@ func TestBudgetClassesFollowTheOperation(t *testing.T) {
 	_, _ = client.DeleteObject(ctx, &awss3.DeleteObjectInput{Bucket: aws.String("b"), Key: aws.String("k")})
 	_, _ = client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String("b"), Key: aws.String("k"), Body: strings.NewReader("x")})
 
-	for class, want := range map[objectguard.Class]uint64{
-		objectguard.ClassGet:    2,
-		objectguard.ClassList:   1,
-		objectguard.ClassDelete: 1,
-		objectguard.ClassPut:    1,
+	for class, want := range map[Class]uint64{
+		classGet:    2,
+		ClassList:   1,
+		classDelete: 1,
+		classPut:    1,
 	} {
 		if got := classState(t, l, class).Allowed; got != want {
 			t.Errorf("class %q spent %d units, want %d", class, got, want)
@@ -142,8 +140,8 @@ func TestBudgetClassesFollowTheOperation(t *testing.T) {
 }
 
 func TestClassForOperationBillsAnUnknownOperationAsAWrite(t *testing.T) {
-	if got := objectguard.ClassForOperation("CreateMultipartUpload"); got != objectguard.ClassPut {
-		t.Fatalf("an unrecognized operation billed as %q, want the expensive guess %q", got, objectguard.ClassPut)
+	if got := classForOperation("CreateMultipartUpload"); got != classPut {
+		t.Fatalf("an unrecognized operation billed as %q, want the expensive guess %q", got, classPut)
 	}
 }
 
@@ -156,7 +154,7 @@ func TestBudgetBoundsAHotLoopAgainstAFailingBucket(t *testing.T) {
 	}
 	const budget = 20
 	endpoint, hits := bucketThatFails(t, 1<<30)
-	l := objectguard.New(testConfig(budget, 0))
+	l := New(testConfig(budget, 0))
 	client := guardedClient(t, endpoint, l, 1)
 
 	ctx := context.Background()
@@ -179,8 +177,8 @@ func TestBudgetBoundsAHotLoopAgainstAFailingBucket(t *testing.T) {
 func TestBudgetCountsWrittenBytesTowardTheCeiling(t *testing.T) {
 	endpoint, _ := bucketThatFails(t, 0)
 	cfg := testConfig(100, 0)
-	cfg.Ceiling = objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 1 << 20}}
-	l := objectguard.New(cfg)
+	cfg.Ceiling = CeilingConfig{Limit: CeilingLimit{MaxBytes: 1 << 20}}
+	l := New(cfg)
 	client := guardedClient(t, endpoint, l, 2)
 
 	body := strings.Repeat("x", 512)
@@ -204,9 +202,9 @@ func TestBudgetCountsWrittenBytesTowardTheCeiling(t *testing.T) {
 func TestBudgetRefusesAWriteAboveTheCeilingBeforeItReachesTheBucket(t *testing.T) {
 	endpoint, hits := bucketThatFails(t, 0)
 	cfg := testConfig(100, 0)
-	cfg.Ceiling = objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 100}}
-	l := objectguard.New(cfg)
-	l.Ceiling().Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
+	cfg.Ceiling = CeilingConfig{Limit: CeilingLimit{MaxBytes: 100}}
+	l := New(cfg)
+	l.Ceiling().Observe(Usage{Bytes: 4096, Objects: 3})
 	client := guardedClient(t, endpoint, l, 2)
 
 	_, err := client.PutObject(context.Background(), &awss3.PutObjectInput{

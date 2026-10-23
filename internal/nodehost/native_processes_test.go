@@ -9,9 +9,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func nativeProcessesFixture(t *testing.T) (*NativeProcesses, capability.CredentialLookup, capability.DelegateSpec, ProcessServices) {
@@ -69,11 +69,11 @@ func TestNativeProcessesKeepIndependentCleanupLedgers(t *testing.T) {
 	if err != nil || one.Cleanups == two.Cleanups {
 		t.Fatal("separate processes shared cleanup registrations")
 	}
-	id, err := one.Cleanups.Register([]string{"/unused"}, "")
+	id, err := one.Cleanups.register([]string{"/unused"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := two.Cleanups.Release(id); err == nil || !one.Cleanups.contains(id) {
+	if err := two.Cleanups.release(id); err == nil || !one.Cleanups.contains(id) {
 		t.Fatal("another process released a cleanup")
 	}
 	refused := errors.New("log delivery refused")

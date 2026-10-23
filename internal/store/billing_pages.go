@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func (t *Tenant) billingMutationTx(ctx context.Context, a capability.Authorized, write func(*storeTx, capability.Principal) error) error {

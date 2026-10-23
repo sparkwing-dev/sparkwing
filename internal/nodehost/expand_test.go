@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
-	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 const testGenerator = "targets/generate/0"
@@ -40,13 +40,13 @@ func evaluateExpansionBytes(t *testing.T, groups map[string]string) (json.RawMes
 		}
 		return nodeproto.EvalResult{Value: json.RawMessage(raw)}, nil
 	}
-	evaluator, err := NewOwnerEvaluator(dependencies)
+	evaluator, err := newOwnerEvaluator(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	body, _, failure, err := evaluator.Expand(ctx, input)
+	body, _, failure, err := evaluator.evaluateExpansion(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
