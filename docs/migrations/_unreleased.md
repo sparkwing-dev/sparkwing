@@ -11,9 +11,9 @@ that post signed deliveries must treat 202 as acceptance for later processing.
 Disconnecting an installation revokes work still preparing source for admission
 or schedule publication. Those refused effects leave no receipt to replay.
 
-The schema baseline moves to version 22 for the inbox, targeted effect results,
-team queue attribution and idle free-slot tracking. Recreate stores from an
-earlier baseline before starting this build.
+The schema baseline moves to version 23 for the inbox, targeted effect results,
+team queue attribution, idle free-slot tracking and per-team descendant ceilings.
+Recreate stores from an earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
 
 ## Runner sizes are labels
@@ -54,7 +54,7 @@ not delay matching jobs. Existing stores must be recreated because the baseline
 adds normalized requirement sets and indexed references on queued work.
 Metered claim leases account for billable time that begins during issuance.
 
-The store baseline is 22. Earlier stores are refused and must be recreated under
+The store baseline is 23. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted
 admission, publication, withdrawal and lifecycle result. Reprocessing preserves
 committed effects. Installation withdrawals keep their original repository targets
