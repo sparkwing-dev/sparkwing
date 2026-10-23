@@ -211,29 +211,24 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 			var removal struct {
 				Removed []githubAppRepoRef `json:"repositories_removed"`
 			}
-			if decodeErr := json.Unmarshal(body, &removal); decodeErr != nil {
-				writeError(w, http.StatusBadRequest, decodeErr)
-				return
+			decodeErr := json.Unmarshal(body, &removal)
+			if decodeErr != nil {
+				removal.Removed = nil
 			}
-			if len(removal.Removed) == 0 {
-				writeError(w, http.StatusBadRequest, fmt.Errorf("repository removal names no repositories; read installation repositories: %w", err))
-				return
-			}
+			removedIDs := make([]int64, 0, len(removal.Removed))
 			for _, removed := range removal.Removed {
-				if removed.ID <= 0 {
-					writeError(w, http.StatusBadRequest, errors.New("repository removal requires positive repository IDs"))
-					return
-				}
+				removedIDs = append(removedIDs, removed.ID)
 			}
-			for _, removed := range removal.Removed {
-				if revokeErr := tenant.WithdrawGitHubAppAutomation(ctx, env.Installation.ID, removed.ID); revokeErr != nil {
-					s.writeInternalError(w, r, "withdraw removed repository automation", revokeErr)
-					return
+			if withdrawErr := tenant.WithdrawGitHubInstallationRepositories(ctx, env.Installation.ID, removedIDs); withdrawErr != nil {
+				if errors.Is(withdrawErr, store.ErrInvalidInput) {
+					if decodeErr != nil {
+						withdrawErr = decodeErr
+					}
+					writeError(w, http.StatusBadRequest, fmt.Errorf("%w; read installation repositories: %v", withdrawErr, err))
+				} else {
+					s.writeInternalError(w, r, "withdraw removed repository automation and schedules", withdrawErr)
 				}
-				if _, withdrawErr := tenant.WithdrawGitHubCronRepository(ctx, env.Installation.ID, removed.ID); withdrawErr != nil {
-					s.writeInternalError(w, r, "withdraw removed repository schedules", withdrawErr)
-					return
-				}
+				return
 			}
 			writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 			return

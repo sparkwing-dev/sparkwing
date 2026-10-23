@@ -167,17 +167,20 @@ The hourly run budget uses store-wide counters shared by controller replicas.
 
 `installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, so adding or removing a repository on GitHub takes effect on the next delivery. Repository listing reads every page, including installations covering more than 1,000 repositories. The full listing, including token minting, has a one-minute deadline. Repeated repository IDs or a listing that stops before GitHub's reported total fail explicitly. The source credential route mints directly against the approved repository IDs.
 
-If GitHub's repository listing fails during a repository-removal delivery, Sparkwing withdraws automation consent and schedules only for the positive repository IDs in `repositories_removed`. Unrelated repositories keep their schedules and consent. If the payload names no repositories or contains an invalid ID, Sparkwing preserves them all and records the delivery as failed for the admin's Process again action. A successful listing reconciles current coverage, so a late removal for a repository GitHub lists as covered leaves its schedules active.
+If GitHub's repository listing fails during a repository-removal delivery, Sparkwing withdraws automation consent and schedules only for the positive repository IDs in `repositories_removed`. Unrelated repositories keep their schedules and consent. If no receipt exists and the payload names no repositories or contains an invalid ID, Sparkwing preserves them all and records the delivery as failed for the admin's Process again action. A successful listing reconciles current coverage, so a late removal for a repository GitHub lists as covered leaves its schedules active.
 
 Schedule publication captures the repository's publication generation and original
 consent before fetching source. Its transaction checks both, then replaces the
 schedule set, advances the generation and records the result together.
 Withdrawals and consent changes advance the generation too. A worker holding an
 older source snapshot cannot restore declarations after a newer publication or
-withdrawal. Installation-wide withdrawal records its original repository targets
-and aggregate result in the same transaction. Reprocessing that delivery cannot
+withdrawal. Installation listing reconciliation and named-repository fallback
+share one withdrawal receipt, which records the original repository targets and
+aggregate result in the same transaction. Reprocessing that delivery cannot
 withdraw schedules or consent added later, even if the installation listing
-changes between attempts. These checks live in the store and apply across workers.
+changes or fails between attempts. A receipt that preserved a re-added repository
+keeps it active during a later listing outage. These checks live in the store and
+apply across workers.
 Disconnecting the installation during source preparation revokes the pending
 admission and publication. It cannot start a run or change schedules.
 

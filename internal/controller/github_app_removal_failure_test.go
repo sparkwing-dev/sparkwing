@@ -24,20 +24,28 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 	for _, tc := range []struct {
 		name, removed string
 		withdraw      bool
+		replay        bool
 	}{
-		{"named", `[{"id":701}]`, true},
-		{"empty", `[]`, false},
-		{"missing", `null`, false},
-		{"invalid", `[{"id":0}]`, false},
-		{"partly ambiguous", `[{"id":701},{"full_name":"acme/other"}]`, false},
+		{"named", `[{"id":701}]`, true, false},
+		{"empty", `[]`, false, false},
+		{"missing", `null`, false, false},
+		{"invalid", `[{"id":0}]`, false, false},
+		{"partly ambiguous", `[{"id":701},{"full_name":"acme/other"}]`, false, false},
+		{"malformed", `{"id":701}`, false, false},
+		{"replay after successful listing", `[{"id":701}]`, false, true},
+		{"replay ambiguous after successful listing", `[]`, false, true},
+		{"replay malformed after successful listing", `{"id":701}`, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, session := credentialSessionServer(t)
 			engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='member'`)
+			unavailable := !tc.replay
 			s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 				status, body := http.StatusBadGateway, "unavailable"
 				if r.URL.Path == "/app/installations/7/access_tokens" {
 					status, body = http.StatusCreated, `{"token":"token"}`
+				} else if r.URL.Path == "/installation/repositories" && !unavailable {
+					status, body = http.StatusOK, `{"total_count":2,"repositories":[{"id":701},{"id":702}]}`
 				}
 				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 			})}})
@@ -50,6 +58,32 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 			body := fmt.Sprintf(`{"action":"removed","installation":{"id":7},"repositories_removed":%s}`, tc.removed)
 			if err := s.operator.EnqueueGitHubDelivery(t.Context(), "removal", "installation_repositories", []byte(body), now); err != nil {
 				t.Fatal(err)
+			}
+			var receipt string
+			if tc.replay {
+				engineSQL(t, s.store, `CREATE TRIGGER fail_delivery_completion BEFORE UPDATE ON github_app_deliveries WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'crash before completion'); END`)
+				if outcome, err := s.processNextGitHubDelivery(t.Context(), now); err == nil || outcome == nil || outcome.failureReason() != "" {
+					t.Fatalf("completion failure: %+v, %v", outcome, err)
+				}
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT result FROM github_app_delivery_effects WHERE effect LIKE 'withdraw-installation:%'`).Scan(&receipt); err != nil {
+					t.Fatal(err)
+				}
+				engineSQL(t, s.store, `DROP TRIGGER fail_delivery_completion`)
+				now = now.Add(3 * time.Minute)
+				if outcome, err := s.processNextGitHubDelivery(t.Context(), now); err != nil || outcome != nil {
+					t.Fatalf("expired delivery retried automatically: %+v, %v", outcome, err)
+				}
+				r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/team/github-app/deliveries/removal/process-again", nil)
+				r.Header.Set("Origin", "https://controller.test")
+				r.Header.Set(csrfHeaderName, "session-csrf")
+				r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+				r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "session-csrf"})
+				w := httptest.NewRecorder()
+				s.Handler().ServeHTTP(w, r)
+				if w.Code != http.StatusNoContent {
+					t.Fatalf("process again: HTTP %d %s", w.Code, w.Body)
+				}
+				unavailable = true
 			}
 			outcome, err := s.processNextGitHubDelivery(t.Context(), now)
 			if err != nil || outcome == nil {
@@ -71,14 +105,20 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 					t.Fatalf("repository %d: declared=%d consent=%d, want %d", id, declared, consent, want)
 				}
 			}
-			if (outcome.failureReason() == "") != tc.withdraw {
+			if (outcome.failureReason() == "") != (tc.withdraw || tc.replay) {
 				t.Fatalf("removal failure reason = %q, withdrew = %t", outcome.failureReason(), tc.withdraw)
+			}
+			if tc.replay {
+				var after string
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT result FROM github_app_delivery_effects WHERE effect LIKE 'withdraw-installation:%'`).Scan(&after); err != nil || after != receipt {
+					t.Fatalf("withdrawal receipt changed: %q -> %q, %v", receipt, after, err)
+				}
 			}
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/team/github-app/deliveries/failed", nil)
 			r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
 			w := httptest.NewRecorder()
 			s.Handler().ServeHTTP(w, r)
-			if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "removal") == tc.withdraw {
+			if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "removal") == (tc.withdraw || tc.replay) {
 				t.Fatalf("admin failed deliveries: HTTP %d %s", w.Code, w.Body)
 			}
 		})

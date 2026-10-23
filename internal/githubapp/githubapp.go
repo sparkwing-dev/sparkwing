@@ -1,8 +1,8 @@
 // Package githubapp is the controller's client for its GitHub App: it signs
-// the App's own JWT, reads installations, mints installation tokens
-// restricted to approved repository IDs, redeems a user's authorization code, and
-// verifies webhook signatures. The App's private key never leaves this
-// package; callers receive only the short-lived tokens it mints.
+// the App's own JWT, reads installations, mints installation tokens, redeems a
+// user's authorization code, and verifies webhook signatures. Source-release
+// tokens are restricted to approved repository IDs. The App's private key never
+// leaves this package; callers receive only the short-lived tokens it mints.
 package githubapp
 
 import (
