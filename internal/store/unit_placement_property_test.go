@@ -15,6 +15,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+func TestCloudSizePreferenceIsRecordedOnAward(t *testing.T) {
+	s, demand, _ := meteredUnitFixture(t, true)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["sparkwing-16cpu"]},"prefers":{"value":["sparkwing-16cpu"]}}`))
+	indexFixtureUnit(t, s, "a", *demand.Target)
+	rates := CreditRateTable{{Cores: 16, MicroPerSecond: 40}}
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	if err := s.db.QueryRow(`SELECT placement_reason FROM nodes`).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != PlacementPreferred {
+		t.Fatalf("Cloud size preference recorded %q, want %q", reason, PlacementPreferred)
+	}
+}
+
 func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(213, 611))
 	for _, problem := range []string{"live", "stale", "stale_activity", "revoked", "expired", "foreign", "repository", "grant", "hard_selector", "deadline", "preferred_claimant", "granted_name"} {

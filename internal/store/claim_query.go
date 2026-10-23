@@ -130,8 +130,13 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 		}
 	}
 	profile = authenticatedClaimProfile(leaf, profile, f.HereRun != "")
-	profile.Labels, profile.OS, profile.Arch = match.SelfAsserted(demand.Labels), demand.OS, demand.Arch
-	f.Labels = slices.DeleteFunc(profile.Labels, func(label string) bool {
+	profile.Labels, profile.OS, profile.Arch = slices.Clone(demand.Labels), demand.OS, demand.Arch
+	if f.Cloud == 1 {
+		for _, size := range match.CloudSizes() {
+			profile.Labels = append(profile.Labels, size.Label)
+		}
+	}
+	f.Labels = slices.DeleteFunc(match.AuthenticatedLabels(profile), func(label string) bool {
 		return profile.OS != "" && strings.HasPrefix(label, "os=") || profile.Arch != "" && strings.HasPrefix(label, "arch=")
 	})
 	for key, value := range map[string]string{"name": profile.Name, "class": profile.Class, "location": profile.Location, "os": profile.OS, "arch": profile.Arch} {
@@ -142,15 +147,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	if profile.Class == match.ClassCoordinator {
 		f.Labels = append(f.Labels, "local", "location=coordinator")
 	}
-	if f.Cloud == 1 {
-		for _, size := range match.CloudSizes() {
-			f.Labels = append(f.Labels, size.Label)
-		}
-	}
 	f.Pools = slices.Clone(profile.ReservedPools)
-	for _, pool := range f.Pools {
-		f.Labels = append(f.Labels, "pool="+pool)
-	}
 	if profile.Accept != nil {
 		f.Accept = claimPatterns(profile.Accept.Patterns())
 		f.Filter = 1

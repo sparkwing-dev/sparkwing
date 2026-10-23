@@ -13,6 +13,24 @@ import (
 // explicitly required by the demand and present in AllowedPools. Matching a
 // different alternative in a selector never substitutes for that pool requirement.
 func Evaluate(profile Profile, demand Demand) Verdict {
+	profile.Labels = AuthenticatedLabels(profile)
+	if len(profile.ReservedPools) > 0 && !requiredReservation(profile.ReservedPools, demand) {
+		return Verdict{Reason: ReasonReservation}
+	}
+	return evaluateRequirements(profile, demand, false)
+}
+
+// PlacementPossible checks granted placement facts while treating ordinary labels
+// and platform requirements as satisfiable, without relying on online runners.
+// It uses the same AND/OR selector evaluation as eligibility.
+func PlacementPossible(profile Profile, selector []string) bool {
+	profile.Labels = AuthenticatedLabels(profile)
+	return evaluateRequirements(profile, Demand{Selector: selector}, true).OK()
+}
+
+// AuthenticatedLabels projects self-reported labels and granted pools, retaining
+// catalog size labels only for a Cloud profile.
+func AuthenticatedLabels(profile Profile) []string {
 	labels := profile.Labels
 	profile.Labels = SelfAsserted(profile.Labels)
 	if profile.Class == ClassCloud {
@@ -25,10 +43,7 @@ func Evaluate(profile Profile, demand Demand) Verdict {
 	for _, pool := range profile.ReservedPools {
 		profile.Labels = append(profile.Labels, "pool="+pool)
 	}
-	if len(profile.ReservedPools) > 0 && !requiredReservation(profile.ReservedPools, demand) {
-		return Verdict{Reason: ReasonReservation}
-	}
-	return evaluateRequirements(profile, demand)
+	return profile.Labels
 }
 
 func requiredReservation(pools []string, demand Demand) bool {

@@ -16,10 +16,7 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 	if !match.Evaluate(profile, demand).OK() {
 		return len(preferences)
 	}
-	profile.Labels = match.SelfAsserted(profile.Labels)
-	for _, pool := range profile.ReservedPools {
-		profile.Labels = append(profile.Labels, "pool="+pool)
-	}
+	profile.Labels = match.AuthenticatedLabels(profile)
 	for i, preference := range preferences {
 		if len(preference.Prefers) == 0 || slices.ContainsFunc(preference.Prefers, func(term string) bool {
 			return strings.TrimSpace(term) != "" && match.TermSatisfied(profile, term)

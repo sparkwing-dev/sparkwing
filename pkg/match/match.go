@@ -111,12 +111,12 @@ func (v Verdict) String() string {
 	return string(v.Reason)
 }
 
-func evaluateRequirements(p Profile, d Demand) Verdict {
+func evaluateRequirements(p Profile, d Demand, placementOnly bool) Verdict {
 	if p.Accept != nil && d.Repo != nil && !admitsRepo(p.Accept, *d.Repo, d.Trigger) {
 		return Verdict{Reason: ReasonRepo}
 	}
 	for _, term := range d.Selector {
-		if strings.TrimSpace(term) == "" || termSatisfied(p, term) {
+		if strings.TrimSpace(term) == "" || termSatisfied(p, term, placementOnly) {
 			continue
 		}
 		if placementTerm(term) {
@@ -129,7 +129,7 @@ func evaluateRequirements(p Profile, d Demand) Verdict {
 
 // TermSatisfied reports whether p satisfies one selector or preference term.
 func TermSatisfied(p Profile, term string) bool {
-	return strings.TrimSpace(term) == "" || termSatisfied(p, term)
+	return strings.TrimSpace(term) == "" || termSatisfied(p, term, false)
 }
 
 // SelfAsserted drops the labels an agent may not assert for itself: the fixed
@@ -139,11 +139,7 @@ func SelfAsserted(labels []string) []string {
 	out := make([]string, 0, len(labels))
 	for _, label := range labels {
 		label = strings.TrimSpace(label)
-		key, _, _ := strings.Cut(label, "=")
-		switch {
-		case strings.HasPrefix(label, "sparkwing-"):
-			continue
-		case label == "", label == "local", key == "location", key == "name", key == "class", key == "team", key == "pool":
+		if label == "" || placementLabel(label) {
 			continue
 		}
 		out = append(out, label)
@@ -162,13 +158,22 @@ func admitsRepo(filter RepoFilter, repo Repository, trigger bool) bool {
 	return !named || admitted
 }
 
-func termSatisfied(p Profile, term string) bool {
+func termSatisfied(p Profile, term string, placementOnly bool) bool {
 	for _, alt := range strings.Split(term, ",") {
-		if alt = strings.TrimSpace(alt); alt != "" && p.has(alt) {
+		if alt = strings.TrimSpace(alt); alt != "" && (placementOnly && !placementLabel(alt) || p.has(alt)) {
 			return true
 		}
 	}
 	return false
+}
+
+func placementLabel(label string) bool {
+	key, _, _ := strings.Cut(label, "=")
+	switch key {
+	case "name", "class", "team", "pool", "location":
+		return true
+	}
+	return label == "local" || strings.HasPrefix(label, "sparkwing-")
 }
 
 func placementTerm(term string) bool {
