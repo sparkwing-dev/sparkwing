@@ -30,6 +30,10 @@ Concurrent same-inode symlink swaps inside the checkout can go undetected.
 Tracked symlinks contribute their target text and entry type. Their target
 contents are never read. Missing or unreadable inputs fail on the host.
 
+Tree traversal keeps directory handles open along the current path. Deeply nested
+trees can exhaust the host's file-descriptor limit and fail the job. Raise that
+limit or narrow the tree input before retrying.
+
 Patterns without a slash match basenames anywhere. A trailing slash matches a
 literal directory prefix from the checkout root, so `cache/` excludes
 `cache/data` but keeps `nested/cache/data`. Other patterns match full paths,

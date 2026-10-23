@@ -17,6 +17,7 @@ import (
 
 func testGoSDKReplyResultReuse(t *testing.T) {
 	t.Run("hello-required-fields", func(t *testing.T) {
+		recordLeaf(t)
 		var greeting nodeproto.HelloResult
 		complete := nodeproto.Reply{ID: "first", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go","version":"v1"},"features":[]}`)}
 		if err := complete.Decode(&greeting); err != nil {
@@ -28,6 +29,7 @@ func testGoSDKReplyResultReuse(t *testing.T) {
 		}
 	})
 	t.Run("success-after-failure", func(t *testing.T) {
+		recordLeaf(t)
 		result := nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "prior failure"}}
 		reply := nodeproto.Reply{ID: "next", OK: true, Result: json.RawMessage(`{"outcome":"success","output":null}`)}
 		if err := reply.Decode(&result); err != nil || result.Outcome != "success" || result.Error != nil || string(result.Output) != "null" {
@@ -50,6 +52,7 @@ func testGoSDKRequiredDescribeFields(t *testing.T) {
 		"risk-labels":       `{"pipelines":[{"name":"build","args":[],"risks_by_step":[{"job_id":"build","step_id":"run"}]}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			recordLeaf(t)
 			var describe nodeproto.DescribeDoc
 			err := (nodeproto.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe)
 			if !errors.Is(err, nodeproto.ErrMalformed) {
@@ -70,6 +73,7 @@ func testGoSDKRequiredDescribeFields(t *testing.T) {
 }
 
 func testGoSDKProcessOutputEncodingFailure(t *testing.T) {
+	recordLeaf(t)
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	t.Cleanup(func() { _ = host.Close() })
 	plan := sparkwing.NewPlan()
@@ -106,6 +110,7 @@ func testGoSDKOutputFailures(t *testing.T) {
 		{name: "unavailable", err: &apierr.Error{Code: apierr.Unavailable, Message: "fixture unavailable"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			recordLeaf(t)
 			host := sparkwingtest.New(sparkwingtest.Options{
 				Latest:      func(context.Context, string, string) (json.RawMessage, error) { return test.raw, test.err },
 				RunPipeline: func(context.Context, string, map[string]string) (json.RawMessage, error) { return test.raw, test.err },
@@ -142,6 +147,7 @@ func testGoSDKOutputFailures(t *testing.T) {
 		{name: "null-string", raw: json.RawMessage(`"null"`), want: "null"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			recordLeaf(t)
 			host := sparkwingtest.New(sparkwingtest.Options{
 				Outputs: map[string]json.RawMessage{"output": test.raw},
 				Latest: func(context.Context, string, string) (json.RawMessage, error) {

@@ -29,6 +29,7 @@ func testGoSDKPlanErrorMasks(t *testing.T) {
 		{"distinct", map[string]string{"fail": "true", "first": "first-secret", "second": "second-secret"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			recordLeaf(t)
 			host := sparkwingtest.New(sparkwingtest.Options{})
 			t.Cleanup(func() { _ = host.Close() })
 			_, err := host.Plan(t.Context(), protocolgo.PlanErrorName, test.args)

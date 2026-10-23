@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"bytes"
@@ -11,24 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-// ConfigBoundaryScenarios identifies executable parser proofs. Placement drivers
-// still own file acquisition, intake and resolved-setting consumption.
-func ConfigBoundaryScenarios() []string {
-	return []string{"surface-config-decoder-boundaries", "surface-config-final-schema"}
-}
-
-// CheckConfigBoundary exercises the shared decoders against independent fixtures.
-func CheckConfigBoundary(scenarioID string) error {
-	switch scenarioID {
-	case "surface-config-decoder-boundaries":
-		return configDecoderBoundaries()
-	case "surface-config-final-schema":
-		return configFinalSchema()
-	default:
-		return fmt.Errorf("no config boundary proof for %q", scenarioID)
-	}
-}
 
 func configDecoderBoundaries() error {
 	for _, test := range []struct {

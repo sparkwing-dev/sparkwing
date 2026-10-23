@@ -57,6 +57,8 @@ func enterSandbox() string {
 		"HOME":            home,
 		"SPARKWING_HOME":  filepath.Join(home, ".sparkwing"),
 		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+		// Go telemetry starts detached uploaders that can recreate a removed home.
+		"TEST_TELEMETRY_DIR": os.DevNull,
 	}
 	if runtime.GOOS == "windows" {
 		env["USERPROFILE"] = home

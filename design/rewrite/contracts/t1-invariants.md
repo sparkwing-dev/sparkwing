@@ -1,8 +1,10 @@
 # Required invariants and execution dimensions
 
+This is a requirements matrix, not executed coverage. Historical scenario names identify requirements only. See [acceptance execution evidence](t1-acceptance.md) for the result contract.
+
 Each row binds an architecture requirement to a concrete assertion excerpt and its required execution dimensions. The baseline is independent of runtime selection: narrowing a scenario's applicability or deleting a target cannot reduce these requirements. An excerpt identifies exactly one assertion within the named scenario. Multiple rows retain separate obligations of a decision; they do not imply that a single excerpt proves every clause of that decision.
 
-A1-A73 refer to the frozen architecture's decision register. Decisions 101-103 supersede the old N/N-1 compatibility statement with SDK-pinned matching engines, verified release/version policy and the twelve-month controller API promise. Decision 104 requires both SDKs on native Windows. These are acceptance obligations, not claims of executed product coverage: product skeletons stay skipped until their owning implementations land.
+A1-A73 refer to the frozen architecture's decision register. Decisions 101-103 supersede the old N/N-1 compatibility statement with SDK-pinned matching engines, verified release/version policy and the twelve-month controller API promise. Decision 104 requires both SDKs on native Windows. These are acceptance obligations, not claims of executed product coverage: unimplemented requirements have no execution evidence.
 
 `all` requires every supported value in the independent target matrix. Explicit lists constrain only the named dimension; all other dimensions still apply. The 34 cells cover both SDKs on native Linux/macOS/Windows for local, locally triggered, runner-hosted and here execution; native Linux/Windows Actions; Linux standalone CI; and launcher execution on both state/blob backend pairs. Launch receipts must execute these cells; a metadata guard alone cannot establish product correctness.
 

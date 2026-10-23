@@ -30,6 +30,7 @@ func (ctx *maskAdmissionContext) Err() error {
 }
 
 func testGoSDKMaskCannotCommitAfterClose(t *testing.T) {
+	recordLeaf(t)
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	t.Cleanup(func() { _ = host.Close() })
 	ctx := &maskAdmissionContext{
@@ -105,6 +106,7 @@ func testGoSDKClosedFakeHostServices(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			recordLeaf(t)
 			if err := call(); !errors.Is(err, context.Canceled) {
 				t.Fatalf("closed fixture service = %v, want cancellation", err)
 			}
@@ -125,9 +127,13 @@ func testGoSDKFakeHostCloseJoinsWork(t *testing.T) {
 		operation string
 		detached  bool
 	}{
-		{operation: "step"}, {operation: "eval"}, {operation: "oidc"},
-		{operation: "latest"}, {operation: "child"},
-		{operation: "oidc", detached: true}, {operation: "latest", detached: true},
+		{operation: "step"},
+		{operation: "eval"},
+		{operation: "oidc"},
+		{operation: "latest"},
+		{operation: "child"},
+		{operation: "oidc", detached: true},
+		{operation: "latest", detached: true},
 		{operation: "child", detached: true},
 	} {
 		name := tc.operation
@@ -135,6 +141,7 @@ func testGoSDKFakeHostCloseJoinsWork(t *testing.T) {
 			name += "-detached"
 		}
 		t.Run(name, func(t *testing.T) {
+			recordLeaf(t)
 			synctest.Test(t, func(t *testing.T) {
 				started, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 				abort := make(chan struct{})
@@ -216,6 +223,7 @@ func testGoSDKFakeHostCloseJoinsWork(t *testing.T) {
 }
 
 func testGoSDKQueuedEvalCancellation(t *testing.T) {
+	recordLeaf(t)
 	synctest.Test(t, func(t *testing.T) {
 		host := sparkwingtest.New(sparkwingtest.Options{})
 		defer host.Close()

@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func TestDefaultFixtureClockUsesGoTime(t *testing.T) {
+func TestDefaultFixtureClockDoesNotConsumeAuthorityDuringSetup(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "state.db")
 		s, err := teststore.Open(path)
@@ -34,14 +34,16 @@ func TestDefaultFixtureClockUsesGoTime(t *testing.T) {
 				t.Error(err)
 			}
 		})
+		opened := teststore.Now(s)
+		time.Sleep(24 * time.Hour)
 		snapshot, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{
 			Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(raw)),
 		}, capability.RequestEvidence{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !snapshot.Now.Equal(time.Now()) {
-			t.Fatalf("fixture clock = %s, Go clock = %s", snapshot.Now, time.Now())
+		if !snapshot.Now.Equal(opened) {
+			t.Fatalf("fixture clock advanced during setup: %s, want %s", snapshot.Now, opened)
 		}
 	})
 }

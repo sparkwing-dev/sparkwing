@@ -10,6 +10,7 @@ import (
 )
 
 func testGoSDKRetryStepOutputs(t *testing.T) {
+	recordLeaf(t)
 	bin, cleanup, err := acceptance.BuildGoSDKFixture(t.Context())
 	if err != nil {
 		t.Fatal(err)

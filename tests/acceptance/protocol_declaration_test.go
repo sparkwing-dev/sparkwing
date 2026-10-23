@@ -76,6 +76,7 @@ func testGoSDKDeclarationServices(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	for _, service := range []string{"secret", "variable", "output", "latest", "child", "oidc", "mask", "annotation"} {
 		t.Run(service, func(t *testing.T) {
+			recordLeaf(t)
 			_, err := host.Plan(t.Context(), "acceptance-declaration-services", map[string]string{"service": service})
 			code := apierr.PlanFailed
 			if service == "output" || service == "latest" || service == "annotation" {

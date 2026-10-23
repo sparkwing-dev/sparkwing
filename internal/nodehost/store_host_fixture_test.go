@@ -211,7 +211,11 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 
 	f.State = &hostState{Tenant: tenant}
 	f.Host = OwnerHost{executionAdmission: ComposeStartGate(tenant, nil, false), Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
-		return database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
+		beat, err := database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
+		if err == nil {
+			beat.ExpiresAt = time.Now().Add(beat.ExpiresAt.Sub(teststore.Now(database)))
+		}
+		return beat, err
 	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }}
 	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil

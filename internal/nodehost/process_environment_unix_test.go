@@ -93,11 +93,11 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 				err = json.Unmarshal(reply.Result, &reported)
 				for _, entry := range reported {
 					name, _, _ := strings.Cut(entry, "=")
-					if !slices.Contains([]string{"SPARKWING_TESTLEAK_HOST", "HOME", "SPARKWING_HOME", "XDG_CONFIG_HOME"}, name) {
+					if !slices.Contains([]string{"SPARKWING_TESTLEAK_HOST", "HOME", "SPARKWING_HOME", "XDG_CONFIG_HOME", "TEST_TELEMETRY_DIR"}, name) {
 						actual = append(actual, entry)
 					}
 				}
-				if err != nil || !reflect.DeepEqual(actual, want) || !slices.Contains(reported, "SPARKWING_TESTLEAK_HOST="+exe) {
+				if err != nil || !reflect.DeepEqual(actual, want) || !slices.Contains(reported, "SPARKWING_TESTLEAK_HOST="+exe) || !slices.Contains(reported, "TEST_TELEMETRY_DIR="+os.DevNull) {
 					t.Fatalf("environment=%v error=%v", actual, err)
 				}
 				if err := process.Close(); err != nil || revoked != 1 || session.cmd.ProcessState == nil {

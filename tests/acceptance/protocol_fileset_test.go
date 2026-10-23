@@ -36,6 +36,7 @@ func testGoSDKFilesetPathNames(t *testing.T) {
 					name = "tracked"
 				}
 				t.Run(name, func(t *testing.T) {
+					recordLeaf(t)
 					dir := t.TempDir()
 					command := exec.CommandContext(t.Context(), "git", "init", "--quiet", dir)
 					if output, err := command.CombinedOutput(); err != nil {
@@ -76,6 +77,7 @@ func testGoSDKFilesetIgnoreReadFailure(t *testing.T) {
 			name = "empty-context"
 		}
 		t.Run(name, func(t *testing.T) {
+			recordLeaf(t)
 			dir := t.TempDir()
 			command := exec.CommandContext(t.Context(), "git", "init", "--quiet", dir)
 			if output, err := command.CombinedOutput(); err != nil {
