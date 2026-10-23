@@ -92,10 +92,10 @@ func (i *Issuer) CodeSignedBy(signer *rsa.PrivateKey, p Person, verifier, redire
 	return i.code(p, verifier, redirectURI, nil, signer)
 }
 
-// IDToken returns an ID token about p signed by the published key, for a
-// test that calls Verify directly. claims and head override the token's
-// claims and JOSE header the way CodeWith does, which is how a test builds a
-// token naming another algorithm or an unpublished key id.
+// IDToken returns an ID token about p signed by the published key. claims and
+// head override the token's claims and JOSE header as CodeWith does, so a test
+// can build a token naming another algorithm or an unpublished key ID and
+// return it from the token endpoint.
 func (i *Issuer) IDToken(t testing.TB, p Person, claims, head map[string]any) string {
 	t.Helper()
 	token, err := i.sign(i.signer.Key, head, i.claims(p, claims))

@@ -14,10 +14,7 @@ internal/controller/client	2
 internal/egress	1
 internal/engine	5
 # apiError.Error: implements error; callers use the error interface.
-# Client.InstallationToken: external tests need githubapptest, which imports githubapp.
-internal/githubapp	2
-# Client.Verify: external tests need googletest, which imports googleauth.
-internal/googleauth	1
+internal/githubapp	1
 # Error.Error: implements error; callers use the error interface.
 internal/gotoolchain	1
 # CancelError.Error: implements error; callers use the error interface.

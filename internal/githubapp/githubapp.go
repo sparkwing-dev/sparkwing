@@ -387,11 +387,11 @@ func (c *Client) RepositoryInstallation(ctx context.Context, owner, name string)
 	return inst, err
 }
 
-// InstallationToken mints a token for installation restricted to the named
+// installationToken mints a token for installation restricted to the named
 // repositories (each without its owner) and to permissions, such as
 // {"contents": "read"}. GitHub refuses a repository the installation does not
 // cover, which surfaces as ErrNotInstalled.
-func (c *Client) InstallationToken(ctx context.Context, installation int64, repositories []string, permissions map[string]string) (Token, error) {
+func (c *Client) installationToken(ctx context.Context, installation int64, repositories []string, permissions map[string]string) (Token, error) {
 	// safety: GitHub reads an empty list as every repository the installation
 	// covers, so a token is never minted without naming what it reads.
 	if len(repositories) == 0 || slices.Contains(repositories, "") || len(permissions) == 0 {
@@ -400,8 +400,8 @@ func (c *Client) InstallationToken(ctx context.Context, installation int64, repo
 	return c.mintToken(ctx, installation, map[string]any{"repositories": repositories, "permissions": permissions}, permissions)
 }
 
-// InstallationTokenByIDs is [Client.InstallationToken] for repositories named
-// by their GitHub IDs, which a rename or a reused name cannot redirect.
+// InstallationTokenByIDs mints a token restricted to repository IDs and
+// permissions, so a rename or a reused name cannot redirect it.
 func (c *Client) InstallationTokenByIDs(ctx context.Context, installation int64, ids []int64, permissions map[string]string) (Token, error) {
 	if len(ids) == 0 || slices.Contains(ids, 0) || len(permissions) == 0 {
 		return Token{}, errors.New("githubapp: an installation token needs its repository ids and permissions")
@@ -496,7 +496,7 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	if ref != "HEAD" && !runspec.IsCommitID(ref) && !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") {
 		return "", errors.New("githubapp: source ref must be qualified")
 	}
-	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+	tok, err := c.installationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
 	if err != nil {
 		return "", err
 	}
@@ -588,7 +588,7 @@ type RepositoryFileSnapshot struct {
 }
 
 func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owner, repo, file string) (RepositoryFileSnapshot, error) {
-	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+	tok, err := c.installationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
 	if err != nil {
 		return RepositoryFileSnapshot{}, err
 	}

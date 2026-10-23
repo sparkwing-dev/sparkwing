@@ -31,27 +31,23 @@ func fixture(t *testing.T) (*githubapptest.GitHub, *githubapp.Client) {
 	return gh, githubapp.New(gh.Config())
 }
 
-func TestInstallationToken_CoversOnlyTheNamedRepository(t *testing.T) {
+func TestResolveCommitRestrictsTheTokenToTheNamedRepository(t *testing.T) {
 	gh, c := fixture(t)
-	tok, err := c.InstallationToken(context.Background(), 7, []string{"widgets"}, map[string]string{"contents": "read"})
-	if err != nil {
-		t.Fatalf("InstallationToken: %v", err)
-	}
-	if !gh.TokenCovers(tok.Token, "acme/widgets") {
-		t.Fatal("the token does not read the repository it was minted for")
-	}
-	if gh.TokenCovers(tok.Token, "acme/secret-plans") {
-		t.Fatal("a token minted for acme/widgets reads acme/secret-plans")
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	gh.SetCommit("acme/widgets", "heads/main", sha)
+	got, err := c.ResolveCommit(context.Background(), 7, "acme", "widgets", "refs/heads/main")
+	if err != nil || got != sha {
+		t.Fatalf("ResolveCommit = %q, %v, want %q", got, err, sha)
 	}
 	minted := gh.Minted()
-	if len(minted) != 1 || len(minted[0].Repositories) != 1 || minted[0].Permissions["contents"] != "read" || len(minted[0].Permissions) != 1 {
+	if len(minted) != 1 || len(minted[0].Repositories) != 1 || minted[0].Repositories[0] != "widgets" || len(minted[0].RepositoryIDs) != 0 || minted[0].Permissions["contents"] != "read" || len(minted[0].Permissions) != 1 {
 		t.Fatalf("the token request asked for %+v, want one repository and contents:read only", minted)
 	}
 }
 
-func TestInstallationToken_RepositoryOutsideTheInstallationIsNotInstalled(t *testing.T) {
+func TestResolveCommitRefusesARepositoryOutsideTheInstallation(t *testing.T) {
 	_, c := fixture(t)
-	_, err := c.InstallationToken(context.Background(), 7, []string{"elsewhere"}, map[string]string{"contents": "read"})
+	_, err := c.ResolveCommit(context.Background(), 7, "acme", "elsewhere", "refs/heads/main")
 	if !errors.Is(err, githubapp.ErrNotInstalled) {
 		t.Fatalf("err = %v, want ErrNotInstalled", err)
 	}
@@ -119,7 +115,7 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	ctx := context.Background()
 	run := githubapp.CheckRun{Name: "sparkwing/build", HeadSHA: "0123456789abcdef0123456789abcdef01234567", Status: "queued"}
 
-	statuses, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"statuses": "write"})
+	statuses, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"statuses": "write"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +124,15 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	}
 
 	gh.SetChecksGranted(7, false)
-	if _, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"checks": "write"}); !errors.Is(err, githubapp.ErrPermissionMissing) {
+	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"checks": "write"}); !errors.Is(err, githubapp.ErrPermissionMissing) {
 		t.Fatalf("checks token on an installation without the permission = %v, want ErrPermissionMissing", err)
 	}
-	if _, err := c.InstallationToken(ctx, 7, []string{"elsewhere"}, map[string]string{"statuses": "write"}); !errors.Is(err, githubapp.ErrNotInstalled) {
+	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{999}, map[string]string{"statuses": "write"}); !errors.Is(err, githubapp.ErrNotInstalled) {
 		t.Fatalf("control: a repository outside the installation = %v, want ErrNotInstalled", err)
 	}
 
 	gh.SetChecksGranted(7, true)
-	checks, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"checks": "write"})
+	checks, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"checks": "write"})
 	if err != nil {
 		t.Fatal(err)
 	}

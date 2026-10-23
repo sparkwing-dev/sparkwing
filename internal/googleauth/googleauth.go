@@ -153,7 +153,7 @@ func (c *Client) Exchange(ctx context.Context, code, verifier, redirectURI strin
 	if body.IDToken == "" {
 		return Claims{}, fmt.Errorf("%w: google returned no id token", ErrRejected)
 	}
-	return c.Verify(ctx, body.IDToken)
+	return c.verify(ctx, body.IDToken)
 }
 
 type idClaims struct {
@@ -170,9 +170,9 @@ type idClaims struct {
 	HD            string        `json:"hd"`
 }
 
-// Verify checks an ID token's signature, issuer, audience, expiry and email
+// verify checks an ID token's signature, issuer, audience, expiry and email
 // verification, in that order, and returns its claims.
-func (c *Client) Verify(ctx context.Context, token string) (Claims, error) {
+func (c *Client) verify(ctx context.Context, token string) (Claims, error) {
 	var cl idClaims
 	if err := c.keys.Verify(ctx, token, &cl); err != nil {
 		if errors.Is(err, jwks.ErrRejected) {
