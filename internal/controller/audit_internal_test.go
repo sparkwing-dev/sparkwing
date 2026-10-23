@@ -117,7 +117,7 @@ func TestClientClassNeverCarriesTheRawUserAgent(t *testing.T) {
 func TestAuditFormatsCredentialsInEveryField(t *testing.T) {
 	for _, prefix := range capability.CredentialPrefixes() {
 		credential := prefix + strings.Repeat("x", 43)
-		value := strings.Repeat("a", 110) + credential
+		value := strings.Repeat("a", 110) + credential + "/" + strings.Repeat("z", 1<<20)
 		h, logs := auditHarness(t, value, func(w http.ResponseWriter, r *http.Request) {
 			notePolicyPrincipal(r.Context(), capability.Principal{Capability: capability.Capability{Team: value, Subject: capability.Subject{Kind: capability.SubjectKind(value), ID: value}}})
 			noteAuditTarget(r.Context(), "machine_id", value)
@@ -129,6 +129,9 @@ func TestAuditFormatsCredentialsInEveryField(t *testing.T) {
 			got, _ := records[0][key].(string)
 			if strings.Contains(got, prefix+"x") || !strings.Contains(got, "[credential:") {
 				t.Errorf("%s contains unsanitized credential: %q", key, got)
+			}
+			if len(got) > 256 || !strings.HasSuffix(got, "[truncated]") {
+				t.Errorf("%s length = %d, want at most 256 bytes with truncation marker", key, len(got))
 			}
 		}
 	}

@@ -206,7 +206,7 @@ func sanitizedMissingPath(path string, mask func(string) string) string {
 		previous = value
 		parts[i] = url.PathEscape(pathCredential.ReplaceAllString(mask(value), "[redacted]"))
 	}
-	return strings.Join(parts, "/")
+	return truncateLogValue(strings.Join(parts, "/"), maxLogValue)
 }
 
 func auditedRead(route string) bool {

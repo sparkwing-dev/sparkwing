@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
@@ -120,6 +122,41 @@ func TestControllerLogsKeepTokenPrefixListBound(t *testing.T) {
 	if len(records) != 1 || records[0]["machine_id"] != "worker" || records[0]["token_prefixes"] != prefixes[:maxAuditValue] {
 		t.Fatalf("machine removal prefix list lost its bound: %s", &logs)
 	}
+}
+
+func TestControllerLogsBoundStringsAfterCredentialFormatting(t *testing.T) {
+	var logs bytes.Buffer
+	s := New(nil, slog.New(slog.NewJSONHandler(&logs, nil)))
+	// A credential crossing the limit must be fingerprinted before truncation.
+	value := strings.Repeat("a", 240) + "swk_" + strings.Repeat("x", 43) + "/" + strings.Repeat("z", 1<<20)
+	s.logger.With("attached", value).WithGroup("outer").Info(value,
+		"plain", value, "bytes", []byte(value), "err", fmt.Errorf("failed: %s", value),
+		"list", []string{value}, "lazy", credentialLogValue(value),
+		slog.Group("group", "inside", value), "unicode", strings.Repeat("界", 100))
+	var record map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	var check func(any, int)
+	check = func(v any, limit int) {
+		switch v := v.(type) {
+		case string:
+			if len(v) > limit || !strings.HasSuffix(v, "[truncated]") || !utf8.ValidString(v) || strings.Contains(v, "swk_x") {
+				t.Errorf("unsafe or unbounded string: length=%d, limit=%d", len(v), limit)
+			}
+		case map[string]any:
+			for _, child := range v {
+				check(child, limit)
+			}
+		case []any:
+			for _, child := range v {
+				check(child, limit)
+			}
+		}
+	}
+	check(record["msg"], 1024)
+	check(record["attached"], 256)
+	check(record["outer"], 256)
 }
 
 func BenchmarkControllerLog(b *testing.B) {
