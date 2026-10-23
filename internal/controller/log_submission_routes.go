@@ -143,10 +143,6 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request, a capab
 	if err != nil {
 		return engineLookupError(err)
 	}
-	objects, err := s.submissionObjects()
-	if err != nil {
-		return err
-	}
 	for i := range body.Segments {
 		key, err := blob.LogObjectKey(subject, class, body.Segments[i].Index)
 		if err != nil {
@@ -157,13 +153,16 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request, a capab
 		}
 		body.Segments[i].ObjectKey = key
 	}
-	reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{store.LogSegments{Subject: subject, Segments: body.Segments}}}
-	offset := int64(0)
 	if len(body.Segments) > 0 {
-		offset = body.Segments[0].Offset
-	}
-	if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
-		return err
+		objects, err := s.submissionObjects()
+		if err != nil {
+			return err
+		}
+		reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{store.LogSegments{Subject: subject, Segments: body.Segments}}}
+		offset := body.Segments[0].Offset
+		if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
+			return err
+		}
 	}
 	if err := tenant.RecordSegments(r.Context(), store.SegmentCommit{Subject: subject, Actor: actor, Segments: body.Segments, Final: body.Final, IncompleteReason: body.IncompleteReason, RetentionClass: class}); err != nil {
 		return engineLookupError(err)

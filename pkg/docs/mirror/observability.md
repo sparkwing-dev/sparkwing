@@ -53,6 +53,19 @@ Sizing reset selects `--reset --pipeline NAME` or
 Its HTTP adapter returns `policy_missing` because the route contract has no
 authorized reset operation. It changes no state.
 
+## Incomplete logs
+
+A log storage failure does not change the job's result or refuse plan acceptance,
+expansion acceptance, run completion, or node reporting. The host emits a
+`run logs incomplete` operator error with the run identity, node when known, and
+a masked error. A failed stream is recorded as incomplete. Streams that cannot publish
+their final manifest are sealed incomplete by log maintenance after the writer
+ends. If the controller cannot be reached, the host reports the loss in its
+operator log and tries to record the incomplete stream once at closure.
+
+Secret masking and required output verification still govern execution. A log
+outage does not relax either check.
+
 ## Observational state-write failures
 
 The node log emits a `state_write_failed` warning when a step lifecycle,
@@ -599,7 +612,7 @@ in-process counter, so they survive a controller restart.
 
 Every object-store client a Sparkwing process builds draws on one
 request budget. The budget counts `put`, `get`, `list` and `delete`
-separately, each against a per-minute rate and a per-day total. A class
+separately, each against a per-minute rate and an optional per-day total. A class
 that spends either budget trips: further requests of that class are
 refused with an error naming the class and the limit, and nothing is
 queued. Classes are independent, so a tripped `put` budget leaves reads
@@ -611,23 +624,25 @@ units, which is what the object store charges for.
 
 The guard exists because a retry loop against a failing bucket bills per
 request and the bill arrives hours later. Defaults sit far above normal
-load and far below a loop with no sleep:
+load and far below a loop with no sleep. Shared daily stops are off by
+default: ordinary enforcement uses per-team budgets. Operators can enable
+a shared daily stop as an emergency cost brake:
 
 | Class | Per minute | Per day |
 |--------|------|-------------|
-| `put` | 1200 | 200000 |
-| `get` | 3000 | 500000 |
-| `list` | 600 | 100000 |
-| `delete` | 600 | 100000 |
+| `put` | 1200 | unlimited |
+| `get` | 3000 | unlimited |
+| `list` | 600 | unlimited |
+| `delete` | 600 | unlimited |
 
 Override any of them on the controller with `--object-store-budget`, a
 comma-separated list of `class:window=count` entries such as
-`put:minute=600,get:day=0`, where the class is `put`, `get`, `list` or
+`put:minute=600,put:day=200000`, where the class is `put`, `get`, `list` or
 `delete` and the window is `minute` or `day`. A count of `0` removes that
 budget. Every other process runs on the built-in budgets.
 A class tripped by its per-minute rate clears when that minute rolls, so
-one burst costs a minute of refusals rather than a day of them; the day
-budget still bounds the total. A class tripped by its per-day budget
+one burst costs a minute of refusals rather than a day of them. An opt-in day
+budget bounds the total. A class tripped by its per-day budget
 clears when the day window rolls, or earlier with a reset.
 
 ### One budget per process

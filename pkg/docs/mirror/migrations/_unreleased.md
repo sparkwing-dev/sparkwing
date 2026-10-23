@@ -3046,7 +3046,9 @@ upgrading:
   scope. Team repository registration or live App installation coverage
   authorizes an explicit repository. A child in another repository always
   runs as asserted. Children nest at most 10 levels deep counting the root and one
-  root starts at most 50 children, retries excluded; past either bound intake
+  root uses the team-set child ceiling (default 50, retries excluded). Team admins
+  change it with `team settings set --profile work --max-children-per-root 200`
+  or in Team settings; changes are audited. Past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
   child spends the admission budget recorded on its parent. App and schedule
   roots use the team bucket for flood and hourly limits. A retry charges the retrier and its

@@ -150,8 +150,6 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 		return errors.Join(prior, err)
 	}
 	errs := []error{prior}
-	ledger := newTeamFaultLedger(nodes.Items)
-	ledger.record(prior)
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
 		namespace := node.Annotations[reservationNamespaceAnnotation]
@@ -162,28 +160,23 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 			continue
 		}
 		held, binding, ok := nodeReservation(node)
-		if !ok {
-			ledger.record(&nodeFault{node: node.Name, cause: "reservation is malformed or does not match its award"})
-		}
 		if !ownsNodeReservation(node, l.Config.Namespace) {
+			if !ok {
+				errs = append(errs, &nodeFault{node: node.Name, cause: "reservation is malformed or does not match its award"})
+			}
 			continue
 		}
 		if !ok {
-			err := ledger.quarantine(ctx, l.Kube, node, "reservation is malformed or does not match its award")
-			ledger.record(err)
+			err := quarantineNode(ctx, l.Kube, node, "reservation is malformed or does not match its award")
 			errs = append(errs, err)
 			continue
 		}
 		refused, err := l.releaseOrphan(ctx, held, binding)
 		if refused {
-			err = ledger.quarantine(ctx, l.Kube, node, "controller refused the reservation's award")
+			err = quarantineNode(ctx, l.Kube, node, "controller refused the reservation's award")
 		}
-		ledger.record(err)
 		errs = append(errs, err)
 	}
-	l.mu.Lock()
-	l.blockedTeamLabels = ledger.blockedLabels()
-	l.mu.Unlock()
 	return errors.Join(errs...)
 }
 
@@ -213,9 +206,6 @@ func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, 
 	return held, binding, held.NodeName == node.Name && held.NodeUID == string(node.UID) && held.Team != "" && held.Team == binding.Team && node.Labels[TeamNodeLabel] == TeamNodeValue(node.Annotations[reservationNamespaceAnnotation], held.Team) &&
 		held.Award == lease && lease.Kind != "" && lease.ID != "" && lease.Holder != "" && lease.Generation > 0 && held.JobName == jobName(binding) && held.ReservationID != ""
 }
-
-// maxQuarantinesPerSync is the contained-fault budget before a team stops claiming.
-const maxQuarantinesPerSync = 3
 
 // safety: each orphaned reservation gets its own controller call, so a refused
 // award names only the node that recorded it.

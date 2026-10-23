@@ -110,25 +110,13 @@ type Config struct {
 	Ceiling CeilingConfig
 }
 
-// Default budgets. The per-minute rates sit an order of magnitude above
-// a busy controller, which writes one object per log append, and far
-// below a retry loop with no sleep, which issues thousands of requests
-// a second and so trips in under two seconds. Each day budget is about
-// 150 times its minute rate, roughly two and a half hours at sustained
-// peak, so a leak that stays under the minute rate is still caught the
-// same day.
+// Default minute rates stop runaway retry loops. Shared daily budgets are
+// opt-in emergency brakes; ordinary enforcement uses per-team budgets.
 const (
-	defaultPutPerMinute = 1200
-	defaultPutPerDay    = 200000
-
-	defaultGetPerMinute = 3000
-	defaultGetPerDay    = 500000
-
-	defaultListPerMinute = 600
-	defaultListPerDay    = 100000
-
+	defaultPutPerMinute    = 1200
+	defaultGetPerMinute    = 3000
+	defaultListPerMinute   = 600
 	defaultDeletePerMinute = 600
-	defaultDeletePerDay    = 100000
 )
 
 // defaultConfig returns the built-in budgets.
@@ -137,10 +125,10 @@ func defaultConfig() Config {
 		Enabled: true,
 		Reset:   tripResetDay,
 		Limits: map[Class]Limit{
-			classPut:    {PerMinute: defaultPutPerMinute, PerDay: defaultPutPerDay},
-			classGet:    {PerMinute: defaultGetPerMinute, PerDay: defaultGetPerDay},
-			ClassList:   {PerMinute: defaultListPerMinute, PerDay: defaultListPerDay},
-			classDelete: {PerMinute: defaultDeletePerMinute, PerDay: defaultDeletePerDay},
+			classPut:    {PerMinute: defaultPutPerMinute},
+			classGet:    {PerMinute: defaultGetPerMinute},
+			ClassList:   {PerMinute: defaultListPerMinute},
+			classDelete: {PerMinute: defaultDeletePerMinute},
 		},
 	}
 }

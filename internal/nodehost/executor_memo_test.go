@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -264,6 +265,63 @@ func TestExecutorMemoPropagatesLookupAndCopyFenceRefusals(t *testing.T) {
 			_, result, err := host.memo(t.Context(), session, input, job, spec)
 			if !errors.Is(err, refusal) || result != nil {
 				t.Fatalf("%s refusal became fresh execution: result=%+v error=%v", stage, result, err)
+			}
+		})
+	}
+}
+
+func TestMemoPublicationAndWarningFailurePreserveJobResult(t *testing.T) {
+	for _, requiredOutput := range []bool{false, true} {
+		t.Run(fmt.Sprint(requiredOutput), func(t *testing.T) {
+			input, state, deps, _ := executorFixture(t)
+			job := &input.Accepted.Plan.Jobs[0]
+			job.Memo = &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "const", Value: "key"}}
+			if requiredOutput {
+				job.ResultStep = "body"
+			}
+			hash, _ := runspec.CanonicalHash(input.Accepted.Plan)
+			jobHash, _ := runspec.CanonicalHash(*job)
+			input.Accepted.PlanHash, input.SpecHash = string(hash), string(jobHash)
+			state.row.Spec, _ = json.Marshal(*job)
+			state.row.SpecHash = input.SpecHash
+			var spec runspec.Spec
+			_ = json.Unmarshal(input.Accepted.Spec, &spec)
+			spec.PlanHash = hash
+			spec.Resolved.Settings.Options.NoMemo.Value = true
+			input.Accepted.Spec, _ = json.Marshal(spec)
+			state.accepted = &input.Accepted
+			deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
+				return &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"output"`)}}, nil
+			}
+			warned := false
+			deps.Log = func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+				if frame.Event == "memo_publish" {
+					warned = true
+					return errors.New("warning persistence failed")
+				}
+				return nil
+			}
+			deps.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
+				return nil, errors.New("required output refused")
+			}
+			executor, err := NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = executor.Execute(t.Context(), input)
+			if (err != nil) != requiredOutput {
+				t.Fatalf("requiredOutput=%v result=%v", requiredOutput, err)
+			}
+			if !requiredOutput && !warned {
+				t.Fatal("memo publication warning was not attempted")
+			}
+			final := state.changes[len(state.changes)-1]
+			want := store.NodeSuccess
+			if requiredOutput {
+				want = store.NodeFailed
+			}
+			if final.Extra.Result == nil || final.Extra.Result.Outcome != want {
+				t.Fatalf("result changed: %+v", final)
 			}
 		})
 	}

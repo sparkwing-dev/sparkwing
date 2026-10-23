@@ -356,14 +356,16 @@ describe("mintMachineToken", () => {
 });
 
 describe("team settings", () => {
-  it("reads and changes enrollment through the selected team's settings routes", async () => {
-    respond = () => Response.json({ members_can_add_machines: true });
-    assert.deepEqual(await teams.getTeamSettings(), { members_can_add_machines: true });
+  it("reads and changes enrollment and child limits through the selected team's settings routes", async () => {
+    respond = () => Response.json({ members_can_add_machines: true, max_children_per_root: 50 });
+    assert.deepEqual(await teams.getTeamSettings(), { members_can_add_machines: true, max_children_per_root: 50 });
     await teams.setTeamSettings({ members_can_add_machines: false });
     assert.equal(calls[0].url, "/api/v1/team/settings");
     assert.equal(calls[1].method, "PUT");
     assert.equal(calls[1].headers.get("X-CSRF-Token"), "session-csrf");
     assert.deepEqual(JSON.parse(calls[1].body), { members_can_add_machines: false });
+    await teams.setTeamSettings({ max_children_per_root: 200 });
+    assert.deepEqual(JSON.parse(calls[2].body), { max_children_per_root: 200 });
   });
 });
 

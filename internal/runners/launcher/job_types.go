@@ -25,6 +25,7 @@ const (
 // CloudJobConfig accepts operator-owned images and ceilings, never pipeline-supplied pod fragments.
 type CloudJobConfig struct {
 	Labels                                             []string
+	StoppedTeams                                       []string
 	Namespace, RunnerImage, DockerImage, ControllerURL string
 	CPUCeiling                                         float64
 	MemoryCeiling                                      int64

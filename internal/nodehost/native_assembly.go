@@ -153,7 +153,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
 	logs := &localLogs{current: current, claims: claims, readNode: cfg.Store.ReadNode, upload: cfg.Logs, masker: masker, run: run.Run.ID}
-	closeResources = func() error { return errors.Join(logs.close(context.WithoutCancel(ctx)), closeHTTP()) }
+	closeResources = func() error { logs.finish(context.WithoutCancel(ctx), ""); return closeHTTP() }
 	processes := &NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
 	claims.processes = processes
 	processes.Log = logs.write

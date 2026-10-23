@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) {
@@ -158,5 +159,26 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEmptyLogRegistrationDoesNotNeedPhysicalBackend(t *testing.T) {
+	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	server := New(e.Store, nil).WithEngineController(e.EngineController)
+	h := server.Handler()
+	response := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claim := award.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
+	body, _ := json.Marshal(logCommitRequest{Subject: subject})
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(body), 200)
+	view, err := teststore.ForTeam(t, e.Store, "a").ReadRunView(t.Context(), "run")
+	if err != nil || len(view.Logs) != 1 {
+		t.Fatalf("stream not registered: %+v %v", view.Logs, err)
 	}
 }

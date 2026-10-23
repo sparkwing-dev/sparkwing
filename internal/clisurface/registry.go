@@ -282,13 +282,14 @@ func Registry() []Command {
 		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
-		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. Plain prints the boolean and the comma-separated ranking."}, Flags: []Flag{
+		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. Plain prints the boolean, comma-separated ranking and child-run ceiling."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing team settings set", Authority: teamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or both. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.", "--claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it."}, Flags: []Flag{
+		{Path: "sparkwing team settings set", Authority: teamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or --max-children-per-root, separately or together. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.", "--max-children-per-root takes a positive integer (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}},
 			{Name: "claim-ranking", Argument: "TIERS"},
+			{Name: "max-children-per-root", Argument: "COUNT", Meaning: "Maximum descendants per root run (positive integer, default 50; retries excluded)"},
 		}},
 		{Path: "sparkwing overflow show", Authority: teamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -827,6 +828,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner launch", Hidden: true, Rules: []string{"Every Cloud Job uses root plus DinD on its own team-dedicated node with enforced egress; fixed 20 GiB scratch has no flag."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "namespace", Argument: "NAMESPACE"},
+			{Name: "stop-team", Argument: "TEAM", Repeatable: true, CommaList: true, Meaning: "Operator emergency stop for new claims and placement; configure every launcher"},
 			{Name: "image", Argument: "IMAGE", Required: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Observed pool label for claim matching"},
 			{Name: "cpu-ceiling", Argument: "CPU", Required: true},

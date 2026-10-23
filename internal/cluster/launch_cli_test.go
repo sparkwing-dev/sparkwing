@@ -20,7 +20,7 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 	}
 	boundary := errors.New("fixture boundary")
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
-	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=500m", "--memory-ceiling=1Gi", "--credentials-dir=" + dir, "--label=cluster"}
+	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=500m", "--memory-ceiling=1Gi", "--credentials-dir=" + dir, "--label=cluster", "--stop-team=team,another"}
 	if _, err := runnerflags.Parse("launch", args, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 			if err != nil || rotated != "rotated-root" {
 				t.Fatalf("credential rotation requires restart: %q %v", rotated, err)
 			}
-			if len(cfg.Labels) != 1 || cfg.Labels[0] != "cluster" || cfg.CPUCeiling != .5 || cfg.MemoryCeiling != 1<<30 || cfg.Namespace != "sparkwing-jobs" || cfg.DockerImage != image || token != "private-launcher-root" {
+			if len(cfg.StoppedTeams) != 2 || cfg.StoppedTeams[0] != "team" || cfg.StoppedTeams[1] != "another" || len(cfg.Labels) != 1 || cfg.Labels[0] != "cluster" || cfg.CPUCeiling != .5 || cfg.MemoryCeiling != 1<<30 || cfg.Namespace != "sparkwing-jobs" || cfg.DockerImage != image || token != "private-launcher-root" {
 				t.Fatalf("configuration lost at runtime boundary")
 			}
 			return nil, boundary

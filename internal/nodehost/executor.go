@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"reflect"
 	"time"
@@ -174,8 +175,10 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 		if err := h.saveMemo(ctx, input, memoHash, result); err != nil {
 			if cause := context.Cause(ctx); cause != nil {
 				runErr, result = errors.Join(cause, err), h.failure(errors.Join(cause, err))
-			} else if logErr := h.diagnostic(ctx, input, "warn", "memo_publish", "", "memo publication failed; a later run will execute again", map[string]any{"error": h.deps.Masker.Mask(err.Error())}); logErr != nil {
-				runErr, result = logErr, h.failure(logErr)
+			} else {
+				if logErr := h.diagnostic(ctx, input, "warn", "memo_publish", "", "memo publication failed; a later run will execute again", map[string]any{"error": h.deps.Masker.Mask(err.Error())}); logErr != nil {
+					slog.Error("run logs incomplete", "run", input.Accepted.RunID, "node", input.NodeID, "error", h.deps.Masker.Mask(logErr.Error()))
+				}
 			}
 		}
 	}

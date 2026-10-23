@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -26,6 +28,7 @@ type localLogs struct {
 	readNode func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
 	upload   func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
 	sinks    map[string]*logseg.Sink
+	failed   map[string]capability.Principal
 	closed   bool
 }
 
@@ -37,26 +40,20 @@ type logHostStore struct {
 
 func (s logHostStore) AcceptPlan(ctx context.Context, request store.PlanAcceptance) (store.AcceptedPlan, error) {
 	if s.unit == capability.UnitPlan {
-		if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-			return store.AcceptedPlan{}, err
-		}
+		s.logs.finish(context.WithoutCancel(ctx), "")
 	}
 	return s.NativeHostStore.AcceptPlan(ctx, request)
 }
 
 func (s logHostStore) AcceptExpansion(ctx context.Context, request store.ExpansionSubmission) (store.AcceptedExpansion, error) {
 	if s.unit == capability.UnitEval {
-		if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-			return store.AcceptedExpansion{}, err
-		}
+		s.logs.finish(context.WithoutCancel(ctx), "")
 	}
 	return s.NativeHostStore.AcceptExpansion(ctx, request)
 }
 
 func (s logHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
-	if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-		return store.Applied{}, err
-	}
+	s.logs.finish(context.WithoutCancel(ctx), "")
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
@@ -64,11 +61,25 @@ func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeComm
 	switch request.(type) {
 	case store.ReportNode, store.RetryNode, store.ReleaseNode:
 		ref, _ := store.NodeCommandAuthority(request)
-		if err := s.logs.closeNode(context.WithoutCancel(ctx), string(ref.NodeID)); err != nil {
-			return store.Applied{}, err
-		}
+		s.logs.finish(context.WithoutCancel(ctx), string(ref.NodeID))
 	}
 	return s.NativeHostStore.TransitionNode(ctx, request)
+}
+
+func (l *localLogs) alert(node string, err error) {
+	slog.Error("run logs incomplete", "run", l.run, "node", node, "error", l.masker.Mask(err.Error()))
+}
+
+func (l *localLogs) finish(ctx context.Context, node string) {
+	var err error
+	if node == "" {
+		err = l.close(ctx)
+	} else {
+		err = l.closeNode(ctx, node)
+	}
+	if err != nil {
+		l.alert(node, err)
+	}
 }
 
 func (l *localLogs) closeNode(ctx context.Context, node string) error {
@@ -81,10 +92,34 @@ func (l *localLogs) closeNode(ctx context.Context, node string) error {
 			return err
 		}
 		if subject.Attempt != nil && subject.Attempt.NodeID == node {
-			_, err := sink.Close(ctx, logseg.End{})
+			manifest, err := sink.Close(ctx, logseg.End{})
+			if err == nil && manifest.Status == "incomplete" {
+				l.alert(node, errors.New(manifest.Reason))
+			}
 			delete(l.sinks, key)
 			result = errors.Join(result, err)
 		}
+	}
+	return errors.Join(result, l.closeFailed(ctx, node))
+}
+
+func (l *localLogs) closeFailed(ctx context.Context, node string) error {
+	var result error
+	for key, principal := range l.failed {
+		var subject blob.LogSubject
+		if err := json.Unmarshal([]byte(key), &subject); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		if node != "" && (subject.Attempt == nil || subject.Attempt.NodeID != node) {
+			continue
+		}
+		uploader, err := l.upload(ctx, principal, subject)
+		if err == nil {
+			err = uploader.PutManifest(ctx, logseg.Manifest{Version: 1, Subject: &subject, Status: "incomplete", Reason: "log persistence failed", SealedBy: "node", SealedAt: time.Now().UTC()})
+		}
+		result = errors.Join(result, err)
+		delete(l.failed, key)
 	}
 	return result
 }
@@ -142,7 +177,8 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return logseg.ErrClosed
+		l.alert(node, logseg.ErrClosed)
+		return nil
 	}
 	if l.sinks == nil {
 		l.sinks = map[string]*logseg.Sink{}
@@ -150,16 +186,28 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	sink := l.sinks[string(key)]
 	if sink == nil {
 		uploader, err := l.upload(ctx, p, subject)
-		if err != nil {
-			return err
+		if err == nil {
+			sink, err = logseg.NewSink(ctx, uploader, logseg.Options{Subject: subject})
 		}
-		sink, err = logseg.NewSink(ctx, uploader, logseg.Options{Subject: subject})
 		if err != nil {
-			return err
+			l.alert(node, err)
+			if l.failed == nil {
+				l.failed = map[string]capability.Principal{}
+			}
+			l.failed[string(key)] = p
+			return nil
 		}
 		l.sinks[string(key)] = sink
+		// Earlier discarded bytes must remain visible even if storage recovers.
+		if _, failed := l.failed[string(key)]; failed {
+			sink.MarkIncomplete()
+			delete(l.failed, string(key))
+		}
 	}
-	return sink.Append(body, "", 0, 0)
+	if err := sink.Append(body, "", 0, 0); err != nil {
+		l.alert(node, err)
+	}
+	return nil
 }
 
 func (l *localLogs) close(ctx context.Context) error {
@@ -171,8 +219,11 @@ func (l *localLogs) close(ctx context.Context) error {
 	l.closed = true
 	var result error
 	for _, sink := range l.sinks {
-		_, err := sink.Close(ctx, logseg.End{})
+		manifest, err := sink.Close(ctx, logseg.End{})
+		if err == nil && manifest.Status == "incomplete" {
+			l.alert("", errors.New(manifest.Reason))
+		}
 		result = errors.Join(result, err)
 	}
-	return result
+	return errors.Join(result, l.closeFailed(ctx, ""))
 }

@@ -40,7 +40,7 @@ func (s *Store) TestOnlyChildLimits(t *testing.T) {
 		var e *apierr.Error
 		return errors.As(err, &e) && e.Code == apierr.Conflict && e.Details["limit"] == limit
 	}
-	childLimitsFixture(t, s, limits.MaxChildrenPerRoot-1)
+	childLimitsFixture(t, s, 50-1)
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
 		return enforceChildLimitsTx(t.Context(), tx, "a", "root", limits.MaxChildDepth)
 	})
@@ -55,7 +55,7 @@ func (s *Store) TestOnlyChildLimits(t *testing.T) {
 		t.Fatalf("child below the depth bound admitted: %v", err)
 	}
 
-	now := childLimitsFixture(t, s, limits.MaxChildrenPerRoot)
+	now := childLimitsFixture(t, s, 50)
 	err = s.inTx(t.Context(), func(tx *storeTx) error {
 		err := enforceChildLimitsTx(t.Context(), tx, "a", "root", 2)
 		return err
@@ -64,7 +64,7 @@ func (s *Store) TestOnlyChildLimits(t *testing.T) {
 		t.Fatalf("51st child of one root admitted: %v", err)
 	}
 
-	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: int64(limits.MaxChildrenPerRoot) + 1}); err != nil {
+	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: int64(50) + 1}); err != nil {
 		t.Fatal(err)
 	}
 	alice := capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}
@@ -72,7 +72,7 @@ func (s *Store) TestOnlyChildLimits(t *testing.T) {
 		return enforceRunsPerHourTx(t.Context(), tx, "a", "next", alice, now)
 	})
 	var hourly *ComputeLimitError
-	if !errors.As(err, &hourly) || hourly.Observed != int64(limits.MaxChildrenPerRoot)+1 {
+	if !errors.As(err, &hourly) || hourly.Observed != int64(50)+1 {
 		t.Fatalf("root and its children were not charged to the root's creator: %v", err)
 	}
 	err = s.inTx(t.Context(), func(tx *storeTx) error {

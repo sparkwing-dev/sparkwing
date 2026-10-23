@@ -174,34 +174,29 @@ Kubernetes administrators remain trusted.
 ## Node faults
 
 A kubelet can rewrite its own Node's annotations, so a fault read from them is
-charged to that node alone. Sync counts malformed reservations and bindings
-against the node's protected team label before filtering by namespace. It may
-quarantine the node only when a reservation or binding team, combined with this
-job namespace, matches that protected label. If both annotations name another
-team or erase their team identity, the fault still counts but Sync leaves the
-node untouched. Within that permission boundary, Sync quarantines malformed or
-disagreeing reservations and awards the controller refuses outright: a binding
-refusal, a bad request or a changed binding. Each orphaned reservation goes to
-the controller in its own call, so a refusal names one
-node. Quarantine cordons a team node, adds the NoSchedule taint
-`sparkwing.dev/quarantined`, which NodeRestriction stops a kubelet from
-removing, and records the cause in the annotation of the same name. One
-UID-fenced JSON patch writes all three. Reservation skips a node with the
-taint or the annotation, even after it is uncordoned. No NodeClaim is deleted:
-an operator inspects the node, then deletes it or removes the taint and
-annotation.
+charged to that node alone. Sync reports each malformed reservation or binding
+with its node identity for operator inspection. It may quarantine the node only
+when a reservation or binding team, combined with this job namespace, matches
+that node's protected team label. If both annotations name another team or erase
+their team identity, Sync reports the node and leaves it untouched. Placement
+skips nodes carrying reservation evidence even if their reservation identity is
+missing.
 
-One per-team fault ledger owns attribution, deduplication, quarantine permission
-and claim blocking. A pass permits quarantine for at most three distinct nodes
-per team. Counted faults and permitted quarantines are separate sets: teardown
-or release faults consume the fault budget without authorizing more writes.
-A fourth fault stops that team's claims; other teams keep claiming. A fourth
-quarantine request reports the node for operator inspection. An erased-identity
-fault that cannot authorize quarantine instead adds the protected team label to
-the blocked labels sent with claims, without a node diagnostic. The protected
-node label groups faults even when both reservation and binding annotations are damaged. The launcher
-sends faulted protected labels with each claim, and the controller excludes
-their matching teams.
+Within that permission boundary, Sync quarantines malformed or disagreeing
+reservations and awards the controller refuses outright. Each orphaned
+reservation goes to the controller in its own call, so a refusal names one node.
+Quarantine cordons the node, adds the NoSchedule taint
+`sparkwing.dev/quarantined`, which NodeRestriction stops a kubelet from removing,
+and records the cause in the annotation of the same name. One UID-fenced JSON
+patch writes all three. Reservation skips a node with the taint or annotation,
+even after it is uncordoned. No NodeClaim is deleted. An operator inspects the
+node, then deletes it or removes the taint and annotation.
+
+Node fault counts never stop a team's claims. Healthy nodes remain available.
+For an explicit emergency stop, configure `sparkwing-runner launch --stop-team=TEAM`
+on every launcher serving the team. Repeat the flag or separate teams with commas.
+This excludes the named teams from new claims and holds their waiting placements.
+Existing Jobs still reconcile. Remove the flag to resume placement and claims.
 
 A quarantine that has not persisted stops claims, so a 503 or any other failed
 write blocks until a later pass writes it. A conflict is retried with backoff;

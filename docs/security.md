@@ -169,7 +169,9 @@ pool. Owner-approved extra repositories join the source token only for a
 verified push to the default branch.
 
 Child runs nest at most 10 levels deep counting the root, and one root run
-starts at most 50 children at every depth, retries excluded. Either bound
+uses the team-set descendant ceiling, default 50 at every depth, retries excluded.
+Team admins change the ceiling in Team settings or with
+`team settings set --max-children-per-root`; changes are audited. Either bound
 refuses with `409` and conflict detail `limit` set to `max_child_depth` or
 `max_children_per_root`. A child spends the hourly run, flood and queue-depth
 budgets of whoever created its root, not the runner holding the parent's

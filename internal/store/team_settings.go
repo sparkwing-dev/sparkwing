@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-// TeamSettings reads the team's machine enrollment policy and claim ranking.
+// TeamSettings reads the team's enrollment, placement and child-run settings.
 func (t *Tenant) TeamSettings(ctx context.Context) (controllerwire.TeamSettings, error) {
 	var out controllerwire.TeamSettings
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
@@ -22,7 +23,7 @@ func (t *Tenant) TeamSettings(ctx context.Context) (controllerwire.TeamSettings,
 
 func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire.TeamSettings, error) {
 	var out controllerwire.TeamSettings
-	if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines FROM teams WHERE name=?`, team).Scan(&out.MembersCanAddMachines); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines,max_children_per_root FROM teams WHERE name=?`, team).Scan(&out.MembersCanAddMachines, &out.MaxChildrenPerRoot); err != nil {
 		return out, err
 	}
 	ranking, err := claimRankingTx(ctx, tx, team)
@@ -32,6 +33,9 @@ func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire
 
 // SetAuthorizedTeamSettings commits a policy change and its audit under current administration.
 func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error {
+	if update.MaxChildrenPerRoot != nil && *update.MaxChildrenPerRoot <= 0 {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "max_children_per_root must be positive"}
+	}
 	reset := update.ClaimRanking != nil && slices.Equal(*update.ClaimRanking, []string{ClaimRankingDefault})
 	if update.ClaimRanking != nil && !reset {
 		if err := ValidateClaimRanking(*update.ClaimRanking); err != nil {
@@ -44,6 +48,9 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 			return err
 		}
 		next := previous
+		if update.MaxChildrenPerRoot != nil {
+			next.MaxChildrenPerRoot = *update.MaxChildrenPerRoot
+		}
 		if update.MembersCanAddMachines != nil {
 			next.MembersCanAddMachines = *update.MembersCanAddMachines
 		}
@@ -64,10 +71,10 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 		case reset:
 			next.ClaimRanking, ranking = append([]string{}, DefaultClaimRanking...), nil
 		}
-		if next.MembersCanAddMachines == previous.MembersCanAddMachines && string(ranking) == stored {
+		if next.MembersCanAddMachines == previous.MembersCanAddMachines && next.MaxChildrenPerRoot == previous.MaxChildrenPerRoot && string(ranking) == stored {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), tx.now(ctx).UnixNano(), t.team); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,max_children_per_root=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), next.MaxChildrenPerRoot, tx.now(ctx).UnixNano(), t.team); err != nil {
 			return err
 		}
 		id, err := newIdentityID()
@@ -81,6 +88,6 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 			}
 			return out
 		}
-		return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditTeamSettings{ReceiptID: id, MembersCanAddMachines: next.MembersCanAddMachines, PreviousMembersCanAddMachines: previous.MembersCanAddMachines, ClaimRanking: toAuditRanking(next.ClaimRanking), PreviousClaimRanking: toAuditRanking(previous.ClaimRanking)})
+		return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditTeamSettings{ReceiptID: id, MembersCanAddMachines: next.MembersCanAddMachines, PreviousMembersCanAddMachines: previous.MembersCanAddMachines, ClaimRanking: toAuditRanking(next.ClaimRanking), PreviousClaimRanking: toAuditRanking(previous.ClaimRanking), MaxChildrenPerRoot: next.MaxChildrenPerRoot, PreviousMaxChildrenPerRoot: previous.MaxChildrenPerRoot})
 	})
 }

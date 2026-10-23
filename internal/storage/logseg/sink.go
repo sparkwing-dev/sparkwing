@@ -124,23 +124,24 @@ type Sink struct {
 	up   Uploader
 	ctx  context.Context
 
-	mu        sync.Mutex
-	spool     *os.File
-	written   int64
-	lines     int64
-	cutOff    int64
-	cutLine   int64
-	stopTimer func() bool
-	queue     []cutSegment
-	nextN     int
-	uploaded  []Segment
-	truncated bool
-	dropped   int64
-	streams   map[string]*writerStream
-	gaps      []Gap
-	extraGap  int64
-	closed    bool
-	watched   bool
+	mu                sync.Mutex
+	spool             *os.File
+	written           int64
+	lines             int64
+	cutOff            int64
+	cutLine           int64
+	stopTimer         func() bool
+	queue             []cutSegment
+	nextN             int
+	uploaded          []Segment
+	truncated         bool
+	persistenceFailed bool
+	dropped           int64
+	streams           map[string]*writerStream
+	gaps              []Gap
+	extraGap          int64
+	closed            bool
+	watched           bool
 
 	upMu     sync.Mutex
 	work     chan struct{}
@@ -215,6 +216,7 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 		data, n = []byte(truncationMarker), 1
 	}
 	if _, err := s.spool.Write(data); err != nil {
+		s.persistenceFailed = true
 		return fmt.Errorf("logseg: write spool: %w", err)
 	}
 	s.advance(ws, last)
@@ -229,6 +231,13 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 		s.stopTimer = s.opts.AfterFunc(s.opts.Interval, s.cutOnInterval)
 	}
 	return nil
+}
+
+// MarkIncomplete records discarded bytes when a sink opens after persistence recovers.
+func (s *Sink) MarkIncomplete() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.persistenceFailed = true
 }
 
 func (s *Sink) stream(name string) *writerStream {
@@ -431,17 +440,18 @@ func (s *Sink) Close(ctx context.Context, end End) (Manifest, error) {
 	allUploaded := s.drain(ctx)
 
 	s.mu.Lock()
+	closeErr := s.spool.Close()
+	if closeErr != nil {
+		s.persistenceFailed = true
+	}
 	m := s.manifestLocked(allUploaded, end)
 	s.mu.Unlock()
 	err := s.retry(ctx, func() error { return s.up.PutManifest(ctx, m) })
 	name := s.spool.Name()
-	if cerr := s.spool.Close(); cerr != nil {
-		s.opts.Logger.Warn("close log spool", "path", name, "err", cerr)
-	}
 	if rerr := os.Remove(name); rerr != nil {
 		s.opts.Logger.Warn("remove log spool", "path", name, "err", rerr)
 	}
-	return m, err
+	return m, errors.Join(err, closeErr)
 }
 
 // safety: the caller holds mu.
@@ -469,6 +479,8 @@ func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 		}
 	}
 	switch {
+	case s.persistenceFailed:
+		m.Status, m.Reason = statusIncomplete, "log persistence failed"
 	case !allUploaded:
 		m.Status, m.Reason = statusIncomplete, reasonUploadFailed
 	case s.truncated:

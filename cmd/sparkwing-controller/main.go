@@ -187,7 +187,8 @@ func run(args []string) error {
 	objectStoreBudget := fs.String("object-store-budget", "",
 		"per-process object-store request budgets, as comma-separated class:window=count entries such as "+
 			"put:minute=600,get:day=0, where class is put, get, list or delete, window is minute or day, and 0 "+
-			"leaves that window unlimited. A class and window the list does not name keeps its built-in budget")
+			"leaves that window unlimited. Daily stops are off by default; set a day count for an emergency brake. "+
+			"A class and window the list does not name keeps its built-in budget")
 	maxBucketBytes := fs.Int64("max-bucket-bytes", 0,
 		"stored bytes across the whole object store at or above which the controller freezes "+
 			"object writes: existing runs finish, new writes are refused naming the ceiling, "+

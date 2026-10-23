@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+- **storage:** Default shared daily object-request stops to off. Operators can opt into a daily emergency brake with `--object-store-budget`; per-team budgets and minute trips still apply
+
+- **logs:** Preserve job results, plan and expansion acceptance, completion and node reporting when log persistence fails. Mark logs incomplete and emit a masked operator alert. Secret masking and required-output integrity remain strict
+
+- **launcher:** Isolate and report suspect nodes while healthy capacity keeps serving the team. Remove the fault-count team claim stop. Operators can explicitly stop new claims and waiting placements with `sparkwing-runner launch --stop-team=TEAM` on every launcher
+
+- **team settings (Breaking):** Make the descendant ceiling per team, defaulting to 50. Team admins change it through the console, team-settings API or `team settings set --max-children-per-root`; each change is audited. Depth, funding and rate limits still apply. Store schema baseline 23 includes the setting. GitHub's comparable limit counts unique reusable workflows rather than invocations
+
 - **runner ranking:** Unnamed jobs wait up to 5 seconds for the best-ranked tier with a live, label-matching claimant on the same team and a free slot in its latest poll. Each award consumes one advertised slot until the runner polls again. Busy or offline higher tiers cause no wait. After the window, any eligible claimant can take the job. Recorded asks and the extra 2-second grace are removed. Explicit `Prefers` holds require an allowed claimant with a free slot; preference scores are removed. See [migration](docs/migrations/_unreleased.md#ranking-uses-available-claimants).
 
 - **local execution:** Foreground local intake reserves its first trigger claim for the submitting OS account. The background queue cannot take it before the CLI, including when a controller is already running. Local intake also accepts an omitted dispatch, resolving it to host execution before checking the reservation. Detached intake and later lease recovery keep using the shared queue.

@@ -4184,11 +4184,14 @@ components:
                 type: string
               type: array
             - type: "null"
+        max_children_per_root:
+          type: integer
         members_can_add_machines:
           type: boolean
       required:
         - members_can_add_machines
         - claim_ranking
+        - max_children_per_root
       type: object
       x-sparkwing-go-type: controllerwire.TeamSettings
     internal.controllerwire.TeamSettingsUpdate:
@@ -4201,6 +4204,10 @@ components:
                     type: string
                   type: array
                 - type: "null"
+            - type: "null"
+        max_children_per_root:
+          anyOf:
+            - type: integer
             - type: "null"
         members_can_add_machines:
           anyOf:
@@ -15597,7 +15604,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Read team machine enrollment settings and claim ranking
+      summary: Read team enrollment, claim ranking and child-run settings
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/settings
@@ -15631,7 +15638,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Change and audit team machine enrollment settings and claim ranking
+      summary: Change and audit team enrollment, claim ranking and child-run settings
       x-sparkwing-policy:
         method: PUT
         path: /api/v1/team/settings

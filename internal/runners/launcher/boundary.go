@@ -100,6 +100,10 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 		}
 		return CloudNodeReservation{}, ErrNoDedicatedNode
 	}
+	// safety: damaged reservation metadata cannot make an occupied node look free.
+	if reservationEvidence(&node) {
+		return CloudNodeReservation{}, ErrNoDedicatedNode
+	}
 	if _, err := b.occupants(ctx, node.Name, team); err != nil {
 		return CloudNodeReservation{}, err
 	}

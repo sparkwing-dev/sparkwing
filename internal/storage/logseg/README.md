@@ -23,7 +23,11 @@ grace constant remains `limits.LogSealGrace`.
 Each segment and the final manifest is signed separately with its
 exact stored size and SHA-256. The final manifest contains the exact committed
 segment list and its tagged identity. The sink can mark a lost tail incomplete
-without changing the job's result.
+without changing the job's result. Failed spool writes or closure mark the final manifest
+incomplete, including when a later write succeeds. Native clients register an
+open stream before opening the spool so maintenance can seal failed startup or
+closure as incomplete. Native host acceptance and result reporting continue
+after persistence failures and emit a masked operator error.
 
 `Signer` signs one segment or manifest URL with a fifteen-minute expiry. The
 controller supplies the run's persisted retention class after authorizing its

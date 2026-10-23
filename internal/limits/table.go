@@ -43,7 +43,6 @@ func table() []limit {
 		{Name: "MaxLabels", Value: maxLabels, class: author, Doc: "Labels per job.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxPipelineRefs", Value: maxPipelineRefs, class: author, Doc: "Pipeline references per plan.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxChildDepth", Value: MaxChildDepth, class: author, Doc: "Child-run chain length, counting the root run as one level.", Refusal: "Refuse a child that would exceed the bound at intake."},
-		{Name: "MaxChildrenPerRoot", Value: MaxChildrenPerRoot, class: author, Doc: "Child runs under one root run at every depth; retries do not count.", Refusal: "Refuse a child that would exceed the bound at intake."},
 		{Name: "MaxAnnotations", Value: MaxAnnotations, class: author, Doc: "Annotations per run.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxEvents", Value: MaxEvents, class: author, Doc: "Events per run.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxMetricSamples", Value: MaxMetricSamples, class: author, Doc: "Metric samples per job.", Refusal: "Refuse above the bound at validation or write."},
