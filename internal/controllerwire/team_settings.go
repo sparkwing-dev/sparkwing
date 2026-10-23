@@ -1,5 +1,8 @@
 package controllerwire
 
+// MaxChildrenPerRoot is the largest supported team descendant ceiling.
+const MaxChildrenPerRoot int64 = 1000
+
 // TeamSettings governs machine enrollment, claim ranking and child-run limits.
 // An empty ClaimRanking means first come.
 type TeamSettings struct {

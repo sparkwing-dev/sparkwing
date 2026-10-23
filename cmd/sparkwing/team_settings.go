@@ -58,8 +58,8 @@ func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsU
 	var update controllerwire.TeamSettingsUpdate
 	if inv.Has("max-children-per-root") {
 		ceiling, err := strconv.ParseInt(inv.Value("max-children-per-root"), 10, 64)
-		if err != nil || ceiling <= 0 {
-			return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "--max-children-per-root must be a positive integer"}
+		if err != nil || ceiling <= 0 || ceiling > controllerwire.MaxChildrenPerRoot {
+			return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "--max-children-per-root must be an integer from 1 to 1000"}
 		}
 		update.MaxChildrenPerRoot = &ceiling
 	}

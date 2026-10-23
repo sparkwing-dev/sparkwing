@@ -37,9 +37,29 @@ func (c *LocalHostClient) LogUploader(ctx context.Context, principal capability.
 	if subject.RunID != c.run || subject.Team != principal.Capability.Team {
 		return nil, localHostClientRefusal()
 	}
-	transport, err := c.nativeTransport(ctx, principal)
+	if err := c.live(); err != nil {
+		return nil, err
+	}
+	// Log tails outlive the execution lease. Select the committed bearer here;
+	// each signing and record request still authenticates its current log fence.
+	transport := c.transport
+	raw, err := transport.bearer(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if sha256.Sum256([]byte(raw)) != principal.Capability.Digest {
+		c.mu.Lock()
+		award, ok := c.nodes[principal.Capability.Binding.NodeID]
+		c.mu.Unlock()
+		if !ok || principal.Capability.Unit != capability.UnitNode || award.prefix != principal.Capability.Prefix || award.generation != principal.Capability.Binding.Generation || sha256.Sum256([]byte(award.raw)) != principal.Capability.Digest {
+			return nil, localHostClientRefusal()
+		}
+		copy := *transport
+		copy.bearer = func(context.Context) (string, error) { return award.raw, c.live() }
+		transport = &copy
+	}
+	if principal.Capability.Binding.RunID != c.run || c.node != "" && principal.Capability.Binding.NodeID != c.node {
+		return nil, localHostClientRefusal()
 	}
 	pattern, path := "/api/v1/claims/{claim}", "/api/v1/claims/"+url.PathEscape(principal.Capability.UnitID)
 	if subject.Attempt != nil {
@@ -52,7 +72,7 @@ func (c *LocalHostClient) LogUploader(ctx context.Context, principal capability.
 		return nil, localHostClientRefusal()
 	}
 	uploader := &nativeLogUploader{transport: transport, subject: subject, pattern: pattern, path: path}
-	// Register before opening a spool so even an unwritable disk leaves a stream to seal incomplete.
+	// Register before uploading segments so maintenance can seal an interrupted stream incomplete.
 	if err := uploader.commit(ctx, nil, false, ""); err != nil {
 		return nil, err
 	}

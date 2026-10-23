@@ -55,13 +55,16 @@ authorized reset operation. It changes no state.
 
 ## Incomplete logs
 
-A log storage failure does not change the job's result or refuse plan acceptance,
-expansion acceptance, run completion, or node reporting. The host emits a
+Log storage runs independently of plan acceptance, expansion acceptance, run
+completion and node reporting. Those commits never wait for log uploads or closure.
+Flush effort is bounded by the existing one-minute log tail window. Uploads hold
+no lock shared across jobs. Log subjects use the committed attempt, without
+logging-only principal refreshes or node lookups. The host emits a
 `run logs incomplete` operator error with the run identity, node when known, and
 a masked error. A failed stream is recorded as incomplete. Streams that cannot publish
 their final manifest are sealed incomplete by log maintenance after the writer
 ends. If the controller cannot be reached, the host reports the loss in its
-operator log and tries to record the incomplete stream once at closure.
+operator log and makes a bounded attempt to record the incomplete stream.
 
 Secret masking and required output verification still govern execution. A log
 outage does not relax either check.

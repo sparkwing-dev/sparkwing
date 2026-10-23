@@ -1,11 +1,15 @@
 package client
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestNativeLogUploaderEmptyRegistrationRequiresAcknowledgement(t *testing.T) {
@@ -39,6 +43,55 @@ func TestNativeLogUploaderEmptyRegistrationRequiresAcknowledgement(t *testing.T)
 			err := uploader.commit(t.Context(), nil, false, "")
 			if !called || (err == nil) != acknowledged {
 				t.Fatalf("registration acknowledgement lost: called=%v error=%v", called, err)
+			}
+		})
+	}
+}
+
+func TestNativeLogUploaderUsesCommittedBearerWithoutMetadataReads(t *testing.T) {
+	for _, kind := range []string{"plan", "eval", "node", "adopted-node"} {
+		t.Run(kind, func(t *testing.T) {
+			raw := "private-capability"
+			if kind == "adopted-node" {
+				raw = "independent-node-award"
+			}
+			p := capability.Principal{Capability: capability.Capability{Prefix: "award", Digest: sha256.Sum256([]byte(raw)), Team: "team", Unit: capability.UnitPlan, UnitID: "unit", Binding: capability.Binding{RunID: "run", Generation: 2}}}
+			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: "plan", Generation: 2}}
+			path := "/api/v1/claims/unit/log-manifest"
+			if kind == "eval" {
+				p.Capability.Unit = capability.UnitEval
+				subject.Unit.Kind = "eval"
+				subject.Unit.Source = &blob.LogSource{NodeID: "source", Generation: 1}
+			}
+			if kind == "node" || kind == "adopted-node" {
+				p.Capability.Unit = capability.UnitNode
+				p.Capability.Binding.NodeID, p.Capability.Binding.Attempt = "job", 3
+				subject.Kind, subject.Unit = blob.LogJobAttempt, nil
+				subject.Attempt = &runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Generation: 2, Attempt: 3}
+				path = "/api/v1/runs/run/jobs/job/log-manifest"
+			}
+			calls := 0
+			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+				calls++
+				if request.Method != "POST" || request.URL.Path != path || request.Header.Get("Authorization") != "Bearer "+raw {
+					t.Errorf("log upload performed an unrelated metadata read or lost authority: %s %s", request.Method, request.URL.Path)
+					return engineResponse(503, `{}`), nil
+				}
+				return engineResponse(200, `{"recorded":true}`), nil
+			})
+			host := &LocalHostClient{run: "run", transport: transport}
+			if kind == "node" {
+				host.node = "job"
+			}
+			if kind == "adopted-node" {
+				host.nodes = map[string]localNodeBearer{"job": {raw: raw, prefix: "award", generation: 2}}
+			}
+			if _, err := host.LogUploader(t.Context(), p, subject); err != nil || calls != 1 {
+				t.Fatalf("log upload depended on execution metadata: calls=%d error=%v", calls, err)
+			}
+			p.Capability.Digest = sha256.Sum256([]byte("another-award"))
+			if _, err := host.LogUploader(context.Background(), p, subject); err == nil || calls != 1 {
+				t.Fatal("changed bearer reached log persistence")
 			}
 		})
 	}

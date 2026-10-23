@@ -167,13 +167,13 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 			continue
 		}
 		if !ok {
-			err := quarantineNode(ctx, l.Kube, node, "reservation is malformed or does not match its award")
+			err := quarantineNode(ctx, l.Kube, node, l.Config.Namespace, "reservation is malformed or does not match its award")
 			errs = append(errs, err)
 			continue
 		}
 		refused, err := l.releaseOrphan(ctx, held, binding)
 		if refused {
-			err = quarantineNode(ctx, l.Kube, node, "controller refused the reservation's award")
+			err = quarantineNode(ctx, l.Kube, node, l.Config.Namespace, "controller refused the reservation's award")
 		}
 		errs = append(errs, err)
 	}

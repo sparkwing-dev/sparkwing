@@ -33,8 +33,8 @@ func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire
 
 // SetAuthorizedTeamSettings commits a policy change and its audit under current administration.
 func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error {
-	if update.MaxChildrenPerRoot != nil && *update.MaxChildrenPerRoot <= 0 {
-		return &apierr.Error{Code: apierr.BadRequest, Message: "max_children_per_root must be positive"}
+	if update.MaxChildrenPerRoot != nil && (*update.MaxChildrenPerRoot <= 0 || *update.MaxChildrenPerRoot > controllerwire.MaxChildrenPerRoot) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "max_children_per_root must be an integer from 1 to 1000"}
 	}
 	reset := update.ClaimRanking != nil && slices.Equal(*update.ClaimRanking, []string{ClaimRankingDefault})
 	if update.ClaimRanking != nil && !reset {

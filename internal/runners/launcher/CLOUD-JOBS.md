@@ -179,16 +179,19 @@ with its node identity for operator inspection. It may quarantine the node only
 when a reservation or binding team, combined with this job namespace, matches
 that node's protected team label. If both annotations name another team or erase
 their team identity, Sync reports the node and leaves it untouched. Placement
-skips nodes carrying reservation evidence even if their reservation identity is
-missing.
+uses the same reservation and binding checks as Sync, including when resuming
+an award. Reservation evidence with missing or disagreeing identity keeps the
+node excluded.
 
 Within that permission boundary, Sync quarantines malformed or disagreeing
 reservations and awards the controller refuses outright. Each orphaned
 reservation goes to the controller in its own call, so a refusal names one node.
 Quarantine cordons the node, adds the NoSchedule taint
 `sparkwing.dev/quarantined`, which NodeRestriction stops a kubelet from removing,
-and records the cause in the annotation of the same name. One UID-fenced JSON
-patch writes all three. Reservation skips a node with the taint or annotation,
+and records the cause in the annotation of the same name. The JSON patch tests
+the original node UID and protected team label. Retries recheck that identity
+and quarantine permission, leaving replacements and changed ownership untouched.
+Reservation skips a node with the taint or annotation,
 even after it is uncordoned. No NodeClaim is deleted. An operator inspects the
 node, then deletes it or removes the taint and annotation.
 
@@ -201,8 +204,8 @@ Existing Jobs still reconcile. Remove the flag to resume placement and claims.
 A quarantine that has not persisted stops claims, so a 503 or any other failed
 write blocks until a later pass writes it. A conflict is retried with backoff;
 repeated conflicts, which a kubelet rewriting its own Node causes, become a
-node fault and claiming continues, because placement already skips a node that
-records a reservation other than the one being placed. Release retries
+node fault and claiming continues. Placement rejects malformed or disagreeing
+reservation and binding metadata even for the same award. Release retries
 conflicts the same way and charges persistent ones to the node, which stays
 reserved.
 

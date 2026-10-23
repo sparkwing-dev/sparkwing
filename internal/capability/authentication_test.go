@@ -262,3 +262,59 @@ func TestTriggerAuthorityUsesSupportedJobBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletedOwnerAuthenticationAllowsOnlyFinalLogs(t *testing.T) {
+	for _, kind := range []UnitKind{UnitTrigger, UnitPlan, UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			for _, change := range []string{"tail", "late", "sealed", "generation", "target", "revoked parent"} {
+				t.Run(change, func(t *testing.T) {
+					r, p, _ := authenticationFixture()
+					c := &r.snapshot.Authorities[0].Principal.Capability
+					c.Unit, c.UnitID, c.Binding.Attempt = kind, "claim", 0
+					c.Grants = []Grant{LogTail, NodeReport}
+					c.Binding.Kind = BindingRun
+					if kind == UnitTrigger {
+						c.Purpose, c.Binding.Kind = PurposeTrigger, BindingTrigger
+					}
+					if kind == UnitPlan {
+						c.Purpose = PurposePlan
+					}
+					if kind == UnitEval {
+						c.Purpose, c.Binding.Kind = PurposeEval, BindingNode
+						c.Grants = []Grant{ExpansionSubmit}
+						c.Binding.Expansion = &LeaseRef{Kind: UnitEval, ID: "claim", Holder: "eval", Generation: 9}
+						r.snapshot.Binding.Expansion = &ExpansionState{Lease: *c.Binding.Expansion}
+					}
+					r.snapshot.Binding.Current = c.Binding
+					finished := r.snapshot.Now.Add(-time.Second)
+					r.snapshot.Binding.FinishedAt = &finished
+					r.snapshot.Binding.LeaseExpiresAt = time.Time{}
+					p.Evidence.Target = Target{Team: "a", RunID: "run", ClaimID: "claim"}
+					switch change {
+					case "late":
+						r.snapshot.Now = finished.Add(limits.LogSealGrace)
+					case "sealed":
+						r.snapshot.Binding.LogSealed = true
+					case "generation":
+						r.snapshot.Binding.Current.Generation++
+					case "target":
+						p.Evidence.Target.ClaimID = "other-claim"
+					case "revoked parent":
+						r.snapshot.Authorities[1].Principal.Capability.RevokedAt = &r.snapshot.Now
+					}
+					for _, suffix := range []string{"log-segments", "log-manifest"} {
+						route, _ := LookupRoute("POST", "/api/v1/claims/{claim}/"+suffix)
+						_, err := NewAuthenticator(r).Authenticate(t.Context(), p, route)
+						if (err == nil) != (change == "tail") {
+							t.Fatalf("%s: %s authentication=%v", change, suffix, err)
+						}
+					}
+					heartbeat, _ := LookupRoute("POST", "/api/v1/claims/{claim}/heartbeat")
+					if _, err := NewAuthenticator(r).Authenticate(t.Context(), p, heartbeat); err == nil {
+						t.Fatal("log grace reopened owner heartbeat")
+					}
+				})
+			}
+		})
+	}
+}

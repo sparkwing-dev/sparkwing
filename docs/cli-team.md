@@ -45,7 +45,7 @@ Change the team's enrollment, claim ranking and child-run settings
 
 Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or --max-children-per-root, separately or together. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.
 
---max-children-per-root takes a positive integer (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
+--max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
 
 ### Flags
 
@@ -58,7 +58,7 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
 | `--members-can-add-machines BOOL` | members can add machines Values: true, false. |
 | `--claim-ranking TIERS` | claim ranking |
-| `--max-children-per-root COUNT` | Maximum descendants per root run (positive integer, default 50; retries excluded) |
+| `--max-children-per-root COUNT` | Maximum descendants per root run (1 to 1000, default 50; retries excluded) |
 
 ## `sparkwing team settings show`
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -450,12 +451,17 @@ func TestSpoolWriteFailureCannotSealComplete(t *testing.T) {
 	if err := sink.spool.Close(); err != nil {
 		t.Fatal(err)
 	}
+	readOnly, err := os.Open(sink.spool.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.spool = readOnly
 	if err := sink.Append([]byte("lost\n"), "", 0, 0); err == nil {
-		t.Fatal("closed spool accepted bytes")
+		t.Fatal("read-only spool accepted bytes")
 	}
 	manifest, err := sink.Close(t.Context(), End{})
-	if err == nil {
-		t.Fatal("closed spool did not report close failure")
+	if err != nil {
+		t.Fatalf("closing after failed append: %v", err)
 	}
 	if manifest.Status != statusIncomplete || manifest.Reason != "log persistence failed" {
 		t.Fatalf("failed write sealed complete: %+v", manifest)

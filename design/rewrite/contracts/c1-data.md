@@ -4444,15 +4444,15 @@ Cloud-only placement or an exclusive Cloud ranking checks credit standing,
 including prepaid policy and holds, before admitting executable work. A
 refused push remains terminal history and replay retains that result.
 
-Each launcher pass has one fault ledger attributed only by protected team
-labels. Every contained teardown, release or quarantine fault enters that
-ledger once per node. More than three distinct faults block that team's next
-claim. Quarantine permission is tracked separately and permits at most three
-distinct nodes per team per pass; counting a fault grants no write permission.
-Reservation evidence on protected team nodes is classified before namespace
-filtering. Erased identity annotations still consume the protected label's budget
-when a reservation taint or quarantine remains. Only a recorded team matching the
-protected label in the launcher's namespace permits a quarantine or release write.
+Launcher faults isolate suspect nodes and report their identities to the operator.
+Healthy nodes keep serving the team. Reservation and binding metadata use one
+validation predicate for reconciliation and placement, including resumption.
+Damaged metadata keeps a node excluded even if quarantine cannot persist.
+Quarantine writes require the recorded team to match the protected team label in
+the launcher's namespace. Every retry retains and checks the original node UID
+and protected team. A replacement or ownership change refuses the write.
+Operators can stop a team's new claims and waiting placements with `--stop-team`
+on every launcher.
 
 ## Sealed masking projection (decision 43)
 

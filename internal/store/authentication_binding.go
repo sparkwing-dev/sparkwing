@@ -113,7 +113,7 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 
 func authenticationExpansionTx(ctx context.Context, tx *storeTx, c capability.Capability, out *capability.BindingState) error {
 	expansion := &capability.ExpansionState{Lease: *c.Binding.Expansion}
-	var lease sql.NullInt64
+	var lease, finished sql.NullInt64
 	if expansion.Lease.Kind == capability.UnitTrigger {
 		err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,lease_expires_at FROM triggers WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease)
 		if err != nil {
@@ -128,9 +128,13 @@ func authenticationExpansionTx(ctx context.Context, tx *storeTx, c capability.Ca
 		var owner string
 		var generation int64
 		var current, until sql.NullInt64
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.owner_lease_name,e.owner_generation,l.generation,l.until FROM eval_units e LEFT JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &owner, &generation, &current, &until)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.owner_lease_name,e.owner_generation,l.generation,l.until,e.finished_at FROM eval_units e LEFT JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &owner, &generation, &current, &until, &finished)
 		if err != nil {
 			return err
+		}
+		if finished.Valid && expansion.Lease.Generation == c.Binding.Expansion.Generation {
+			expansion.Lease.Holder = c.Binding.Expansion.Holder
+			out.FinishedAt = stateTime(finished)
 		}
 		if owner == "controller.owner" && current.Valid && current.Int64 == generation {
 			expansion.ControllerLeaseExpiresAt = stateTime(until)

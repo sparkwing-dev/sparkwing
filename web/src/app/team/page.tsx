@@ -121,7 +121,7 @@ function Members({ me }: { me: Me }) {
           <form className="flex flex-wrap items-center gap-3 p-4 text-sm" onSubmit={(e) => {
             e.preventDefault();
             const ceiling = Number(new FormData(e.currentTarget).get("max_children_per_root"));
-            if (Number.isSafeInteger(ceiling) && ceiling > 0) {
+            if (Number.isSafeInteger(ceiling) && ceiling > 0 && ceiling <= 1000) {
               run("settings", async () => {
                 setSettings(await setTeamSettings({ max_children_per_root: ceiling }));
               }, "Team settings saved");
@@ -134,9 +134,10 @@ function Members({ me }: { me: Me }) {
               name="max_children_per_root"
               type="number"
               min="1"
+              max="1000"
               step="1"
               required
-              title="Descendants across every depth, excluding retries. Default 50. Changes are audited."
+              title="1 to 1000 descendants across every depth, excluding retries. Default 50. Changes are audited."
               defaultValue={settings.max_children_per_root}
               disabled={!owner || busy !== null}
               className={`${inputClass} w-24`}

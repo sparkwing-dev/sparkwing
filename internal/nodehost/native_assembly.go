@@ -152,8 +152,13 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return NativeServices{}, err
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
-	logs := &localLogs{current: current, claims: claims, readNode: cfg.Store.ReadNode, upload: cfg.Logs, masker: masker, run: run.Run.ID}
-	closeResources = func() error { logs.finish(context.WithoutCancel(ctx), ""); return closeHTTP() }
+	logs := &localLogs{principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	closeResources = func() error {
+		logs.finish(ctx, "")
+		// State transitions already committed. Keep bearer transports alive for the bounded tail.
+		logs.flushes.Wait()
+		return closeHTTP()
+	}
 	processes := &NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
 	claims.processes = processes
 	processes.Log = logs.write
@@ -208,7 +213,11 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			if err != nil {
 				return StorageBinding{}, err
 			}
-			return cfg.Storage(ctx, principal)
+			binding, err := cfg.Storage(ctx, principal)
+			if err == nil {
+				logs.bind(principal, int64(input.Attempt))
+			}
+			return binding, err
 		}, Bind: func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 			return delegate(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 		}},

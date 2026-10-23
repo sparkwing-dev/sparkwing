@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -293,13 +295,14 @@ func TestMemoPublicationAndWarningFailurePreserveJobResult(t *testing.T) {
 			deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
 				return &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"output"`)}}, nil
 			}
+			logs := &localLogs{run: input.Accepted.RunID, masker: deps.Masker, principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitTrigger, Binding: capability.Binding{RunID: input.Accepted.RunID, Generation: 1}}}, upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
+				return nil, errors.New("warning persistence failed")
+			}}
+			t.Cleanup(func() { <-logs.finish(t.Context(), "") })
 			warned := false
-			deps.Log = func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
-				if frame.Event == "memo_publish" {
-					warned = true
-					return errors.New("warning persistence failed")
-				}
-				return nil
+			deps.Log = func(ctx context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+				warned = warned || frame.Event == "memo_publish"
+				return logs.write(ctx, input.Accepted.RunID, "", frame)
 			}
 			deps.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
 				return nil, errors.New("required output refused")

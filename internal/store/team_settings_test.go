@@ -32,7 +32,7 @@ func TestChildCeilingTeamSetting(t *testing.T) {
 		}
 	}
 	check(true)
-	for _, ceiling := range []int64{200, 200, 20} {
+	for _, ceiling := range []int64{1000, 1000, 20} {
 		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MaxChildrenPerRoot: &ceiling}); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +52,7 @@ func TestChildCeilingTeamSetting(t *testing.T) {
 	if err != nil || other.MaxChildrenPerRoot != 50 {
 		t.Fatalf("changed another team's ceiling: %+v %v", other, err)
 	}
-	for _, ceiling := range []int64{-1, 0} {
+	for _, ceiling := range []int64{-1, 0, 1001, 9223372036854775807} {
 		var invalid *apierr.Error
 		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MaxChildrenPerRoot: &ceiling}); !errors.As(err, &invalid) || invalid.Code != apierr.BadRequest {
 			t.Fatalf("invalid ceiling %d: %v", ceiling, err)
@@ -64,6 +64,28 @@ func TestChildCeilingTeamSetting(t *testing.T) {
 		t.Fatal("changed ceiling without its audit")
 	}
 	check(true)
+}
+
+func TestChildCeilingDatabaseRange(t *testing.T) {
+	s, _ := machineEnrollment(t)
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := tx.ExecContext(t.Context(), `UPDATE teams SET max_children_per_root=1000 WHERE name='a'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ceiling := range []int64{-1, 0, 1001, 9223372036854775807} {
+		if err := s.inTx(t.Context(), func(tx *storeTx) error {
+			_, err := tx.ExecContext(t.Context(), `UPDATE teams SET max_children_per_root=? WHERE name='a'`, ceiling)
+			return err
+		}); err == nil {
+			t.Fatalf("database accepted child ceiling %d", ceiling)
+		}
+	}
+	current, err := (&Tenant{s: s, team: "a"}).TeamSettings(t.Context())
+	if err != nil || current.MaxChildrenPerRoot != 1000 {
+		t.Fatalf("rejected update changed child ceiling: %+v %v", current, err)
+	}
 }
 
 func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {

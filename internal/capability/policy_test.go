@@ -164,12 +164,16 @@ func TestEvalLogsRequireOwnUnit(t *testing.T) {
 			t.Fatalf("missing eval operation %s", operation)
 		}
 		found := false
+		liveness := liveLogTail
+		if operation == "heartbeat" {
+			liveness = LiveExpansion
+		}
 		for _, access := range route.Access {
 			if !slices.Contains(access.Grants, ExpansionSubmit) {
 				continue
 			}
 			found = true
-			if access.Credential != credentialEval || access.Binding != BindOwnEval || access.Liveness != LiveExpansion || len(access.Grants) != 1 {
+			if access.Credential != credentialEval || access.Binding != BindOwnEval || access.Liveness != liveness || len(access.Grants) != 1 {
 				t.Errorf("%s allows expansion grant outside own live eval: %+v", operation, access)
 			}
 		}

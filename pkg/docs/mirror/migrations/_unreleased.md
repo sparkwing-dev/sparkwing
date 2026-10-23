@@ -3046,7 +3046,7 @@ upgrading:
   scope. Team repository registration or live App installation coverage
   authorizes an explicit repository. A child in another repository always
   runs as asserted. Children nest at most 10 levels deep counting the root and one
-  root uses the team-set child ceiling (default 50, retries excluded). Team admins
+  root uses the team-set child ceiling (1 to 1000, default 50, retries excluded). Team admins
   change it with `team settings set --profile work --max-children-per-root 200`
   or in Team settings; changes are audited. Past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A

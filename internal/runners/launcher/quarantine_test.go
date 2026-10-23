@@ -413,3 +413,105 @@ func TestOperatorStopHoldsWaitingPlacement(t *testing.T) {
 		t.Fatalf("operator resume did not place held award: jobs=%v err=%v", jobs, err)
 	}
 }
+
+func TestReservationBindingMismatchStaysExcludedDuringQuarantineConflicts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary, kube := boundaryFixture()
+		binding := boundaryBinding("team")
+		job := jobName(binding)
+		original, _, err := boundary.Reserve(t.Context(), binding, job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tampered := binding
+		tampered.UnitID = "other-unit"
+		raw, err := json.Marshal(tampered)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.Annotations[bindingAnnotation] = string(raw)
+		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		patches := 0
+		kube.PrependReactor("patch", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
+			patches++
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, "node", errors.New("changed"))
+		})
+		l, _, _, _ := fixture()
+		l.Kube = kube
+		if err := l.Sync(t.Context()); err == nil || blocking(err) != nil || patches == 0 {
+			t.Fatalf("suspect node was not reported without blocking healthy claims: patches=%d err=%v", patches, err)
+		}
+		if _, _, err := boundary.Reserve(t.Context(), binding, job); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("resumed a suspect reservation while quarantine conflicted: %v", err)
+		}
+		node, err = kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err = json.Marshal(binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.Annotations[bindingAnnotation] = string(raw)
+		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		resumed, _, err := boundary.Reserve(t.Context(), binding, job)
+		if err != nil || resumed != original {
+			t.Fatalf("repaired reservation did not resume: %+v %v", resumed, err)
+		}
+	})
+}
+
+func TestQuarantineRetryStaysWithinOriginalNodeAndTeam(t *testing.T) {
+	for _, change := range []string{"replacement", "protected team", "erased ownership", "protected team during patch"} {
+		t.Run(change, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				_, kube := boundaryFixture()
+				node := reservedNode(t, "tampered", boundaryBinding("team"), "garbage")
+				if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				patches := 0
+				kube.PrependReactor("patch", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
+					patches++
+					if patches > 1 {
+						return false, nil, nil
+					}
+					changed := node.DeepCopy()
+					switch change {
+					case "replacement":
+						changed.UID = "replacement-uid"
+					case "protected team", "protected team during patch":
+						changed.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
+					case "erased ownership":
+						changed.Annotations = nil
+					}
+					if err := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("nodes"), changed, ""); err != nil {
+						t.Fatal(err)
+					}
+					if change == "protected team during patch" {
+						return false, nil, nil
+					}
+					return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, node.Name, errors.New("changed"))
+				})
+				if err := quarantineNode(t.Context(), kube, node, "cloud", "reservation is malformed or does not match its award"); err == nil || change != "protected team during patch" && blocking(err) != nil {
+					t.Fatalf("changed node was not reported as a contained fault: %v", err)
+				}
+				got, err := kube.CoreV1().Nodes().Get(t.Context(), node.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if patches != 1 || quarantined(*got) || got.Spec.Unschedulable {
+					t.Fatalf("quarantine crossed changed identity: patches=%d node=%+v", patches, got)
+				}
+			})
+		})
+	}
+}

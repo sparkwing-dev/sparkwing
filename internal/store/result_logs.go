@@ -270,13 +270,13 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 	unit := subject.Unit
 	var holder, prefix, status string
 	var generation int64
-	var lease sql.NullInt64
+	var lease, finished sql.NullInt64
 	if unit.Kind == blob.LogEval {
 		source := unit.Source
 		if source == nil || c.Unit != capability.UnitEval || c.Binding.Expansion == nil || c.Binding.NodeID != source.NodeID || c.Binding.Generation != source.Generation || c.Binding.Expansion.Generation != unit.Generation || !slices.Contains(c.Grants, capability.ExpansionSubmit) {
 			return holderRefusal()
 		}
-		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at FROM eval_units WHERE team = ? AND run_id = ? AND source_node_id = ? AND source_generation = ?", team, subject.RunID, source.NodeID, source.Generation).Scan(&holder, &prefix, &status, &generation, &lease)
+		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at,finished_at FROM eval_units WHERE team = ? AND run_id = ? AND source_node_id = ? AND source_generation = ?", team, subject.RunID, source.NodeID, source.Generation).Scan(&holder, &prefix, &status, &generation, &lease, &finished)
 		if err != nil {
 			return err
 		}
@@ -294,12 +294,24 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 		if string(c.Unit) != string(unit.Kind) || c.Binding.Generation != unit.Generation || !slices.Contains(c.Grants, capability.LogTail) {
 			return holderRefusal()
 		}
-		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at FROM triggers WHERE team = ? AND id = ? AND unit_kind = ?", team, subject.RunID, string(unit.Kind)).Scan(&holder, &prefix, &status, &generation, &lease)
+		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at,finished_at FROM triggers WHERE team = ? AND id = ? AND unit_kind = ?", team, subject.RunID, string(unit.Kind)).Scan(&holder, &prefix, &status, &generation, &lease, &finished)
 		if err != nil {
 			return err
 		}
 	}
 	now := tx.now(ctx)
+	if finished.Valid && (status == "done" || status == "failed") && generation == unit.Generation && generation == int64(actor.Generation) &&
+		now.UnixNano() >= finished.Int64 && now.UnixNano() < finished.Int64+int64(limits.LogSealGrace) {
+		// Retired rows clear the live writer; the immutable awarded credential retains its identity.
+		award, err := decodeAwardUnit(c.Unit, c.UnitID)
+		if err != nil || (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder || string(award.RunID) != subject.RunID {
+			return holderRefusal()
+		}
+		if unit.Source != nil && (string(award.NodeID) != unit.Source.NodeID || award.SourceGeneration != unit.Source.Generation) {
+			return holderRefusal()
+		}
+		return nil
+	}
 	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}

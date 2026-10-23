@@ -104,6 +104,20 @@ func TestSchemaPreservesOmissionNullAndEncodedShapes(t *testing.T) {
 	}
 }
 
+func TestTeamSettingsSchemaBoundsChildCeiling(t *testing.T) {
+	for _, typ := range []reflect.Type{reflect.TypeFor[wire.TeamSettings](), reflect.TypeFor[wire.TeamSettingsUpdate]()} {
+		b := schemaBuilder{definitions: schema{}}
+		definition := schemaDefinition(t, &b, b.value(typ))
+		value := definition["properties"].(schema)["max_children_per_root"].(schema)
+		if typ == reflect.TypeFor[wire.TeamSettingsUpdate]() {
+			value = value["anyOf"].([]any)[0].(schema)
+		}
+		if value["minimum"] != 1 || value["maximum"] != int64(1000) {
+			t.Fatalf("%s child ceiling range: %v", typ, value)
+		}
+	}
+}
+
 func TestSchemasRefuseUnsupportedJSONBeforePublishing(t *testing.T) {
 	for _, kind := range []reflect.Type{reflect.TypeFor[chan int](), reflect.TypeFor[map[bool]string]()} {
 		b := schemaBuilder{definitions: schema{}}

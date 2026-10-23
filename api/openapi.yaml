@@ -4185,6 +4185,8 @@ components:
               type: array
             - type: "null"
         max_children_per_root:
+          maximum: 1000
+          minimum: 1
           type: integer
         members_can_add_machines:
           type: boolean
@@ -4207,7 +4209,9 @@ components:
             - type: "null"
         max_children_per_root:
           anyOf:
-            - type: integer
+            - maximum: 1000
+              minimum: 1
+              type: integer
             - type: "null"
         members_can_add_machines:
           anyOf:

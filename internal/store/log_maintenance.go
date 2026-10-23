@@ -16,15 +16,15 @@ AND ((l.subject_kind='job_attempt'
 OR (l.subject_kind='owner_unit' AND (
     (l.unit_kind IN ('trigger','plan') AND NOT EXISTS (
         SELECT 1 FROM triggers t WHERE t.team=l.team AND t.id=l.run_id AND t.unit_kind=l.unit_kind
-        AND t.generation=l.generation AND t.status IN ('claimed','running') AND t.lease_expires_at>?))
+        AND t.generation=l.generation AND ((t.status IN ('claimed','running') AND t.lease_expires_at>?) OR (t.finished_at>?))))
     OR (l.unit_kind='eval' AND NOT EXISTS (
         SELECT 1 FROM eval_units e JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id
         WHERE e.team=l.team AND e.run_id=l.run_id AND e.source_node_id=l.source_node_id
         AND e.source_generation=l.source_generation AND n.generation=l.source_generation
-        AND e.generation=l.generation AND e.status IN ('claimed','running') AND e.lease_expires_at>?)))))`
+        AND e.generation=l.generation AND ((e.status IN ('claimed','running') AND e.lease_expires_at>?) OR (e.finished_at>?)))))))`
 
 func abandonedLogStreamArgs(now time.Time) []any {
-	return []any{now.Add(-limits.LogSealGrace).UnixNano(), now.UnixNano(), now.UnixNano()}
+	return []any{now.Add(-limits.LogSealGrace).UnixNano(), now.UnixNano(), now.Add(-limits.LogSealGrace).UnixNano(), now.UnixNano(), now.Add(-limits.LogSealGrace).UnixNano()}
 }
 
 type abandonedLogStream struct {
@@ -33,7 +33,7 @@ type abandonedLogStream struct {
 }
 
 // SealAbandonedLogStreams closes ended execution logs as incomplete under the
-// maintenance fence. Job attempts retain their final tail grace. Publication
+// maintenance fence. Completed attempts and owner units retain final-tail grace. Publication
 // streams require their publisher's final commit because they have no lease.
 func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonLease, limit int) (int64, error) {
 	if limit <= 0 {
