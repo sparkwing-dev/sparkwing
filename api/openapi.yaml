@@ -7342,7 +7342,7 @@ paths:
             grants:
               - expansion.submit
             binding: ownEval
-            liveness: expansion
+            liveness: logTail
         retry: exact_body
       x-sparkwing-wire: undocumented
   /api/v1/claims/{claim}/log-segments:
@@ -7378,7 +7378,7 @@ paths:
             grants:
               - expansion.submit
             binding: ownEval
-            liveness: expansion
+            liveness: logTail
         retry: exact_body
       x-sparkwing-wire: undocumented
   /api/v1/claims/{claim}/logs:
@@ -7414,7 +7414,7 @@ paths:
             grants:
               - expansion.submit
             binding: ownEval
-            liveness: expansion
+            liveness: logTail
         retry: exact_body
       x-sparkwing-wire: undocumented
   /api/v1/claims/exchange:
