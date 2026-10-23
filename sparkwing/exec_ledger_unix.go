@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
@@ -17,7 +16,7 @@ import (
 // recordStepSession writes the ledger record a sweep outside this process
 // needs to end the command's session if this process dies first. Outside a
 // run there is no owner to sweep for, so nothing is written.
-func recordStepSession(ctx context.Context, cmd *exec.Cmd, program string, _ stepJob) func() {
+func recordStepSession(ctx context.Context, cmd *exec.Cmd, _ stepJob) func() {
 	run := os.Getenv("SPARKWING_RUN_ID")
 	node := nodeFromContext(ctx)
 	if node == "" {
@@ -51,7 +50,6 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, program string, _ ste
 			SessionID:   leader.SessionID,
 			LeaderBirth: leader.BirthToken,
 		},
-		Program: filepath.Base(program),
 	})
 	if err != nil {
 		slog.Default().Debug("step session not recorded", "err", err)

@@ -28,6 +28,7 @@ func TestOrphanedSessionEventOmitsCommandArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy["command"] = "tool " + secret
+	legacy["program"] = "tool-" + secret
 	data, err = json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +69,8 @@ func record(t *testing.T, l *Ledger, run, node string, owner int) func() {
 	t.Helper()
 	release, err := l.Record(Record{
 		Run: run, Node: node, OwnerPID: owner, OwnerBirth: "b",
-		Handle:  Handle{Kind: "session", LeaderPID: owner + 100, SessionID: owner + 100, LeaderBirth: "lb"},
-		Program: "go",
+		Handle:      Handle{Kind: "session", LeaderPID: owner + 100, SessionID: owner + 100, LeaderBirth: "lb"},
+		Description: "go",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +137,7 @@ func TestSweepEndsOnlySessionsWhoseOwnerIsGone(t *testing.T) {
 	}
 	verdicts := map[string]Verdict{}
 	for _, o := range out {
-		verdicts[o.Record.Run+"/"+o.Record.Node] = o.Verdict
+		verdicts[o.Run+"/"+o.Node] = o.Verdict
 	}
 	want := map[string]Verdict{"run-live/build": VerdictLive, "run-dead/build": verdictReaped, "run-dead/test": verdictReaped}
 	for k, v := range want {
@@ -162,7 +163,7 @@ func TestSweepScopedToARunLeavesOtherRunsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Record.Run != "run-a" || out[0].Verdict != verdictReaped {
+	if len(out) != 1 || out[0].Run != "run-a" || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	left, _ := l.List()

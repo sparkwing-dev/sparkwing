@@ -47,15 +47,15 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 		case sessionledger.VerdictLive:
 			continue
 		case sessionledger.VerdictWouldReap:
-			findings = append(findings, wingd.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Record.Run})
+			findings = append(findings, wingd.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Run})
 			continue
 		}
 		for _, recordErr := range sessionledger.RecordOutcomes(r.Context(), tenant, "doctor", []sessionledger.Outcome{outcome}) {
-			findings = append(findings, wingd.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Record.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
+			findings = append(findings, wingd.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
 		}
 		if outcome.Err != nil {
 			failure = errors.Join(failure, outcome.Err)
-			findings = append(findings, wingd.LocalDoctorFinding{Code: "step_cleanup_failed", Unit: outcome.Record.Run, Message: outcome.Err.Error()})
+			findings = append(findings, wingd.LocalDoctorFinding{Code: "step_cleanup_failed", Unit: outcome.Run, Message: outcome.Err.Error()})
 		}
 	}
 	result := localhostwire.LocalDoctor{Findings: findings}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
@@ -14,13 +13,11 @@ import (
 // runCleanupCommand runs a library-registered cleanup argv once, directly
 // (never through a shell), when the owner that registered it is gone. The
 // command should be idempotent: the reaper attempts it a single time and
-// drops the record whatever the exit, because it runs in a sweeping process
-// (a later run, the daemon, or doctor) whose environment may differ from the
-// step's, and retrying a command it cannot judge would only accumulate noise.
+// drops the record whatever the exit, because controller doctor may run
+// in a different environment from the step and cannot judge a retry.
 //
-// safety: the error names only the program, since a sweep copies it into a
-// stray_session_reaped event and its path, arguments and output can quote a
-// secret no sweeping process can mask.
+// safety: errors omit executable text and output because the sweep copies
+// them into durable events without a host masker.
 func runCleanupCommand(ctx context.Context, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("sessionledger: command handle carries no argv")
@@ -36,5 +33,5 @@ func runCleanupCommand(ctx context.Context, argv []string) error {
 	case errors.As(err, &pathErr):
 		err = pathErr.Err
 	}
-	return fmt.Errorf("cleanup %s: %w", filepath.Base(argv[0]), err)
+	return fmt.Errorf("cleanup: %w", err)
 }

@@ -17,14 +17,14 @@ type EventAppender interface {
 
 // eventPayload is the JSON body of an [eventKind] event.
 type eventPayload struct {
-	Reaper    string    `json:"reaper"`
-	Verdict   Verdict   `json:"verdict"`
-	OwnerPID  int       `json:"owner_pid"`
-	LeaderPID int       `json:"leader_pid,omitempty"`
-	JobName   string    `json:"job_name,omitempty"`
-	Program   string    `json:"program,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	Error     string    `json:"error,omitempty"`
+	Reaper      string    `json:"reaper"`
+	Verdict     Verdict   `json:"verdict"`
+	OwnerPID    int       `json:"owner_pid"`
+	LeaderPID   int       `json:"leader_pid,omitempty"`
+	JobName     string    `json:"job_name,omitempty"`
+	Description string    `json:"description"`
+	StartedAt   time.Time `json:"started_at"`
+	Error       string    `json:"error,omitempty"`
 }
 
 // RecordOutcomes appends one event per reaped or failed outcome. Live
@@ -38,14 +38,14 @@ func RecordOutcomes(ctx context.Context, st EventAppender, reaper string, outcom
 		}
 		p := eventPayload{
 			Reaper: reaper, Verdict: o.Verdict,
-			OwnerPID: o.Record.OwnerPID, LeaderPID: o.Record.Handle.LeaderPID, JobName: o.Record.Handle.JobName,
-			Program: o.Record.Program, StartedAt: o.Record.StartedAt,
+			OwnerPID: o.OwnerPID, LeaderPID: o.LeaderPID, JobName: o.JobName,
+			Description: o.Description, StartedAt: o.StartedAt,
 		}
 		if o.Err != nil {
 			p.Error = o.Err.Error()
 		}
 		body, _ := json.Marshal(p)
-		if err := st.AppendEvent(ctx, o.Record.Run, o.Record.Node, eventKind, body); err != nil {
+		if err := st.AppendEvent(ctx, o.Run, o.Node, eventKind, body); err != nil {
 			errs = append(errs, err)
 		}
 	}

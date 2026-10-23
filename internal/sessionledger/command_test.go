@@ -13,7 +13,7 @@ func TestCommandRecordsFromOneOwnerDoNotCollide(t *testing.T) {
 	mk := func(id string) {
 		if _, err := l.Record(Record{
 			Run: "run-1", Node: "build", OwnerPID: 4242, OwnerBirth: "b",
-			Handle: Handle{Kind: "command", ID: id, Argv: []string{"true"}}, Program: "cleanup",
+			Handle: Handle{Kind: "command", ID: id, Argv: []string{"true"}}, Description: "cleanup",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -45,8 +45,8 @@ func TestSweepRunsTheCommandForADeadOwnerThenDropsTheRecord(t *testing.T) {
 	l := Open(filepath.Join(dir, "sessions")) // real dispatch probe -> runs the argv
 	if _, err := l.Record(Record{
 		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
-		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"touch", marker}},
-		Program: "touch",
+		Handle:      Handle{Kind: "command", ID: "x", Argv: []string{"touch", marker}},
+		Description: "touch",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func TestSweepDropsAFailingCommandAfterOneAttempt(t *testing.T) {
 	l := Open(filepath.Join(dir, "sessions"))
 	if _, err := l.Record(Record{
 		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
-		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"false"}},
-		Program: "false",
+		Handle:      Handle{Kind: "command", ID: "x", Argv: []string{"false"}},
+		Description: "false",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,14 +122,14 @@ func (r *eventRecorder) AppendEvent(_ context.Context, _, _, _ string, payload [
 }
 
 // A failed cleanup's argv and output can quote a secret no sweeping process
-// can mask, so the reaped event names only the program and its exit.
+// can mask, so the reaped event uses a safe label and the exit status.
 func TestAFailedCleanupEventQuotesNeitherArgvNorOutput(t *testing.T) {
 	const secret = "hunter2-cleanup-secret"
 	l := Open(filepath.Join(t.TempDir(), "sessions"))
 	if _, err := l.Record(Record{
 		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
-		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"sh", "-c", "echo " + secret + "; exit 3", secret}},
-		Program: "sh",
+		Handle:      Handle{Kind: "command", ID: "x", Argv: []string{"sh", "-c", "echo " + secret + "; exit 3", secret}},
+		Description: "sh",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,13 +149,12 @@ func TestAFailedCleanupEventQuotesNeitherArgvNorOutput(t *testing.T) {
 	}
 }
 
-// A cleanup that cannot start names only its program: the path to it can
-// carry a secret, and the sweep copies the error into an event.
-func TestACleanupThatCannotStartNamesOnlyItsProgram(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "hunter2-secret-dir", "missing-cleanup")
+// A missing executable can have secrets in any part of its path.
+func TestACleanupThatCannotStartOmitsExecutableText(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "hunter2-secret-dir", "missing-hunter2-cleanup")
 	err := runCleanupCommand(context.Background(), []string{missing, "arg"})
-	if err == nil || strings.Contains(err.Error(), "hunter2-secret-dir") || !strings.Contains(err.Error(), "missing-cleanup") {
-		t.Fatalf("err = %v, want the program's name without its path", err)
+	if err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("err = %v, want an error without executable text", err)
 	}
 }
 

@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/cleanup`
 
-Package cleanup lets a sparks library guarantee that a resource it starts -- a container, a cluster, a release -- is torn down if the step's node dies before the library's own cleanup runs.
+Package cleanup lets a sparks library register best-effort cleanup for resources outside the step's process tree.
 
 Import as `swcleanup "github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
@@ -24,8 +24,8 @@ type Spec struct {
     // process whose environment may differ from the step's, and does not
     // retry. Empty Argv makes Register a no-op.
     Argv []string
-    // Description names the resource for the reaped event and for
-    // `sparkwing doctor`; defaults to the command's program name when empty.
+    // Description is a safe resource label for cleanup diagnostics. It must
+    // contain no secrets. Orphan-sweep events use a fixed label when empty.
     Description string
 }
 ```

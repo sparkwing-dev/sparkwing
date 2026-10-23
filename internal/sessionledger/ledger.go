@@ -50,14 +50,14 @@ type Record struct {
 	OwnerPID   int    `json:"owner_pid"`
 	OwnerBirth string `json:"owner_birth"`
 	Handle     Handle `json:"handle"`
-	// Program is the executable's base name, without its path or arguments.
-	Program   string    `json:"program,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	// Description is a safe label supplied by the registering library.
+	Description string    `json:"description,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
 
 	path string
 }
 
-// Path is the file the record lives in, set on records read back by List.
+// filename returns the path List read the record from.
 func (r Record) filename() string { return r.path }
 
 // probe answers the two platform questions a sweep asks.
@@ -81,9 +81,9 @@ func Open(dir string) *Ledger {
 	return &Ledger{dir: dir, probe: dispatchProbe{platform: platformProbe{}}}
 }
 
-// dispatchProbe owns the cross-platform handle kinds (docker) and delegates
-// the rest to the platform probe, so a session or job is ended the way its
-// OS requires while a container is ended the same way everywhere.
+// dispatchProbe replays registered cleanup commands and delegates session
+// and job termination to the platform probe. The local controller invokes
+// the sweep through doctor.
 type dispatchProbe struct{ platform probe }
 
 func (d dispatchProbe) OwnerAlive(rec Record) (bool, error) { return d.platform.OwnerAlive(rec) }
@@ -200,18 +200,21 @@ const (
 	VerdictLive Verdict = "live"
 	// verdictReaped means the owner is gone and the session was ended.
 	verdictReaped Verdict = "reaped"
-	// VerdictWouldReap is VerdictReaped under a dry run: nothing was killed.
+	// VerdictWouldReap means a dry run found an orphan without ending it.
 	VerdictWouldReap Verdict = "would-reap"
 	// verdictFailed means the owner is gone but the session could not be
 	// ended; session/job records stay for the next sweep.
 	verdictFailed Verdict = "failed"
 )
 
-// Outcome pairs a record with the sweep's verdict.
+// Outcome contains diagnostics only. Replay handles stay private to the ledger.
 type Outcome struct {
-	Record  Record
-	Verdict Verdict
-	Err     error
+	Run, Node            string
+	OwnerPID, LeaderPID  int
+	JobName, Description string
+	StartedAt            time.Time
+	Verdict              Verdict
+	Err                  error
 }
 
 // SweepOptions narrows a sweep.
@@ -237,34 +240,38 @@ func (l *Ledger) Sweep(ctx context.Context, opts SweepOptions) ([]Outcome, error
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		alive, err := l.probe.OwnerAlive(rec)
-		if err != nil {
-			out = append(out, Outcome{Record: rec, Verdict: verdictFailed, Err: err})
-			continue
+		o := Outcome{
+			Run: rec.Run, Node: rec.Node, OwnerPID: rec.OwnerPID,
+			LeaderPID: rec.Handle.LeaderPID, JobName: rec.Handle.JobName,
+			Description: rec.Description, StartedAt: rec.StartedAt,
 		}
-		if alive {
-			out = append(out, Outcome{Record: rec, Verdict: VerdictLive})
-			continue
-		}
-		if opts.DryRun {
-			out = append(out, Outcome{Record: rec, Verdict: VerdictWouldReap})
-			continue
-		}
-		if err := l.probe.Terminate(ctx, rec.Handle); err != nil {
-			// safety: a process handle (session/job) is core's own
-			// guarantee, so a failure keeps the record for the next sweep
-			// to retry. A command is a library's best-effort external
-			// cleanup run in a foreign environment; we attempted it once,
-			// so drop the record rather than retry a failure we cannot
-			// judge and report every sweep thereafter.
+		if o.Description == "" {
+			o.Description = "step process"
 			if rec.Handle.Kind == "command" {
+				o.Description = "registered cleanup"
+			}
+		}
+		alive, err := l.probe.OwnerAlive(rec)
+		switch {
+		case err != nil:
+			o.Verdict, o.Err = verdictFailed, err
+		case alive:
+			o.Verdict = VerdictLive
+		case opts.DryRun:
+			o.Verdict = VerdictWouldReap
+		default:
+			o.Err = l.probe.Terminate(ctx, rec.Handle)
+			o.Verdict = verdictReaped
+			if o.Err != nil {
+				o.Verdict = verdictFailed
+			}
+			// A library cleanup is attempted once in doctor's environment.
+			// Keep failed process handles because core owns their termination.
+			if o.Err == nil || rec.Handle.Kind == "command" {
 				_ = os.Remove(rec.path)
 			}
-			out = append(out, Outcome{Record: rec, Verdict: verdictFailed, Err: err})
-			continue
 		}
-		_ = os.Remove(rec.path)
-		out = append(out, Outcome{Record: rec, Verdict: verdictReaped})
+		out = append(out, o)
 	}
 	return out, nil
 }
