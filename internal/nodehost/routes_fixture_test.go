@@ -1,4 +1,4 @@
-package nodehost_test
+package nodehost
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
@@ -52,15 +52,15 @@ func (transport routeTransport) RoundTrip(request *http.Request) (*http.Response
 }
 
 type server struct {
-	authorities *nodehost.ProcessAuthorities
+	authorities *ProcessAuthorities
 	parent      *routeParent
 	handler     http.Handler
 	client      *http.Client
 }
 
-func newService(t testing.TB) *nodehost.ProcessServices {
+func newService(t testing.TB) *ProcessServices {
 	t.Helper()
-	return &nodehost.ProcessServices{RunID: "run-1", Job: nodeproto.JobSpec{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}}, Masks: nodehost.NewMaskRegistry(secrets.NewMasker())}
+	return &ProcessServices{RunID: "run-1", Job: nodeproto.JobSpec{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
 }
 
 type routeNode struct {
@@ -71,7 +71,7 @@ type routeNode struct {
 		Resolve(context.Context, string) (string, bool, error)
 	}
 	Masker  *secrets.Masker
-	Service *nodehost.ProcessServices
+	Service *ProcessServices
 }
 
 func (s *server) Admit(node routeNode) (string, func(), error) {
@@ -79,7 +79,7 @@ func (s *server) Admit(node routeNode) (string, func(), error) {
 	if service == nil {
 		job := node.Job
 		job.ID = node.NodeID
-		service = &nodehost.ProcessServices{RunID: node.RunID, Job: job, Secrets: node.Secrets, Masks: nodehost.NewMaskRegistry(node.Masker)}
+		service = &ProcessServices{RunID: node.RunID, Job: job, Secrets: node.Secrets, Masks: NewMaskRegistry(node.Masker)}
 		if node.Resolver != nil {
 			service.Secret = func(ctx context.Context, _ capability.Authorized, name string) (string, bool, error) {
 				value, masked, err := node.Resolver.Resolve(ctx, name)
@@ -99,7 +99,7 @@ func (s *server) Admit(node routeNode) (string, func(), error) {
 	principal := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: id}, Capability: capability.Capability{Prefix: id, Digest: sha256.Sum256([]byte(id)), Audience: capability.Controller, Unit: capability.UnitNode, UnitID: id, Purpose: capability.PurposeWork, Issuance: capability.Award, Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "machine"}, Binding: binding, Grants: grants, IssuedAt: now, ExpiresAt: &expires}}
 	s.parent.snapshots[principal.Capability.Digest] = capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: principal}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires, StartPermitted: true}}
 	s.parent.mu.Unlock()
-	issued, revoke, err := s.authorities.Delegate(context.Background(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost, Binding: binding, Grants: grants, ExpiresAt: &expires}, service)
+	issued, revoke, err := s.authorities.delegate(context.Background(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost, Binding: binding, Grants: grants, ExpiresAt: &expires}, service)
 	if err != nil {
 		return "", nil, err
 	}
@@ -111,12 +111,12 @@ func (s *server) URL() string  { return "http://127.0.0.1" }
 func start(t testing.TB) *server {
 	t.Helper()
 	parent := &routeParent{snapshots: map[[sha256.Size]byte]capability.AuthenticationSnapshot{}}
-	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: parent, Bindings: routeRelations{}})
+	authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{Parent: parent, Bindings: routeRelations{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
-	if err := nodehost.RegisterProcessServices(router, authorities.Resolve); err != nil {
+	if err := RegisterProcessServices(router, authorities.Resolve); err != nil {
 		t.Fatal(err)
 	}
 	if err := router.Validate(); err != nil {
@@ -127,7 +127,7 @@ func start(t testing.TB) *server {
 	return s
 }
 
-func admitService(t testing.TB, s *server, service *nodehost.ProcessServices) string {
+func admitService(t testing.TB, s *server, service *ProcessServices) string {
 	t.Helper()
 	bearer, _, err := s.Admit(routeNode{Service: service})
 	if err != nil {

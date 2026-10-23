@@ -192,7 +192,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 		if err := decodeService(request, &body); err != nil {
 			return nil, 0, err
 		}
-		id, err := s.Cleanups.Register(body.Argv, body.Description)
+		id, err := s.Cleanups.register(body.Argv, body.Description)
 		return struct {
 			ID string `json:"id"`
 		}{id}, http.StatusCreated, err
@@ -200,7 +200,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 		if s.Cleanups == nil {
 			return nil, 0, serviceUnavailable()
 		}
-		return nil, http.StatusNoContent, s.Cleanups.Release(request.PathValue("cleanup"))
+		return nil, http.StatusNoContent, s.Cleanups.release(request.PathValue("cleanup"))
 	default:
 		return s.read(request, auth, path)
 	}
@@ -214,7 +214,7 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		if err := decodeService(request, &body); err != nil {
 			return err
 		}
-		return s.Masks.Register(body.Value)
+		return s.Masks.registerValue(body.Value)
 	case "/node/v1/annotations":
 		var body nodeproto.AnnotationRequest
 		if err := decodeService(request, &body); err != nil {

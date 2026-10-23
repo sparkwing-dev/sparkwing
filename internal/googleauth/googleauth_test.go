@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -96,37 +98,52 @@ func TestExchangeAcceptsSeveralAudiencesWhenThisClientIsTheAuthorizedParty(t *te
 func TestExchangeFailsWhenTheTokenEndpointIsUnreachable(t *testing.T) {
 	iss := googletest.New(t)
 	cfg := iss.Config()
-	cfg.HTTP = &http.Client{Transport: unreachable{}}
+	cfg.HTTP = &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})}
 	if _, err := googleauth.New(cfg).Exchange(context.Background(), "code", "v", redirect); err == nil {
 		t.Fatal("Exchange against an unreachable endpoint succeeded")
 	}
 }
 
-type unreachable struct{}
+type transport func(*http.Request) (*http.Response, error)
 
-func (unreachable) RoundTrip(*http.Request) (*http.Response, error) {
-	return nil, errors.New("connection refused")
+func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func tokenExchange(cfg googleauth.Config) func(string) (googleauth.Claims, error) {
+	var token string
+	cfg.HTTP = &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != cfg.TokenURL {
+			return http.DefaultTransport.RoundTrip(r)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id_token":` + strconv.Quote(token) + `}`)), Header: make(http.Header)}, nil
+	})}
+	c := googleauth.New(cfg)
+	return func(raw string) (googleauth.Claims, error) {
+		token = raw
+		return c.Exchange(context.Background(), "code", "v", redirect)
+	}
 }
 
-func TestVerifyRefusesATokenThatIsNotThreeSegments(t *testing.T) {
+func TestExchangeRefusesATokenThatIsNotThreeSegments(t *testing.T) {
 	iss := googletest.New(t)
-	c := googleauth.New(iss.Config())
+	exchange := tokenExchange(iss.Config())
 	signed := iss.IDToken(t, alice, nil, nil)
 	unsigned := signed[:strings.LastIndex(signed, ".")]
 	for _, token := range []string{"", unsigned, signed + ".extra"} {
-		if _, err := c.Verify(context.Background(), token); !errors.Is(err, googleauth.ErrRejected) {
-			t.Errorf("Verify(%q) = %v, want ErrRejected", token, err)
+		if _, err := exchange(token); !errors.Is(err, googleauth.ErrRejected) {
+			t.Errorf("Exchange(%q) = %v, want ErrRejected", token, err)
 		}
 	}
 }
 
-func TestVerifyRefusesAHeaderNamingAnotherAlgorithmEvenWhenRSASigned(t *testing.T) {
+func TestExchangeRefusesAHeaderNamingAnotherAlgorithmEvenWhenRSASigned(t *testing.T) {
 	iss := googletest.New(t)
-	c := googleauth.New(iss.Config())
+	exchange := tokenExchange(iss.Config())
 	for _, alg := range []string{"none", "HS256", "RS512"} {
 		token := iss.IDToken(t, alice, nil, map[string]any{"alg": alg})
-		if _, err := c.Verify(context.Background(), token); !errors.Is(err, googleauth.ErrRejected) {
-			t.Errorf("Verify(alg=%s) = %v, want ErrRejected", alg, err)
+		if _, err := exchange(token); !errors.Is(err, googleauth.ErrRejected) {
+			t.Errorf("Exchange(alg=%s) = %v, want ErrRejected", alg, err)
 		}
 	}
 }
@@ -135,20 +152,20 @@ type clock struct{ now time.Time }
 
 func (c *clock) Now() time.Time { return c.now }
 
-func TestVerifyReusesKeysUntilTheirMaxAgeThenRefetches(t *testing.T) {
+func TestExchangeReusesKeysUntilTheirMaxAgeThenRefetches(t *testing.T) {
 	iss := googletest.New(t)
 	clk := &clock{now: time.Now()}
 	cfg := iss.Config()
 	cfg.Now = clk.Now
-	c := googleauth.New(cfg)
+	exchange := tokenExchange(cfg)
 	token := iss.IDToken(t, alice, map[string]any{"exp": clk.now.Add(3 * time.Hour).Unix()}, nil)
 	for _, step := range []struct {
 		advance time.Duration
 		fetches int
 	}{{0, 1}, {30 * time.Minute, 1}, {31 * time.Minute, 2}} {
 		clk.now = clk.now.Add(step.advance)
-		if _, err := c.Verify(context.Background(), token); err != nil {
-			t.Fatalf("Verify after %v: %v", step.advance, err)
+		if _, err := exchange(token); err != nil {
+			t.Fatalf("Exchange after %v: %v", step.advance, err)
 		}
 		if got := iss.KeyFetches(); got != step.fetches {
 			t.Fatalf("after %v the client fetched keys %d times, want %d", step.advance, got, step.fetches)
@@ -156,14 +173,14 @@ func TestVerifyReusesKeysUntilTheirMaxAgeThenRefetches(t *testing.T) {
 	}
 }
 
-func TestVerifyRefetchesForAnUnknownKeyIDAtMostOncePerMinute(t *testing.T) {
+func TestExchangeRefetchesForAnUnknownKeyIDAtMostOncePerMinute(t *testing.T) {
 	iss := googletest.New(t)
 	clk := &clock{now: time.Now()}
 	cfg := iss.Config()
 	cfg.Now = clk.Now
-	c := googleauth.New(cfg)
-	if _, err := c.Verify(context.Background(), iss.IDToken(t, alice, nil, nil)); err != nil {
-		t.Fatalf("Verify: %v", err)
+	exchange := tokenExchange(cfg)
+	if _, err := exchange(iss.IDToken(t, alice, nil, nil)); err != nil {
+		t.Fatalf("Exchange: %v", err)
 	}
 	forged := iss.IDToken(t, alice, nil, map[string]any{"kid": "forged"})
 	for _, step := range []struct {
@@ -171,8 +188,8 @@ func TestVerifyRefetchesForAnUnknownKeyIDAtMostOncePerMinute(t *testing.T) {
 		fetches int
 	}{{0, 1}, {59 * time.Second, 1}, {time.Second, 2}} {
 		clk.now = clk.now.Add(step.advance)
-		if _, err := c.Verify(context.Background(), forged); !errors.Is(err, googleauth.ErrRejected) {
-			t.Fatalf("Verify(unknown kid) after %v = %v, want ErrRejected", step.advance, err)
+		if _, err := exchange(forged); !errors.Is(err, googleauth.ErrRejected) {
+			t.Fatalf("Exchange(unknown kid) after %v = %v, want ErrRejected", step.advance, err)
 		}
 		if got := iss.KeyFetches(); got != step.fetches {
 			t.Fatalf("after %v the client fetched keys %d times, want %d", step.advance, got, step.fetches)

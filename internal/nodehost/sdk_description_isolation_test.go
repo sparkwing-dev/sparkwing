@@ -102,7 +102,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 						if phase == "malformed" {
 							body = json.RawMessage(`{"jobs":` + unclassified)
 						}
-						_, err = PlanInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) { return body, nil })
+						_, err = planInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) { return body, nil })
 					}
 					var failure *apierr.Error
 					if !errors.As(err, &failure) || strings.Contains(failure.Message, unclassified) || !strings.Contains(failure.Message, "details withheld: secrets not yet known") {

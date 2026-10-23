@@ -37,7 +37,7 @@ func (o OutputRecords) ReadResult(ctx context.Context, row store.NodeRow, author
 	if row.Status != store.StatusDone || row.OutputRecord == nil {
 		return nil, blob.ErrNotFound
 	}
-	return o.ReadOutput(ctx, blob.RecordLookup{Authority: authority, Key: *row.OutputRecord})
+	return o.readOutput(ctx, blob.RecordLookup{Authority: authority, Key: *row.OutputRecord})
 }
 
 // PublishOutput returns a record only after both immutable upload and record
@@ -133,9 +133,9 @@ func (u JobUpload) commit(ctx context.Context, records blob.RecordStore, digest 
 	return &record.Key, nil
 }
 
-// ReadOutput closes every reader and accepts bytes only after verified EOF.
+// readOutput closes every reader and accepts bytes only after verified EOF.
 // The caller supplies its existing read authority; looking up a key creates none.
-func (o OutputRecords) ReadOutput(ctx context.Context, request blob.RecordLookup) (value json.RawMessage, err error) {
+func (o OutputRecords) readOutput(ctx context.Context, request blob.RecordLookup) (value json.RawMessage, err error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}

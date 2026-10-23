@@ -153,7 +153,7 @@ func checkoutPlanningSettings(input CheckoutPlanningInput) (settings.Inputs, str
 	if cfg.Defaults != nil {
 		inputs.Defaults = settings.Values{Args: cfg.Defaults.Args, Guards: cfg.Defaults.Guards}
 	}
-	selection := ResolvePipeline(cfg, input.Request.Request.Pipeline)
+	selection := resolvePipeline(cfg, input.Request.Request.Pipeline)
 	for _, pipeline := range cfg.Pipelines {
 		if pipeline.Name == input.Request.Request.Pipeline {
 			entrypoint = selection.Entrypoint

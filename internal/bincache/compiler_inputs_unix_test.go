@@ -42,7 +42,7 @@ func TestGoCommandsRequireExplicitInputs(t *testing.T) {
 		if err := CompilePipeline(t.Context(), t.TempDir(), "unused", options); err == nil {
 			t.Fatal("compiler inferred missing inputs")
 		}
-		if err := RunGo(t.Context(), t.TempDir(), nil, options); err == nil {
+		if err := runGo(t.Context(), t.TempDir(), nil, options); err == nil {
 			t.Fatal("Go command inferred missing inputs")
 		}
 		if _, _, err := MaterializePipeline(t.Context(), t.TempDir(), options); err == nil {

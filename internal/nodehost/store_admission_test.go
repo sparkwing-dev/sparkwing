@@ -65,7 +65,7 @@ func TestStartDecisionsAndPolling(t *testing.T) {
 					}
 					return
 				}
-				var refusal *AdmissionFailure
+				var refusal *admissionFailure
 				if ran || !errors.As(err, &refusal) || !refusal.committed {
 					t.Fatalf("ran=%t error=%v", ran, err)
 				}

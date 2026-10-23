@@ -66,7 +66,7 @@ type paymentObject struct {
 	} `json:"last_payment_error"`
 }
 
-func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, created int64, body []byte, policy PaymentEventPolicy) (*VerifiedPaymentEvent, error) {
+func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, created int64, body []byte, policy paymentEventPolicy) (*VerifiedPaymentEvent, error) {
 	var object paymentObject
 	if err := json.Unmarshal(body, &object); err != nil || object.ID == "" || object.LiveMode == nil || *object.LiveMode != (a.mode == PaymentLive) || created <= 0 {
 		return nil, invalidPaymentEvent()
@@ -191,8 +191,8 @@ func (event *PaymentEvent) setPaidCardFacts(charge paymentObject) {
 	}
 }
 
-// PaymentProviderAPIVersion is the Stripe API version the controller reads provider objects at.
-const PaymentProviderAPIVersion = "2026-08-26.dahlia"
+// paymentProviderAPIVersion is the Stripe API version the controller reads provider objects at.
+const paymentProviderAPIVersion = "2026-08-26.dahlia"
 
 type paymentProvider struct {
 	key    string
@@ -218,7 +218,7 @@ func (p *paymentProvider) read(ctx context.Context, collection, id, kind string,
 		return object, paymentProviderUnavailable()
 	}
 	request.Header.Set("Authorization", "Bearer "+p.key)
-	request.Header.Set("Stripe-Version", PaymentProviderAPIVersion)
+	request.Header.Set("Stripe-Version", paymentProviderAPIVersion)
 	response, err := p.client.Do(request)
 	if err != nil {
 		return object, paymentProviderUnavailable()

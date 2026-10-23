@@ -1,4 +1,4 @@
-package localsecrets_test
+package localsecrets
 
 import (
 	"testing"

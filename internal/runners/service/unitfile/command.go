@@ -31,7 +31,7 @@ func Arguments(goos, body string) []string {
 			if args != nil {
 				return nil
 			}
-			args = SystemdWords(strings.TrimPrefix(value, ":"))
+			args = systemdWords(strings.TrimPrefix(value, ":"))
 			if len(args) == 0 && strings.TrimSpace(value) != "" {
 				return nil
 			}

@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	LevelInfo = "info"
-	LevelWarn = "warn"
+	levelInfo = "info"
 )
 
 var reapTimeout = 10 * time.Second

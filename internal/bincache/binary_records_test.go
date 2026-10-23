@@ -73,7 +73,7 @@ func (b *binaryBytes) Transfer(ctx context.Context, _ blob.SignedTransfer, body 
 	return io.NopCloser(bytes.NewReader(b.body)), nil
 }
 
-func binaryFixture() (*BinaryData, *binaryRecords, *binaryBytes) {
+func binaryFixture() (*binaryData, *binaryRecords, *binaryBytes) {
 	i := blob.UploadIdentity{
 		Kind: blob.UploadOwnerUnit, Team: "team", RunID: "run", Principal: "principal", CapabilityRef: "cap",
 		Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadPlanUnit, ID: "plan", Generation: 3}},
@@ -81,7 +81,7 @@ func binaryFixture() (*BinaryData, *binaryRecords, *binaryBytes) {
 	a := blob.Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: i}}
 	b := &binaryBytes{body: []byte("binary"), size: 6, want: blob.Digest(fmt.Sprintf("%x", sha256.Sum256([]byte("binary"))))}
 	r := &binaryRecords{record: blob.Record{Key: blob.RecordKey{Team: "team", Kind: blob.KindBinary, Scope: blob.Scope{Repo: a.Repo, Ref: a.Ref.Scope}, Name: "build-key"}, Digest: b.want, Source: i, Provenance: blob.ProvenanceCloud}}
-	return &BinaryData{
+	return &binaryData{
 		Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: b, HTTPClient: b}), Records: r, Authority: a, Identity: i,
 		Trust: blob.BuildTrust{Team: "team"}, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)},
 	}, r, b
@@ -90,24 +90,24 @@ func binaryFixture() (*BinaryData, *binaryRecords, *binaryBytes) {
 func TestBinaryRecordDownload(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		change func(*BinaryData, *binaryRecords, *binaryBytes)
+		change func(*binaryData, *binaryRecords, *binaryBytes)
 		want   error
 	}{
-		{"cloud", func(*BinaryData, *binaryRecords, *binaryBytes) {}, nil},
-		{"local refused", func(_ *BinaryData, r *binaryRecords, _ *binaryBytes) { r.record.Provenance = blob.ProvenanceLocal }, blob.ErrDigestNotReadable},
-		{"local opted in", func(d *BinaryData, r *binaryRecords, _ *binaryBytes) {
+		{"cloud", func(*binaryData, *binaryRecords, *binaryBytes) {}, nil},
+		{"local refused", func(_ *binaryData, r *binaryRecords, _ *binaryBytes) { r.record.Provenance = blob.ProvenanceLocal }, blob.ErrDigestNotReadable},
+		{"local opted in", func(d *binaryData, r *binaryRecords, _ *binaryBytes) {
 			r.record.Provenance = blob.ProvenanceLocal
 			d.Trust.TrustLocalBuilds = true
 		}, nil},
-		{"foreign team", func(_ *BinaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Team = "foreign" }, blob.ErrDigestNotReadable},
-		{"foreign repo", func(_ *BinaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Scope.Repo = "gh:456" }, blob.ErrDigestNotReadable},
-		{"wrong build", func(_ *BinaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Name = "other" }, blob.ErrDigestNotReadable},
-		{"wrong ref", func(_ *BinaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Scope.Ref.Verified = true }, blob.ErrDigestNotReadable},
-		{"miss", func(_ *BinaryData, r *binaryRecords, _ *binaryBytes) { r.record = blob.Record{} }, ErrMiss},
-		{"corrupt", func(_ *BinaryData, _ *binaryRecords, b *binaryBytes) { b.body = []byte("BINARY") }, blob.ErrIntegrity},
-		{"short", func(_ *BinaryData, _ *binaryRecords, b *binaryBytes) { b.body = []byte("bin") }, blob.ErrIntegrity},
-		{"long", func(_ *BinaryData, _ *binaryRecords, b *binaryBytes) { b.body = []byte("binary!") }, blob.ErrIntegrity},
-		{"budget", func(d *BinaryData, _ *binaryRecords, _ *binaryBytes) { d.Budget.Deadline = time.Unix(1, 0) }, blob.ErrBudget},
+		{"foreign team", func(_ *binaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Team = "foreign" }, blob.ErrDigestNotReadable},
+		{"foreign repo", func(_ *binaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Scope.Repo = "gh:456" }, blob.ErrDigestNotReadable},
+		{"wrong build", func(_ *binaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Name = "other" }, blob.ErrDigestNotReadable},
+		{"wrong ref", func(_ *binaryData, r *binaryRecords, _ *binaryBytes) { r.record.Key.Scope.Ref.Verified = true }, blob.ErrDigestNotReadable},
+		{"miss", func(_ *binaryData, r *binaryRecords, _ *binaryBytes) { r.record = blob.Record{} }, errMiss},
+		{"corrupt", func(_ *binaryData, _ *binaryRecords, b *binaryBytes) { b.body = []byte("BINARY") }, blob.ErrIntegrity},
+		{"short", func(_ *binaryData, _ *binaryRecords, b *binaryBytes) { b.body = []byte("bin") }, blob.ErrIntegrity},
+		{"long", func(_ *binaryData, _ *binaryRecords, b *binaryBytes) { b.body = []byte("binary!") }, blob.ErrIntegrity},
+		{"budget", func(d *binaryData, _ *binaryRecords, _ *binaryBytes) { d.Budget.Deadline = time.Unix(1, 0) }, blob.ErrBudget},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, r, b := binaryFixture()
@@ -117,7 +117,7 @@ func TestBinaryRecordDownload(t *testing.T) {
 			if err := os.WriteFile(dest, []byte("previous"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			err := DownloadBinary(t.Context(), d, "build-key", dest)
+			err := downloadBinary(t.Context(), d, "build-key", dest)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("download = %v, want %v", err, tc.want)
 			}
@@ -151,7 +151,7 @@ func TestBinaryRecordUpload(t *testing.T) {
 			if err := os.WriteFile(path, []byte("upload"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			err := UploadBinary(t.Context(), d, "build-key", path)
+			err := uploadBinary(t.Context(), d, "build-key", path)
 			if fail {
 				if !errors.Is(err, blob.ErrIntegrity) || len(r.commits) != 0 {
 					t.Fatalf("failed upload = %v, commits %v", err, r.commits)
@@ -204,7 +204,7 @@ func TestBinaryDownloadRequiresVerificationAndClose(t *testing.T) {
 			stream := &binaryStream{Reader: bytes.NewBufferString("binary"), verified: tc.verified, closeErr: tc.closeErr}
 			data.Bytes = binaryStreamStore{reader: stream}
 			dir := t.TempDir()
-			if err := DownloadBinary(t.Context(), data, "build-key", filepath.Join(dir, "binary")); !errors.Is(err, tc.error) {
+			if err := downloadBinary(t.Context(), data, "build-key", filepath.Join(dir, "binary")); !errors.Is(err, tc.error) {
 				t.Fatalf("download = %v", err)
 			}
 			entries, err := os.ReadDir(dir)
@@ -219,7 +219,7 @@ func TestBinaryDownloadCancelledBeforeLookup(t *testing.T) {
 	data, records, _ := binaryFixture()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := DownloadBinary(ctx, data, "build-key", filepath.Join(t.TempDir(), "binary"))
+	err := downloadBinary(ctx, data, "build-key", filepath.Join(t.TempDir(), "binary"))
 	if !errors.Is(err, context.Canceled) || len(records.lookups) != 0 {
 		t.Fatalf("download %v, lookups %v", err, records.lookups)
 	}
@@ -232,7 +232,7 @@ func TestBinaryDownloadPublicationFailureCleansStaging(t *testing.T) {
 	if err := os.Mkdir(dest, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := DownloadBinary(t.Context(), data, "build-key", dest); err == nil {
+	if err := downloadBinary(t.Context(), data, "build-key", dest); err == nil {
 		t.Fatal("replaced a directory with an executable")
 	}
 	entries, err := os.ReadDir(dir)
@@ -258,7 +258,7 @@ func TestBinaryDownloadDeadlineFailuresAreBudgetFailures(t *testing.T) {
 				data.Bytes = binaryStreamStore{reader: &binaryStream{Reader: binaryReadFailure{}}}
 			}
 			dir := t.TempDir()
-			err := DownloadBinary(t.Context(), data, "build-key", filepath.Join(dir, "binary"))
+			err := downloadBinary(t.Context(), data, "build-key", filepath.Join(dir, "binary"))
 			if !errors.Is(err, blob.ErrBudget) || !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("download = %v", err)
 			}
@@ -293,25 +293,25 @@ func (r binaryReceiptResponse) Put(context.Context, blob.PutRequest) (blob.Recei
 func TestBinaryRecordUploadRefusesMismatchedResponses(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		change  func(*BinaryData)
+		change  func(*binaryData)
 		commits int
 	}{
-		{"receipt digest", func(d *BinaryData) {
+		{"receipt digest", func(d *binaryData) {
 			d.Bytes = binaryReceiptResponse{receipt: blob.Receipt{Identity: d.Identity, Digest: "other"}}
 		}, 0},
-		{"receipt owner", func(d *BinaryData) {
+		{"receipt owner", func(d *binaryData) {
 			sum := sha256.Sum256([]byte("bundle"))
 			i := d.Identity
 			i.RunID = "other"
 			d.Bytes = binaryReceiptResponse{receipt: blob.Receipt{Identity: i, Digest: blob.Digest(fmt.Sprintf("%x", sum[:]))}}
 		}, 0},
-		{"record digest", func(d *BinaryData) {
+		{"record digest", func(d *binaryData) {
 			d.Records = binaryRecordResponse{d.Records, func(r *blob.Record) { r.Digest = "other" }}
 		}, 1},
-		{"record scope", func(d *BinaryData) {
+		{"record scope", func(d *binaryData) {
 			d.Records = binaryRecordResponse{d.Records, func(r *blob.Record) { r.Key.Scope.Repo = "gh:456" }}
 		}, 1},
-		{"record owner", func(d *BinaryData) {
+		{"record owner", func(d *binaryData) {
 			d.Records = binaryRecordResponse{d.Records, func(r *blob.Record) { r.Source.RunID = "other" }}
 		}, 1},
 	} {
@@ -324,7 +324,7 @@ func TestBinaryRecordUploadRefusesMismatchedResponses(t *testing.T) {
 			if err := os.WriteFile(path, []byte("bundle"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			err := UploadBinary(t.Context(), data, "build-key", path)
+			err := uploadBinary(t.Context(), data, "build-key", path)
 			if !errors.Is(err, blob.ErrIntegrity) || len(records.commits) != tc.commits {
 				t.Fatalf("upload = %v, commits = %d", err, len(records.commits))
 			}
@@ -335,7 +335,7 @@ func TestBinaryRecordUploadRefusesMismatchedResponses(t *testing.T) {
 func TestBinaryRecordUploadRejectsAnotherOwner(t *testing.T) {
 	data, _, transport := binaryFixture()
 	data.Identity.Unit.Value.Generation++
-	err := UploadBinary(t.Context(), data, "build-key", "must-not-be-opened")
+	err := uploadBinary(t.Context(), data, "build-key", "must-not-be-opened")
 	if !errors.Is(err, blob.ErrDigestNotReadable) || transport.upload.Identity.Kind != "" {
 		t.Fatalf("upload = %v, byte request = %+v", err, transport.upload)
 	}

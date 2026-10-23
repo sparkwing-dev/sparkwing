@@ -17,9 +17,9 @@ func VerifyBundleEmbedded() error {
 	return nil
 }
 
-// VerifyBundle reports whether bundleFS carries a dashboard to serve. The
+// verifyBundle reports whether bundleFS carries a dashboard to serve. The
 // bundle is rooted at its index.html, the way BundleFS returns it.
-func VerifyBundle(bundleFS fs.FS) error {
+func verifyBundle(bundleFS fs.FS) error {
 	if _, err := fs.Stat(bundleFS, "index.html"); err != nil {
 		return fmt.Errorf("dashboard bundle carries no index.html: %w", err)
 	}

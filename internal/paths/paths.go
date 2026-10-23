@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -69,75 +68,24 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 // without reaping them.
 func (p Paths) SessionLedgerDir() string { return filepath.Join(p.Root, "sessions") }
 
-// RefWorktreesDir holds the git worktrees `run --sw-detached --sw-ref` checks out for
+// refWorktreesDir holds the git worktrees `run --sw-detached --sw-ref` checks out for
 // detached runs. Every one sits under this root, which is what lets a sweep
 // decide ownership by containment rather than by a record it has to trust.
-func (p Paths) RefWorktreesDir() string { return filepath.Join(p.Root, "ref-worktrees") }
+func (p Paths) refWorktreesDir() string { return filepath.Join(p.Root, "ref-worktrees") }
 
-func (p Paths) RefWorktreeDir(runID string) string {
-	return filepath.Join(p.RefWorktreesDir(), runID)
+// standaloneDir holds the runs stores written by pipeline binaries that could
+// not reach the admission daemon.
+func (p Paths) standaloneDir() string { return filepath.Join(p.Root, "standalone") }
+
+// standaloneStateDB is the store standalone runs share.
+func (p Paths) standaloneStateDB() string {
+	return filepath.Join(p.standaloneDir(), "state.db")
 }
 
-// StandaloneDir holds the runs stores written by pipeline binaries that could
-// not reach the admission daemon. The read verbs merge these with
-// [Paths.StateDB]; [Paths.StandaloneStores] enumerates them.
-func (p Paths) StandaloneDir() string { return filepath.Join(p.Root, "standalone") }
-
-// StandaloneStateDB is the store standalone runs share.
-func (p Paths) StandaloneStateDB() string {
-	return filepath.Join(p.StandaloneDir(), "state.db")
-}
-
-// StandaloneSchemaDir is where a build before the store baseline kept a
+// standaloneSchemaDir is where a build before the store baseline kept a
 // standalone store the shared one refused, one directory per schema version.
-// Nothing writes there now; [Paths.StandaloneStores] still lists what is left.
-func (p Paths) StandaloneSchemaDir(version int) string {
-	return filepath.Join(p.StandaloneDir(), fmt.Sprintf("schema-%d", version))
-}
-
-// EnsureStandaloneDir prepares [Paths.StandaloneDir] under the home's own mode.
-func (p Paths) EnsureStandaloneDir() error {
-	if err := p.EnsureRoot(); err != nil {
-		return err
-	}
-	return fssecure.EnsureDir(p.StandaloneDir())
-}
-
-// StandaloneStore is one runs store under [Paths.StandaloneDir]: the shared
-// standalone file, whose Schema is zero, or a per-schema fallback carrying the
-// store schema version its directory names.
-type StandaloneStore struct {
-	Path   string
-	Schema int
-}
-
-// StandaloneStores lists the standalone runs stores that exist under this
-// home, the shared file first and each per-schema fallback after it in schema
-// order. A home with no standalone directory yields none. Only regular files
-// are listed, so a caller still handles a store it cannot open.
-func (p Paths) StandaloneStores() []StandaloneStore {
-	var out []StandaloneStore
-	if isRegularFile(p.StandaloneStateDB()) {
-		out = append(out, StandaloneStore{Path: p.StandaloneStateDB()})
-	}
-	entries, err := os.ReadDir(p.StandaloneDir())
-	if err != nil {
-		return out
-	}
-	var fallbacks []StandaloneStore
-	for _, entry := range entries {
-		schema, ok := standaloneSchemaOf(entry)
-		if !ok {
-			continue
-		}
-		path := filepath.Join(p.StandaloneSchemaDir(schema), "state.db")
-		if !isRegularFile(path) {
-			continue
-		}
-		fallbacks = append(fallbacks, StandaloneStore{Path: path, Schema: schema})
-	}
-	sort.Slice(fallbacks, func(i, j int) bool { return fallbacks[i].Schema < fallbacks[j].Schema })
-	return append(out, fallbacks...)
+func (p Paths) standaloneSchemaDir(version int) string {
+	return filepath.Join(p.standaloneDir(), fmt.Sprintf("schema-%d", version))
 }
 
 func standaloneSchemaOf(entry os.DirEntry) (int, bool) {
@@ -162,10 +110,10 @@ func isRegularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-func (p Paths) VersionStampDir() string { return filepath.Join(p.Root, "last-version.d") }
+func (p Paths) versionStampDir() string { return filepath.Join(p.Root, "last-version.d") }
 
 func (p Paths) VersionStampFile(key string) string {
-	return filepath.Join(p.VersionStampDir(), key)
+	return filepath.Join(p.versionStampDir(), key)
 }
 
 func (p Paths) RunsDir() string { return filepath.Join(p.Root, "runs") }
@@ -174,7 +122,7 @@ func (p Paths) RunDir(runID string) string {
 	return filepath.Join(p.RunsDir(), runID)
 }
 
-func (p Paths) EnsureRunDir(runID string) error {
+func (p Paths) ensureRunDir(runID string) error {
 	if err := p.EnsureRoot(); err != nil {
 		return err
 	}

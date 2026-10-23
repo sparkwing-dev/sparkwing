@@ -27,7 +27,7 @@ func TestRunSummariesSanitizeTerminalControls(t *testing.T) {
 
 func TestMarkdownSummarySanitizesTerminalControls(t *testing.T) {
 	var out bytes.Buffer
-	RenderMarkdownSummary(&out, "  ", "\x1b]0;injected\x07\x1b[2Jsummary")
+	renderMarkdownSummary(&out, "  ", "\x1b]0;injected\x07\x1b[2Jsummary")
 	if got := out.String(); strings.Contains(got, "injected") || strings.Contains(got, "\x1b[2J") {
 		t.Fatalf("unsafe summary: %q", got)
 	}

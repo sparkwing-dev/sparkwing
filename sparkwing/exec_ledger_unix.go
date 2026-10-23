@@ -16,7 +16,7 @@ import (
 // recordStepSession writes the ledger record a sweep outside this process
 // needs to end the command's session if this process dies first. Outside a
 // run there is no owner to sweep for, so nothing is written.
-func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, _ stepJob) func() {
+func recordStepSession(ctx context.Context, cmd *exec.Cmd, _ stepJob) func() {
 	run := os.Getenv("SPARKWING_RUN_ID")
 	node := nodeFromContext(ctx)
 	if node == "" {
@@ -50,7 +50,6 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, _ ste
 			SessionID:   leader.SessionID,
 			LeaderBirth: leader.BirthToken,
 		},
-		Command: sessionledger.MaskCommand(ctx, display),
 	})
 	if err != nil {
 		slog.Default().Debug("step session not recorded", "err", err)

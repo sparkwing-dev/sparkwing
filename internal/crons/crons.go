@@ -7,7 +7,7 @@
 // every durable fact through [store.Store], so the same code serves the CLI,
 // the dashboard, and a test with a fake clock and a fake launcher.
 //
-// A schedule is identified by [ScheduleID], derived from the repository path,
+// A schedule is identified by [scheduleID], derived from the repository path,
 // the pipeline name and the entry's name, so re-arming the same checkout finds
 // the same row and two checkouts of one repository stay separate schedules.
 package crons
@@ -34,23 +34,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// ScheduleIDPrefix marks a schedule id.
-const ScheduleIDPrefix = "crn_"
+// scheduleIDPrefix marks a schedule id.
+const scheduleIDPrefix = "crn_"
 
 // safety: twelve hex characters stay readable in a table and leave collisions far beyond one host's checkouts.
 const scheduleIDHexLen = 12
 
-// ScheduleID is the stable identity of one of a pipeline's schedules in one
+// scheduleID is the stable identity of one of a pipeline's schedules in one
 // checkout: crn_ followed by the first twelve hex characters of
 // sha256(repoPath + NUL + pipeline) for the entry named "default", and of
 // sha256(repoPath + NUL + pipeline + NUL + name) for any other. The lone
 // schedule of a pipeline keeps the id it had before entries carried names.
-func ScheduleID(repoPath, pipeline, name string) string {
+func scheduleID(repoPath, pipeline, name string) string {
 	return teamScheduleID(store.DefaultTeam, repoPath, pipeline, name)
 }
 
-// teamScheduleID is [ScheduleID] for a schedule armed in team. The operator's
-// team keeps the ids [ScheduleID] names; any other team's seed also carries the
+// teamScheduleID is [scheduleID] for a schedule armed in team. The operator's
+// team keeps the ids [scheduleID] names; any other team's seed also carries the
 // team. The store keys schedules by team and id, so no team's id can block another's.
 func teamScheduleID(team store.Team, repoPath, pipeline, name string) string {
 	seed := repoPath + "\x00" + pipeline
@@ -61,7 +61,7 @@ func teamScheduleID(team store.Team, repoPath, pipeline, name string) string {
 		seed = "team\x00" + string(team) + "\x00" + seed
 	}
 	sum := sha256.Sum256([]byte(seed))
-	return ScheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]
+	return scheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]
 }
 
 // AppScheduleID keeps one team's App schedule identity when GitHub changes a
@@ -73,7 +73,7 @@ func AppScheduleID(team store.Team, installationID, repositoryID int64, pipeline
 		seed += "\x00" + name
 	}
 	sum := sha256.Sum256([]byte(seed))
-	return ScheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]
+	return scheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]
 }
 
 // DisplayName is the name an operator types and reads: the repository
@@ -96,7 +96,7 @@ func displayName(repoPath, pipeline, name string) string {
 // scp form git@host:owner/name spells the owner after a colon rather than a
 // slash, so the label reads the same for both spellings of one repository.
 func repoLabel(repoPath string) string {
-	if !PushedRepo(repoPath) {
+	if !pushedRepo(repoPath) {
 		return filepath.Base(repoPath)
 	}
 	trimmed := strings.TrimSuffix(strings.TrimRight(repoPath, "/"), ".git")
@@ -112,11 +112,11 @@ func repoLabel(repoPath string) string {
 	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
 }
 
-// PushedRepo reports whether a stored repo_path names a repository pushed to a
+// pushedRepo reports whether a stored repo_path names a repository pushed to a
 // controller rather than a checkout on this machine. Every clone URL a push is
 // allowed to carry counts, including the scp form under any user name, not
 // only git@.
-func PushedRepo(repoPath string) bool {
+func pushedRepo(repoPath string) bool {
 	for _, scheme := range []string{"https://", "http://", "ssh://", "git://"} {
 		if strings.HasPrefix(repoPath, scheme) {
 			return true
@@ -128,10 +128,10 @@ func PushedRepo(repoPath string) bool {
 	return err == nil
 }
 
-// Pushed reports whether a schedule was pushed to a controller, so its
+// pushed reports whether a schedule was pushed to a controller, so its
 // declaration is what the push carried and no working tree answers for it.
-func Pushed(s store.CronSchedule) bool {
-	return s.Where == store.CronWhereController || PushedRepo(s.RepoPath)
+func pushed(s store.CronSchedule) bool {
+	return s.Where == store.CronWhereController || pushedRepo(s.RepoPath)
 }
 
 // Declared is one entry of a repository's on.schedule.
@@ -149,15 +149,15 @@ type Declared struct {
 // ID is the schedule id this entry arms under.
 func (d Declared) ID() string { return teamScheduleID(d.Team, d.RepoPath, d.Pipeline, d.Name) }
 
-// DisplayName is what an operator types and reads for this entry.
-func (d Declared) DisplayName() string { return displayName(d.RepoPath, d.Pipeline, d.Name) }
+// displayName is what an operator types and reads for this entry.
+func (d Declared) displayName() string { return displayName(d.RepoPath, d.Pipeline, d.Name) }
 
-// Local reports whether the entry fires from a host that arms it, rather than
+// local reports whether the entry fires from a host that arms it, rather than
 // from a controller.
-func (d Declared) Local() bool { return d.Trigger.Where == pipelines.ScheduleWhereLocal }
+func (d Declared) local() bool { return d.Trigger.Where == pipelines.ScheduleWhereLocal }
 
-// Selector is the "pipeline/name" form an operator restricts an arm with.
-func (d Declared) Selector() string { return d.Pipeline + "/" + d.Name }
+// selector is the "pipeline/name" form an operator restricts an arm with.
+func (d Declared) selector() string { return d.Pipeline + "/" + d.Name }
 
 // declaredSchedules reads <repoRoot>/.sparkwing/sparkwing.yaml and returns one
 // entry per declared cadence, in declaration order. A readable config that
@@ -308,23 +308,23 @@ func (s *Service) now() time.Time {
 
 // State names what a stored schedule does at the next due instant.
 const (
-	StateArmed      = "armed"
-	StatePaused     = "paused"
-	StateUndeclared = "undeclared"
+	stateArmed      = "armed"
+	statePaused     = "paused"
+	stateUndeclared = "undeclared"
 )
 
 // LockState names what a schedule runs at its next fire.
 const (
-	// LockFollows compiles the checkout on every fire.
-	LockFollows = "follows"
-	// LockPinned runs the pinned binary, and the checkout has not moved.
-	LockPinned = "pinned"
-	// LockAhead runs the pinned binary while the checkout has newer commits.
-	LockAhead = "ahead"
-	// LockDirty runs the pinned binary while the checkout has uncommitted edits.
-	LockDirty = "dirty"
-	// LockMissing names a pin whose binary is gone, which fires nothing.
-	LockMissing = "missing"
+	// lockFollows compiles the checkout on every fire.
+	lockFollows = "follows"
+	// lockPinned runs the pinned binary, and the checkout has not moved.
+	lockPinned = "pinned"
+	// lockAhead runs the pinned binary while the checkout has newer commits.
+	lockAhead = "ahead"
+	// lockDirty runs the pinned binary while the checkout has uncommitted edits.
+	lockDirty = "dirty"
+	// lockMissing names a pin whose binary is gone, which fires nothing.
+	lockMissing = "missing"
 )
 
 // safety: seven characters is what git itself abbreviates to, so the ref reads
@@ -339,16 +339,13 @@ type Lock struct {
 	State  string `json:"state"`
 }
 
-// ShortRef abbreviates the locked commit the way git does.
-func (l Lock) ShortRef() string {
+// shortRef abbreviates the locked commit the way git does.
+func (l Lock) shortRef() string {
 	if len(l.Ref) <= shortRefLen {
 		return l.Ref
 	}
 	return l.Ref[:shortRefLen]
 }
-
-// Locked reports whether the schedule runs a pinned binary.
-func (l Lock) Locked() bool { return l.State != LockFollows }
 
 // Row is a stored schedule plus the fields a renderer needs and the store does
 // not keep: the display name, the state, the effective cadence, the lock and
@@ -406,11 +403,11 @@ func newRow(ctx context.Context, s store.CronSchedule, ck checkouts) Row {
 func stateOf(s store.CronSchedule) string {
 	switch {
 	case !s.Declared:
-		return StateUndeclared
+		return stateUndeclared
 	case s.Paused:
-		return StatePaused
+		return statePaused
 	default:
-		return StateArmed
+		return stateArmed
 	}
 }
 
@@ -422,21 +419,21 @@ func scheduleEntryName(s store.CronSchedule) string {
 }
 
 func lockOf(ctx context.Context, s store.CronSchedule, ck checkouts) Lock {
-	lock := Lock{Ref: s.LockedRef, Binary: s.LockedBinary, Digest: s.LockedDigest, State: LockFollows}
-	if Pushed(s) {
+	lock := Lock{Ref: s.LockedRef, Binary: s.LockedBinary, Digest: s.LockedDigest, State: lockFollows}
+	if pushed(s) {
 		// safety: the controller clones what it was pushed, so the pin is the
 		// ref alone and there is no working tree to compare it against.
 		if s.LockedRef != "" {
-			lock.State = LockPinned
+			lock.State = lockPinned
 		}
 		return lock
 	}
 	if s.LockedBinary == "" {
 		return lock
 	}
-	lock.State = LockPinned
+	lock.State = lockPinned
 	if _, err := os.Stat(s.LockedBinary); err != nil {
-		lock.State = LockMissing
+		lock.State = lockMissing
 		return lock
 	}
 	if ck == nil || s.LockedRef == "" {
@@ -445,9 +442,9 @@ func lockOf(ctx context.Context, s store.CronSchedule, ck checkouts) Lock {
 	state := ck.at(ctx, s.RepoPath)
 	switch {
 	case state.head != "" && state.head != s.LockedRef:
-		lock.State = LockAhead
+		lock.State = lockAhead
 	case state.dirty:
-		lock.State = LockDirty
+		lock.State = lockDirty
 	}
 	return lock
 }
@@ -455,24 +452,24 @@ func lockOf(ctx context.Context, s store.CronSchedule, ck checkouts) Lock {
 // safety: a pushed schedule has no checkout to be ahead of, so its detail says
 // which commit the controller clones rather than how a working tree compares.
 func stateDetail(s store.CronSchedule, l Lock) string {
-	if !Pushed(s) {
+	if !pushed(s) {
 		return lockDetail(l)
 	}
 	if l.Ref == "" {
 		return "branch tip"
 	}
-	return "pinned " + l.ShortRef()
+	return "pinned " + l.shortRef()
 }
 
 func lockDetail(l Lock) string {
 	switch l.State {
-	case LockPinned:
-		return "locked " + l.ShortRef()
-	case LockAhead:
+	case lockPinned:
+		return "locked " + l.shortRef()
+	case lockAhead:
 		return "locked, checkout ahead"
-	case LockDirty:
+	case lockDirty:
 		return "locked, checkout dirty"
-	case LockMissing:
+	case lockMissing:
 		return "locked, binary missing"
 	}
 	return ""
@@ -623,16 +620,16 @@ func (s *Service) Show(ctx context.Context, id string, fires int) (Row, []store.
 	return newRow(ctx, sched, newCheckouts()), history, nil
 }
 
-// Pause stops a schedule firing. Its cursor still advances on each tick, so
+// pause stops a schedule firing. Its cursor still advances on each tick, so
 // resuming does not replay the instants that passed while it was paused.
-func (s *Service) Pause(ctx context.Context, id string) error {
+func (s *Service) pause(ctx context.Context, id string) error {
 	return s.Schedules.SetCronSchedulePaused(ctx, id, true)
 }
 
-// Resume lets a paused schedule fire again from its next due instant. The
+// resume lets a paused schedule fire again from its next due instant. The
 // cursor moves to now before the pause clears, so a host whose timer was off
 // for the whole pause still does not replay it.
-func (s *Service) Resume(ctx context.Context, id string) error {
+func (s *Service) resume(ctx context.Context, id string) error {
 	sched, err := s.Schedules.GetCronSchedule(ctx, id)
 	if err != nil {
 		return err
@@ -663,9 +660,9 @@ func (s *Service) Upcoming(ctx context.Context, id string, n int) ([]time.Time, 
 	return eval.schedule.Upcoming(s.now(), eval.loc, n), nil
 }
 
-// ErrAmbiguousName is returned, wrapped, when a name matches more than one
+// errAmbiguousName is returned, wrapped, when a name matches more than one
 // armed schedule.
-var ErrAmbiguousName = errors.New("more than one schedule carries that name")
+var errAmbiguousName = errors.New("more than one schedule carries that name")
 
 // Resolve finds one schedule from what an operator typed: a schedule id, a
 // repo/pipeline[/name] display name, a pipeline/name pair, or a bare pipeline
@@ -676,7 +673,7 @@ func (s *Service) Resolve(ctx context.Context, name string) (store.CronSchedule,
 	if trimmed == "" {
 		return store.CronSchedule{}, errors.New("crons: a schedule name is required")
 	}
-	if strings.HasPrefix(trimmed, ScheduleIDPrefix) {
+	if strings.HasPrefix(trimmed, scheduleIDPrefix) {
 		return s.Schedules.GetCronSchedule(ctx, trimmed)
 	}
 	stored, err := s.Schedules.ListCronSchedules(ctx)
@@ -709,7 +706,7 @@ func (s *Service) Resolve(ctx context.Context, name string) (store.CronSchedule,
 		}
 		sort.Strings(names)
 		return store.CronSchedule{}, fmt.Errorf("crons: %q: %w: %s",
-			trimmed, ErrAmbiguousName, strings.Join(names, ", "))
+			trimmed, errAmbiguousName, strings.Join(names, ", "))
 	}
 	return store.CronSchedule{}, fmt.Errorf(
 		"crons: no schedule named %q is armed here; `sparkwing schedules list` names them: %w", trimmed, store.ErrNotFound)
@@ -769,20 +766,3 @@ func (s *Service) pinnedBinaryReady(sched store.CronSchedule) error {
 	}
 	return nil
 }
-
-// ScheduleEnvKey carries the id of the cron schedule that launched a run, so
-// one run traces back to the cadence that asked for it. The cron_fires table is
-// the authoritative join; this key answers the question from the run's own row,
-// which is where an operator reading `runs status -o json` starts.
-const ScheduleEnvKey = "_SPARKWING_CRON_SCHEDULE"
-
-// PinnedBinaryEnvKey carries the pipeline binary a locked cron schedule pinned
-// at arming time. The consumer execs that file instead of compiling the
-// checkout, so a checkout updated between arming and three in the morning
-// cannot change what the unattended run executes.
-const PinnedBinaryEnvKey = "_SPARKWING_CRON_BINARY"
-
-// PinnedDigestEnvKey carries the sha256 of that file as it stood when the
-// schedule was armed. The consumer recomputes it before executing, so a pinned
-// binary replaced in place fails the run instead of running as the pin.
-const PinnedDigestEnvKey = "_SPARKWING_CRON_BINARY_SHA256"

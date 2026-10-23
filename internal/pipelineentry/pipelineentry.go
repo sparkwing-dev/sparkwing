@@ -22,30 +22,30 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// ProtocolArg is the one argument a host appends to an entry's command.
-const ProtocolArg = "--sw-node-protocol"
+// protocolArg is the one argument a host appends to an entry's command.
+const protocolArg = "--sw-node-protocol"
 
-// SDKPackage is the npm package a TypeScript pipeline depends on.
-const SDKPackage = "@sparkwing/sdk"
+// sdkPackage is the npm package a TypeScript pipeline depends on.
+const sdkPackage = "@sparkwing/sdk"
 
-// ErrNotInstalled reports a TypeScript pipeline whose dependencies are not
+// errNotInstalled reports a TypeScript pipeline whose dependencies are not
 // installed in .sparkwing/node_modules.
-var ErrNotInstalled = errors.New("the TypeScript pipeline's dependencies are not installed")
+var errNotInstalled = errors.New("the TypeScript pipeline's dependencies are not installed")
 
-// Command is the program and the arguments a host runs, with [ProtocolArg]
+// Command is the program and the arguments a host runs, with [protocolArg]
 // appended, to start one SDK process.
 type Command []string
 
 // Binary is the command for a compiled pipeline binary.
 func Binary(path string) Command { return Command{path} }
 
-// Node is the command for a TypeScript entry.
-func Node(node, entry string) Command { return Command{node, entry} }
+// nodeCommand is the command for a TypeScript entry.
+func nodeCommand(node, entry string) Command { return Command{node, entry} }
 
 // Exec returns the command that starts the SDK process.
 func (c Command) Exec(environment procenv.Env) *exec.Cmd {
 	// #nosec G204 -- the pipeline entry the host resolved, run as argv without a shell.
-	return procenv.Command(environment, c[0], append(slices.Clone(c[1:]), ProtocolArg)...)
+	return procenv.Command(environment, c[0], append(slices.Clone(c[1:]), protocolArg)...)
 }
 
 // safety: each reader decodes only the fields it needs, so a valid manifest
@@ -62,7 +62,7 @@ func readPackage(path string, into any) error {
 }
 
 // IsTypeScript reports whether sparkwingDir holds a TypeScript pipeline: a
-// package.json that depends on [SDKPackage].
+// package.json that depends on [sdkPackage].
 func IsTypeScript(sparkwingDir string) (bool, error) {
 	raw, err := os.ReadFile(filepath.Join(sparkwingDir, "package.json"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -71,15 +71,15 @@ func IsTypeScript(sparkwingDir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	typescript, err := IsTypeScriptManifest(raw)
+	typescript, err := isTypeScriptManifest(raw)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", filepath.Join(sparkwingDir, "package.json"), err)
 	}
 	return typescript, nil
 }
 
-// IsTypeScriptManifest classifies package.json bytes without reading the working tree.
-func IsTypeScriptManifest(raw []byte) (bool, error) {
+// isTypeScriptManifest classifies package.json bytes without reading the working tree.
+func isTypeScriptManifest(raw []byte) (bool, error) {
 	var pkg struct {
 		Dependencies    map[string]json.RawMessage `json:"dependencies"`
 		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
@@ -87,8 +87,8 @@ func IsTypeScriptManifest(raw []byte) (bool, error) {
 	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &pkg); err != nil {
 		return false, err
 	}
-	_, dep := pkg.Dependencies[SDKPackage]
-	_, dev := pkg.DevDependencies[SDKPackage]
+	_, dep := pkg.Dependencies[sdkPackage]
+	_, dev := pkg.DevDependencies[sdkPackage]
 	return dep || dev, nil
 }
 
@@ -102,7 +102,7 @@ func IsPipelineDir(dir string) (bool, error) {
 }
 
 // TypeScript returns the command for the TypeScript pipeline in sparkwingDir.
-// It wraps [ErrNotInstalled] when node_modules lacks the SDK.
+// It wraps [errNotInstalled] when node_modules lacks the SDK.
 func TypeScript(sparkwingDir string) (Command, error) {
 	var pkg struct {
 		Main string `json:"main"`
@@ -117,11 +117,11 @@ func TypeScript(sparkwingDir string) (Command, error) {
 	if _, err := os.Stat(entry); err != nil {
 		return nil, fmt.Errorf("pipeline entry: %w", err)
 	}
-	sdkDir := filepath.Join(sparkwingDir, "node_modules", filepath.FromSlash(SDKPackage))
+	sdkDir := filepath.Join(sparkwingDir, "node_modules", filepath.FromSlash(sdkPackage))
 	var sdk struct{}
 	err := readPackage(filepath.Join(sdkDir, "package.json"), &sdk)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("%w: %s has no %s", ErrNotInstalled, sparkwingDir, SDKPackage)
+		return nil, fmt.Errorf("%w: %s has no %s", errNotInstalled, sparkwingDir, sdkPackage)
 	}
 	if err != nil {
 		return nil, err
@@ -133,11 +133,11 @@ func TypeScript(sparkwingDir string) (Command, error) {
 	if node, err = filepath.Abs(node); err != nil {
 		return nil, err
 	}
-	return Node(node, entry), nil
+	return nodeCommand(node, entry), nil
 }
 
-// InstallTypeScript runs npm ci with filtered captured inputs and masked output.
-func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string, out io.Writer) error {
+// installTypeScript runs npm ci with filtered captured inputs and masked output.
+func installTypeScript(ctx context.Context, sparkwingDir string, env []string, out io.Writer) error {
 	masker := secrets.NewMasker()
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: env, Masker: masker}, procenv.Runtime{})
 	if err != nil {
@@ -183,10 +183,10 @@ func (w *installOutput) flush() error {
 // npm's output going to out.
 func Prepare(ctx context.Context, sparkwingDir string, env []string, out io.Writer) (Command, error) {
 	cmd, err := TypeScript(sparkwingDir)
-	if !errors.Is(err, ErrNotInstalled) {
+	if !errors.Is(err, errNotInstalled) {
 		return cmd, err
 	}
-	if err := InstallTypeScript(ctx, sparkwingDir, env, out); err != nil {
+	if err := installTypeScript(ctx, sparkwingDir, env, out); err != nil {
 		return nil, err
 	}
 	return TypeScript(sparkwingDir)

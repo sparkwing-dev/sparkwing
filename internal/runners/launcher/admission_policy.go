@@ -20,8 +20,8 @@ type AdmissionConfig struct {
 	Namespace, Launcher, RunnerImage, DockerImage string
 }
 
-// AdmissionPolicyName names one of the cluster-scoped policies, and its binding, guarding a job namespace.
-func AdmissionPolicyName(kind, namespace string) string {
+// admissionPolicyName names one of the cluster-scoped policies, and its binding, guarding a job namespace.
+func admissionPolicyName(kind, namespace string) string {
 	return "sparkwing-cloud-" + kind + "-" + namespace
 }
 
@@ -168,7 +168,7 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 		{"pods", []admissionv1.NamedRuleWithOperations{admissionRule("", writes, "pods", "pods/ephemeralcontainers", "pods/resize"), admissionRule("", []admissionv1.OperationType{admissionv1.Connect}, "pods/exec", "pods/attach", "pods/portforward", "pods/proxy")}, pods, podRules},
 		{"jobs", []admissionv1.NamedRuleWithOperations{admissionRule("batch", writes, "jobs")}, jobs, jobRules},
 	} {
-		name := AdmissionPolicyName(p.kind, c.Namespace)
+		name := admissionPolicyName(p.kind, c.Namespace)
 		policies = append(policies, &admissionv1.ValidatingAdmissionPolicy{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "admissionregistration.k8s.io/v1", Kind: "ValidatingAdmissionPolicy"},
 			ObjectMeta: metav1.ObjectMeta{Name: name},

@@ -123,8 +123,8 @@ func DisplaySpec(s Spec) Display {
 	return d
 }
 
-// Reproducer emits argv, avoiding shell interpretation and every secret argument value.
-func (s Spec) Reproducer() []string {
+// reproducer emits argv, avoiding shell interpretation and every secret argument value.
+func (s Spec) reproducer() []string {
 	names, classified := displaySecretNames(s)
 	return reproducer(s, names, classified)
 }

@@ -159,11 +159,11 @@ func TestApprovalConcurrencyRefusedAtAcceptance(t *testing.T) {
 }
 
 func TestPlanCapabilityLaunchParity(t *testing.T) {
-	rows := CapabilityTable()
+	rows := capabilityTable()
 	if len(rows) != 35 {
 		t.Fatalf("capability rows = %d, want 35", len(rows))
 	}
-	seen := map[PlanCapability]bool{}
+	seen := map[planCapability]bool{}
 	for _, row := range rows {
 		if seen[row.Feature] {
 			t.Fatalf("duplicate capability %s", row.Feature)

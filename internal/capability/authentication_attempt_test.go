@@ -1,12 +1,10 @@
-package capability_test
+package capability
 
 import (
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
 	"testing/quick"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestControllerClaimProjectsOnlyItsCurrentAttemptProperty(t *testing.T) {
@@ -14,7 +12,7 @@ func TestControllerClaimProjectsOnlyItsCurrentAttemptProperty(t *testing.T) {
 		r, presentation, route := authenticationFixture()
 		c := &r.snapshot.Authorities[0].Principal.Capability
 		c.Binding.Attempt = 0
-		c.Data = &capability.DataScope{Use: capability.DataClaim, RunID: "run", NodeID: "job", Generation: c.Binding.Generation}
+		c.Data = &DataScope{Use: DataClaim, RunID: "run", NodeID: "job", Generation: c.Binding.Generation}
 		current := &r.snapshot.Binding.Current
 		current.Attempt = int64(ordinal) + 1
 		valid := mutation%5 == 0
@@ -28,7 +26,7 @@ func TestControllerClaimProjectsOnlyItsCurrentAttemptProperty(t *testing.T) {
 		case 4:
 			current.NodeID += "-other"
 		}
-		auth, err := capability.NewAuthenticator(r).Authenticate(t.Context(), presentation, route)
+		auth, err := NewAuthenticator(r).Authenticate(t.Context(), presentation, route)
 		if !valid {
 			return err != nil
 		}
@@ -36,18 +34,18 @@ func TestControllerClaimProjectsOnlyItsCurrentAttemptProperty(t *testing.T) {
 			return false
 		}
 		secret := sha256.Sum256([]byte("attempt-bound process"))
-		presentation.Raw = capability.NodeHostPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
-		c.Digest, c.Audience = sha256.Sum256([]byte(presentation.Raw)), capability.NodeHost
+		presentation.Raw = NodeHostPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
+		c.Digest, c.Audience = sha256.Sum256([]byte(presentation.Raw)), NodeHost
 		r.snapshot.Binding.ProcessAlive = true
-		if _, err := capability.NewAuthenticator(r).Authenticate(t.Context(), presentation, route); err == nil {
+		if _, err := NewAuthenticator(r).Authenticate(t.Context(), presentation, route); err == nil {
 			return false
 		}
 		c.Binding.Attempt = current.Attempt
-		if _, err := capability.NewAuthenticator(r).Authenticate(t.Context(), presentation, route); err != nil {
+		if _, err := NewAuthenticator(r).Authenticate(t.Context(), presentation, route); err != nil {
 			return false
 		}
 		current.Attempt++
-		_, err = capability.NewAuthenticator(r).Authenticate(t.Context(), presentation, route)
+		_, err = NewAuthenticator(r).Authenticate(t.Context(), presentation, route)
 		return err != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 256}); err != nil {

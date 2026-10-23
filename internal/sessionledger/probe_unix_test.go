@@ -40,8 +40,8 @@ func TestPlatformProbeEndsASessionWhoseOwnerIsGone(t *testing.T) {
 	l := Open(filepath.Join(t.TempDir(), "sessions"))
 	if _, err := l.Record(Record{
 		Run: "run-1", Node: "build", OwnerPID: owner.Process.Pid, OwnerBirth: "gone",
-		Handle:  Handle{Kind: "session", LeaderPID: leader.LeaderPID, SessionID: leader.SessionID, LeaderBirth: leader.BirthToken},
-		Command: "sleep",
+		Handle:      Handle{Kind: "session", LeaderPID: leader.LeaderPID, SessionID: leader.SessionID, LeaderBirth: leader.BirthToken},
+		Description: "sleep",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPlatformProbeEndsASessionWhoseOwnerIsGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Verdict != VerdictReaped {
+	if len(out) != 1 || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	waited := make(chan error, 1)
@@ -115,7 +115,7 @@ func TestPlatformProbeTreatsAReusedOwnerPIDAsGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Verdict != VerdictReaped {
+	if len(out) != 1 || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 }

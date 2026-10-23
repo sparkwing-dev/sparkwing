@@ -284,8 +284,8 @@ func containsKind(events []Event, kind EventKind) bool {
 
 func TestNew_RejectsInvalidConfig(t *testing.T) {
 	for _, cores := range []float64{-1, math.NaN(), math.Inf(1)} {
-		if _, err := New(Config{TotalCores: cores}); !errors.Is(err, ErrInvalidConfig) {
-			t.Fatalf("New(cores=%v) error = %v, want %v", cores, err, ErrInvalidConfig)
+		if _, err := New(Config{TotalCores: cores}); !errors.Is(err, errInvalidConfig) {
+			t.Fatalf("New(cores=%v) error = %v, want %v", cores, err, errInvalidConfig)
 		}
 	}
 }
@@ -381,7 +381,7 @@ func TestFailPolicy_FailsWhenSemaphoreFull(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyQueue)}})
 	before := l.Snapshot()
-	d, events := submit(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyFail)}})
+	d, events := submit(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 1, 1, policyFail)}})
 	if d.Kind != DecisionFailed || d.Key != "k" {
 		t.Fatalf("decision = %+v, want failed on k", d)
 	}
@@ -396,7 +396,7 @@ func TestFailPolicy_FailsWhenSemaphoreFull(t *testing.T) {
 func TestSkipPolicy_SkipsWhenSemaphoreFull(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyQueue)}})
-	d, events := submit(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicySkip)}})
+	d, events := submit(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 1, 1, policySkip)}})
 	if d.Kind != DecisionSkipped || d.Key != "k" {
 		t.Fatalf("decision = %+v, want skipped on k", d)
 	}
@@ -408,7 +408,7 @@ func TestSkipPolicy_SkipsWhenSemaphoreFull(t *testing.T) {
 func TestFailPolicy_QueuesWhenOnlyHostBlocks(t *testing.T) {
 	l := testLedger(t, 2, 0)
 	leaseA := mustGrant(t, l, Request{ID: "a", Cores: 2})
-	pos := mustQueue(t, l, Request{ID: "b", Cores: 2, Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyFail)}})
+	pos := mustQueue(t, l, Request{ID: "b", Cores: 2, Semaphores: []SemaphoreClaim{sem("k", 1, 1, policyFail)}})
 	if pos != 0 {
 		t.Fatalf("position = %d, want 0", pos)
 	}
@@ -423,7 +423,7 @@ func TestFailPolicy_BackfillsPastWaiterBlockedByOlderHolder(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyQueue)}})
 	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 2, 2, PolicyQueue)}})
-	d, events := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyFail)}})
+	d, events := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 2, 1, policyFail)}})
 	if d.Kind != DecisionGranted {
 		t.Fatalf("decision = %+v, want granted: budget fits and the heavy head waits only on an older holder", d)
 	}
@@ -440,7 +440,7 @@ func TestFailPolicy_FailsBehindProtectedWaiter(t *testing.T) {
 	mustGrant(t, l, Request{ID: "younger", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
 	events := mustRelease(t, l, older.ID, "older")
 	wantKinds(t, events, EventReleased)
-	d, _ := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 10, 3, PolicyFail)}})
+	d, _ := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 10, 3, policyFail)}})
 	if d.Kind != DecisionFailed || d.Key != "k" {
 		t.Fatalf("decision = %+v, want failed: the heavy head is protected by a younger holder", d)
 	}
@@ -717,7 +717,7 @@ func TestAttach_Errors(t *testing.T) {
 	mustGrant(t, l, Request{ID: "filler", Cores: 1})
 	mustQueue(t, l, Request{ID: "waiting", Cores: 1})
 
-	if err := l.Attach("lease-999", "child", "parent"); !errors.Is(err, ErrUnknownLease) {
+	if err := l.Attach("lease-999", "child", "parent"); !errors.Is(err, errUnknownLease) {
 		t.Fatalf("unknown lease: %v", err)
 	}
 	if err := l.Attach(lease.ID, "", "parent"); !errors.Is(err, ErrInvalidRequest) {
@@ -729,7 +729,7 @@ func TestAttach_Errors(t *testing.T) {
 	if err := l.Attach(lease.ID, "waiting", "parent"); !errors.Is(err, ErrDuplicateID) {
 		t.Fatalf("waiter attach: %v", err)
 	}
-	if err := l.Attach(lease.ID, "child", "filler"); !errors.Is(err, ErrUnknownMember) {
+	if err := l.Attach(lease.ID, "child", "filler"); !errors.Is(err, errUnknownMember) {
 		t.Fatalf("parent on another lease: %v", err)
 	}
 }
@@ -738,14 +738,14 @@ func TestRelease_Errors(t *testing.T) {
 	l := testLedger(t, 2, 0)
 	lease := mustGrant(t, l, Request{ID: "a", Cores: 1})
 
-	if _, err := l.Release("lease-999", "a"); !errors.Is(err, ErrUnknownLease) {
+	if _, err := l.Release("lease-999", "a"); !errors.Is(err, errUnknownLease) {
 		t.Fatalf("unknown lease: %v", err)
 	}
-	if _, err := l.Release(lease.ID, "nobody"); !errors.Is(err, ErrUnknownMember) {
+	if _, err := l.Release(lease.ID, "nobody"); !errors.Is(err, errUnknownMember) {
 		t.Fatalf("unknown member: %v", err)
 	}
 	mustRelease(t, l, lease.ID, "a")
-	if _, err := l.Release(lease.ID, "a"); !errors.Is(err, ErrUnknownLease) {
+	if _, err := l.Release(lease.ID, "a"); !errors.Is(err, errUnknownLease) {
 		t.Fatalf("double release: %v", err)
 	}
 }
@@ -758,11 +758,11 @@ func TestReattach_ResolvesLiveTokensOnly(t *testing.T) {
 	if err != nil || id != lease.ID {
 		t.Fatalf("Reattach = (%s, %v), want (%s, nil)", id, err, lease.ID)
 	}
-	if _, err := l.Reattach("bogus"); !errors.Is(err, ErrUnknownToken) {
+	if _, err := l.Reattach("bogus"); !errors.Is(err, errUnknownToken) {
 		t.Fatalf("bogus token: %v", err)
 	}
 	mustRelease(t, l, lease.ID, "a")
-	if _, err := l.Reattach(lease.Token); !errors.Is(err, ErrUnknownToken) {
+	if _, err := l.Reattach(lease.Token); !errors.Is(err, errUnknownToken) {
 		t.Fatalf("released token: %v", err)
 	}
 }
@@ -931,24 +931,24 @@ func TestResizeTotals_SoftOvercommitSurvivesShrink(t *testing.T) {
 func TestResizeTotals_HardOvercommitStillRejected(t *testing.T) {
 	l := testLedger(t, 4, 2048)
 	mustGrant(t, l, Request{ID: "holder", Cores: 3})
-	if err := l.ResizeTotals(2, 2048); !errors.Is(err, ErrInvalidResize) {
-		t.Fatalf("ResizeTotals under hard overcommit = %v, want %v", err, ErrInvalidResize)
+	if err := l.ResizeTotals(2, 2048); !errors.Is(err, errInvalidResize) {
+		t.Fatalf("ResizeTotals under hard overcommit = %v, want %v", err, errInvalidResize)
 	}
 }
 
 func TestResizeTotals_MemoryOvercommitRejectedEvenWithSoftCores(t *testing.T) {
 	l := testLedger(t, 4, 2048)
 	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 512, SoftCores: true})
-	if err := l.ResizeTotals(4, 256); !errors.Is(err, ErrInvalidResize) {
-		t.Fatalf("ResizeTotals under memory overcommit = %v, want %v", err, ErrInvalidResize)
+	if err := l.ResizeTotals(4, 256); !errors.Is(err, errInvalidResize) {
+		t.Fatalf("ResizeTotals under memory overcommit = %v, want %v", err, errInvalidResize)
 	}
 }
 
 func TestSetHeadroom_RejectsInvalidValues(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	for _, cores := range []float64{-1, math.NaN(), math.Inf(1)} {
-		if _, err := l.SetHeadroom(cores, 0); !errors.Is(err, ErrInvalidHeadroom) {
-			t.Fatalf("SetHeadroom(%v) error = %v, want %v", cores, err, ErrInvalidHeadroom)
+		if _, err := l.SetHeadroom(cores, 0); !errors.Is(err, errInvalidHeadroom) {
+			t.Fatalf("SetHeadroom(%v) error = %v, want %v", cores, err, errInvalidHeadroom)
 		}
 	}
 }

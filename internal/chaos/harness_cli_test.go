@@ -20,7 +20,7 @@ func TestCLIObservationsPreserveSyntheticAdmission(t *testing.T) {
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
 	h.home = t.TempDir()
-	h.cfg = CIConfig(1)
+	h.cfg = ciConfig(1)
 	h.buildBinaries()
 	if h.sparkBin == "" {
 		t.Fatal("CLI observation regression requires the CLI binary")
@@ -74,7 +74,7 @@ func TestCLIObservationsPreserveSyntheticAdmission(t *testing.T) {
 			t.Fatalf("CLI opened a controller runs store in the synthetic admission home: %v", err)
 		}
 	}
-	recorded, err := os.Open(journal.Path())
+	recorded, err := os.Open(journal.filename())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestCLIObservationsPreserveSyntheticAdmission(t *testing.T) {
 	index := 0
 	seen := [2]map[string]bool{{}, {}}
 	for {
-		var event Event
+		var event event
 		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {

@@ -8,21 +8,21 @@ import (
 	"time"
 )
 
-// ChargeFunc charges n bytes to a team's download day. With record false it
+// chargeFunc charges n bytes to a team's download day. With record false it
 // refuses when the team is already at its cap, and n zero asks only that;
 // with record true it charges n whatever the cap says.
-type ChargeFunc func(ctx context.Context, n int64, record bool) error
+type chargeFunc func(ctx context.Context, n int64, record bool) error
 
-// ChargeChunk is how many delivered bytes a download counts at a time, so a
+// chargeChunk is how many delivered bytes a download counts at a time, so a
 // long response shows on the team's day while it streams.
-const ChargeChunk int64 = 8 << 20
+const chargeChunk int64 = 8 << 20
 
-// ChargeTeam runs next with a writer that refuses a 2xx response before its
+// chargeTeam runs next with a writer that refuses a 2xx response before its
 // first byte when the team is already at its cap, then charges the bytes it
-// actually delivers, a [ChargeChunk] at a time and the rest when it ends. A
+// actually delivers, a [chargeChunk] at a time and the rest when it ends. A
 // range or a resumed download is charged what it served, and a response that
 // started always finishes. A refused response is answered by refuse.
-func ChargeTeam(w http.ResponseWriter, r *http.Request, charge ChargeFunc,
+func chargeTeam(w http.ResponseWriter, r *http.Request, charge chargeFunc,
 	refuse func(http.ResponseWriter, error), next http.Handler,
 ) {
 	if Bodyless(r) || r.Method != http.MethodGet {
@@ -39,7 +39,7 @@ var errDownloadRefused = errors.New("the team's download was refused before its 
 type chargedWriter struct {
 	http.ResponseWriter
 	ctx     context.Context
-	charge  ChargeFunc
+	charge  chargeFunc
 	refuse  func(http.ResponseWriter, error)
 	started bool
 	refused bool
@@ -74,7 +74,7 @@ func (c *chargedWriter) Write(p []byte) (int, error) {
 	}
 	n, err := c.ResponseWriter.Write(p)
 	c.pending += int64(n)
-	c.record(c.ctx, ChargeChunk)
+	c.record(c.ctx, chargeChunk)
 	return n, err
 }
 

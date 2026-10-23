@@ -3,14 +3,13 @@ package logpretty
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type QuietRenderer struct {
+type quietRenderer struct {
 	mu       sync.Mutex
 	w        io.Writer
 	errW     io.Writer
@@ -19,15 +18,7 @@ type QuietRenderer struct {
 	pendingSummary *sparkwing.LogRecord
 }
 
-func NewQuietRenderer() *QuietRenderer {
-	return &QuietRenderer{
-		w:        os.Stdout,
-		errW:     os.Stderr,
-		useColor: os.Getenv("NO_COLOR") == "",
-	}
-}
-
-func (q *QuietRenderer) color(s, code string) string {
+func (q *quietRenderer) color(s, code string) string {
 	if !q.useColor {
 		return s
 	}
@@ -35,20 +26,20 @@ func (q *QuietRenderer) color(s, code string) string {
 }
 
 // safety: pipeline output reaches the terminal here, so escape sequences are filtered before printing.
-func (q *QuietRenderer) sanitize(s string) string {
+func (q *quietRenderer) sanitize(s string) string {
 	if q.useColor {
-		return SanitizeANSI(s)
+		return sanitizeANSI(s)
 	}
 	return StripANSI(s)
 }
 
-func (q *QuietRenderer) sanitizeInline(s string) string { return foldLines(q.sanitize(s)) }
+func (q *quietRenderer) sanitizeInline(s string) string { return foldLines(q.sanitize(s)) }
 
-func (q *QuietRenderer) Log(level, msg string) {
+func (q *quietRenderer) Log(level, msg string) {
 	q.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
 
-func (q *QuietRenderer) Emit(rec sparkwing.LogRecord) {
+func (q *quietRenderer) Emit(rec sparkwing.LogRecord) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	switch rec.Event {
@@ -63,7 +54,7 @@ func (q *QuietRenderer) Emit(rec sparkwing.LogRecord) {
 	}
 }
 
-func (q *QuietRenderer) Flush() {
+func (q *quietRenderer) Flush() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.pendingSummary != nil {
@@ -72,7 +63,7 @@ func (q *QuietRenderer) Flush() {
 	}
 }
 
-func (q *QuietRenderer) writeStart(rec sparkwing.LogRecord) {
+func (q *quietRenderer) writeStart(rec sparkwing.LogRecord) {
 	pipeline, _ := rec.Attrs["pipeline"].(string)
 	if pipeline == "" {
 		pipeline = "pipeline"
@@ -98,7 +89,7 @@ func profileName(attrs map[string]any) string {
 	return name
 }
 
-func (q *QuietRenderer) writeFinish(finish sparkwing.LogRecord) {
+func (q *quietRenderer) writeFinish(finish sparkwing.LogRecord) {
 	runID, _ := finish.Attrs["run_id"].(string)
 	status, _ := finish.Attrs["status"].(string)
 
@@ -134,7 +125,7 @@ func (q *QuietRenderer) writeFinish(finish sparkwing.LogRecord) {
 	}
 }
 
-func (q *QuietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID string) {
+func (q *quietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID string) {
 	for _, n := range nodes {
 		m, ok := n.(map[string]any)
 		if !ok || m["outcome"] != "failed" {

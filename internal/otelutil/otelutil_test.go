@@ -59,7 +59,7 @@ func TestWrapTransport_Roundtrips(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &http.Client{Transport: WrapTransport(nil)}
+	client := &http.Client{Transport: wrapTransport(nil)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("build req: %v", err)
@@ -128,8 +128,8 @@ func TestInitPreservesConfiguredLogging(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	old := slog.Default()
-	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
-	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+	provider, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(provider); otel.SetTextMapPropagator(propagator) })
 	var output bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	telemetry, err := Init(t.Context(), Config{ServiceName: "test"})
@@ -180,8 +180,8 @@ func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", server.URL)
 	old := slog.Default()
-	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
-	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+	provider, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(provider); otel.SetTextMapPropagator(propagator) })
 	handler := &startupLogHandler{Handler: slog.NewTextHandler(io.Discard, nil), ready: make(chan struct{})}
 	slog.SetDefault(slog.New(handler))
 	telemetry, err := Init(t.Context(), Config{ServiceName: "shutdown-test"})
@@ -214,10 +214,10 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	old := slog.Default()
-	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	provider, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
 	t.Cleanup(func() {
 		slog.SetDefault(old)
-		otel.SetMeterProvider(meter)
+		otel.SetMeterProvider(provider)
 		otel.SetTextMapPropagator(propagator)
 	})
 	slog.SetDefault(slog.New(builtinSlogHandler))
@@ -260,15 +260,15 @@ func TestInitServesMetricsOnlyWhenAsked(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	old := slog.Default()
-	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
-	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+	provider, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(provider); otel.SetTextMapPropagator(propagator) })
 
 	plain, err := Init(t.Context(), Config{ServiceName: "plain"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = plain.Shutdown(context.Background()) })
-	if plain.PromHandler != nil || otel.GetMeterProvider() != meter {
+	if plain.PromHandler != nil || otel.GetMeterProvider() != provider {
 		t.Fatal("a service that serves no /metrics got a Prometheus meter provider")
 	}
 
@@ -277,7 +277,7 @@ func TestInitServesMetricsOnlyWhenAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = served.Shutdown(context.Background()) })
-	counter, err := Meter("served").Int64Counter("otelutil_test_hits")
+	counter, err := meter("served").Int64Counter("otelutil_test_hits")
 	if err != nil {
 		t.Fatal(err)
 	}

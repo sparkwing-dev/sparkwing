@@ -1,4 +1,4 @@
-package logseg_test
+package logseg
 
 import (
 	"testing"

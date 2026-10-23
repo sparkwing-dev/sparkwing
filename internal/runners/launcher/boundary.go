@@ -170,7 +170,7 @@ func (b *KubernetesBoundary) release(ctx context.Context, reservation CloudNodeR
 	}
 	if err = b.vacant(ctx, node.Name); err != nil {
 		if errors.Is(err, ErrNoDedicatedNode) {
-			return ErrContainersRunning
+			return errContainersRunning
 		}
 		return err
 	}

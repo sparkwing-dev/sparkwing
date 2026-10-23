@@ -40,7 +40,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 				value = json.RawMessage("null")
 			}
 			process := newPolicySDK(plan, value, mode == "predicate_error")
-			host, err := NewOwnerEvaluator(EvaluationDependencies{
+			host, err := newOwnerEvaluator(evaluationDependencies{
 				Store: st,
 				Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil },
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {

@@ -4,86 +4,47 @@
 # .guards/README.md.
 # The package move accepts the existing exports in controller, storage and store
 # once. These counts measure declarations newly within internal/, not added code.
-internal/admission	10
-internal/agentconfig	1
-internal/api	1
-internal/apierr	4
-internal/apiroutes	7
-internal/artifacts	2
-internal/authwire	2
-internal/backend	1
-internal/bincache	15
-internal/blob	20
-internal/capability	28
-internal/capacity	9
-internal/chaos	11
-internal/clisurface	11
-internal/cluster	3
-internal/configguard	2
+# compileError.Error: implements error; callers use the error interface.
+internal/bincache	1
+# UsageError.Error: implements error; callers use the error interface.
+internal/clisurface	1
 internal/controller	67
 internal/controller/client	2
-internal/crons	35
-internal/discovery	4
-internal/diskspace	1
-internal/egress	21
+# ConcurrencyError.Error: implements error; callers use the error interface.
+internal/egress	1
 internal/engine	5
-internal/envredact	1
-internal/executionpolicy	45
-internal/executorinfo	3
-internal/fssecure	8
-internal/gatescope	1
-internal/githubapp	6
-internal/githubapp/githubapptest	3
-internal/githubauth	4
-internal/googleauth	4
+# apiError.Error: implements error; callers use the error interface.
+internal/githubapp	1
+# Error.Error: implements error; callers use the error interface.
 internal/gotoolchain	1
-internal/health	3
-internal/installsite	1
-internal/lease	2
-internal/license	4
+# CancelError.Error: implements error; callers use the error interface.
+internal/lease	1
+# LocalControllerHandshake: used by wingd/peeridentity_windows.go in Windows builds.
 internal/limits	1
-internal/localsecrets	8
-internal/logpretty	6
-internal/logutil	2
-internal/nodehost	41
-internal/nodeproto	42
-internal/objectguard	43
-internal/oidcissuer	8
-internal/opsview	20
-internal/orchestrator	2
-internal/originguard	1
-internal/otelutil	3
-internal/paths	12
-internal/pipelineentry	6
-internal/pipelinegen	5
-internal/pipelinelint	8
-internal/procenv	12
-internal/profile	23
-internal/ratelimit	3
-internal/releaseasset	1
-internal/releaseauth	1
-internal/repos	20
-internal/runflags	11
-internal/runners	3
-internal/runners/launcher	4
-internal/runners/service	4
-internal/runners/service/unitfile	1
-internal/runspec	4
-internal/secrets	1
-internal/secretsource	2
-internal/sessionledger	8
-internal/settings	42
-internal/sourceurl	6
-internal/sparks	5
-internal/sparkwingruntime	3
-internal/storage/logseg	24
-internal/storage/s3	1
+# admissionFailure.Error: implements error; callers use the error interface.
+# executorApplicationError.Error: implements error; callers use the error interface.
+# executorCleanupError.Error: implements error; callers use the error interface.
+# executorStepRecordError.Error: implements error; callers use the error interface.
+# executorTransitionError.Error: implements error; callers use the error interface.
+# maskedRunError.As: called by errors.As through the error interface.
+# maskedRunError.Error: implements error; callers use the error interface.
+internal/nodehost	7
+# budgetError.Error: implements error; callers use the error interface.
+# budgetError.RetryableError: Smithy retry classification calls this method through an interface.
+# ceilingError.Error: implements error; callers use the error interface.
+# ceilingError.RetryableError: Smithy retry classification calls this method through an interface.
+internal/objectguard	4
+# ConfigureWindowsBash: used by sparkwing/exec_windows.go in Windows builds.
+internal/procenv	1
+# nodeFault.Error: implements error; callers use the error interface.
+# podMismatch.Error: implements error; callers use the error interface.
+internal/runners/launcher	2
+# Error.Error: implements error; callers use the error interface.
+internal/settings	1
 internal/store	251
 internal/store/internal/storetest	1
 internal/store/teststore	4
-internal/tokenpark	3
-internal/toolchain	2
-internal/userconfig	3
-internal/web	5
+# FieldError.Error: implements error; callers use the error interface.
+internal/userconfig	1
 internal/wingd	24
 internal/wingd/client	15

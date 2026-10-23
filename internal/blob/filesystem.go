@@ -126,12 +126,6 @@ func (f *Filesystem) transferPath(object capability.ObjectToSign) string {
 	return "/api/v1/data/objects/" + object.Key
 }
 
-// VerifyTransfer checks the signed method, path, object and expiry before transfer.
-func (f *Filesystem) VerifyTransfer(r *http.Request) error {
-	_, err := f.signedRequest(r)
-	return err
-}
-
 // ServeHTTP accepts signed PUT and GET only. Raw object paths never authorize access.
 func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	object, err := f.signedRequest(r)

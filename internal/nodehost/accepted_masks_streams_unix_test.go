@@ -61,7 +61,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					host.Acquire = func(ctx context.Context, _ RunInput) (*source.Entry, error) {
 						prepared, err := planner.Prepare(ctx, planning, fixture.input)
 						if err == nil {
-							_, err = PlanInitial(ctx, prepared.Input, prepared.Plan)
+							_, err = planInitial(ctx, prepared.Input, prepared.Plan)
 						}
 						return nil, err
 					}

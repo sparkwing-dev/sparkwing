@@ -199,7 +199,7 @@ length. The batch and uploader carry that header through the PUT. S3 refuses
 every existing object with HTTP 412, including an identical retry. After a
 transfer error, the uploader asks the controller's `VerifyUpload` route to reauthorize the
 writer and verify that exact object's stored size and SHA-256. Only a successful
-verification permits the record commit to proceed. `logseg.UploadVerifier`
+verification permits the record commit to proceed. `logseg.uploadVerifier`
 performs the bounded object read after the controller supplies the run's
 persisted retention class. Cancellation, mismatched bytes and failed close
 remain errors. A precondition failure alone never proves matching bytes.
@@ -272,7 +272,7 @@ and exact uploader. Output and dependency-cache writes cancelled after upload
 return an error before committing a record.
 Archive spools and filesystem upload temporary files report cleanup errors.
 
-`bincache.BinaryData` binds remote pipeline binaries to these same byte and
+`bincache.binaryData` binds remote pipeline binaries to these same byte and
 record contracts. A download checks the exact repo/ref/build record and team
 provenance policy before reading its committed digest. It installs the
 executable only after EOF verification and successful close. An upload obtains

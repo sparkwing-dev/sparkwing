@@ -503,7 +503,7 @@ func TestRunStopsClaimingWhenAdmissionDrifts(t *testing.T) {
 		if control.claims != 1 {
 			t.Fatalf("claims before drift = %d", control.claims)
 		}
-		if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicybindings"), "", AdmissionPolicyName("pods", "cloud")); err != nil {
+		if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicybindings"), "", admissionPolicyName("pods", "cloud")); err != nil {
 			t.Fatal(err)
 		}
 		before := syncs

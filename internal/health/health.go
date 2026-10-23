@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	StatusOK       = "ok"
-	StatusDegraded = "degraded"
+	statusOK       = "ok"
+	statusDegraded = "degraded"
 )
 
-const MaxBodyBytes = 1 << 16
+const maxBodyBytes = 1 << 16
 
 type Response struct {
 	Status   string   `json:"status"`
@@ -21,13 +21,13 @@ type Response struct {
 }
 
 func (r Response) Degraded() bool {
-	return r.Status == StatusDegraded || len(r.Problems) > 0
+	return r.Status == statusDegraded || len(r.Problems) > 0
 }
 
 var ErrNotContract = errors.New("health body is not the JSON contract")
 
 func Decode(r io.Reader) (Response, error) {
-	raw, err := io.ReadAll(io.LimitReader(r, MaxBodyBytes))
+	raw, err := io.ReadAll(io.LimitReader(r, maxBodyBytes))
 	if err != nil {
 		return Response{}, fmt.Errorf("read health body: %w", err)
 	}

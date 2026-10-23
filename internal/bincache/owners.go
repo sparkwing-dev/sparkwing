@@ -26,7 +26,7 @@ func ownersPath(key string) string {
 	return filepath.Join(entry.entryDir(), ownersFile)
 }
 
-func Owners(key string) []Owner {
+func owners(key string) []Owner {
 	return readOwners(ownersPath(key))
 }
 
@@ -138,7 +138,7 @@ func writeDescriptiveFile(path string, data []byte) {
 	_ = replaceCacheMetadata(tempPath, path)
 }
 
-func (l *Lease) RecordUse(sparkwingDir string, parts []KeyPart) {
+func (l *Lease) recordUse(sparkwingDir string, parts []KeyPart) {
 	if l == nil || l.file == nil {
 		return
 	}

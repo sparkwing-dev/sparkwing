@@ -1,4 +1,4 @@
-package license_test
+package license
 
 import (
 	"crypto/ed25519"
@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 )
 
@@ -16,7 +15,7 @@ var now = time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
 
 func multiTeamTerms() licensetest.Terms {
 	return licensetest.Terms{
-		Features:  []string{license.FeatureMultiTeam},
+		Features:  []string{FeatureMultiTeam},
 		IssuedTo:  "acme",
 		IssuedAt:  now.Add(-time.Hour),
 		ExpiresAt: now.Add(24 * time.Hour),
@@ -25,17 +24,17 @@ func multiTeamTerms() licensetest.Terms {
 
 func TestVerifyAcceptsALicenseSignedByTheKey(t *testing.T) {
 	pub, priv := licensetest.NewKey(t)
-	lic, err := license.Verify(licensetest.Sign(t, priv, multiTeamTerms()), pub, now)
+	lic, err := Verify(licensetest.Sign(t, priv, multiTeamTerms()), pub, now)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if !lic.Allows(license.FeatureMultiTeam, now) {
+	if !lic.Allows(FeatureMultiTeam, now) {
 		t.Fatal("a valid multi-team license does not allow multi-team")
 	}
 	if lic.Allows("billing", now) {
 		t.Fatal("a license allows a feature it does not list")
 	}
-	if lic.Allows(license.FeatureMultiTeam, now.Add(25*time.Hour)) {
+	if lic.Allows(FeatureMultiTeam, now.Add(25*time.Hour)) {
 		t.Fatal("a license still allows its feature after it expired")
 	}
 }
@@ -47,14 +46,14 @@ func TestMeteringRequiresASignedFeature(t *testing.T) {
 		features []string
 		want     bool
 	}{
-		{"legacy multi-team", []string{license.FeatureMultiTeam}, true},
+		{"legacy multi-team", []string{FeatureMultiTeam}, true},
 		{"metering only", []string{"metering"}, true},
 		{"unrelated", []string{"other"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			terms := multiTeamTerms()
 			terms.Features = tc.features
-			lic, err := license.Verify(licensetest.Sign(t, priv, terms), pub, now)
+			lic, err := Verify(licensetest.Sign(t, priv, terms), pub, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,7 +62,7 @@ func TestMeteringRequiresASignedFeature(t *testing.T) {
 			}
 		})
 	}
-	if (*license.License)(nil).Allows("metering", now) {
+	if (*License)(nil).Allows("metering", now) {
 		t.Fatal("an absent license grants metering")
 	}
 }
@@ -71,8 +70,8 @@ func TestMeteringRequiresASignedFeature(t *testing.T) {
 func TestVerifyRefusesALicenseSignedByAnotherKey(t *testing.T) {
 	pub, _ := licensetest.NewKey(t)
 	_, otherPriv := licensetest.NewKey(t)
-	_, err := license.Verify(licensetest.Sign(t, otherPriv, multiTeamTerms()), pub, now)
-	if !errors.Is(err, license.ErrBadSignature) {
+	_, err := Verify(licensetest.Sign(t, otherPriv, multiTeamTerms()), pub, now)
+	if !errors.Is(err, errBadSignature) {
 		t.Fatalf("Verify = %v, want ErrBadSignature", err)
 	}
 }
@@ -93,8 +92,8 @@ func TestVerifyRefusesATamperedPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	tampered := []byte(strings.Replace(string(body), `"billing"`, `"multi-team"`, 1))
-	_, err = license.Verify(licensetest.Encode(tampered, sig), pub, now)
-	if !errors.Is(err, license.ErrBadSignature) {
+	_, err = Verify(licensetest.Encode(tampered, sig), pub, now)
+	if !errors.Is(err, errBadSignature) {
 		t.Fatalf("Verify = %v, want ErrBadSignature", err)
 	}
 }
@@ -103,8 +102,8 @@ func TestVerifyRefusesAnExpiredLicense(t *testing.T) {
 	pub, priv := licensetest.NewKey(t)
 	terms := multiTeamTerms()
 	terms.ExpiresAt = now.Add(-time.Minute)
-	_, err := license.Verify(licensetest.Sign(t, priv, terms), pub, now)
-	if !errors.Is(err, license.ErrExpired) {
+	_, err := Verify(licensetest.Sign(t, priv, terms), pub, now)
+	if !errors.Is(err, errExpired) {
 		t.Fatalf("Verify = %v, want ErrExpired", err)
 	}
 }
@@ -112,21 +111,21 @@ func TestVerifyRefusesAnExpiredLicense(t *testing.T) {
 func TestVerifyRefusesMalformedText(t *testing.T) {
 	pub, _ := licensetest.NewKey(t)
 	for _, raw := range []string{"", "no-dot", "!!!.!!!", "YQ.YQ"} {
-		if _, err := license.Verify(raw, pub, now); !errors.Is(err, license.ErrMalformed) {
+		if _, err := Verify(raw, pub, now); !errors.Is(err, errMalformed) {
 			t.Errorf("Verify(%q) = %v, want ErrMalformed", raw, err)
 		}
 	}
 }
 
 func TestEmbeddedKeyIsUsable(t *testing.T) {
-	if _, err := license.EmbeddedKey(); err != nil {
+	if _, err := EmbeddedKey(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestVerifyAcceptsALicenseWithSurroundingWhitespace(t *testing.T) {
 	pub, priv := licensetest.NewKey(t)
-	if _, err := license.Verify(" "+licensetest.Sign(t, priv, multiTeamTerms())+"\n", pub, now); err != nil {
+	if _, err := Verify(" "+licensetest.Sign(t, priv, multiTeamTerms())+"\n", pub, now); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -145,17 +144,17 @@ func TestVerifyBoundsTheLicenseLength(t *testing.T) {
 			over = raw
 		}
 	}
-	if _, err := license.Verify(under, pub, now); err != nil {
+	if _, err := Verify(under, pub, now); err != nil {
 		t.Fatalf("Verify(%d bytes) = %v, want accepted", len(under), err)
 	}
-	if _, err := license.Verify(over, pub, now); !errors.Is(err, license.ErrMalformed) {
+	if _, err := Verify(over, pub, now); !errors.Is(err, errMalformed) {
 		t.Fatalf("Verify(%d bytes) = %v, want ErrMalformed", len(over), err)
 	}
 }
 
 func TestVerifyRefusesAKeyOfTheWrongSize(t *testing.T) {
 	pub, priv := licensetest.NewKey(t)
-	if _, err := license.Verify(licensetest.Sign(t, priv, multiTeamTerms()), pub[:16], now); err == nil {
+	if _, err := Verify(licensetest.Sign(t, priv, multiTeamTerms()), pub[:16], now); err == nil {
 		t.Fatal("Verify accepted a truncated public key")
 	}
 }
@@ -163,7 +162,7 @@ func TestVerifyRefusesAKeyOfTheWrongSize(t *testing.T) {
 func TestVerifyRefusesJunkAfterASignedPayload(t *testing.T) {
 	pub, priv := licensetest.NewKey(t)
 	encPayload, encSig, _ := strings.Cut(licensetest.Sign(t, priv, multiTeamTerms()), ".")
-	if _, err := license.Verify(encPayload+"!."+encSig, pub, now); !errors.Is(err, license.ErrMalformed) {
+	if _, err := Verify(encPayload+"!."+encSig, pub, now); !errors.Is(err, errMalformed) {
 		t.Fatalf("Verify = %v, want ErrMalformed", err)
 	}
 }
@@ -176,7 +175,7 @@ func TestVerifyRefusesASignedPayloadItCannotRead(t *testing.T) {
 		"no expiry":           `{"features":["multi-team"]}`,
 	} {
 		raw := licensetest.Encode([]byte(body), ed25519.Sign(priv, []byte(body)))
-		if _, err := license.Verify(raw, pub, now); !errors.Is(err, license.ErrMalformed) {
+		if _, err := Verify(raw, pub, now); !errors.Is(err, errMalformed) {
 			t.Errorf("%s: Verify = %v, want ErrMalformed", name, err)
 		}
 	}
@@ -186,11 +185,11 @@ func TestVerifyGrantsOnlyTheListedFeatures(t *testing.T) {
 	pub, priv := licensetest.NewKey(t)
 	terms := multiTeamTerms()
 	terms.Features = []string{"billing"}
-	lic, err := license.Verify(licensetest.Sign(t, priv, terms), pub, now)
+	lic, err := Verify(licensetest.Sign(t, priv, terms), pub, now)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if lic.Allows(license.FeatureMultiTeam, now) {
+	if lic.Allows(FeatureMultiTeam, now) {
 		t.Fatal("a license without multi-team allows multi-team")
 	}
 }

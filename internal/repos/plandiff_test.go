@@ -15,11 +15,11 @@ func TestDiffPlans_IdenticalIgnoresOrder(t *testing.T) {
 		node("test", []string{"build"}, "run"),
 		node("build", nil, "run", PlanStep{ID: "compile", Decision: "run"}),
 	}}
-	d := DiffPlans(a, b)
+	d := diffPlans(a, b)
 	if !d.Identical {
 		t.Fatalf("reordered identical plans should compare identical: %+v", d)
 	}
-	if a.Hash() != b.Hash() {
+	if a.hash() != b.hash() {
 		t.Errorf("hash should ignore node ordering")
 	}
 }
@@ -35,7 +35,7 @@ func TestDiffPlans_DetectsAddedRemovedChanged(t *testing.T) {
 		node("test", []string{"build", "lint-fix"}, "run"),
 		node("deploy", []string{"test"}, "run"),
 	}}
-	d := DiffPlans(before, after)
+	d := diffPlans(before, after)
 	if d.Identical {
 		t.Fatal("plans differ; Identical should be false")
 	}
@@ -57,7 +57,7 @@ func TestDiffPlans_DetectsStepAndDecisionChange(t *testing.T) {
 	after := Plan{Pipeline: "p", Nodes: []PlanNode{
 		node("deploy", nil, "skip", PlanStep{ID: "canary", Decision: "skip"}, PlanStep{ID: "rollout", Decision: "run"}),
 	}}
-	d := DiffPlans(before, after)
+	d := diffPlans(before, after)
 	if len(d.ChangedNodes) != 1 {
 		t.Fatalf("want 1 changed node, got %v", d.ChangedNodes)
 	}

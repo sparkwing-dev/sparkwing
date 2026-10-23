@@ -97,7 +97,7 @@ func TestBoundaryRequiresTeardownAndNodeCleanup(t *testing.T) {
 	if _, err = kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Release(t.Context(), r); !errors.Is(err, ErrContainersRunning) {
+	if err = b.Release(t.Context(), r); !errors.Is(err, errContainersRunning) {
 		t.Fatalf("release while pod remained=%v", err)
 	}
 	if cleared {

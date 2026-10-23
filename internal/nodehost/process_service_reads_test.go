@@ -223,7 +223,7 @@ func TestProcessServicesCleanupRegistrationIsProcessScoped(t *testing.T) {
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("missing cleanup=%d %s", response.Code, response.Body)
 	}
-	if err := service.Cleanups.Run(t.Context(), CleanupScope{}); err != nil {
+	if err := service.Cleanups.run(t.Context(), CleanupScope{}); err != nil {
 		t.Fatal(err)
 	}
 	response = registeredServiceRequest(t, routes, auth, http.MethodPost, "/node/v1/cleanups", `{"argv":["tool"]}`)

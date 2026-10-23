@@ -15,7 +15,7 @@ func TestDeclarationsRejectUnsetUnsupportedPayloads(t *testing.T) {
 	} {
 		d := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion, File: ".sparkwing/sparkwing.yaml"}
 		mutate(&d.Defaults)
-		err := ValidateCheckoutDeclarations(d)
+		err := validateCheckoutDeclarations(d)
 		if err == nil || strings.Contains(err.Error(), "secret-value") {
 			t.Fatalf("bad malformed-absence refusal: %v", err)
 		}
@@ -43,7 +43,7 @@ func TestDeclarationsRejectForgedNestedLocations(t *testing.T) {
 			t.Fatal(err)
 		}
 		mutate(&d)
-		if err := ValidateCheckoutDeclarations(d); err == nil {
+		if err := validateCheckoutDeclarations(d); err == nil {
 			t.Fatal("accepted forged location")
 		}
 	}

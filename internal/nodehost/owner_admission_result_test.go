@@ -39,7 +39,7 @@ func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
 		}
 		return p, err
 	}
-	evaluator, err := NewOwnerEvaluator(deps)
+	evaluator, err := newOwnerEvaluator(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

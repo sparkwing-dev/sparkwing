@@ -24,8 +24,8 @@ func (c *ProcessCleanups) contains(id string) bool {
 	return !c.closed && slices.ContainsFunc(c.list.items, func(item cleanup) bool { return item.id == id })
 }
 
-// Register retains a validated command under the existing cleanup limits.
-func (c *ProcessCleanups) Register(argv []string, description string) (string, error) {
+// register retains a validated command under the existing cleanup limits.
+func (c *ProcessCleanups) register(argv []string, description string) (string, error) {
 	if message := checkCleanup(argv, description); message != "" {
 		return "", executorError(apierr.BadRequest, message)
 	}
@@ -43,8 +43,8 @@ func (c *ProcessCleanups) Register(argv []string, description string) (string, e
 	return id, nil
 }
 
-// Release removes only this process's outstanding cleanup.
-func (c *ProcessCleanups) Release(id string) error {
+// release removes only this process's outstanding cleanup.
+func (c *ProcessCleanups) release(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -58,8 +58,8 @@ func (c *ProcessCleanups) Release(id string) error {
 	return nil
 }
 
-// Run closes registration and runs unreleased commands once, after process revocation and join.
-func (c *ProcessCleanups) Run(ctx context.Context, scope CleanupScope) error {
+// run closes registration and runs unreleased commands once, after process revocation and join.
+func (c *ProcessCleanups) run(ctx context.Context, scope CleanupScope) error {
 	c.mu.Lock()
 	c.closed = true
 	items := c.list.items

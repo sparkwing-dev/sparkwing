@@ -1,4 +1,4 @@
-package nodehost_test
+package nodehost
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -45,14 +45,14 @@ func TestProductionRouterCanonicalRefusalsAndHardCut(t *testing.T) {
 	masker := secrets.NewMasker()
 	service := newService(t)
 	service.RunID, service.Job.ID = "run", "job"
-	service.Masks = nodehost.NewMaskRegistry(masker)
+	service.Masks = NewMaskRegistry(masker)
 	service.Secret = func(context.Context, capability.Authorized, string) (string, bool, error) {
 		t.Fatal("undeclared secret reached resolver")
 		return "", false, nil
 	}
-	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessOutput, error) {
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
 		t.Fatal("malformed latest reached backend")
-		return nodehost.ProcessOutput{}, nil
+		return ProcessOutput{}, nil
 	}
 	bearer, revoke, err := s.Admit(routeNode{Service: service})
 	if err != nil {
@@ -160,7 +160,7 @@ func FuzzProductionRouterBindsImplicitSelectors(f *testing.F) {
 			check(auth)
 			return nil
 		}
-		service.StartChild = func(_ context.Context, auth capability.Authorized, _ nodehost.ChildRequest) (string, error) {
+		service.StartChild = func(_ context.Context, auth capability.Authorized, _ ChildRequest) (string, error) {
 			check(auth)
 			if auth.Target.BodyRunID != run {
 				t.Fatalf("child escaped parent run: %+v", auth.Target)

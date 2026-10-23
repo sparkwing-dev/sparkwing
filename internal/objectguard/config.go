@@ -8,17 +8,17 @@ import (
 	"sync"
 )
 
-// BudgetFlag is the controller flag ParseBudget reads.
-const BudgetFlag = "--object-store-budget"
+// budgetFlag is the controller flag ParseBudget reads.
+const budgetFlag = "--object-store-budget"
 
-// ParseBudget layers spec onto DefaultConfig. spec is a comma-separated list
+// ParseBudget layers spec onto defaultConfig. spec is a comma-separated list
 // of class:window=count entries, such as "put:minute=600,get:day=0", where
 // class is put, get, list or delete, window is minute or day, and 0 leaves
 // that window unlimited. A class and window spec does not name keeps its
 // default. It reports the first malformed entry rather than keeping a
 // default, because a typo in a budget is a budget that does not apply.
 func ParseBudget(spec string) (Config, error) {
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	for _, entry := range strings.Split(spec, ",") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
@@ -27,23 +27,23 @@ func ParseBudget(spec string) (Config, error) {
 		key, raw, ok := strings.Cut(entry, "=")
 		class, window, ok2 := strings.Cut(key, ":")
 		if !ok || !ok2 {
-			return Config{}, fmt.Errorf("%s %q: want class:window=count, such as put:minute=600", BudgetFlag, entry)
+			return Config{}, fmt.Errorf("%s %q: want class:window=count, such as put:minute=600", budgetFlag, entry)
 		}
 		limit, known := cfg.Limits[Class(strings.TrimSpace(class))]
 		if !known {
-			return Config{}, fmt.Errorf("%s %q: class must be put, get, list or delete", BudgetFlag, entry)
+			return Config{}, fmt.Errorf("%s %q: class must be put, get, list or delete", budgetFlag, entry)
 		}
 		n, err := strconv.Atoi(strings.TrimSpace(raw))
 		if err != nil || n < 0 {
-			return Config{}, fmt.Errorf("%s %q: want a whole number of requests, or 0 for no limit", BudgetFlag, entry)
+			return Config{}, fmt.Errorf("%s %q: want a whole number of requests, or 0 for no limit", budgetFlag, entry)
 		}
 		switch Window(strings.TrimSpace(window)) {
-		case WindowMinute:
+		case windowMinute:
 			limit.PerMinute = n
-		case WindowDay:
+		case windowDay:
 			limit.PerDay = n
 		default:
-			return Config{}, fmt.Errorf("%s %q: window must be minute or day", BudgetFlag, entry)
+			return Config{}, fmt.Errorf("%s %q: window must be minute or day", budgetFlag, entry)
 		}
 		cfg.Limits[Class(strings.TrimSpace(class))] = limit
 	}
@@ -56,11 +56,11 @@ var (
 )
 
 // Shared returns the process-wide limiter: the one [ConfigureShared] built,
-// or one on DefaultConfig. Every object-store client Sparkwing constructs
+// or one on defaultConfig. Every object-store client Sparkwing constructs
 // draws on it, so one runaway caller spends the same budget every other
 // caller sees.
 func Shared() *Limiter {
-	sharedOnce.Do(func() { shared = New(DefaultConfig()) })
+	sharedOnce.Do(func() { shared = New(defaultConfig()) })
 	return shared
 }
 

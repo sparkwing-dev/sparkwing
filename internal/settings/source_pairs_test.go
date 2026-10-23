@@ -25,15 +25,15 @@ func inputLayer(in *Inputs, s Source) *Values {
 		return &in.Flags
 	case Env:
 		return &in.Environment
-	case Run:
+	case sourceRun:
 		return &in.Sealed
-	case ProjectPipeline:
+	case projectPipeline:
 		return &in.Pipeline
-	case ProjectDefaults:
+	case projectDefaults:
 		return &in.Defaults
-	case Code:
+	case code:
 		return &in.Code
-	case Machine:
+	case machine:
 		return &in.Machine
 	default:
 		panic("bad fixture source")
@@ -47,33 +47,33 @@ func TestRunSettingSourcePairs(t *testing.T) {
 		first, second any
 		resolve       sourceProbe
 	}{
-		{"profile", "Profile", []Source{Flag, Run, ProjectPipeline}, "near", "far", probe(Profile)},
-		{"guards", "Guards", []Source{Run, ProjectPipeline, ProjectDefaults}, projectconfig.Guards{When: []string{"where:local"}}, projectconfig.Guards{When: []string{"where:controller"}}, probe(Guards)},
-		{"requires", "Requires", []Source{Flag, Run, ProjectPipeline, ProjectDefaults, Code}, []string{"near"}, []string{"far"}, probe(Requires)},
-		{"prefers", "Prefers", []Source{Flag, Run, ProjectPipeline, ProjectDefaults, Code}, []string{"near"}, []string{"far"}, probe(Prefers)},
-		{"workers", "Workers", []Source{Flag, Run}, 2, 7, probe(Workers)},
-		{"output", "Output", []Source{Flag, Env, Run}, "plain", "json", probe(Output)},
-		{"admission_class", "AdmissionClass", []Source{Run, Code}, "interactive", "batch", probe(AdmissionClass)},
-		{"priority", "Priority", []Source{Flag, Run, Code}, 0, 9, probe(Priority)},
-		{"debug.pause_timeout", "PauseTimeout", []Source{Run, Machine}, time.Minute, 2 * time.Minute, probe(PauseTimeout)},
-		{"runner", "RunnerSelection", []Source{Flag, Run}, runspec.RunnerSelection{Kind: runspec.RunnerHere}, runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "worker"}, probe(RunnerSelection)},
-		{"start_at", "StartAt", []Source{Flag, Run}, "near", "far", probe(StartAt)},
-		{"stop_at", "StopAt", []Source{Flag, Run}, "near", "far", probe(StopAt)},
-		{"only", "Only", []Source{Flag, Run}, "near", "far", probe(Only)},
-		{"dry_run", "DryRun", []Source{Flag, Run}, false, true, probe(DryRun)},
-		{"no_memo", "NoMemo", []Source{Flag, Run}, false, true, probe(NoMemo)},
-		{"allow_risk", "AllowRisk", []Source{Flag, Run}, []string{}, []string{"destructive"}, probe(AllowRisk)},
-		{"job.no_progress_timeout", "NoProgressTimeout", []Source{Run, Code}, time.Duration(0), time.Minute, probe(NoProgressTimeout)},
-		{"job.retry_backoff", "RetryBackoff", []Source{Run, Code}, time.Duration(0), time.Second, probe(RetryBackoff)},
-		{"job.timeout", "JobTimeout", []Source{Run, Code}, time.Minute, 2 * time.Minute, probe(JobTimeout)},
-		{"approval.wait", "ApprovalWait", []Source{Run, Code}, time.Duration(0), time.Minute, probe(ApprovalWait)},
-		{"job.retry", "Retry", []Source{Run, Code}, 0, 4, probe(Retry)},
-		{"job.memo_ttl", "MemoTTL", []Source{Run, Code}, time.Hour, 2 * time.Hour, probe(MemoTTL)},
-		{"claim_wait", "ClaimWait", []Source{Run, Code}, time.Hour, 2 * time.Hour, probe(ClaimWait)},
-		{"debug", "Debug", []Source{Env, Run}, false, true, probe(Debug)},
-		{"publish", "Publish", []Source{Flag, Run}, "near", "far", probe(Publish)},
-		{"cache_from", "CacheFrom", []Source{Flag, Run, Machine}, "near", "far", probe(CacheFrom)},
-		{"run.submit_env_allow", "SubmitEnvAllow", []Source{Run, Machine}, []string{}, []string{"APP_*"}, probe(SubmitEnvAllow)},
+		{"profile", "Profile", []Source{Flag, sourceRun, projectPipeline}, "near", "far", probe(profile)},
+		{"guards", "Guards", []Source{sourceRun, projectPipeline, projectDefaults}, projectconfig.Guards{When: []string{"where:local"}}, projectconfig.Guards{When: []string{"where:controller"}}, probe(Guards)},
+		{"requires", "Requires", []Source{Flag, sourceRun, projectPipeline, projectDefaults, code}, []string{"near"}, []string{"far"}, probe(requires)},
+		{"prefers", "Prefers", []Source{Flag, sourceRun, projectPipeline, projectDefaults, code}, []string{"near"}, []string{"far"}, probe(prefers)},
+		{"workers", "Workers", []Source{Flag, sourceRun}, 2, 7, probe(workers)},
+		{"output", "Output", []Source{Flag, Env, sourceRun}, "plain", "json", probe(output)},
+		{"admission_class", "AdmissionClass", []Source{sourceRun, code}, "interactive", "batch", probe(admissionClass)},
+		{"priority", "Priority", []Source{Flag, sourceRun, code}, 0, 9, probe(priority)},
+		{"debug.pause_timeout", "PauseTimeout", []Source{sourceRun, machine}, time.Minute, 2 * time.Minute, probe(pauseTimeout)},
+		{"runner", "RunnerSelection", []Source{Flag, sourceRun}, runspec.RunnerSelection{Kind: runspec.RunnerHere}, runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "worker"}, probe(runnerSelection)},
+		{"start_at", "StartAt", []Source{Flag, sourceRun}, "near", "far", probe(startAt)},
+		{"stop_at", "StopAt", []Source{Flag, sourceRun}, "near", "far", probe(stopAt)},
+		{"only", "Only", []Source{Flag, sourceRun}, "near", "far", probe(only)},
+		{"dry_run", "DryRun", []Source{Flag, sourceRun}, false, true, probe(dryRun)},
+		{"no_memo", "NoMemo", []Source{Flag, sourceRun}, false, true, probe(noMemo)},
+		{"allow_risk", "AllowRisk", []Source{Flag, sourceRun}, []string{}, []string{"destructive"}, probe(allowRisk)},
+		{"job.no_progress_timeout", "NoProgressTimeout", []Source{sourceRun, code}, time.Duration(0), time.Minute, probe(noProgressTimeout)},
+		{"job.retry_backoff", "RetryBackoff", []Source{sourceRun, code}, time.Duration(0), time.Second, probe(retryBackoff)},
+		{"job.timeout", "JobTimeout", []Source{sourceRun, code}, time.Minute, 2 * time.Minute, probe(JobTimeout)},
+		{"approval.wait", "ApprovalWait", []Source{sourceRun, code}, time.Duration(0), time.Minute, probe(ApprovalWait)},
+		{"job.retry", "Retry", []Source{sourceRun, code}, 0, 4, probe(Retry)},
+		{"job.memo_ttl", "MemoTTL", []Source{sourceRun, code}, time.Hour, 2 * time.Hour, probe(MemoTTL)},
+		{"claim_wait", "ClaimWait", []Source{sourceRun, code}, time.Hour, 2 * time.Hour, probe(ClaimWait)},
+		{"debug", "Debug", []Source{Env, sourceRun}, false, true, probe(debug)},
+		{"publish", "Publish", []Source{Flag, sourceRun}, "near", "far", probe(publish)},
+		{"cache_from", "CacheFrom", []Source{Flag, sourceRun, machine}, "near", "far", probe(cacheFrom)},
+		{"run.submit_env_allow", "SubmitEnvAllow", []Source{sourceRun, machine}, []string{}, []string{"APP_*"}, probe(submitEnvAllow)},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {

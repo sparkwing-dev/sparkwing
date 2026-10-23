@@ -43,7 +43,7 @@ func TestLoopUsesOneQueueForEveryUnitKind(t *testing.T) {
 		Host: hostFunc(func(_ context.Context, unit controllerwire.ClaimedUnit) error {
 			hosted = append(hosted, unit.Unit)
 			if len(hosted) == len(want) {
-				loop.Drain()
+				loop.startDrain()
 			}
 			return nil
 		}),
@@ -81,7 +81,7 @@ func TestLoopDrainKeepsHeldUnitsAliveAndJoins(t *testing.T) {
 	}
 	go func() { joined <- loop.Run(t.Context()) }()
 	<-started
-	loop.Drain()
+	loop.startDrain()
 	select {
 	case err := <-joined:
 		t.Fatalf("drain did not join: %v", err)
@@ -141,7 +141,7 @@ func TestLoopCannotRunTwice(t *testing.T) {
 	loop := &Loop{Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1}, Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 		return controllerwire.ClaimResponse{}, nil
 	}), Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return nil }), CheckVersion: func(context.Context, string) error { return nil }}
-	loop.Drain()
+	loop.startDrain()
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
 	for range 2 {
@@ -172,7 +172,7 @@ func TestLoopDrainCancelsInflightClaim(t *testing.T) {
 		Host:         hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected execution"); return nil }),
 		CheckVersion: func(context.Context, string) error { return nil },
 	}
-	go func() { <-started; loop.Drain() }()
+	go func() { <-started; loop.startDrain() }()
 	if err := loop.Run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestLoopOwnsAnAwardThatRacesDrain(t *testing.T) {
 	loop = &Loop{
 		Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1},
 		Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-			loop.Drain()
+			loop.startDrain()
 			return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
 		}),
 		Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
@@ -297,7 +297,7 @@ func TestLoopReclaimedGenerationDoesNotLoseItsAward(t *testing.T) {
 			claims++
 			if claims == 2 {
 				<-firstFinished
-				loop.Drain()
+				loop.startDrain()
 			}
 			return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "same-unit", RunID: "run", Capability: "secret", Binding: capability.Binding{Generation: claims}}}, nil
 		}),
@@ -660,7 +660,7 @@ func testPendingClaimStop(t *testing.T, run string, reason, order uint8, awarded
 			if reason == 1 {
 				cancel(cancelledErr)
 			} else {
-				loop.Drain()
+				loop.startDrain()
 			}
 			if order == 1 {
 				release()
@@ -938,7 +938,7 @@ func TestLoopDrainDuringPendingClaimPolicyRefresh(t *testing.T) {
 					finished := make(chan error, 1)
 					go func() { finished <- loop.Run(t.Context()) }()
 					<-refreshing
-					loop.Drain()
+					loop.startDrain()
 					err := <-finished
 					wantHosted := 0
 					if awarded {

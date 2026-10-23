@@ -79,7 +79,7 @@ type Report struct {
 	TotalMS int64 `json:"total_ms"`
 }
 
-func Run(ctx context.Context, specs []Spec, gen Generator, scorer Scorer) Report {
+func run(ctx context.Context, specs []Spec, gen Generator, scorer Scorer) Report {
 	return RunWith(ctx, specs, gen, scorer, RunOptions{})
 }
 
@@ -173,7 +173,7 @@ func scoreSpec(ctx context.Context, spec Spec, gen Generator, scorer Scorer, att
 
 	checks, scoreErr := scorer.Score(ctx, spec, source)
 
-	reviser, canRevise := gen.(Reviser)
+	reviser, canRevise := gen.(reviser)
 	for round := 1; canRevise && spec.Expect == ExpectPass && round <= opts.Revise; round++ {
 		if scoreErr == nil && allOK(checks) {
 			break

@@ -43,7 +43,7 @@ func TestDescribeRepoRunsATypeScriptPipelineBehindTheBootstrap(t *testing.T) {
 definePipeline({ name: "ts-hello", plan(plan) { plan.job("build", () => {}); } });
 process.exitCode = await main();
 `)
-	got, err := DescribeRepo(repo)
+	got, err := describeRepo(repo)
 	if err != nil {
 		t.Fatal(err)
 	}

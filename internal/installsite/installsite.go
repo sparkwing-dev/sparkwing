@@ -99,7 +99,7 @@ func unixShellUnsafe(r rune) bool {
 	return true
 }
 
-func SamePath(a, b string) bool {
+func samePath(a, b string) bool {
 	if a == b {
 		return true
 	}
@@ -167,7 +167,7 @@ func Scan(dirs []string) []Copy {
 func Competing(copies []Copy, self string) []Copy {
 	var out []Copy
 	for _, c := range copies {
-		if self != "" && SamePath(c.Resolved, self) {
+		if self != "" && samePath(c.Resolved, self) {
 			continue
 		}
 		out = append(out, c)

@@ -219,9 +219,9 @@ func TestValidateCloneURLKeepsPublicNamesThatMerelyLookInternal(t *testing.T) {
 }
 
 func TestSetHostPolicyGatesEveryCloneHost(t *testing.T) {
-	t.Cleanup(func() { SetHostPolicy(nil) })
+	t.Cleanup(func() { setHostPolicy(nil) })
 	var seen []string
-	SetHostPolicy(func(host string) error {
+	setHostPolicy(func(host string) error {
 		seen = append(seen, host)
 		if host != "git.example.com" {
 			return fmt.Errorf("host %q is off the allowlist", host)
@@ -251,15 +251,15 @@ func TestSetHostPolicyGatesEveryCloneHost(t *testing.T) {
 		}
 	}
 
-	SetHostPolicy(nil)
+	setHostPolicy(nil)
 	if _, err := ValidateCloneURL("https://forge.elsewhere.com/acme/repo.git"); err != nil {
 		t.Fatalf("after clearing the policy: %v", err)
 	}
 }
 
 func TestSetHostPolicyRunsAfterTheBuiltInChecks(t *testing.T) {
-	t.Cleanup(func() { SetHostPolicy(nil) })
-	SetHostPolicy(func(string) error { return nil })
+	t.Cleanup(func() { setHostPolicy(nil) })
+	setHostPolicy(func(string) error { return nil })
 	for _, tc := range []string{
 		"https://127.0.0.1/repo.git",
 		"https://svc.internal/repo.git",

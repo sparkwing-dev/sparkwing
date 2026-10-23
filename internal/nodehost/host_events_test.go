@@ -88,7 +88,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				result, err := FollowReconciliation(ctx, fixture.Tenant, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: store.SourceResume}, nil)
+				result, err := followReconciliation(ctx, fixture.Tenant, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: store.SourceResume}, nil)
 				if err != nil || result.Kind != store.KeepTerminal || result.Claim != nil || len(result.Bearer) != 0 {
 					t.Fatalf("adopted terminal result=%+v, error=%v", result, err)
 				}

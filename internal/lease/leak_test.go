@@ -1,4 +1,4 @@
-package lease_test
+package lease
 
 import (
 	"testing"

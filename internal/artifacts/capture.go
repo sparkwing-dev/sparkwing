@@ -83,7 +83,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 		if d.IsDir() && !isSymlink {
 			return nil
 		}
-		if !Matches(globs, rel) {
+		if !matches(globs, rel) {
 			return nil
 		}
 		name, nerr := workspaceRelPath(wsRoot, p)
@@ -209,9 +209,9 @@ func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name strin
 	return digest, n, nil
 }
 
-// Matches reports whether a slash-separated path or one of its parent directories
+// matches reports whether a slash-separated path or one of its parent directories
 // matches an artifact glob. A ** segment matches zero or more path segments.
-func Matches(globs []string, rel string) bool {
+func matches(globs []string, rel string) bool {
 	segs := strings.Split(rel, "/")
 	for i := len(segs); i >= 1; i-- {
 		prefix := strings.Join(segs[:i], "/")

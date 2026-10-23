@@ -22,7 +22,7 @@ func TestInstallAppliesCredentialPolicyAndMasksOutput(t *testing.T) {
 	t.Setenv("PATH", dir)
 	var output bytes.Buffer
 	env := []string{"AWS_SECRET_ACCESS_KEY=aws-private", "GH_TOKEN=gh-private", "CUSTOM_API_TOKEN=custom-private", "HTTPS_PROXY=https://alice:proxy-private-password@proxy.example"}
-	if err := InstallTypeScript(t.Context(), dir, env, &output); err != nil {
+	if err := installTypeScript(t.Context(), dir, env, &output); err != nil {
 		t.Fatal(err)
 	}
 	if got := output.String(); got != "|||https://***@proxy.example***" {

@@ -15,10 +15,10 @@ func TestServeTokenRefusesEscapingSymlink(t *testing.T) {
 	if err := fssecure.WriteFile(target, []byte(strings.Repeat("a", 64))); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, p.ServeTokenFile()); err != nil {
+	if err := os.Symlink(target, p.serveTokenFile()); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if got, err := p.ServeToken(); err == nil || got != "" {
+	if got, err := p.serveToken(); err == nil || got != "" {
 		t.Fatalf("escaped serve token = %q, %v", got, err)
 	}
 }

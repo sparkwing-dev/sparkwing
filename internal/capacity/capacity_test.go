@@ -104,7 +104,7 @@ func TestApplyHostCeiling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, warning := ApplyHostCeiling(tc.res, "repo/ci", tc.machine, tc.grantCores, tc.grantMem)
+			got, warning := applyHostCeiling(tc.res, "repo/ci", tc.machine, tc.grantCores, tc.grantMem)
 			if got.Cores != tc.wantCores {
 				t.Errorf("cores = %v, want %v", got.Cores, tc.wantCores)
 			}
@@ -160,7 +160,7 @@ func TestApplyCeiling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ApplyCeiling(tc.res, tc.cores, tc.mem)
+			got := applyCeiling(tc.res, tc.cores, tc.mem)
 			if got.Cores != tc.wantCores {
 				t.Errorf("cores = %v, want %v", got.Cores, tc.wantCores)
 			}
@@ -242,8 +242,8 @@ func TestResolve_ZeroCPUProfileQualifiesOnHealthySampler(t *testing.T) {
 	if got.Source != store.CostSourceMeasured {
 		t.Fatalf("Source = %q, want measured (healthy sampler, near-zero peak)", got.Source)
 	}
-	if got.Cores != MeasuredCoreFloor {
-		t.Errorf("Cores = %v, want the %v core floor", got.Cores, MeasuredCoreFloor)
+	if got.Cores != measuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v core floor", got.Cores, measuredCoreFloor)
 	}
 	if got.MemoryBytes != 256<<20 {
 		t.Errorf("MemoryBytes = %d, want the measured 256MiB", got.MemoryBytes)
@@ -273,8 +273,8 @@ func TestResolve_MeasuredPeakBelowFloorLiftsToFloor(t *testing.T) {
 		SampleCount: MinSamples,
 		CPUMeasured: true,
 	}
-	if got := Resolve(nil, tiny, 8, ""); got.Cores != MeasuredCoreFloor {
-		t.Errorf("Cores = %v, want the %v floor", got.Cores, MeasuredCoreFloor)
+	if got := Resolve(nil, tiny, 8, ""); got.Cores != measuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
 	}
 }
 
@@ -322,7 +322,7 @@ func TestFloorPoisoned_Gating(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := FloorPoisoned(tc.profile, tc.grantable); got != tc.want {
+			if got := floorPoisoned(tc.profile, tc.grantable); got != tc.want {
 				t.Errorf("FloorPoisoned = %v, want %v", got, tc.want)
 			}
 		})
@@ -345,8 +345,8 @@ func TestCheckDrift_Gating(t *testing.T) {
 		{name: "empty pin never warns", pin: &Pin{}, profile: measured(9, 12), wantNil: true},
 		{name: "too few samples stays quiet", pin: &Pin{Cores: 2}, profile: measured(9, 2), wantNil: true},
 		{name: "within threshold stays quiet", pin: &Pin{Cores: 8}, profile: measured(9, 12), wantNil: true},
-		{name: "under-pinned warns", pin: &Pin{Cores: 2}, profile: measured(9.1, 12), wantClass: DriftUnderPinned},
-		{name: "over-pinned warns", pin: &Pin{Cores: 16}, profile: measured(4, 12), wantClass: DriftOverPinned},
+		{name: "under-pinned warns", pin: &Pin{Cores: 2}, profile: measured(9.1, 12), wantClass: driftUnderPinned},
+		{name: "over-pinned warns", pin: &Pin{Cores: 16}, profile: measured(4, 12), wantClass: driftOverPinned},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -406,8 +406,8 @@ func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 		SampleCount:    MinSamples,
 		CPUMeasured:    true,
 	}
-	if got := Resolve(nil, tiny, 8, ""); got.Cores != MeasuredCoreFloor {
-		t.Errorf("Cores = %v, want the %v floor", got.Cores, MeasuredCoreFloor)
+	if got := Resolve(nil, tiny, 8, ""); got.Cores != measuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
 	}
 }
 
@@ -422,7 +422,7 @@ func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 		t.Errorf("drift = %+v, want none: a pin of 3 agrees with the 2.6 it is charged", d)
 	}
 	d := CheckDrift(&Pin{Cores: 8}, spiky)
-	if d == nil || d.Class != DriftOverPinned {
+	if d == nil || d.Class != driftOverPinned {
 		t.Fatalf("drift = %+v, want over-pinned: 8 reserves triple the 2.6 charge", d)
 	}
 	if d.MeasuredCores != 2.6 {

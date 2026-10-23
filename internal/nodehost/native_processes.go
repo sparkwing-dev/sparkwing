@@ -30,7 +30,7 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 	}
 	services.Masks, services.Cleanups = p.Masks, &ProcessCleanups{}
 	services.activity = &nativeProcessActivity{}
-	issued, revoke, err := p.Authorities.Delegate(ctx, parent, spec, &services)
+	issued, revoke, err := p.Authorities.delegate(ctx, parent, spec, &services)
 	if err != nil {
 		return ProcessGrant{Revoke: revoke}, err
 	}
@@ -46,11 +46,11 @@ func (p *NativeProcesses) Start(ctx context.Context, input NodeInput, activity E
 	if err != nil {
 		return nil, err
 	}
-	return p.compute.start(input.Accepted.RunID, func() (ExecutorProcess, error) { return config.Start(ctx, input, activity) })
+	return p.compute.start(input.Accepted.RunID, func() (ExecutorProcess, error) { return config.startNode(ctx, input, activity) })
 }
 
-// StartEvaluation launches an owner closure with its live delegated services.
-func (p *NativeProcesses) StartEvaluation(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
+// startEvaluation launches an owner closure with its live delegated services.
+func (p *NativeProcesses) startEvaluation(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
 	config, err := p.configuration(ctx, input.RouteBinding, input.processRevoke, ExecutorActivity{}, input.Accepted)
 	if err != nil {
 		return nil, err
@@ -58,8 +58,8 @@ func (p *NativeProcesses) StartEvaluation(ctx context.Context, input EvaluationI
 	return p.compute.start(input.Accepted.RunID, func() (ExecutorProcess, error) { return config.StartEvaluation(ctx, input) })
 }
 
-// StartPlanning uses the shared environment and planner's secret-discovery log gate.
-func (p *NativeProcesses) StartPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+// startPlanning uses the shared environment and planner's secret-discovery log gate.
+func (p *NativeProcesses) startPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 	config := p.Session
 	config.Revoke, config.RunCleanups = nil, nil
 	return p.compute.start(input.Run.RunID, func() (ExecutorProcess, error) { return config.StartPlanning(ctx, input, log) })
@@ -95,9 +95,9 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 		ctx, cancel := context.WithCancelCause(ctx)
 		defer cancel(context.Canceled)
 		cleanupLogs := &planningLogs{known: true, debug: debug, masker: service.Masks.masker, sink: logs.sink, fail: cancel}
-		output := cleanupLogs.writer(ctx, LevelInfo)
+		output := cleanupLogs.writer(ctx, levelInfo)
 		scope.Log = output
-		err := service.Cleanups.Run(ctx, scope)
+		err := service.Cleanups.run(ctx, scope)
 		return errors.Join(err, output.close(), cleanupLogs.finish(ctx))
 	}
 	return config, nil

@@ -22,13 +22,13 @@ func (e *Error) Error() string {
 	return message
 }
 
-func ruleFor(key string) Rule {
-	for _, rule := range Table() {
+func ruleFor(key string) rule {
+	for _, rule := range table() {
 		if rule.Key == key {
 			return rule
 		}
 	}
-	return Rule{}
+	return rule{}
 }
 
 func sourceValues(in Inputs, source Source) Values {
@@ -37,15 +37,15 @@ func sourceValues(in Inputs, source Source) Values {
 		return in.Flags
 	case Env:
 		return in.Environment
-	case Run:
+	case sourceRun:
 		return in.Sealed
-	case ProjectPipeline:
+	case projectPipeline:
 		return in.Pipeline
-	case ProjectDefaults:
+	case projectDefaults:
 		return in.Defaults
-	case Code:
+	case code:
 		return in.Code
-	case Machine:
+	case machine:
 		return in.Machine
 	default:
 		return Values{}
@@ -54,7 +54,7 @@ func sourceValues(in Inputs, source Source) Values {
 
 func originFor(v Values, source Source, key string) Origin {
 	if origin, ok := v.Origins[key]; ok {
-		if source != Run {
+		if source != sourceRun {
 			origin.Source = source
 		}
 		if origin.Key == "" {
@@ -67,8 +67,8 @@ func originFor(v Values, source Source, key string) Origin {
 
 func sources(in Inputs, key string) []Source {
 	rule := ruleFor(key)
-	if !in.Context.Submitter && rule.Phase != Startup {
-		return []Source{Run}
+	if !in.Context.Submitter && rule.Phase != startup {
+		return []Source{sourceRun}
 	}
 	return rule.Sources
 }
@@ -84,9 +84,9 @@ func pick[T any](in Inputs, key string, field func(Values) *T, fallback T) (T, O
 			return *value, originFor(v, source, key), nil
 		}
 	}
-	if !in.Context.Submitter && ruleFor(key).Phase != Startup {
+	if !in.Context.Submitter && ruleFor(key).Phase != startup {
 		var zero T
-		return zero, Origin{Source: Run, Key: key}, invalid(key, Origin{Source: Run, Key: key}, "sealed setting is absent")
+		return zero, Origin{Source: sourceRun, Key: key}, invalid(key, Origin{Source: sourceRun, Key: key}, "sealed setting is absent")
 	}
 	return fallback, Origin{Source: Default, Key: key}, nil
 }
@@ -118,7 +118,7 @@ func mergeArgs(in Inputs) (map[string]string, Origin, error) {
 		}
 	}
 	if !in.Context.Submitter && !found {
-		return nil, origin, invalid("args", Origin{Source: Run, Key: "args"}, "sealed setting is absent")
+		return nil, origin, invalid("args", Origin{Source: sourceRun, Key: "args"}, "sealed setting is absent")
 	}
 	return out, origin, nil
 }

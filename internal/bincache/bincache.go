@@ -25,7 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-var ErrMiss = errors.New("remote binary cache: miss")
+var errMiss = errors.New("remote binary cache: miss")
 
 func mkdirCache(dir string) error {
 	err := os.MkdirAll(dir, 0o755)
@@ -62,15 +62,15 @@ func SparkwingHome() string {
 	return p.Root
 }
 
-var ErrMissingGoSum = errors.New("missing go.sum entries")
+var errMissingGoSum = errors.New("missing go.sum entries")
 
-type CompileError struct {
+type compileError struct {
 	Output []byte
 	Err    error
 }
 
-func (e *CompileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
-func (e *CompileError) Unwrap() error { return e.Err }
+func (e *compileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
+func (e *compileError) Unwrap() error { return e.Err }
 
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -185,12 +185,12 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 			return ctxErr
 		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
-			return ErrMissingGoSum
+			return errMissingGoSum
 		}
 		if explanation := gotoolchain.ExplainOutput(ctx, captured.String(), env); explanation != nil {
-			return &CompileError{Output: []byte(explanation.Error()), Err: explanation}
+			return &compileError{Output: []byte(explanation.Error()), Err: explanation}
 		}
-		return &CompileError{Output: captured.Bytes(), Err: err}
+		return &compileError{Output: captured.Bytes(), Err: err}
 	}
 	return nil
 }
@@ -272,10 +272,10 @@ func withGoworkOff(env []string) []string {
 }
 
 func PipelineCacheKey(sparkwingDir string) (string, error) {
-	return PipelineCacheKeyForPlatform(sparkwingDir, runtime.GOOS, runtime.GOARCH)
+	return pipelineCacheKeyForPlatform(sparkwingDir, runtime.GOOS, runtime.GOARCH)
 }
 
-func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
+func pipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
 	parts, err := stableKeyParts(sparkwingDir, goos, goarch, os.Environ(), false)
 	if err != nil {
 		return "", err
@@ -431,13 +431,13 @@ func goMajorMinor() string {
 	return v
 }
 
-type HashStats struct {
+type hashStats struct {
 	Files   int
 	Bytes   int64
 	Ignored int
 }
 
-func (s HashStats) String() string {
+func (s hashStats) String() string {
 	base := fmt.Sprintf("%d files, %s", s.Files, humanSize(s.Bytes))
 	if s.Ignored > 0 {
 		base += fmt.Sprintf(" (%d gitignored, excluded)", s.Ignored)
@@ -486,10 +486,10 @@ func snapshotHashable(dir string, keep fileFilter) (map[string]fileState, error)
 	return out, nil
 }
 
-func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (HashStats, error) {
+func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
 	before, err := snapshotHashable(dir, keep)
 	if err != nil {
-		return HashStats{}, err
+		return hashStats{}, err
 	}
 	var digest bytes.Buffer
 	stats, err := hashFilesInto(&digest, dir, keep, hashAllFiles)
@@ -507,8 +507,8 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 	return stats, err
 }
 
-func hashFilesInto(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (HashStats, error) {
-	var stats HashStats
+func hashFilesInto(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
+	var stats hashStats
 	files, err := walkHashable(dir, keep)
 	if err != nil {
 		return stats, err

@@ -52,7 +52,7 @@ type Loop struct {
 }
 
 // Drain may be called before or during Run and is safe to repeat.
-func (l *Loop) Drain() {
+func (l *Loop) startDrain() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.initDrain()

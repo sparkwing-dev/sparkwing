@@ -44,8 +44,8 @@ const (
 	DataLookup   DataOperation = "lookup"
 )
 
-// DataPolicy keeps the signing path from treating blob existence as authority.
-type DataPolicy struct {
+// dataPolicy keeps the signing path from treating blob existence as authority.
+type dataPolicy struct {
 	Operation           DataOperation
 	Grant               Grant
 	RequireReadSet      bool
@@ -53,8 +53,8 @@ type DataPolicy struct {
 	CheckReferenceEdges bool
 }
 
-// DataPolicies covers all object operations; logs use their separate signed PUT path.
-var dataPolicies = []DataPolicy{
+// dataPolicies covers all object operations; logs use their separate signed PUT path.
+var dataPolicies = []dataPolicy{
 	{DataDownload, DataRead, true, false, false},
 	{DataUpload, DataWrite, false, true, false},
 	{DataCommit, DataWrite, false, true, false},
@@ -90,7 +90,7 @@ func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Auth
 	if edges == nil {
 		return policyFailure()
 	}
-	var policy *DataPolicy
+	var policy *dataPolicy
 	for i := range dataPolicies {
 		if dataPolicies[i].Operation == target.Operation {
 			policy = &dataPolicies[i]

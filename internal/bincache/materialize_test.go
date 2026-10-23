@@ -38,8 +38,8 @@ func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
 	if err := lease.Release(); err != nil {
 		t.Fatal(err)
 	}
-	if published || lease.Key() != key || lease.entry.binaryPath() != seed.entry.binaryPath() {
-		t.Fatalf("cached binary replaced: published=%t key=%s", published, lease.Key())
+	if published || lease.key() != key || lease.entry.binaryPath() != seed.entry.binaryPath() {
+		t.Fatalf("cached binary replaced: published=%t key=%s", published, lease.key())
 	}
 	writeCacheConfig(t, "cache:\n  max_bytes: lots\n")
 	if _, _, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: io.Discard}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {

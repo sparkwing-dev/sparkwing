@@ -23,9 +23,9 @@ import (
 // behind.
 const SDKMaxAttempts = 4
 
-// SDKMaxBackoff ceilings the SDK's wait between those attempts, so a
+// sdkMaxBackoff ceilings the SDK's wait between those attempts, so a
 // slow failure cannot stretch one call past a caller's patience.
-const SDKMaxBackoff = 5 * time.Second
+const sdkMaxBackoff = 5 * time.Second
 
 // ParseURL splits an s3://bucket/prefix URL into its bucket and its prefix
 // with no leading or trailing slash.
@@ -58,7 +58,7 @@ func NewClient(ctx context.Context, optFns ...func(*awss3.Options)) (*awss3.Clie
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRetryer(func() aws.Retryer {
 		return retry.NewStandard(func(o *retry.StandardOptions) {
 			o.MaxAttempts = SDKMaxAttempts
-			o.MaxBackoff = SDKMaxBackoff
+			o.MaxBackoff = sdkMaxBackoff
 		})
 	}))
 	if err != nil {

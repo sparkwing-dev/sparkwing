@@ -168,7 +168,7 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 }
 
 func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (store.Applied, error)) error {
-	var decision *AdmissionFailure
+	var decision *admissionFailure
 	if errors.As(failure, &decision) && decision.committed {
 		if decision.Outcome == store.NodeSkipped {
 			return nil
@@ -188,7 +188,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 		code = structured.Code
 	}
 	result := store.NodeResult{Outcome: store.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
-	var refused *AdmissionFailure
+	var refused *admissionFailure
 	if errors.As(failure, &refused) && waitFailure(failure, refused) == nil {
 		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
 	}

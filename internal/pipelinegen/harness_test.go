@@ -28,7 +28,7 @@ func (g stubGenerator) Generate(_ context.Context, spec Spec) (string, error) {
 type stubScorer struct{ failing map[string]bool }
 
 func (s stubScorer) Score(_ context.Context, spec Spec, _ string) ([]CheckResult, error) {
-	checks := []CheckResult{{Name: CheckCompile, OK: true}, {Name: CheckExplain, OK: true}}
+	checks := []CheckResult{{Name: checkCompile, OK: true}, {Name: checkExplain, OK: true}}
 	checks = append(checks, CheckResult{Name: CheckLint, OK: !s.failing[spec.Name]})
 	return checks, nil
 }
@@ -171,7 +171,7 @@ func TestRunAggregatesPassRateAndMatched(t *testing.T) {
 	gen := stubGenerator{src: map[string]string{"good": "x", "bad": "y"}}
 	scorer := stubScorer{failing: map[string]bool{"bad": true}}
 
-	rep := Run(context.Background(), specs, gen, scorer)
+	rep := run(context.Background(), specs, gen, scorer)
 	if rep.Total != 2 || rep.PassExpected != 1 || rep.Passed != 1 {
 		t.Fatalf("counts: %+v", rep)
 	}
@@ -188,7 +188,7 @@ func TestRunCatchesRegressionWhenGoodSpecFails(t *testing.T) {
 	gen := stubGenerator{src: map[string]string{"good": "x"}}
 	scorer := stubScorer{failing: map[string]bool{"good": true}}
 
-	rep := Run(context.Background(), specs, gen, scorer)
+	rep := run(context.Background(), specs, gen, scorer)
 	if rep.Passed != 0 || rep.Matched != 0 || rep.PassRate != 0 {
 		t.Fatalf("a failing good spec must be unmatched: %+v", rep)
 	}
@@ -203,7 +203,7 @@ func TestRunGenerationErrorMatchesOnlyExpectFail(t *testing.T) {
 		"broken-fail": fmt.Errorf("boom"),
 		"broken-pass": fmt.Errorf("boom"),
 	}}
-	rep := Run(context.Background(), specs, gen, stubScorer{})
+	rep := run(context.Background(), specs, gen, stubScorer{})
 	byName := map[string]SpecResult{}
 	for _, r := range rep.Results {
 		byName[r.Name] = r
@@ -250,7 +250,7 @@ func TestEvalHarnessEndToEnd(t *testing.T) {
 	}
 	gen := FixtureGenerator{FS: fsys, Root: croot}
 	scorer := NewProjectScorer(bin, base)
-	rep := Run(context.Background(), specs, gen, scorer)
+	rep := run(context.Background(), specs, gen, scorer)
 
 	pretty, _ := json.MarshalIndent(rep, "", "  ")
 	t.Logf("pipelinegen report:\n%s", pretty)

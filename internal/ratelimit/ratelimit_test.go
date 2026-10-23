@@ -52,8 +52,8 @@ func TestLimiter_PeekDoesNotConsume(t *testing.T) {
 			t.Fatalf("peek should not consume the only token")
 		}
 	}
-	if l.Len() != 0 {
-		t.Fatalf("peek created %d buckets, want 0", l.Len())
+	if l.len() != 0 {
+		t.Fatalf("peek created %d buckets, want 0", l.len())
 	}
 	if !l.Allow("alice", now) {
 		t.Fatalf("token should still be available after peeks")
@@ -80,14 +80,14 @@ func TestLimiter_PenalizeChargesOnlyFailures(t *testing.T) {
 func TestLimiter_KeySpaceIsBounded(t *testing.T) {
 	l := New(1, time.Minute)
 	now := time.Unix(0, 0)
-	for i := range MaxKeys {
+	for i := range maxKeys {
 		l.Allow(fmt.Sprintf("client-%d", i), now)
 	}
 	if !l.Allow("one-too-many", now) {
 		t.Fatalf("a full key space must evict, not deny an unseen client")
 	}
-	if l.Len() > MaxKeys {
-		t.Fatalf("tracked %d keys, want at most %d", l.Len(), MaxKeys)
+	if l.len() > maxKeys {
+		t.Fatalf("tracked %d keys, want at most %d", l.len(), maxKeys)
 	}
 	if !l.Allow("after-gc", now.Add(10*time.Minute)) {
 		t.Fatalf("idle buckets should be reclaimed for new keys")
@@ -97,11 +97,11 @@ func TestLimiter_KeySpaceIsBounded(t *testing.T) {
 func TestLimiter_EvictionKeepsServingNewClients(t *testing.T) {
 	l := New(1, time.Minute)
 	now := time.Unix(0, 0)
-	for i := range MaxKeys {
+	for i := range maxKeys {
 		l.Allow(fmt.Sprintf("client-%d", i), now.Add(time.Duration(i)*time.Microsecond))
 	}
-	warm := fmt.Sprintf("client-%d", MaxKeys-1)
-	warmAt := now.Add(time.Duration(MaxKeys-1) * time.Microsecond)
+	warm := fmt.Sprintf("client-%d", maxKeys-1)
+	warmAt := now.Add(time.Duration(maxKeys-1) * time.Microsecond)
 	if l.Peek(warm, warmAt) {
 		t.Fatalf("the warm bucket should already be drained")
 	}
@@ -112,8 +112,8 @@ func TestLimiter_EvictionKeepsServingNewClients(t *testing.T) {
 		if !l.Allow(fresh, flood) {
 			t.Fatalf("%s denied at a full key space", fresh)
 		}
-		if l.Len() > MaxKeys {
-			t.Fatalf("tracked %d keys after %s, want at most %d", l.Len(), fresh, MaxKeys)
+		if l.len() > maxKeys {
+			t.Fatalf("tracked %d keys after %s, want at most %d", l.len(), fresh, maxKeys)
 		}
 	}
 	// safety: the coldest buckets go first, so a key flood cannot forget the client that just spent its budget.

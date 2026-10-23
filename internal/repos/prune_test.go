@@ -19,8 +19,8 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", registry)
-	want := &Config{
-		Repos:         []*Entry{{Path: live}, {Path: stale}},
+	want := &config{
+		Repos:         []*entry{{Path: live}, {Path: stale}},
 		FallbackPaths: []string{"~/code"},
 	}
 	if err := Save(registry, want); err != nil {
@@ -34,11 +34,11 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 	if !reflect.DeepEqual(dropped, []string{stale}) {
 		t.Fatalf("dropped = %v, want [%s]", dropped, stale)
 	}
-	got, err := Load(registry)
+	got, err := load(registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Repos, []*Entry{{Path: live}}) {
+	if !reflect.DeepEqual(got.Repos, []*entry{{Path: live}}) {
 		t.Fatalf("repos = %#v, want only %s", got.Repos, live)
 	}
 	if !reflect.DeepEqual(got.FallbackPaths, want.FallbackPaths) {

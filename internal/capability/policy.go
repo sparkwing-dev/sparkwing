@@ -17,9 +17,9 @@ const (
 	OwnerNone       Owner = "none"
 	OwnerTeam       Owner = "team"
 	OwnerRun        Owner = "run"
-	OwnerAccount    Owner = "account"
+	ownerAccount    Owner = "account"
 	OwnerDeployment Owner = "deployment"
-	OwnerNodeHost   Owner = "nodehost"
+	ownerNodeHost   Owner = "nodehost"
 )
 
 // BindingRule applies even to operators and local peers; there is no admin bypass.
@@ -59,15 +59,15 @@ const (
 	LiveSensitive  Liveness = "sensitive"
 	LiveReporting  Liveness = "reporting"
 	LiveResult     Liveness = "result"
-	LiveLogTail    Liveness = "logTail"
-	LiveHereClaim  Liveness = "hereClaim"
+	liveLogTail    Liveness = "logTail"
+	liveHereClaim  Liveness = "hereClaim"
 	LiveExpansion  Liveness = "expansion"
-	LiveProcess    Liveness = "process"
+	liveProcess    Liveness = "process"
 )
 
-// LivenessPolicy makes the narrow post-terminal exceptions explicit.
+// livenessPolicy makes the narrow post-terminal exceptions explicit.
 // Every class also requires token expiry, revocation ancestry and membership to remain valid.
-type LivenessPolicy struct {
+type livenessPolicy struct {
 	Class               Liveness
 	RefuseCancel        bool
 	ResultReplayOnly    bool
@@ -77,18 +77,18 @@ type LivenessPolicy struct {
 	CheckProcess        bool
 }
 
-// LivenessPolicies requires a current binding unless the named exception applies.
+// livenessPolicies requires a current binding unless the named exception applies.
 // Result replay checks the recorded actor, generation and digest; log tail checks its grace
 // deadline (persisted attempt finish plus limits.LogSealGrace), final attempt and absence of a newer claim. Neither exception reopens execution.
-var livenessPolicies = []LivenessPolicy{
+var livenessPolicies = []livenessPolicy{
 	{Class: LiveCredential},
 	{Class: LiveSensitive, RefuseCancel: true},
 	{Class: LiveReporting},
 	{Class: LiveResult, ResultReplayOnly: true},
-	{Class: LiveLogTail, FinalLogTailOnly: true},
-	{Class: LiveHereClaim, CheckHereWindow: true},
+	{Class: liveLogTail, FinalLogTailOnly: true},
+	{Class: liveHereClaim, CheckHereWindow: true},
 	{Class: LiveExpansion, RefuseCancel: true, CheckExpansionLease: true},
-	{Class: LiveProcess, RefuseCancel: true, CheckProcess: true},
+	{Class: liveProcess, RefuseCancel: true, CheckProcess: true},
 }
 
 // CredentialRule constrains how authority was established, beyond a grant's spelling.
@@ -100,16 +100,16 @@ const (
 	CredentialMember       CredentialRule = "unbound_member_or_local"
 	CredentialAccount      CredentialRule = "account_session"
 	CredentialClaim        CredentialRule = "awarded_or_delegated_claim"
-	CredentialEval         CredentialRule = "eval_unit"
-	CredentialHere         CredentialRule = "here_award"
-	CredentialLauncher     CredentialRule = "launcher_service"
+	credentialEval         CredentialRule = "eval_unit"
+	credentialHere         CredentialRule = "here_award"
+	credentialLauncher     CredentialRule = "launcher_service"
 	CredentialDeployment   CredentialRule = "deployment_admin"
 	CredentialOperator     CredentialRule = "operator_console_session"
-	CredentialNodeProcess  CredentialRule = "nodehost_process"
-	CredentialOwnerProcess CredentialRule = "owner_process"
+	credentialNodeProcess  CredentialRule = "nodehost_process"
+	credentialOwnerProcess CredentialRule = "owner_process"
 	CredentialPublisher    CredentialRule = "local_run_publisher"
 	CredentialRepoReader   CredentialRule = "repo_cache_reader"
-	CredentialDiscovery    CredentialRule = "discovery"
+	credentialDiscovery    CredentialRule = "discovery"
 	CredentialLocalPeer    CredentialRule = "verified_local_peer"
 )
 
@@ -128,10 +128,10 @@ type Authentication string
 const (
 	AuthCapability     Authentication = "capability"
 	AuthPublic         Authentication = "public"
-	AuthGitHubWebhook  Authentication = "github_webhook_hmac"
+	authGitHubWebhook  Authentication = "github_webhook_hmac"
 	AuthPaymentWebhook Authentication = "payment_webhook_signature"
 	AuthGitHubActions  Authentication = "github_actions_oidc"
-	AuthSignedObject   Authentication = "signed_object_url"
+	authSignedObject   Authentication = "signed_object_url"
 	AuthBrowserFlow    Authentication = "browser_flow_csrf_nonce"
 )
 
@@ -239,7 +239,7 @@ type Authenticated struct {
 // nodes.claim authorizes node and eval, triggers.claim authorizes trigger and plan, and
 // claims.launch authorizes plan/eval/node only. The request cannot combine alternatives to widen authority.
 // The named trigger route also accepts a here Award's trigger.host for its exact
-// reserved run under LiveHereClaim. This exception never opens an ordered queue scan.
+// reserved run under liveHereClaim. This exception never opens an ordered queue scan.
 type BindingChecker interface {
 	CheckBinding(context.Context, Principal, BindingRule, Target) error
 }
@@ -276,7 +276,7 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 			return Authorized{}, policyFailure()
 		}
 		rule := route.Access[live.RuleIndex]
-		if live.ResultReplay && rule.Liveness != LiveResult || live.LogTailAttempt != 0 && rule.Liveness != LiveLogTail {
+		if live.ResultReplay && rule.Liveness != LiveResult || live.LogTailAttempt != 0 && rule.Liveness != liveLogTail {
 			return Authorized{}, policyFailure()
 		}
 		if p.Capability.Delivery == DeliveryBootstrap && rule.Credential != CredentialBootstrap {
@@ -397,7 +397,7 @@ func isMember(p Principal) bool {
 		return c.Subject.Kind == SubjectAccount && c.Subject.ID != ""
 	case CredentialPeer:
 		return c.Subject.Kind == SubjectLocal && c.Subject.ID != ""
-	case CredentialAnonymous:
+	case credentialAnonymous:
 		return c.Subject.Kind == SubjectAnonymous
 	}
 	return false
@@ -418,20 +418,20 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 		return p.DirectAccountSession()
 	case CredentialClaim:
 		return isClaim(p)
-	case CredentialEval:
+	case credentialEval:
 		return isClaim(p) && c.Unit == UnitEval && c.Purpose == PurposeEval && c.Delivery != DeliveryBootstrap &&
 			c.Binding.Expansion != nil && c.Binding.Expansion.Kind == UnitEval && c.Binding.Expansion.ID == c.UnitID
-	case CredentialHere:
+	case credentialHere:
 		return isClaim(p) && c.Unit == UnitTrigger && c.Purpose == PurposeHere && c.Binding.Reservation == "here:"+c.Binding.RunID
-	case CredentialLauncher:
+	case credentialLauncher:
 		return p.Class == CredentialBearer && Launcher(c)
 	case CredentialDeployment:
 		return DeploymentAuthority(p)
 	case CredentialOperator:
 		return p.Class == CredentialConsole && c.Subject.Kind == SubjectAccount && c.Subject.ID != "" && c.Unit == "" && c.Binding.Kind == BindingNone
-	case CredentialNodeProcess:
+	case credentialNodeProcess:
 		return p.Class == CredentialBearer && c.Audience == NodeHost && c.Binding.Kind == BindingNode && c.Binding.Holder != "" && c.Binding.Generation > 0 && c.Binding.Attempt > 0 && c.Binding.Expansion == nil
-	case CredentialOwnerProcess:
+	case credentialOwnerProcess:
 		if !isClaim(p) || c.Audience != NodeHost || c.Delivery == DeliveryBootstrap {
 			return false
 		}
@@ -441,7 +441,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 		if c.Unit == UnitPlan {
 			return c.Purpose == PurposePlan && c.Binding.Kind == BindingRun && c.Binding.NodeID == "" && c.Binding.Generation > 0 && c.Binding.Holder != "" && c.Binding.Attempt == 0 && c.Binding.Expansion == nil
 		}
-		return c.Unit == UnitEval && matchesCredential(p, CredentialEval)
+		return c.Unit == UnitEval && matchesCredential(p, credentialEval)
 	case CredentialPublisher, CredentialRepoReader:
 		if c.Subject.Kind != SubjectAccount || c.Unit != "" || c.Purpose != "" || c.Data == nil || (p.Class != CredentialBearer && p.Class != CredentialSession) {
 			return false
@@ -450,7 +450,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 			return c.Data.Use == DataPublish && c.Data.RunID != "" && c.Binding.Kind == BindingRun && c.Binding.RunID == c.Data.RunID
 		}
 		return c.Data.Use == DataRemoteCache && c.Data.RepositoryKey != "" && c.Binding.Kind == BindingNone
-	case CredentialDiscovery:
+	case credentialDiscovery:
 		return c.Delivery != DeliveryBootstrap && c.Unit != UnitEval && c.Audience == Controller
 	}
 	return false
@@ -459,7 +459,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 func checkOwner(p Principal, owner Owner, rule AccessRule, target Target) error {
 	switch owner {
 	case OwnerTeam, OwnerRun:
-		if rule.Credential == CredentialLauncher && rule.Binding == BindClaimSelection {
+		if rule.Credential == credentialLauncher && rule.Binding == BindClaimSelection {
 			return nil
 		}
 		if target.Team == "" || p.Capability.Team == "" {
@@ -468,11 +468,11 @@ func checkOwner(p Principal, owner Owner, rule AccessRule, target Target) error 
 		if target.Team != p.Capability.Team {
 			return forbidden(apierr.ReasonTeam)
 		}
-	case OwnerAccount:
+	case ownerAccount:
 		if target.AccountID != "" && p.Capability.Subject.ID != target.AccountID {
 			return forbidden(apierr.ReasonBinding)
 		}
-	case OwnerNone, OwnerDeployment, OwnerNodeHost:
+	case OwnerNone, OwnerDeployment, ownerNodeHost:
 	default:
 		return policyFailure()
 	}
@@ -503,7 +503,7 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 		return isClaim(p) && t.ClaimID == p.Capability.UnitID
 	case BindOwnEval:
 		lease := b.Expansion
-		return matchesCredential(p, CredentialEval) && run && t.ClaimID == p.Capability.UnitID &&
+		return matchesCredential(p, credentialEval) && run && t.ClaimID == p.Capability.UnitID &&
 			t.Unit == UnitEval && t.UnitID == p.Capability.UnitID && t.UnitGeneration == lease.Generation && t.UnitHolder == lease.Holder &&
 			t.UnitSourceNodeID == b.NodeID && t.UnitSourceGeneration == b.Generation
 	case BindPlanOwner:
@@ -563,9 +563,9 @@ func ValidateRoutes(registered []string) error {
 func validateRoutePolicy(route RoutePolicy) error {
 	if route.Method == "" || !strings.HasPrefix(route.Path, "/") ||
 		!slices.Contains([]Audience{Controller, NodeHost}, route.Audience) ||
-		!slices.Contains([]Owner{OwnerNone, OwnerTeam, OwnerRun, OwnerAccount, OwnerDeployment, OwnerNodeHost}, route.Owner) ||
+		!slices.Contains([]Owner{OwnerNone, OwnerTeam, OwnerRun, ownerAccount, OwnerDeployment, ownerNodeHost}, route.Owner) ||
 		!slices.Contains([]RetryPolicy{RetryNever, RetrySafe, RetryIdempotencyKey, RetryExactBody}, route.Retry) ||
-		!slices.Contains([]Authentication{AuthCapability, AuthPublic, AuthGitHubWebhook, AuthPaymentWebhook, AuthGitHubActions, AuthSignedObject, AuthBrowserFlow}, route.Authentication) {
+		!slices.Contains([]Authentication{AuthCapability, AuthPublic, authGitHubWebhook, AuthPaymentWebhook, AuthGitHubActions, authSignedObject, AuthBrowserFlow}, route.Authentication) {
 		return fmt.Errorf("invalid route metadata")
 	}
 	if (route.Authentication == AuthCapability) != (len(route.Access) > 0) {
@@ -573,15 +573,15 @@ func validateRoutePolicy(route RoutePolicy) error {
 	}
 	for _, access := range route.Access {
 		if !slices.Contains([]CredentialRule{
-			CredentialBootstrap, CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
-			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery, CredentialLocalPeer,
+			CredentialBootstrap, CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, credentialEval, credentialHere, credentialLauncher,
+			CredentialDeployment, CredentialOperator, credentialNodeProcess, credentialOwnerProcess, CredentialPublisher, CredentialRepoReader, credentialDiscovery, CredentialLocalPeer,
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
 				BindNone, BindOperatorSettings, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
 				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindSourceBundle, BindData, BindExpansion, BindClaimSelection, BindOwnToken,
 				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||
-			!slices.ContainsFunc(livenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {
+			!slices.ContainsFunc(livenessPolicies, func(policy livenessPolicy) bool { return policy.Class == access.Liveness }) {
 			return fmt.Errorf("invalid access policy")
 		}
 		for i, grant := range access.Grants {

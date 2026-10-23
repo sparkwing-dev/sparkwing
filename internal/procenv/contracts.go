@@ -8,12 +8,12 @@ type Class uint8
 
 // safety: runtime names are public values, never a transport for protocol credentials.
 const (
-	User Class = iota
-	RuntimeClass
+	user Class = iota
+	runtimeClass
 	Protocol
 	Credential
-	Diagnostic
-	Tool
+	diagnostic
+	tool
 )
 
 // Kind identifies the process boundary at which Build applies policy.
@@ -22,13 +22,13 @@ type Kind uint8
 // safety: hosts and services need explicit policies even when they execute no pipeline code themselves.
 const (
 	CLI Kind = iota
-	DaemonSpawn
-	Controller
-	Runner
-	Launcher
-	RunHost
-	NodeHost
-	JobContainer
+	daemonSpawn
+	controller
+	runner
+	launcher
+	runHost
+	nodeHost
+	jobContainer
 	Plan
 	Attempt
 	Eval

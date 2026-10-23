@@ -133,12 +133,12 @@ func TestMaterializedGeneratorEvaluationKeepsTheJobTimeout(t *testing.T) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}
-		host, err := NewOwnerEvaluator(deps)
+		host, err := newOwnerEvaluator(deps)
 		if err != nil {
 			t.Fatal(err)
 		}
 		start := time.Now()
-		body, _, failure, err := host.Expand(t.Context(), input)
+		body, _, failure, err := host.evaluateExpansion(t.Context(), input)
 		if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.DeadlineExceeded || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" || time.Since(start) != 400*time.Millisecond {
 			t.Fatalf("body=%s failure=%+v elapsed=%s error=%v", body, failure, time.Since(start), err)
 		}

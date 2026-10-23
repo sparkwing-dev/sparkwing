@@ -45,22 +45,23 @@ type Handle struct {
 
 // Record is one running step command and the node that owns it.
 type Record struct {
-	Run        string    `json:"run"`
-	Node       string    `json:"node"`
-	OwnerPID   int       `json:"owner_pid"`
-	OwnerBirth string    `json:"owner_birth"`
-	Handle     Handle    `json:"handle"`
-	Command    string    `json:"command"`
-	StartedAt  time.Time `json:"started_at"`
+	Run        string `json:"run"`
+	Node       string `json:"node"`
+	OwnerPID   int    `json:"owner_pid"`
+	OwnerBirth string `json:"owner_birth"`
+	Handle     Handle `json:"handle"`
+	// Description is a safe label supplied by the registering library.
+	Description string    `json:"description,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
 
 	path string
 }
 
-// Path is the file the record lives in, set on records read back by List.
-func (r Record) Path() string { return r.path }
+// filename returns the path List read the record from.
+func (r Record) filename() string { return r.path }
 
-// Probe answers the two platform questions a sweep asks.
-type Probe interface {
+// probe answers the two platform questions a sweep asks.
+type probe interface {
 	// OwnerAlive reports whether the node that wrote the record still runs:
 	// the pid exists and its birth token matches.
 	OwnerAlive(rec Record) (bool, error)
@@ -72,7 +73,7 @@ type Probe interface {
 // Ledger is the directory of records for one sparkwing home.
 type Ledger struct {
 	dir   string
-	probe Probe
+	probe probe
 }
 
 // Open returns the ledger at dir with the platform probe.
@@ -80,10 +81,10 @@ func Open(dir string) *Ledger {
 	return &Ledger{dir: dir, probe: dispatchProbe{platform: platformProbe{}}}
 }
 
-// dispatchProbe owns the cross-platform handle kinds (docker) and delegates
-// the rest to the platform probe, so a session or job is ended the way its
-// OS requires while a container is ended the same way everywhere.
-type dispatchProbe struct{ platform Probe }
+// dispatchProbe replays registered cleanup commands and delegates session
+// and job termination to the platform probe. The local controller invokes
+// the sweep through doctor.
+type dispatchProbe struct{ platform probe }
 
 func (d dispatchProbe) OwnerAlive(rec Record) (bool, error) { return d.platform.OwnerAlive(rec) }
 
@@ -197,20 +198,23 @@ type Verdict string
 const (
 	// VerdictLive means the owner still runs; the record stays.
 	VerdictLive Verdict = "live"
-	// VerdictReaped means the owner is gone and the session was ended.
-	VerdictReaped Verdict = "reaped"
-	// VerdictWouldReap is VerdictReaped under a dry run: nothing was killed.
+	// verdictReaped means the owner is gone and the session was ended.
+	verdictReaped Verdict = "reaped"
+	// VerdictWouldReap means a dry run found an orphan without ending it.
 	VerdictWouldReap Verdict = "would-reap"
-	// VerdictFailed means the owner is gone but the session could not be
-	// ended; the record stays for the next sweep.
-	VerdictFailed Verdict = "failed"
+	// verdictFailed means the owner is gone but the session could not be
+	// ended; session/job records stay for the next sweep.
+	verdictFailed Verdict = "failed"
 )
 
-// Outcome pairs a record with the sweep's verdict.
+// Outcome contains diagnostics only. Replay handles stay private to the ledger.
 type Outcome struct {
-	Record  Record
-	Verdict Verdict
-	Err     error
+	Run, Node            string
+	OwnerPID, LeaderPID  int
+	JobName, Description string
+	StartedAt            time.Time
+	Verdict              Verdict
+	Err                  error
 }
 
 // SweepOptions narrows a sweep.
@@ -236,34 +240,38 @@ func (l *Ledger) Sweep(ctx context.Context, opts SweepOptions) ([]Outcome, error
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		alive, err := l.probe.OwnerAlive(rec)
-		if err != nil {
-			out = append(out, Outcome{Record: rec, Verdict: VerdictFailed, Err: err})
-			continue
+		o := Outcome{
+			Run: rec.Run, Node: rec.Node, OwnerPID: rec.OwnerPID,
+			LeaderPID: rec.Handle.LeaderPID, JobName: rec.Handle.JobName,
+			Description: rec.Description, StartedAt: rec.StartedAt,
 		}
-		if alive {
-			out = append(out, Outcome{Record: rec, Verdict: VerdictLive})
-			continue
-		}
-		if opts.DryRun {
-			out = append(out, Outcome{Record: rec, Verdict: VerdictWouldReap})
-			continue
-		}
-		if err := l.probe.Terminate(ctx, rec.Handle); err != nil {
-			// safety: a process handle (session/job) is core's own
-			// guarantee, so a failure keeps the record for the next sweep
-			// to retry. A command is a library's best-effort external
-			// cleanup run in a foreign environment; we attempted it once,
-			// so drop the record rather than retry a failure we cannot
-			// judge and report every sweep thereafter.
+		if o.Description == "" {
+			o.Description = "step process"
 			if rec.Handle.Kind == "command" {
+				o.Description = "registered cleanup"
+			}
+		}
+		alive, err := l.probe.OwnerAlive(rec)
+		switch {
+		case err != nil:
+			o.Verdict, o.Err = verdictFailed, err
+		case alive:
+			o.Verdict = VerdictLive
+		case opts.DryRun:
+			o.Verdict = VerdictWouldReap
+		default:
+			o.Err = l.probe.Terminate(ctx, rec.Handle)
+			o.Verdict = verdictReaped
+			if o.Err != nil {
+				o.Verdict = verdictFailed
+			}
+			// A library cleanup is attempted once in doctor's environment.
+			// Keep failed process handles because core owns their termination.
+			if o.Err == nil || rec.Handle.Kind == "command" {
 				_ = os.Remove(rec.path)
 			}
-			out = append(out, Outcome{Record: rec, Verdict: VerdictFailed, Err: err})
-			continue
 		}
-		_ = os.Remove(rec.path)
-		out = append(out, Outcome{Record: rec, Verdict: VerdictReaped})
+		out = append(out, o)
 	}
 	return out, nil
 }

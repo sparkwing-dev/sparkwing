@@ -40,7 +40,7 @@ func securePrivateDir(path string, expected os.FileInfo) error {
 	if !opened.IsDir() || !os.SameFile(expected, opened) {
 		return fmt.Errorf("private directory %q changed while it was inspected", path)
 	}
-	if err := file.Chmod(DirMode); err != nil {
+	if err := file.Chmod(dirMode); err != nil {
 		return err
 	}
 	secured, err := file.Stat()
@@ -53,7 +53,7 @@ func securePrivateDir(path string, expected os.FileInfo) error {
 	return nil
 }
 
-func repairTree(root string, expected os.FileInfo, dryRun bool) ([]Change, error) {
+func repairTree(root string, expected os.FileInfo, dryRun bool) ([]change, error) {
 	clean := filepath.Clean(root)
 	if clean == "." || filepath.Dir(clean) == clean {
 		return nil, fmt.Errorf("refuse permission repair for unsafe root %q", root)
@@ -129,8 +129,8 @@ func repairTree(root string, expected os.FileInfo, dryRun bool) ([]Change, error
 	return repairOpenedTree(rootFile, opened, ".", dryRun)
 }
 
-func repairOpenedTree(dir *os.File, stat unix.Stat_t, rel string, dryRun bool) ([]Change, error) {
-	changes, err := repairOpenedMode(dir, stat, rel, DirMode, dryRun)
+func repairOpenedTree(dir *os.File, stat unix.Stat_t, rel string, dryRun bool) ([]change, error) {
+	changes, err := repairOpenedMode(dir, stat, rel, dirMode, dryRun)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func repairOpenedTree(dir *os.File, stat unix.Stat_t, rel string, dryRun bool) (
 	}
 }
 
-func repairOpenedChild(parentFD int, name, rel string, dryRun bool) ([]Change, error) {
+func repairOpenedChild(parentFD int, name, rel string, dryRun bool) ([]change, error) {
 	var beforeOpen unix.Stat_t
 	if err := unix.Fstatat(parentFD, name, &beforeOpen, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		if errors.Is(err, unix.ENOENT) {
@@ -191,14 +191,14 @@ func repairOpenedChild(parentFD int, name, rel string, dryRun bool) ([]Change, e
 	if kind == unix.S_IFDIR {
 		return repairOpenedTree(openedFile, opened, rel, dryRun)
 	}
-	target := FileMode
+	target := fileMode
 	if fs.FileMode(opened.Mode).Perm()&0o111 != 0 && preserveExecutable(rel) {
-		target = DirMode
+		target = dirMode
 	}
 	return repairOpenedMode(openedFile, opened, rel, target, dryRun)
 }
 
-func repairOpenedMode(file *os.File, stat unix.Stat_t, rel string, allowed fs.FileMode, dryRun bool) ([]Change, error) {
+func repairOpenedMode(file *os.File, stat unix.Stat_t, rel string, allowed fs.FileMode, dryRun bool) ([]change, error) {
 	before := fs.FileMode(stat.Mode).Perm()
 	target := before & allowed
 	hasSpecial := stat.Mode&(unix.S_ISUID|unix.S_ISGID|unix.S_ISVTX) != 0
@@ -210,7 +210,7 @@ func repairOpenedMode(file *os.File, stat unix.Stat_t, rel string, allowed fs.Fi
 			return nil, err
 		}
 	}
-	return []Change{{
+	return []change{{
 		Path:   rel,
 		Before: fmt.Sprintf("%04o", before),
 		After:  fmt.Sprintf("%04o", target),

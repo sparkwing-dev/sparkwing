@@ -46,18 +46,18 @@ func TestTriggerRepositoryRefusesFieldsThatNameDifferentRepositories(t *testing.
 		{"", "", "acme", ""},
 	}
 	for _, c := range cases {
-		if got, err := TriggerRepository(c.repoURL, c.env, c.owner, c.repo); err == nil {
+		if got, err := triggerRepository(c.repoURL, c.env, c.owner, c.repo); err == nil {
 			t.Errorf("TriggerRepository(%+v) = %q, want a refusal", c, got)
 		}
 	}
 }
 
 func TestTriggerRepositoryAcceptsAgreeingFields(t *testing.T) {
-	got, err := TriggerRepository("git@github.com:Acme/App.git", "acme/app", "ACME", "app")
+	got, err := triggerRepository("git@github.com:Acme/App.git", "acme/app", "ACME", "app")
 	if err != nil || got != "github.com/acme/app" {
 		t.Fatalf("TriggerRepository = %q, %v; want github.com/acme/app", got, err)
 	}
-	if got, err := TriggerRepository("", "", "", ""); err != nil || got != "" {
+	if got, err := triggerRepository("", "", "", ""); err != nil || got != "" {
 		t.Fatalf("an unnamed repository = %q, %v; want empty", got, err)
 	}
 }

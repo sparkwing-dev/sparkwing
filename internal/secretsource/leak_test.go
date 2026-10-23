@@ -1,4 +1,4 @@
-package secretsource_test
+package secretsource
 
 import (
 	"testing"

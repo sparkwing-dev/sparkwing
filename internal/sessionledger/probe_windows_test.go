@@ -31,8 +31,8 @@ func TestPlatformProbeEndsAJobWhoseOwnerIsGone(t *testing.T) {
 	l := Open(filepath.Join(t.TempDir(), "sessions"))
 	if _, err := l.Record(Record{
 		Run: "run-1", Node: "build", OwnerPID: gone.Process.Pid, OwnerBirth: "earlier",
-		Handle:  Handle{Kind: "job", LeaderPID: step.Process.Pid, JobName: job.Name},
-		Command: "ping",
+		Handle:      Handle{Kind: "job", LeaderPID: step.Process.Pid, JobName: job.Name},
+		Description: "ping",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPlatformProbeEndsAJobWhoseOwnerIsGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Verdict != VerdictReaped {
+	if len(out) != 1 || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	waited := make(chan error, 1)

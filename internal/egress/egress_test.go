@@ -1,4 +1,4 @@
-package egress_test
+package egress
 
 import (
 	"errors"
@@ -11,8 +11,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 func at(t *testing.T, stamp string) time.Time {
@@ -24,18 +22,18 @@ func at(t *testing.T, stamp string) time.Time {
 	return when.UTC()
 }
 
-func meterAt(t *testing.T, cfg egress.Config, stamp string) (*egress.Meter, *time.Time) {
+func meterAt(t *testing.T, cfg Config, stamp string) (*Meter, *time.Time) {
 	t.Helper()
 	clock := at(t, stamp)
-	m := egress.New(cfg)
-	egress.SetClock(m, func() time.Time { return clock })
+	m := New(cfg)
+	setClock(m, func() time.Time { return clock })
 	return m, &clock
 }
 
-func flushUsages(t *testing.T, m *egress.Meter) []egress.Usage {
+func flushUsages(t *testing.T, m *Meter) []Usage {
 	t.Helper()
-	var flushed []egress.Usage
-	if err := m.Flush(func(usages []egress.Usage) error {
+	var flushed []Usage
+	if err := m.flush(func(usages []Usage) error {
 		flushed = append(flushed, usages...)
 		return nil
 	}); err != nil {
@@ -44,7 +42,7 @@ func flushUsages(t *testing.T, m *egress.Meter) []egress.Usage {
 	return flushed
 }
 
-func monthBytes(m *egress.Meter, principal string) int64 {
+func monthBytes(m *Meter, principal string) int64 {
 	for _, p := range m.State().Top {
 		if p.Principal == principal {
 			return p.MonthBytes
@@ -54,8 +52,8 @@ func monthBytes(m *egress.Meter, principal string) int64 {
 }
 
 func TestUnbudgetedMeterCountsAndRefusesNothing(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 5000)
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 5000)
 	state := m.State()
 	if state.GlobalMonthBytes != 5000 || state.GlobalDayBytes != 5000 {
 		t.Fatalf("global totals = month %d day %d, want 5000 and 5000", state.GlobalMonthBytes, state.GlobalDayBytes)
@@ -69,13 +67,13 @@ func TestUnbudgetedMeterCountsAndRefusesNothing(t *testing.T) {
 }
 
 func TestDailyAlarmRaisesOnceAndClearsWithTheDay(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{GlobalDailyAlarmBytes: 1000}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 600)
-	if m.Alarm() {
+	m, clock := meterAt(t, Config{GlobalDailyAlarmBytes: 1000}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 600)
+	if m.alarmed() {
 		t.Fatal("the alarm rose below the threshold")
 	}
-	m.Record("bob", egress.ClassArtifact, 400)
-	if !m.Alarm() {
+	m.record("bob", ClassArtifact, 400)
+	if !m.alarmed() {
 		t.Fatal("the alarm did not rise when the process reached the daily threshold")
 	}
 	state := m.State()
@@ -87,7 +85,7 @@ func TestDailyAlarmRaisesOnceAndClearsWithTheDay(t *testing.T) {
 	}
 
 	*clock = at(t, "2026-09-14T00:00:01Z")
-	if m.Alarm() {
+	if m.alarmed() {
 		t.Fatal("the alarm survived the day roll")
 	}
 	if state := m.State(); state.GlobalDayBytes != 0 || state.GlobalMonthBytes != 1000 {
@@ -98,11 +96,11 @@ func TestDailyAlarmRaisesOnceAndClearsWithTheDay(t *testing.T) {
 func TestSlotCapsRefusePastTheLimitAndReleaseFreesASlot(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		cfg  egress.Config
-		slot egress.Slot
+		cfg  Config
+		slot Slot
 	}{
-		{"streams", egress.Config{MaxStreamsPerPrincipal: 2}, egress.SlotLogStream},
-		{"downloads", egress.Config{MaxDownloadsPerPrincipal: 2}, egress.SlotDownload},
+		{"streams", Config{MaxStreamsPerPrincipal: 2}, SlotLogStream},
+		{"downloads", Config{MaxDownloadsPerPrincipal: 2}, SlotDownload},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _ := meterAt(t, tc.cfg, "2026-09-13T10:00:00Z")
@@ -114,11 +112,11 @@ func TestSlotCapsRefusePastTheLimitAndReleaseFreesASlot(t *testing.T) {
 			if err != nil {
 				t.Fatalf("second = %v, want nil", err)
 			}
-			var limit *egress.ConcurrencyError
+			var limit *ConcurrencyError
 			if err := func() error { _, err := m.Open("alice", tc.slot); return err }(); !errors.As(err, &limit) {
 				t.Fatalf("third = %v, want a *ConcurrencyError", err)
 			}
-			if !errors.Is(limit, egress.ErrConcurrencyLimit) || limit.Limit != 2 || limit.Slot != tc.slot {
+			if !errors.Is(limit, errConcurrencyLimit) || limit.Limit != 2 || limit.Slot != tc.slot {
 				t.Fatalf("refusal = %+v, want the cap of 2 on %s", limit, tc.slot)
 			}
 			if _, err := m.Open("bob", tc.slot); err != nil {
@@ -142,26 +140,26 @@ func TestSlotCapsRefusePastTheLimitAndReleaseFreesASlot(t *testing.T) {
 // safety: the two slots are separate budgets, so a principal holding its
 // cap of streams may still start a download.
 func TestSlotsAreCountedApart(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{MaxStreamsPerPrincipal: 1, MaxDownloadsPerPrincipal: 1}, "2026-09-13T10:00:00Z")
-	stream, err := m.Open("alice", egress.SlotLogStream)
+	m, _ := meterAt(t, Config{MaxStreamsPerPrincipal: 1, MaxDownloadsPerPrincipal: 1}, "2026-09-13T10:00:00Z")
+	stream, err := m.Open("alice", SlotLogStream)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream()
-	download, err := m.Open("alice", egress.SlotDownload)
+	download, err := m.Open("alice", SlotDownload)
 	if err != nil {
 		t.Fatalf("a download while a stream is open = %v, want nil", err)
 	}
 	defer download()
-	if _, err := m.Open("alice", egress.SlotDownload); err == nil {
+	if _, err := m.Open("alice", SlotDownload); err == nil {
 		t.Fatal("a second download past the cap was admitted")
 	}
 }
 
 func TestServeCountsTheBytesTheHandlerWrites(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
 	rec := httptest.NewRecorder()
-	out := m.Serve(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", egress.ClassArtifact)
+	out := m.serveResponse(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", ClassArtifact)
 	for _, chunk := range []string{"0123456789", "0123456789", "0123456789ab"} {
 		if _, err := out.Write([]byte(chunk)); err != nil {
 			t.Fatalf("write: %v", err)
@@ -176,11 +174,11 @@ func TestServeCountsTheBytesTheHandlerWrites(t *testing.T) {
 }
 
 func TestServeKeepsTheStreamControlsAHandlerAsksFor(t *testing.T) {
-	m := egress.New(egress.Config{})
+	m := New(Config{})
 	done := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
-		out := m.Serve(w, r, "alice", egress.ClassLogStream)
+		out := m.serveResponse(w, r, "alice", ClassLogStream)
 		f, ok := out.(http.Flusher)
 		if !ok {
 			t.Error("the counting writer dropped http.Flusher")
@@ -212,9 +210,9 @@ func TestServeKeepsTheStreamControlsAHandlerAsksFor(t *testing.T) {
 }
 
 func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 400)
-	m.Record("bob", egress.ClassLog, 100)
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 400)
+	m.record("bob", ClassLog, 100)
 	dirty := flushUsages(t, m)
 	if len(dirty) != 2 || dirty[0].Principal != "alice" || dirty[0].Bytes != 400 || dirty[0].Month != "2026-09" {
 		t.Fatalf("Flush = %+v, want alice at 400 and bob at 100 for 2026-09", dirty)
@@ -222,13 +220,13 @@ func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
 	if again := flushUsages(t, m); len(again) != 0 {
 		t.Fatalf("Flush with nothing moved = %+v, want empty", again)
 	}
-	m.Record("alice", egress.ClassArtifact, 1)
+	m.record("alice", ClassArtifact, 1)
 	if moved := flushUsages(t, m); len(moved) != 1 || moved[0].Principal != "alice" || moved[0].Bytes != 401 {
 		t.Fatalf("Flush after one more byte = %+v, want alice at 401", moved)
 	}
 
-	restarted, _ := meterAt(t, egress.Config{}, "2026-09-13T11:00:00Z")
-	restarted.Restore([]egress.Usage{
+	restarted, _ := meterAt(t, Config{}, "2026-09-13T11:00:00Z")
+	restarted.Restore([]Usage{
 		{Principal: "alice", Month: "2026-09", Bytes: 401},
 		{Principal: "carol", Month: "2026-08", Bytes: 900},
 	})
@@ -242,10 +240,10 @@ func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
 }
 
 func TestFlushRetriesUsageAfterPersistenceFails(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 400)
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 400)
 	wantErr := errors.New("persistence failed")
-	if err := m.Flush(func(usages []egress.Usage) error {
+	if err := m.flush(func(usages []Usage) error {
 		if len(usages) != 1 || usages[0].Principal != "alice" || usages[0].Bytes != 400 {
 			t.Fatalf("first attempt = %+v, want alice at 400", usages)
 		}
@@ -262,16 +260,16 @@ func TestFlushRetriesUsageAfterPersistenceFails(t *testing.T) {
 }
 
 func TestFlushDoesNotAcknowledgeBytesRecordedDuringPersistence(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 100)
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 100)
 	persisting := make(chan struct{})
 	recorded := make(chan struct{})
 	go func() {
 		<-persisting
-		m.Record("alice", egress.ClassArtifact, 50)
+		m.record("alice", ClassArtifact, 50)
 		close(recorded)
 	}()
-	if err := m.Flush(func(usages []egress.Usage) error {
+	if err := m.flush(func(usages []Usage) error {
 		close(persisting)
 		<-recorded
 		if len(usages) != 1 || usages[0].Bytes != 100 {
@@ -287,20 +285,20 @@ func TestFlushDoesNotAcknowledgeBytesRecordedDuringPersistence(t *testing.T) {
 }
 
 func TestRestoreNeverLowersWhatThisProcessCounted(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 900)
-	m.Restore([]egress.Usage{{Principal: "alice", Month: "2026-09", Bytes: 100}})
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 900)
+	m.Restore([]Usage{{Principal: "alice", Month: "2026-09", Bytes: 100}})
 	if got := monthBytes(m, "alice"); got != 900 {
 		t.Fatalf("alice after a lower persisted total = %d, want the in-memory 900 to stand", got)
 	}
 }
 
 func TestAnonymousBytesShareOneCount(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("", egress.ClassArtifact, 60)
-	m.Record("", egress.ClassArtifact, 40)
-	if got := monthBytes(m, egress.AnonymousPrincipal); got != 100 {
-		t.Fatalf("anonymous bytes = %d, want 100 under %q", got, egress.AnonymousPrincipal)
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("", ClassArtifact, 60)
+	m.record("", ClassArtifact, 40)
+	if got := monthBytes(m, anonymousPrincipal); got != 100 {
+		t.Fatalf("anonymous bytes = %d, want 100 under %q", got, anonymousPrincipal)
 	}
 }
 
@@ -309,14 +307,14 @@ func TestAnonymousBytesShareOneCount(t *testing.T) {
 // principal map; without the key captured under the lock this is a
 // "concurrent map read and map write" under -race.
 func TestConcurrentRecordsSumExactly(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range 20 {
-				m.Record(fmt.Sprintf("principal-%d", i), egress.ClassArtifact, 7)
+				m.record(fmt.Sprintf("principal-%d", i), ClassArtifact, 7)
 			}
 		}()
 	}
@@ -331,24 +329,24 @@ func TestConcurrentRecordsSumExactly(t *testing.T) {
 }
 
 func TestBudgetedReportsWhetherAnyBudgetApplies(t *testing.T) {
-	if (egress.Config{}).Budgeted() {
+	if (Config{}).budgeted() {
 		t.Error("a zero Config reports a budget")
 	}
-	for _, cfg := range []egress.Config{
+	for _, cfg := range []Config{
 		{GlobalDailyAlarmBytes: 1},
 		{MaxDownloadsPerPrincipal: 1},
 		{MaxStreamsPerPrincipal: 1},
 	} {
-		if !cfg.Budgeted() {
+		if !cfg.budgeted() {
 			t.Errorf("%+v reports no budget", cfg)
 		}
 	}
 }
 
 func TestHeadRequestsChargeNothing(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
 	rec := httptest.NewRecorder()
-	out := m.Serve(rec, httptest.NewRequest(http.MethodHead, "/a", nil), "alice", egress.ClassArtifact)
+	out := m.serveResponse(rec, httptest.NewRequest(http.MethodHead, "/a", nil), "alice", ClassArtifact)
 	// safety: net/http discards this, so charging it let a HEAD loop latch
 	// the daily alarm with nothing on the wire.
 	if _, err := out.Write([]byte(strings.Repeat("x", 4096))); err != nil {
@@ -357,13 +355,13 @@ func TestHeadRequestsChargeNothing(t *testing.T) {
 	if state := m.State(); state.GlobalDayBytes != 0 {
 		t.Fatalf("a HEAD charged %d bytes, want 0", state.GlobalDayBytes)
 	}
-	if m.Alarm() {
+	if m.alarmed() {
 		t.Error("a HEAD raised the daily alarm")
 	}
-	if !egress.Bodyless(httptest.NewRequest(http.MethodHead, "/a", nil)) {
+	if !Bodyless(httptest.NewRequest(http.MethodHead, "/a", nil)) {
 		t.Error("Bodyless does not recognize HEAD")
 	}
-	if egress.Bodyless(httptest.NewRequest(http.MethodGet, "/a", nil)) {
+	if Bodyless(httptest.NewRequest(http.MethodGet, "/a", nil)) {
 		t.Error("Bodyless treats GET as bodyless")
 	}
 }
@@ -381,9 +379,9 @@ func TestOnlySuccessfulResponsesAreCharged(t *testing.T) {
 		{"redirect", http.StatusFound, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+			m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
 			rec := httptest.NewRecorder()
-			out := m.Serve(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", egress.ClassArtifact)
+			out := m.serveResponse(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", ClassArtifact)
 			out.WriteHeader(tc.status)
 			if _, err := out.Write([]byte("12345")); err != nil {
 				t.Fatal(err)
@@ -396,10 +394,10 @@ func TestOnlySuccessfulResponsesAreCharged(t *testing.T) {
 }
 
 func TestServeForwardsHijack(t *testing.T) {
-	m := egress.New(egress.Config{})
+	m := New(Config{})
 	hijacked := make(chan error, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		out := m.Serve(w, r, "alice", egress.ClassArtifact)
+		out := m.serveResponse(w, r, "alice", ClassArtifact)
 		h, ok := out.(http.Hijacker)
 		if !ok {
 			hijacked <- errors.New("the counting writer dropped http.Hijacker")
@@ -432,20 +430,20 @@ func TestServeForwardsHijack(t *testing.T) {
 }
 
 func TestPrincipalsPastTheCapShareTheOverflowCount(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	for i := range egress.MaxPrincipals {
-		m.Record(fmt.Sprintf("p%d", i), egress.ClassArtifact, 1)
+	m, clock := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	for i := range MaxPrincipals {
+		m.record(fmt.Sprintf("p%d", i), ClassArtifact, 1)
 	}
-	if got := m.State().Principals; got != egress.MaxPrincipals {
-		t.Fatalf("tracked %d principals, want the cap of %d", got, egress.MaxPrincipals)
+	if got := m.State().Principals; got != MaxPrincipals {
+		t.Fatalf("tracked %d principals, want the cap of %d", got, MaxPrincipals)
 	}
 
-	m.Record("late-1", egress.ClassArtifact, 6)
-	m.Record("late-2", egress.ClassArtifact, 6)
-	if got := monthBytes(m, egress.OverflowPrincipal); got != 12 {
-		t.Fatalf("%s = %d bytes, want both untracked principals' 12", egress.OverflowPrincipal, got)
+	m.record("late-1", ClassArtifact, 6)
+	m.record("late-2", ClassArtifact, 6)
+	if got := monthBytes(m, overflowPrincipal); got != 12 {
+		t.Fatalf("%s = %d bytes, want both untracked principals' 12", overflowPrincipal, got)
 	}
-	if got := m.State().Principals; got != egress.MaxPrincipals+1 {
+	if got := m.State().Principals; got != MaxPrincipals+1 {
 		t.Fatalf("tracked %d principals, want the cap plus the overflow bucket", got)
 	}
 
@@ -458,18 +456,18 @@ func TestPrincipalsPastTheCapShareTheOverflowCount(t *testing.T) {
 }
 
 func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-09-30T23:59:59Z")
-	m.WithPersistence()
-	m.Record("alice", egress.ClassArtifact, 400)
+	m, clock := meterAt(t, Config{}, "2026-09-30T23:59:59Z")
+	m.withPersistence()
+	m.record("alice", ClassArtifact, 400)
 
 	// safety: the flush that would have persisted September lands after
 	// the roll, so the closing total must still be offered under September.
 	*clock = at(t, "2026-10-01T00:00:01Z")
-	m.Record("alice", egress.ClassArtifact, 5)
+	m.record("alice", ClassArtifact, 5)
 
 	wantErr := errors.New("persistence failed")
-	var dirty []egress.Usage
-	if err := m.Flush(func(usages []egress.Usage) error {
+	var dirty []Usage
+	if err := m.flush(func(usages []Usage) error {
 		dirty = append(dirty, usages...)
 		return wantErr
 	}); !errors.Is(err, wantErr) {
@@ -496,15 +494,15 @@ func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
 }
 
 func TestFlushKeepsAMonthRolledDuringPersistence(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-09-30T23:59:59Z")
-	m.WithPersistence()
-	m.Record("alice", egress.ClassArtifact, 400)
-	if err := m.Flush(func(usages []egress.Usage) error {
+	m, clock := meterAt(t, Config{}, "2026-09-30T23:59:59Z")
+	m.withPersistence()
+	m.record("alice", ClassArtifact, 400)
+	if err := m.flush(func(usages []Usage) error {
 		if len(usages) != 1 || usages[0].Month != "2026-09" || usages[0].Bytes != 400 {
 			t.Fatalf("first flush = %+v, want September at 400", usages)
 		}
 		*clock = at(t, "2026-10-01T00:00:01Z")
-		m.Record("alice", egress.ClassArtifact, 5)
+		m.record("alice", ClassArtifact, 5)
 		return nil
 	}); err != nil {
 		t.Fatalf("Flush: %v", err)
@@ -524,10 +522,10 @@ func TestFlushKeepsAMonthRolledDuringPersistence(t *testing.T) {
 // unlock this is a "concurrent map read and map write" under -race, and
 // with one alarm per run it is a window the detector can miss.
 func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
-	m := egress.New(egress.Config{GlobalDailyAlarmBytes: 1})
+	m := New(Config{GlobalDailyAlarmBytes: 1})
 	var ticks atomic.Int64
 	base := at(t, "2026-09-13T10:00:00Z")
-	egress.SetClock(m, func() time.Time {
+	setClock(m, func() time.Time {
 		return base.Add(time.Duration(ticks.Add(1)) * 24 * time.Hour)
 	})
 
@@ -537,7 +535,7 @@ func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := range 20 {
-				m.Record(fmt.Sprintf("principal-%d-%d", g, i), egress.ClassArtifact, 7)
+				m.record(fmt.Sprintf("principal-%d-%d", g, i), ClassArtifact, 7)
 			}
 		}()
 	}
@@ -551,11 +549,11 @@ func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
 // that parked a closing total per principal per month would grow for the
 // life of the process.
 func TestAnUndrainedMeterParksNothingAcrossManyMonths(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-01-15T10:00:00Z")
+	m, clock := meterAt(t, Config{}, "2026-01-15T10:00:00Z")
 	for month := 1; month <= 36; month++ {
 		*clock = at(t, fmt.Sprintf("%04d-%02d-15T10:00:00Z", 2026+(month-1)/12, (month-1)%12+1))
 		for p := range 20 {
-			m.Record(fmt.Sprintf("p%d", p), egress.ClassLog, 100)
+			m.record(fmt.Sprintf("p%d", p), ClassLog, 100)
 		}
 	}
 	state := m.State()
@@ -568,13 +566,13 @@ func TestAnUndrainedMeterParksNothingAcrossManyMonths(t *testing.T) {
 }
 
 func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-01-15T10:00:00Z")
-	m.WithPersistence()
+	m, clock := meterAt(t, Config{}, "2026-01-15T10:00:00Z")
+	m.withPersistence()
 
 	*clock = at(t, "2026-01-15T10:00:00Z")
-	m.Record("alice", egress.ClassLog, 100)
+	m.record("alice", ClassLog, 100)
 	*clock = at(t, "2026-02-15T10:00:00Z")
-	m.Record("alice", egress.ClassLog, 5)
+	m.record("alice", ClassLog, 5)
 	if state := m.State(); state.Pending != 1 {
 		t.Fatalf("Pending = %d, want January parked for the next drain", state.Pending)
 	}
@@ -587,13 +585,13 @@ func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
 
 	// safety: a drain that has stopped must cap rather than grow; the store
 	// keeps a high-water mark, so a dropped entry costs history alone.
-	for i := range egress.MaxPendingUsages + 100 {
+	for i := range maxPendingUsages + 100 {
 		*clock = at(t, fmt.Sprintf("2026-%02d-15T10:00:00Z", i%12+1))
-		m.Record(fmt.Sprintf("p%d", i), egress.ClassLog, 1)
+		m.record(fmt.Sprintf("p%d", i), ClassLog, 1)
 	}
 	state := m.State()
-	if state.Pending > egress.MaxPendingUsages {
-		t.Fatalf("Pending = %d, want at most the cap of %d", state.Pending, egress.MaxPendingUsages)
+	if state.Pending > maxPendingUsages {
+		t.Fatalf("Pending = %d, want at most the cap of %d", state.Pending, maxPendingUsages)
 	}
 	if state.PendingDropped == 0 {
 		t.Fatal("the backlog filled without reporting a drop")
@@ -601,8 +599,8 @@ func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
 }
 
 func TestStateRollsEachPrincipalsDayWithTheProcesss(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-09-13T23:59:00Z")
-	m.Record("alice", egress.ClassArtifact, 400)
+	m, clock := meterAt(t, Config{}, "2026-09-13T23:59:00Z")
+	m.record("alice", ClassArtifact, 400)
 	if state := m.State(); state.GlobalDayBytes != 400 || state.Top[0].DayBytes != 400 {
 		t.Fatalf("before the roll = %+v", state)
 	}
@@ -627,23 +625,23 @@ func TestStateRollsEachPrincipalsDayWithTheProcesss(t *testing.T) {
 // day, while that day's own total no longer counts; another month's total is
 // ignored.
 func TestRestoreDayResumesTheMonthOnALaterDay(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 700)
-	var saved egress.DayUsage
-	if err := m.FlushDay(func(u egress.DayUsage) error { saved = u; return nil }); err != nil {
+	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 700)
+	var saved DayUsage
+	if err := m.flushDay(func(u DayUsage) error { saved = u; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	restarted, _ := meterAt(t, egress.Config{}, "2026-09-20T08:00:00Z")
-	restarted.RestoreDay(egress.DayUsage{Day: "2026-08-31", Bytes: 9000, Month: "2026-08", MonthBytes: 9000})
+	restarted, _ := meterAt(t, Config{}, "2026-09-20T08:00:00Z")
+	restarted.RestoreDay(DayUsage{Day: "2026-08-31", Bytes: 9000, Month: "2026-08", MonthBytes: 9000})
 	restarted.RestoreDay(saved)
 	state := restarted.State()
 	if state.GlobalMonthBytes != 700 || state.GlobalDayBytes != 0 {
 		t.Fatalf("after a restart a week later = month %d, day %d; want the month's 700 and a fresh day",
 			state.GlobalMonthBytes, state.GlobalDayBytes)
 	}
-	restarted.Record("bob", egress.ClassArtifact, 50)
-	var again egress.DayUsage
-	if err := restarted.FlushDay(func(u egress.DayUsage) error { again = u; return nil }); err != nil {
+	restarted.record("bob", ClassArtifact, 50)
+	var again DayUsage
+	if err := restarted.flushDay(func(u DayUsage) error { again = u; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if again.MonthBytes != 750 || again.Bytes != 50 {
@@ -652,34 +650,34 @@ func TestRestoreDayResumesTheMonthOnALaterDay(t *testing.T) {
 }
 
 func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 600)
-	m.Record("bob", egress.ClassLog, 400)
-	var got []egress.DayUsage
-	persist := func(u egress.DayUsage) error { got = append(got, u); return nil }
-	if err := m.FlushDay(persist); err != nil {
+	m, clock := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
+	m.record("alice", ClassArtifact, 600)
+	m.record("bob", ClassLog, 400)
+	var got []DayUsage
+	persist := func(u DayUsage) error { got = append(got, u); return nil }
+	if err := m.flushDay(persist); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.FlushDay(persist); err != nil {
+	if err := m.flushDay(persist); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].Day != "2026-09-13" || got[0].Bytes != 1000 || got[0].Month != "2026-09" || got[0].MonthBytes != 1000 {
 		t.Fatalf("FlushDay = %+v, want one 2026-09-13 total of 1000 in a 2026-09 total of 1000", got)
 	}
 
-	restarted, _ := meterAt(t, egress.Config{}, "2026-09-13T11:00:00Z")
-	restarted.RestoreDay(egress.DayUsage{Day: "2026-09-12", Bytes: 5000})
+	restarted, _ := meterAt(t, Config{}, "2026-09-13T11:00:00Z")
+	restarted.RestoreDay(DayUsage{Day: "2026-09-12", Bytes: 5000})
 	if state := restarted.State(); state.GlobalDayBytes != 0 {
 		t.Fatalf("GlobalDayBytes after restoring yesterday = %d, want 0", state.GlobalDayBytes)
 	}
 	restarted.RestoreDay(got[0])
-	restarted.RestoreDay(egress.DayUsage{Day: "2026-09-13", Bytes: 10})
+	restarted.RestoreDay(DayUsage{Day: "2026-09-13", Bytes: 10})
 	if state := restarted.State(); state.GlobalDayBytes != 1000 {
 		t.Fatalf("GlobalDayBytes after RestoreDay = %d, want 1000 and never lowered", state.GlobalDayBytes)
 	}
 
 	*clock = at(t, "2026-09-14T00:00:01Z")
-	if err := m.FlushDay(func(u egress.DayUsage) error {
+	if err := m.flushDay(func(u DayUsage) error {
 		t.Fatalf("FlushDay after the day rolled with nothing sent = %+v, want no write", u)
 		return nil
 	}); err != nil {

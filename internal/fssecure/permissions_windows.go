@@ -191,4 +191,4 @@ func rejectReparsePoint(handle windows.Handle, path string) error {
 	return nil
 }
 
-func repairTree(string, os.FileInfo, bool) ([]Change, error) { return nil, nil }
+func repairTree(string, os.FileInfo, bool) ([]change, error) { return nil, nil }

@@ -24,11 +24,11 @@ func TestRecordOwner_TracksCheckoutsAndCounts(t *testing.T) {
 
 	primary := filepath.Join(t.TempDir(), "primary", ".sparkwing")
 	worktree := filepath.Join(t.TempDir(), "worktree", ".sparkwing")
-	lease.RecordUse(primary, nil)
-	lease.RecordUse(primary, nil)
-	lease.RecordUse(worktree, nil)
+	lease.recordUse(primary, nil)
+	lease.recordUse(primary, nil)
+	lease.recordUse(worktree, nil)
 
-	owners := Owners(key)
+	owners := owners(key)
 	if len(owners) != 2 {
 		t.Fatalf("expected both checkouts recorded, got %+v", owners)
 	}
@@ -46,7 +46,7 @@ func TestRecordOwner_TracksCheckoutsAndCounts(t *testing.T) {
 
 func TestOwners_MissingFileIsNotAnError(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	if owners := Owners("never-written"); owners != nil {
+	if owners := owners("never-written"); owners != nil {
 		t.Fatalf("absent owners should read as nil, got %+v", owners)
 	}
 }
@@ -62,7 +62,7 @@ func TestLeaseRecordUseMutatesOnlyItsEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = lease.Release() }()
-	lease.RecordUse(filepath.Join(t.TempDir(), ".sparkwing"), []KeyPart{{Label: "module", Digest: "digest"}})
+	lease.recordUse(filepath.Join(t.TempDir(), ".sparkwing"), []KeyPart{{Label: "module", Digest: "digest"}})
 	if _, err := os.Stat(filepath.Join(entry.entryDir(), ownersFile)); err != nil {
 		t.Fatalf("leased owner metadata: %v", err)
 	}

@@ -10,8 +10,8 @@ import (
 func (in Inputs) options(source Source) runspec.Options { return sourceValues(in, source).Options }
 
 func runOrigin(origin runspec.SettingOrigin, source Source, key string) runspec.SettingOrigin {
-	if source != Run || origin.Layer == "" {
-		origin.Layer = OriginLayers[source]
+	if source != sourceRun || origin.Layer == "" {
+		origin.Layer = originLayers[source]
 	}
 	if origin.Key == "" {
 		origin.Key = key
@@ -39,7 +39,7 @@ func pickRun[T any](in Inputs, key string, field func(runspec.Options) runspec.S
 		}
 	}
 	if !in.Context.Submitter {
-		return fallback, Origin{Source: Run, Key: key}, invalid(key, Origin{Source: Run, Key: key}, "sealed setting is absent")
+		return fallback, Origin{Source: sourceRun, Key: key}, invalid(key, Origin{Source: sourceRun, Key: key}, "sealed setting is absent")
 	}
 	return fallback, Origin{Source: Default, Key: key}, nil
 }

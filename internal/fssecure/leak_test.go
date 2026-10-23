@@ -1,4 +1,4 @@
-package fssecure_test
+package fssecure
 
 import (
 	"testing"

@@ -104,7 +104,7 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 				if command == "warm" {
 					args = []string{"--controller=" + hosting.ControllerURL, "--repos=github.com/acme/*", "--credentials-dir=" + credentials, "--max-concurrent=1", "--max-claims-before-restart=1"}
 				}
-				err := ProductionRuntime("dev").Runner.Run(ctx, command, args, "dev")
+				err := productionRuntime("dev").Runner.Run(ctx, command, args, "dev")
 				// safety: the award renews with its own bearer before source acquisition; the beat count is the keeper's.
 				if claims == 0 || renewals == 0 || private == 0 {
 					t.Fatalf("command did not claim, renew and bind its award: claims=%d renewals=%d private=%d error=%v", claims, renewals, private, err)
@@ -327,7 +327,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 			if unit.JobID != "" {
 				args = append(args, "--job="+unit.JobID)
 			}
-			if err := ProductionRuntime("v1.2.3").Bootstrap.Run(t.Context(), "run-node", args); !errors.Is(err, boundary) || exchanges != 1 || renewals != 1 {
+			if err := productionRuntime("v1.2.3").Bootstrap.Run(t.Context(), "run-node", args); !errors.Is(err, boundary) || exchanges != 1 || renewals != 1 {
 				t.Fatalf("production %s stopped before awarded renewal: exchanges=%d renewals=%d error=%v", kind, exchanges, renewals, err)
 			}
 		})

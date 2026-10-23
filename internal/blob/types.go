@@ -115,14 +115,6 @@ type Receipt struct {
 	CreatedAt time.Time
 }
 
-// safety: Tombstone starts reachability GC's grace period, never an age-only object expiry.
-type Tombstone struct {
-	Team        string
-	Digest      Digest
-	MarkedAt    time.Time
-	DeleteAfter time.Time
-}
-
 // safety: EdgeKind enumerates the only admitted ways to make bytes reachable.
 type EdgeKind string
 
@@ -135,8 +127,8 @@ const (
 	EdgeMemoScope         EdgeKind = "memo_scope"
 )
 
-// EdgeKinds is complete so authorization tests cannot silently omit an edge.
-var EdgeKinds = []EdgeKind{EdgeSealedSource, EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
+// edgeKinds is complete so authorization tests cannot silently omit an edge.
+var edgeKinds = []EdgeKind{EdgeSealedSource, EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
 
 // safety: ReadEdge records a server-derived ancestry or scoped-cache entitlement.
 type ReadEdge struct {
@@ -341,49 +333,12 @@ const (
 	RestoreDefaultBranch RestoreSource = "default_branch"
 )
 
-// safety: RestoreRule makes the trusted fallback requirement explicit.
-type RestoreRule struct {
-	Source                    RestoreSource
-	RequireVerifiedProvenance bool
-}
-
-// DepcacheRestoreOrder is the complete ordered restore policy.
-var DepcacheRestoreOrder = []RestoreRule{{RestoreOwnRef, false}, {RestorePRBase, true}, {RestoreDefaultBranch, true}}
-
 // safety: DepcacheLookup never accepts a caller-selected repo outside its data grant.
 type DepcacheLookup struct {
 	Authority Authority
 	Key       DepcacheKey
 	Budget    Budget
 }
-
-// safety: FailureUse distinguishes safe cold starts from missing required bytes.
-type FailureUse string
-
-const (
-	UseMemo     FailureUse = "memo"
-	UseStaging  FailureUse = "staging"
-	UseOutput   FailureUse = "output"
-	UseDepcache FailureUse = "depcache"
-)
-
-// safety: FailureAction prevents missing bytes or exhausted budgets from looking successful.
-type FailureAction string
-
-const (
-	FailureMiss  FailureAction = "miss"
-	FailureError FailureAction = "error"
-	FailureCold  FailureAction = "cold"
-)
-
-// safety: FailureRule applies equally to missing, corrupt and over-budget reads.
-type FailureRule struct {
-	Use    FailureUse
-	Action FailureAction
-}
-
-// FailureRules is the complete per-use failure policy.
-var FailureRules = []FailureRule{{UseMemo, FailureMiss}, {UseStaging, FailureError}, {UseOutput, FailureError}, {UseDepcache, FailureCold}}
 
 // safety: BuildTrust preserves the team-owned opt-in for local binary provenance.
 type BuildTrust struct {
@@ -416,17 +371,7 @@ type RemoteCache interface {
 	Artifact(context.Context, Digest) (VerifiedReader, error)
 }
 
-// safety: PublishPolicy labels published results local and never creates an owner claim.
-// Publication failure is reported separately from the completed local run's outcome.
-type PublishPolicy struct {
-	Profile           string
-	AuthorityRef      string
-	LocalRunID        string
-	ExecutionLocation string
-	Trust             BuildTrust
-}
-
-// ErrBudget follows FailureRules instead of being treated as successful absence.
+// ErrBudget distinguishes exhausted reads from absent bytes.
 var ErrBudget = errors.New("blob budget exhausted")
 
 // ErrNotFound makes missing committed bytes loud at required-read boundaries.
@@ -466,7 +411,7 @@ func (r Record) VerifiedDefault() bool {
 }
 
 // safety: DepcacheHit records the winning fallback so provenance remains visible after a restore.
-// No hit, corrupt bytes and exhausted budget mean a cold cache under FailureRules.
+// No hit, corrupt bytes and exhausted budget mean a cold cache.
 type DepcacheHit struct {
 	Found   bool
 	Record  Record

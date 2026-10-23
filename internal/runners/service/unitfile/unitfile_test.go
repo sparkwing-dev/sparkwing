@@ -17,7 +17,7 @@ func TestSystemdCommandPreservesLiteralArguments(t *testing.T) {
 		t.Fatalf("command lost literal arguments: %q -> %#v", command, Arguments("linux", "ExecStart="+command))
 	}
 	for _, malformed := range []string{`"unfinished`, `trailing\`, `"bad\q"`} {
-		if words := SystemdWords(malformed); words != nil {
+		if words := systemdWords(malformed); words != nil {
 			t.Fatalf("accepted ambiguous native command %q: %#v", malformed, words)
 		}
 	}

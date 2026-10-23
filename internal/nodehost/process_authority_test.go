@@ -102,7 +102,7 @@ func processAuthorized(issued capability.Issued) capability.Authorized {
 
 func TestProcessAuthorityRetainsFreshParentAndExactFence(t *testing.T) {
 	registry, parent, lookup, spec, service := processAuthorityFixture(t)
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestProcessAuthorityRetainsFreshParentAndExactFence(t *testing.T) {
 
 func TestProcessAuthorityRevocationRefusesReadersAndCancelsServices(t *testing.T) {
 	registry, parent, lookup, spec, service := processAuthorityFixture(t)
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestProcessAuthorityRevocationRefusesReadersAndCancelsServices(t *testing.T
 
 func TestProcessAuthorityRevocationWinsAnInflightParentRead(t *testing.T) {
 	registry, parent, lookup, spec, service := processAuthorityFixture(t)
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestProcessAuthorityRevocationWinsAnInflightParentRead(t *testing.T) {
 
 func TestProcessAuthorityRejectsUnknownCredentialsBeforeParentRead(t *testing.T) {
 	registry, parent, lookup, spec, service := processAuthorityFixture(t)
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestProcessAuthorityRejectsUnknownCredentialsBeforeParentRead(t *testing.T)
 
 func TestProcessAuthorityPreservesAudienceForSharedAuthorization(t *testing.T) {
 	registry, _, lookup, spec, service := processAuthorityFixture(t)
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,11 +233,11 @@ func TestProcessAuthorityPreservesAudienceForSharedAuthorization(t *testing.T) {
 
 func TestProcessAuthorityCloseRevokesAllAndRefusesNewDelegation(t *testing.T) {
 	registry, _, lookup, spec, service := processAuthorityFixture(t)
-	a, _, err := registry.Delegate(t.Context(), lookup, spec, service)
+	a, _, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, err := registry.Delegate(t.Context(), lookup, spec, service)
+	b, _, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestProcessAuthorityCloseRevokesAllAndRefusesNewDelegation(t *testing.T) {
 				t.Fatal("closed registry retained process authentication")
 			}
 		}
-		if issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
+		if issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
 			t.Fatal("closed registry admitted a new process")
 		}
 	}
@@ -269,7 +269,7 @@ func TestProcessAuthorityCloseWinsInflightDelegation(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	if issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
+	if issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
 		t.Fatal("in-flight admission reopened a closed registry")
 	}
 }
@@ -301,7 +301,7 @@ func TestProcessAuthorityRefusesInvalidDelegationWithoutIssuing(t *testing.T) {
 				cancel()
 				ctx = cancelled
 			}
-			issued, revoke, err := registry.Delegate(ctx, lookup, spec, service)
+			issued, revoke, err := registry.delegate(ctx, lookup, spec, service)
 			if err == nil || issued.Raw != "" || revoke != nil {
 				t.Fatal("invalid authority issued a process bearer")
 			}
@@ -311,7 +311,7 @@ func TestProcessAuthorityRefusesInvalidDelegationWithoutIssuing(t *testing.T) {
 
 func TestProcessAuthoritySnapshotsCannotMutateStoredAuthority(t *testing.T) {
 	registry, _, lookup, spec, service := processAuthorityFixture(t)
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestProcessAuthorityRevokesInflightServiceBeforeAcknowledgement(t *testing.
 		<-ctx.Done()
 		return nil
 	}
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestProcessAuthorityBindingChecksKeepLocalAndPersistedOwnership(t *testing.
 	registry, _, lookup, spec, service := processAuthorityFixture(t)
 	service.Secrets = []string{"TOKEN"}
 	service.Cleanups = &ProcessCleanups{}
-	id, err := service.Cleanups.Register([]string{"tool"}, "")
+	id, err := service.Cleanups.register([]string{"tool"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestProcessAuthorityBindingChecksKeepLocalAndPersistedOwnership(t *testing.
 		}
 		return sentinel
 	})
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestProcessAuthorityBindingChecksKeepLocalAndPersistedOwnership(t *testing.
 	if err := registry.CheckBinding(t.Context(), principal, capability.BindOwnCleanup, capability.Target{CleanupID: id}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Cleanups.Release(id); err != nil {
+	if err := service.Cleanups.release(id); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.CheckBinding(t.Context(), principal, capability.BindOwnCleanup, capability.Target{CleanupID: id}); err == nil {
@@ -448,7 +448,7 @@ func FuzzProcessAuthorityFenceAndRevocation(f *testing.F) {
 	f.Add("run", "job", int64(4), int64(2), "holder", true)
 	f.Fuzz(func(t *testing.T, run, job string, generation, attempt int64, holder string, revoked bool) {
 		registry, _, lookup, spec, service := processAuthorityFixture(t)
-		issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+		issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -486,11 +486,11 @@ func TestProcessDelegationRequiresCommittedJobAdmission(t *testing.T) {
 		}
 	})
 	parent.snapshot.Binding.StartPermitted = false
-	if issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, services); err == nil || issued.Raw != "" || revoke != nil {
+	if issued, revoke, err := registry.delegate(t.Context(), lookup, spec, services); err == nil || issued.Raw != "" || revoke != nil {
 		t.Fatalf("job process bypassed admission: issued=%+v revoke=%v error=%v", issued, revoke != nil, err)
 	}
 	parent.snapshot.Binding.StartPermitted = true
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, services)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, services)
 	if err != nil || issued.Raw == "" || revoke == nil {
 		t.Fatalf("admitted process failed: issued=%+v error=%v", issued, err)
 	}

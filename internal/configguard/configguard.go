@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
-func WatchedFiles(home string) []string {
+func watchedFiles(home string) []string {
 	dir := fssecure.ConfigDirIn(home)
 	return []string{
 		filepath.Join(dir, "config.yaml"),
@@ -22,7 +22,7 @@ func WatchedFiles(home string) []string {
 	}
 }
 
-func SandboxLeaks(sandboxHome string) ([]string, error) {
+func sandboxLeaks(sandboxHome string) ([]string, error) {
 	var leaks []string
 	for _, root := range []string{
 		fssecure.ConfigDirIn(sandboxHome),
@@ -46,8 +46,8 @@ func SandboxLeaks(sandboxHome string) ([]string, error) {
 }
 
 func Fingerprint(home string) (map[string]string, error) {
-	out := make(map[string]string, len(WatchedFiles(home)))
-	for _, p := range WatchedFiles(home) {
+	out := make(map[string]string, len(watchedFiles(home)))
+	for _, p := range watchedFiles(home) {
 		sum, err := fingerprintFile(p)
 		if err != nil {
 			return nil, err

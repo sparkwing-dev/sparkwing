@@ -2,11 +2,52 @@ package sessionledger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestOrphanedSessionEventOmitsCommandArguments(t *testing.T) {
+	l := OpenWithProbe(filepath.Join(t.TempDir(), "sessions"), &fakeProbe{})
+	record(t, l, "run-orphan", "build", 4242)
+	records, err := l.List()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %+v, err = %v", records, err)
+	}
+	// Records written before command text was removed can still be swept.
+	const secret = "orphan-secret-argument"
+	data, err := os.ReadFile(records[0].filename())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy["command"] = "tool " + secret
+	legacy["program"] = "tool-" + secret
+	data, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(records[0].filename(), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := l.Sweep(t.Context(), SweepOptions{})
+	if err != nil || len(outcomes) != 1 || outcomes[0].Verdict != verdictReaped {
+		t.Fatalf("outcomes = %+v, err = %v", outcomes, err)
+	}
+	events := &eventRecorder{}
+	if errs := RecordOutcomes(t.Context(), events, "doctor", outcomes); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if len(events.payloads) != 1 || strings.Contains(events.payloads[0], secret) {
+		t.Fatalf("events = %q, want one event without command arguments", events.payloads)
+	}
+}
 
 type fakeProbe struct {
 	alive      map[int]bool
@@ -28,8 +69,8 @@ func record(t *testing.T, l *Ledger, run, node string, owner int) func() {
 	t.Helper()
 	release, err := l.Record(Record{
 		Run: run, Node: node, OwnerPID: owner, OwnerBirth: "b",
-		Handle:  Handle{Kind: "session", LeaderPID: owner + 100, SessionID: owner + 100, LeaderBirth: "lb"},
-		Command: "go build ./...",
+		Handle:      Handle{Kind: "session", LeaderPID: owner + 100, SessionID: owner + 100, LeaderBirth: "lb"},
+		Description: "go",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,9 +137,9 @@ func TestSweepEndsOnlySessionsWhoseOwnerIsGone(t *testing.T) {
 	}
 	verdicts := map[string]Verdict{}
 	for _, o := range out {
-		verdicts[o.Record.Run+"/"+o.Record.Node] = o.Verdict
+		verdicts[o.Run+"/"+o.Node] = o.Verdict
 	}
-	want := map[string]Verdict{"run-live/build": VerdictLive, "run-dead/build": VerdictReaped, "run-dead/test": VerdictReaped}
+	want := map[string]Verdict{"run-live/build": VerdictLive, "run-dead/build": verdictReaped, "run-dead/test": verdictReaped}
 	for k, v := range want {
 		if verdicts[k] != v {
 			t.Errorf("%s = %s, want %s", k, verdicts[k], v)
@@ -122,7 +163,7 @@ func TestSweepScopedToARunLeavesOtherRunsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Record.Run != "run-a" || out[0].Verdict != VerdictReaped {
+	if len(out) != 1 || out[0].Run != "run-a" || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	left, _ := l.List()
@@ -158,7 +199,7 @@ func TestSweepKeepsARecordItCouldNotEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Verdict != VerdictFailed || out[0].Err == nil {
+	if len(out) != 1 || out[0].Verdict != verdictFailed || out[0].Err == nil {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	if left, _ := l.List(); len(left) != 1 {
@@ -175,4 +216,4 @@ func TestSweepOfAMissingLedgerIsEmpty(t *testing.T) {
 }
 
 // OpenWithProbe returns the ledger at dir with a caller-supplied probe.
-func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, probe: probe} }
+func OpenWithProbe(dir string, probe probe) *Ledger { return &Ledger{dir: dir, probe: probe} }

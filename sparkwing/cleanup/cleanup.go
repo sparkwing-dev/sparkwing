@@ -1,10 +1,7 @@
-// Package cleanup lets a sparks library guarantee that a resource it starts
-// -- a container, a cluster, a release -- is torn down if the step's node
-// dies before the library's own cleanup runs. It is the extension point that
-// keeps such resource types out of the core SDK: the library says how to
-// clean up (a command), and sparkwing runs that command from the same sweeps
-// that reap step processes (before each run, in the admission daemon when a
-// run's connection drops, and in `sparkwing doctor`).
+// Package cleanup lets a sparks library register best-effort cleanup for
+// resources outside the step's process tree. The host runs unreleased
+// cleanups when the node process exits. Tools without a host connection
+// leave private replay records for the local controller's doctor sweep.
 //
 // Core reaps the processes a step spawns on its own, with no registration.
 // Register is only for resources that live outside the step's process tree,
@@ -16,7 +13,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -35,8 +31,8 @@ type Spec struct {
 	// process whose environment may differ from the step's, and does not
 	// retry. Empty Argv makes Register a no-op.
 	Argv []string
-	// Description names the resource for the reaped event and for
-	// `sparkwing doctor`; defaults to the command's program name when empty.
+	// Description is a safe resource label for cleanup diagnostics. It must
+	// contain no secrets. Orphan-sweep events use a fixed label when empty.
 	Description string
 }
 
@@ -65,21 +61,15 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 	if err != nil {
 		return func() {}, err
 	}
-	// safety: a tool a step starts holds no masker, so an unnamed cleanup is
-	// recorded by its program, never by arguments that can quote a secret.
-	desc := spec.Description
-	if desc == "" {
-		desc = filepath.Base(spec.Argv[0])
-	}
 	var idb [8]byte
 	_, _ = rand.Read(idb[:])
 	rel, err := sessionledger.Open(p.SessionLedgerDir()).Record(sessionledger.Record{
-		Run:        run,
-		Node:       node,
-		OwnerPID:   os.Getpid(),
-		OwnerBirth: birth,
-		Handle:     sessionledger.Handle{Kind: "command", ID: hex.EncodeToString(idb[:]), Argv: spec.Argv},
-		Command:    sessionledger.MaskCommand(ctx, desc),
+		Run:         run,
+		Node:        node,
+		OwnerPID:    os.Getpid(),
+		OwnerBirth:  birth,
+		Handle:      sessionledger.Handle{Kind: "command", ID: hex.EncodeToString(idb[:]), Argv: spec.Argv},
+		Description: spec.Description,
 	})
 	if err != nil {
 		return func() {}, err

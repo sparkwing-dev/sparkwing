@@ -136,7 +136,7 @@ const (
 	CredentialSession   CredentialClass = "session"
 	CredentialConsole   CredentialClass = "operator_console"
 	CredentialPeer      CredentialClass = "local_peer"
-	CredentialAnonymous CredentialClass = "anonymous"
+	credentialAnonymous CredentialClass = "anonymous"
 )
 
 // Principal is the common policy input for reference tokens, sessions and local peers.

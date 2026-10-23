@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -74,8 +73,8 @@ func TestS3LogSigningRejectsBeforeSigning(t *testing.T) {
 	for _, c := range []struct {
 		key    string
 		size   int64
-		digest blob.Digest
-	}{{key, 0, digest}, {key, limits.LogManifestBytes + 1, digest}, {segment, limits.LogSegmentUploadBytes + 1, digest}, {segment, 1, ""}, {segment, 1, blob.Digest(strings.ToUpper(string(digest)))}} {
+		digest Digest
+	}{{key, 0, digest}, {key, limits.LogManifestBytes + 1, digest}, {segment, limits.LogSegmentUploadBytes + 1, digest}, {segment, 1, ""}, {segment, 1, Digest(strings.ToUpper(string(digest)))}} {
 		if _, _, err := backend.SignLogPut(t.Context(), c.key, c.size, c.digest, now.Add(time.Minute)); err == nil {
 			t.Errorf("signed invalid payload binding %+v", c)
 		}

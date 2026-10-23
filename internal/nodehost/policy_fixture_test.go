@@ -9,9 +9,9 @@ import (
 
 type testPolicyName struct{ Name string }
 
-func setTestPolicies(h *OwnerHost, f func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)) {
+func setTestPolicies(h *OwnerHost, f func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (ownerLayerResult, error)) {
 	bind := func(name string) OwnerPolicy {
-		return func(ctx context.Context, in EvaluationInput, row store.NodeRow, s StorageBinding) (OwnerLayerResult, error) {
+		return func(ctx context.Context, in EvaluationInput, row store.NodeRow, s StorageBinding) (ownerLayerResult, error) {
 			return f(ctx, testPolicyName{name}, in, row, s)
 		}
 	}
@@ -35,7 +35,7 @@ func executionOperationsFixture(h ExecutorDependencies) ExecutionOperations {
 	return ExecutionOperations{Log: h.Log, BindStorage: h.BindStorage, Bind: h.Bind, ChildContext: h.ChildContext, PrepareArtifacts: h.PrepareArtifacts, PrepareCaches: h.PrepareCaches, PublishOutput: h.PublishOutput, Annotate: h.Annotate, ReadFailure: h.ReadFailure}
 }
 
-func setTestNativePolicies(h *OwnerOperations, f func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)) {
+func setTestNativePolicies(h *OwnerOperations, f func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (ownerLayerResult, error)) {
 	var host OwnerHost
 	setTestPolicies(&host, f)
 }

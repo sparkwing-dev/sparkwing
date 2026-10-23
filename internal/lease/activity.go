@@ -24,8 +24,8 @@ type activity struct {
 	compute  func() bool
 }
 
-// Bind ties preparation and execution to one unit's keeper and activity projection.
-func Bind(ctx context.Context, identity Identity) (context.Context, func() bool) {
+// bind ties preparation and execution to one unit's keeper and activity projection.
+func bind(ctx context.Context, identity Identity) (context.Context, func() bool) {
 	a := &activity{identity: identity}
 	return context.WithValue(ctx, activityKey{}, a), func() bool {
 		a.mu.RLock()

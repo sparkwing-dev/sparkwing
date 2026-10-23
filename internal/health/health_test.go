@@ -20,13 +20,13 @@ func TestDecodeReadsTheContractEveryServicePublishes(t *testing.T) {
 		{
 			name:         "healthy",
 			body:         `{"status":"ok"}`,
-			wantStatus:   StatusOK,
+			wantStatus:   statusOK,
 			wantDegraded: false,
 		},
 		{
 			name:         "controller degraded",
 			body:         `{"status":"degraded","auth":"enabled","problems":["db: unavailable"]}`,
-			wantStatus:   StatusDegraded,
+			wantStatus:   statusDegraded,
 			wantProblems: 1,
 			wantAuth:     "enabled",
 			wantDegraded: true,
@@ -34,7 +34,7 @@ func TestDecodeReadsTheContractEveryServicePublishes(t *testing.T) {
 		{
 			name:         "logs degraded",
 			body:         `{"status":"degraded","problems":["root: disk free 412MiB (<1GiB) on /data"]}`,
-			wantStatus:   StatusDegraded,
+			wantStatus:   statusDegraded,
 			wantProblems: 1,
 			wantDegraded: true,
 		},
@@ -42,21 +42,21 @@ func TestDecodeReadsTheContractEveryServicePublishes(t *testing.T) {
 			name: "cache degraded",
 			body: `{"status":"degraded","problems":["gitcache: background fetch failing for all 7 repos",` +
 				`"proxy: cache directory not writable: permission denied"]}`,
-			wantStatus:   StatusDegraded,
+			wantStatus:   statusDegraded,
 			wantProblems: 2,
 			wantDegraded: true,
 		},
 		{
 			name:         "problems without status",
 			body:         `{"status":"ok","problems":["gitcache: background fetch failing"]}`,
-			wantStatus:   StatusOK,
+			wantStatus:   statusOK,
 			wantProblems: 1,
 			wantDegraded: true,
 		},
 		{
 			name:         "healthy with auth disabled",
 			body:         `{"status":"ok","auth":"disabled"}`,
-			wantStatus:   StatusOK,
+			wantStatus:   statusOK,
 			wantAuth:     "disabled",
 			wantDegraded: false,
 		},
@@ -132,7 +132,7 @@ func (r *errReader) Read(p []byte) (int, error) {
 }
 
 func TestDecodeBoundsTheBody(t *testing.T) {
-	oversized := `{"status":"ok","problems":["` + strings.Repeat("x", MaxBodyBytes) + `"]}`
+	oversized := `{"status":"ok","problems":["` + strings.Repeat("x", maxBodyBytes) + `"]}`
 	if _, err := Decode(strings.NewReader(oversized)); err == nil {
 		t.Fatal("an oversized body decoded; the read is not bounded")
 	}

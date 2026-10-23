@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"bytes"
@@ -17,14 +17,12 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestFilesystemLogDeletionScope(t *testing.T) {
 	property := func(seed uint32, payload [32]byte) bool {
 		dir := t.TempDir()
-		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
+		objects, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
 		if err != nil {
 			t.Log(err)
 			return false
@@ -40,8 +38,8 @@ func TestFilesystemLogDeletionScope(t *testing.T) {
 			for _, id := range []string{run, run + "-other"} {
 				for _, class := range []string{"r30", "r90", "r365"} {
 					for _, index := range []int64{0, 1} {
-						subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: owner, RunID: id, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}}
-						key, err := blob.LogObjectKey(subject, class, index)
+						subject := LogSubject{Kind: LogOwnerUnit, Team: owner, RunID: id, Unit: &LogUnit{Kind: LogPlan, Generation: 1}}
+						key, err := LogObjectKey(subject, class, index)
 						if err != nil {
 							t.Log(err)
 							return false
@@ -90,7 +88,7 @@ func TestFilesystemLogDeletionScope(t *testing.T) {
 				removed := strings.Contains(key, "/teams/"+team+"/") && (pass > 0 || strings.Contains(key, "/runs/"+run+"/"))
 				body, err := objects.Get(t.Context(), key)
 				if removed {
-					if !errors.Is(err, blob.ErrNotFound) {
+					if !errors.Is(err, ErrNotFound) {
 						return false
 					}
 					continue
@@ -117,7 +115,7 @@ func TestFilesystemLogDeletionScope(t *testing.T) {
 
 func TestFilesystemLogDeletionDoesNotFollowLinks(t *testing.T) {
 	dir, outside := t.TempDir(), t.TempDir()
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
+	objects, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,10 +153,10 @@ func TestFilesystemSignedLogSlotHasOneConcurrentWinner(t *testing.T) {
 	property := func(left, right [32]byte) bool {
 		right[0] = left[0] ^ 1
 		dir := t.TempDir()
-		var objects [2]*blob.Filesystem
+		var objects [2]*Filesystem
 		for i := range objects {
 			var err error
-			objects[i], err = blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
+			objects[i], err = NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
 			if err != nil {
 				t.Log(err)
 				return false

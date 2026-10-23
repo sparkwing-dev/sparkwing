@@ -6,7 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 )
 
-func CapabilitiesHandler(b backend.Backend) http.HandlerFunc {
+func capabilitiesHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caps, err := b.Capabilities(r.Context())
 		if err != nil {

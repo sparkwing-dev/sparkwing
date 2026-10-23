@@ -1,21 +1,19 @@
-package capability_test
+package capability
 
 import (
 	"fmt"
 	"strings"
 	"testing"
 	"testing/quick"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestRepositoryScopeNarrowingProperty(t *testing.T) {
 	invariant := func(owner, name string) bool {
-		repository := capability.RepositoryIdentity{Key: "gh:" + name, Display: "https://github.com/" + owner + "/" + name}
+		repository := RepositoryIdentity{Key: "gh:" + name, Display: "https://github.com/" + owner + "/" + name}
 		scopes := [][]string{nil, {}, {repository.Key}, {"github.com/" + owner + "/*"}, {"github.com/" + owner + "/" + name}, {"github.com/other/*"}}
 		for _, parent := range scopes {
 			for _, child := range scopes {
-				if capability.RepositoryScopeNarrows(parent, child) && capability.RepositoryAllowed(child, repository) && !capability.RepositoryAllowed(parent, repository) {
+				if repositoryScopeNarrows(parent, child) && RepositoryAllowed(child, repository) && !RepositoryAllowed(parent, repository) {
 					return false
 				}
 			}
@@ -35,12 +33,12 @@ func TestRepositoryPatternsKeepHostAndOwnerBoundaries(t *testing.T) {
 			fmt.Sprintf("https://github.com/acme/repo%d/extra", i),
 			fmt.Sprintf("https://github.com/acme@evil/repo%d", i),
 		} {
-			if capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: display}) {
+			if RepositoryAllowed([]string{"github.com/acme/*"}, RepositoryIdentity{Key: "gh:42", Display: display}) {
 				t.Fatalf("pattern authorized %q", display)
 			}
 		}
 	}
-	if !capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: "https://github.com/acme/repo.git"}) {
+	if !RepositoryAllowed([]string{"github.com/acme/*"}, RepositoryIdentity{Key: "gh:42", Display: "https://github.com/acme/repo.git"}) {
 		t.Fatal("pattern refused repository URL")
 	}
 }
@@ -52,15 +50,15 @@ func FuzzRepositorySlugDisplayStaysOnItsOwner(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, display string) {
 		owner, name, _ := strings.Cut(display, "/")
-		app := capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: display})
+		app := RepositoryAllowed([]string{"github.com/acme/*"}, RepositoryIdentity{Key: "gh:42", Display: display})
 		if app && (!strings.EqualFold(owner, "acme") || name == "" || strings.ContainsAny(name, "/:")) {
 			t.Fatalf("App slug %q escaped its owner", display)
 		}
-		if capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "git:example.com/acme/widgets", Display: display}) && !strings.Contains(display, "github.com") {
+		if RepositoryAllowed([]string{"github.com/acme/*"}, RepositoryIdentity{Key: "git:example.com/acme/widgets", Display: display}) && !strings.Contains(display, "github.com") {
 			t.Fatalf("non-App identity %q was read as github.com", display)
 		}
 	})
-	if !capability.RepositoryAllowed([]string{"github.com/acme/*"}, capability.RepositoryIdentity{Key: "gh:42", Display: "acme/widgets"}) {
+	if !RepositoryAllowed([]string{"github.com/acme/*"}, RepositoryIdentity{Key: "gh:42", Display: "acme/widgets"}) {
 		f.Fatal("App slug display refused by its owner's pattern")
 	}
 }

@@ -166,32 +166,32 @@ const everyMinute = `  - name: every-minute
 `
 
 func TestScheduleIDIsStableAndScopedToTheCheckoutPipelineAndEntry(t *testing.T) {
-	first := ScheduleID("/repos/alpha", "nightly", "")
-	if first != ScheduleID("/repos/alpha", "nightly", "") {
+	first := scheduleID("/repos/alpha", "nightly", "")
+	if first != scheduleID("/repos/alpha", "nightly", "") {
 		t.Fatal("ScheduleID is not stable for the same inputs")
 	}
-	if !strings.HasPrefix(first, ScheduleIDPrefix) || len(first) != len(ScheduleIDPrefix)+scheduleIDHexLen {
+	if !strings.HasPrefix(first, scheduleIDPrefix) || len(first) != len(scheduleIDPrefix)+scheduleIDHexLen {
 		t.Fatalf("ScheduleID shape %q", first)
 	}
-	if first != ScheduleID("/repos/alpha", "nightly", store.CronScheduleDefaultName) {
+	if first != scheduleID("/repos/alpha", "nightly", store.CronScheduleDefaultName) {
 		t.Fatal("the lone entry and the entry named default are not the same schedule")
 	}
-	if first == ScheduleID("/repos/beta", "nightly", "") {
+	if first == scheduleID("/repos/beta", "nightly", "") {
 		t.Fatal("two checkouts share a schedule id")
 	}
-	if first == ScheduleID("/repos/alpha", "weekly", "") {
+	if first == scheduleID("/repos/alpha", "weekly", "") {
 		t.Fatal("two pipelines in one checkout share a schedule id")
 	}
-	if first == ScheduleID("/repos/alpha", "nightly", "quick") {
+	if first == scheduleID("/repos/alpha", "nightly", "quick") {
 		t.Fatal("a named entry shares the default entry's id")
 	}
-	if ScheduleID("/repos/alpha", "nightly", "quick") == ScheduleID("/repos/alpha", "nightly", "slow") {
+	if scheduleID("/repos/alpha", "nightly", "quick") == scheduleID("/repos/alpha", "nightly", "slow") {
 		t.Fatal("two entries of one pipeline share a schedule id")
 	}
-	if ScheduleID("/repos/a", "bc", "") == ScheduleID("/repos/ab", "c", "") {
+	if scheduleID("/repos/a", "bc", "") == scheduleID("/repos/ab", "c", "") {
 		t.Fatal("the separator does not separate the fields")
 	}
-	if ScheduleID("/repos/a", "b", "cd") == ScheduleID("/repos/a", "bc", "d") {
+	if scheduleID("/repos/a", "b", "cd") == scheduleID("/repos/a", "bc", "d") {
 		t.Fatal("the separator does not separate the entry name")
 	}
 }
@@ -199,10 +199,10 @@ func TestScheduleIDIsStableAndScopedToTheCheckoutPipelineAndEntry(t *testing.T) 
 // safety: rows armed before entries carried names keep their ids, so this is
 // the exact hash a v0.47.0 host wrote for that checkout and pipeline.
 func TestScheduleIDOfADefaultEntryDidNotMove(t *testing.T) {
-	if got := ScheduleID("/repos/alpha", "nightly", ""); got != "crn_5c7401ef046c" {
+	if got := scheduleID("/repos/alpha", "nightly", ""); got != "crn_5c7401ef046c" {
 		t.Fatalf("ScheduleID = %q; a moved id disarms every schedule armed before it", got)
 	}
-	if got := ScheduleID("/repos/alpha", "nightly", "quick"); got != "crn_dbed746315e4" {
+	if got := scheduleID("/repos/alpha", "nightly", "quick"); got != "crn_dbed746315e4" {
 		t.Fatalf("ScheduleID of a named entry = %q", got)
 	}
 }
@@ -297,7 +297,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 	if report.Armed != 1 || report.Refreshed != 0 || report.Withdrawn != 0 {
 		t.Fatalf("first arm: %+v", report)
 	}
-	id := ScheduleID(root, "every-minute", "")
+	id := scheduleID(root, "every-minute", "")
 	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
@@ -312,7 +312,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 		t.Fatalf("cursor = %v, want the arming instant", sched.CursorAt)
 	}
 
-	if err := h.svc.Pause(ctx, id); err != nil {
+	if err := h.svc.pause(ctx, id); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-01T02:00:30Z"))
@@ -379,7 +379,7 @@ func TestArmWithdrawsASchedulTheRepoStoppedDeclaring(t *testing.T) {
 	if report.Withdrawn != 1 || len(report.Withdrawals) != 1 || report.Withdrawals[0] != "svc/nightly" {
 		t.Fatalf("withdrawal: %+v", report)
 	}
-	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "nightly", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "nightly", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, other, ArmOptions{}); err != nil {
 		t.Fatalf("Arm other: %v", err)
 	}
-	removed, err := h.svc.DisarmRepo(ctx, root)
+	removed, err := h.svc.disarmRepo(ctx, root)
 	if err != nil {
 		t.Fatalf("Disarm: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
 		t.Fatalf("remove %s: %v", gone, err)
 	}
 
-	report, err := h.svc.Refresh(ctx)
+	report, err := h.svc.refresh(ctx)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -490,14 +490,14 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
 	if report.Withdrawn != 1 {
 		t.Errorf("Withdrawn = %d, want only the dropped pipeline", report.Withdrawn)
 	}
-	changed, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(edited, "every-minute", ""))
+	changed, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(edited, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
 	if changed.Cron != "0 4 * * *" {
 		t.Errorf("edited cron = %q", changed.Cron)
 	}
-	vanished, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(gone, "every-minute", ""))
+	vanished, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(gone, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
 	armed := armOne(t, h, root)
 
 	h.clock.set(at(t, "2026-01-01T00:01:30Z"))
-	report, err := h.svc.Refresh(ctx)
+	report, err := h.svc.refresh(ctx)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	report, err = h.svc.Refresh(ctx)
+	report, err = h.svc.refresh(ctx)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -556,7 +556,7 @@ func armOne(t *testing.T, h *harness, root string) store.CronSchedule {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, scheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestTickAdvancesAPausedScheduleWithoutFiring(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.Pause(ctx, sched.ID); err != nil {
+	if err := h.svc.pause(ctx, sched.ID); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-01T00:05:05Z"))
@@ -831,12 +831,12 @@ func TestResumeDoesNotReplayThePauseWindow(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.Pause(ctx, sched.ID); err != nil {
+	if err := h.svc.pause(ctx, sched.ID); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	// safety: no tick lands during the pause, so only Resume can move the cursor.
 	h.clock.set(at(t, "2026-01-08T00:00:30Z"))
-	if err := h.svc.Resume(ctx, sched.ID); err != nil {
+	if err := h.svc.resume(ctx, sched.ID); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-08T00:01:05Z"))
@@ -893,7 +893,7 @@ func TestTickRecordsALauncherFailureAndKeepsGoing(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, healthyRoot, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	healthy := ScheduleID(healthyRoot, "every-minute", "")
+	healthy := scheduleID(healthyRoot, "every-minute", "")
 
 	first, second := broken.ID, healthy
 	if broken.RepoPath > healthyRoot {
@@ -939,7 +939,7 @@ func TestASecondTickIsRefusedWhileTheFirstHoldsTheLock(t *testing.T) {
 		t.Fatalf("lockTick: %v", err)
 	}
 	defer unlock()
-	if _, err := h.svc.Tick(context.Background(), false); !errors.Is(err, ErrTickRunning) {
+	if _, err := h.svc.Tick(context.Background(), false); !errors.Is(err, errTickRunning) {
 		t.Fatalf("Tick error = %v, want ErrTickRunning", err)
 	}
 }
@@ -1018,7 +1018,7 @@ func TestResolveNamesTheCandidatesWhenABareNameIsAmbiguous(t *testing.T) {
 		}
 	}
 	_, err := h.svc.Resolve(ctx, "every-minute")
-	if !errors.Is(err, ErrAmbiguousName) {
+	if !errors.Is(err, errAmbiguousName) {
 		t.Fatalf("Resolve error = %v, want ErrAmbiguousName", err)
 	}
 	for _, want := range []string{"alpha/every-minute", "beta/every-minute"} {
@@ -1066,26 +1066,26 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(rows) != 1 || rows[0].Display != "svc/every-minute" || rows[0].State != StateArmed {
+	if len(rows) != 1 || rows[0].Display != "svc/every-minute" || rows[0].State != stateArmed {
 		t.Fatalf("rows: %+v", rows)
 	}
 	if rows[0].Location != time.UTC {
 		t.Errorf("location = %v, want UTC", rows[0].Location)
 	}
-	if err := h.svc.Pause(ctx, sched.ID); err != nil {
+	if err := h.svc.pause(ctx, sched.ID); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	row, fires, err := h.svc.Show(ctx, sched.ID, 5)
 	if err != nil {
 		t.Fatalf("Show: %v", err)
 	}
-	if row.State != StatePaused || len(fires) != 0 {
+	if row.State != statePaused || len(fires) != 0 {
 		t.Fatalf("show: %+v %+v", row, fires)
 	}
-	if err := h.svc.Resume(ctx, sched.ID); err != nil {
+	if err := h.svc.resume(ctx, sched.ID); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if row, _, err = h.svc.Show(ctx, sched.ID, 5); err != nil || row.State != StateArmed {
+	if row, _, err = h.svc.Show(ctx, sched.ID, 5); err != nil || row.State != stateArmed {
 		t.Fatalf("resume: %v %+v", err, row)
 	}
 }
@@ -1096,7 +1096,7 @@ func TestHealthReportsAStaleTick(t *testing.T) {
 	armOne(t, h, writeRepo(t, "svc", everyMinute))
 
 	timer := fakeTimerHost(t, h.home, true)
-	fresh, err := h.svc.Health(ctx, timer)
+	fresh, err := h.svc.health(ctx, timer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
@@ -1111,11 +1111,11 @@ func TestHealthReportsAStaleTick(t *testing.T) {
 	if _, err := h.svc.Tick(ctx, false); err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	ticked, err := h.svc.Health(ctx, timer)
+	ticked, err := h.svc.health(ctx, timer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if ticked.TickStale || !ticked.Healthy() {
+	if ticked.TickStale || !ticked.healthy() {
 		t.Fatalf("a home that just ticked: %+v", ticked)
 	}
 	if ticked.Armed != 1 || ticked.Schedules != 1 {
@@ -1123,11 +1123,11 @@ func TestHealthReportsAStaleTick(t *testing.T) {
 	}
 
 	h.clock.set(at(t, "2026-01-01T00:10:00Z"))
-	stale, err := h.svc.Health(ctx, timer)
+	stale, err := h.svc.health(ctx, timer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if !stale.TickStale || stale.Healthy() {
+	if !stale.TickStale || stale.healthy() {
 		t.Fatalf("ten minutes without a tick: %+v", stale)
 	}
 	if !strings.Contains(stale.Detail, "crons.log") {
@@ -1147,14 +1147,14 @@ func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordCronTick: %v", err)
 	}
-	health, err := h.svc.Health(ctx, timer)
+	health, err := h.svc.health(ctx, timer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
 	if health.TickStale {
 		t.Fatalf("the tick just landed: %+v", health)
 	}
-	if health.Healthy() {
+	if health.healthy() {
 		t.Fatal("a tick that reported a failure read as healthy")
 	}
 	if !strings.Contains(health.Detail, "consumer will not start") {
@@ -1198,11 +1198,11 @@ func TestHealthAcceptsAHostTickingFromItsOwnScheduler(t *testing.T) {
 	armOne(t, h, writeRepo(t, "svc", everyMinute))
 	noTimer := fakeTimerHost(t, h.home, false)
 
-	before, err := h.svc.Health(ctx, noTimer)
+	before, err := h.svc.health(ctx, noTimer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if before.Healthy() {
+	if before.healthy() {
 		t.Fatalf("an armed host with no timer and no tick: %+v", before)
 	}
 
@@ -1210,34 +1210,34 @@ func TestHealthAcceptsAHostTickingFromItsOwnScheduler(t *testing.T) {
 	if _, err := h.svc.Tick(ctx, false); err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	ticked, err := h.svc.Health(ctx, noTimer)
+	ticked, err := h.svc.health(ctx, noTimer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if !ticked.Healthy() || ticked.TickStale {
+	if !ticked.healthy() || ticked.TickStale {
 		t.Fatalf("a host ticking from its own scheduler: %+v", ticked)
 	}
 
 	h.clock.set(at(t, "2026-01-01T01:00:00Z"))
-	lapsed, err := h.svc.Health(ctx, noTimer)
+	lapsed, err := h.svc.health(ctx, noTimer)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if !lapsed.TickStale || lapsed.Healthy() {
+	if !lapsed.TickStale || lapsed.healthy() {
 		t.Fatalf("an hour after the last external tick: %+v", lapsed)
 	}
 }
 
 func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {
 	repo, pipeline := "https://github.com/acme/app.git", "nightly"
-	if got, want := teamScheduleID(store.DefaultTeam, repo, pipeline, "default"), ScheduleID(repo, pipeline, "default"); got != want {
+	if got, want := teamScheduleID(store.DefaultTeam, repo, pipeline, "default"), scheduleID(repo, pipeline, "default"); got != want {
 		t.Errorf("the operator's id = %s, want the unchanged %s", got, want)
 	}
-	if teamScheduleID("", repo, pipeline, "default") != ScheduleID(repo, pipeline, "default") {
+	if teamScheduleID("", repo, pipeline, "default") != scheduleID(repo, pipeline, "default") {
 		t.Error("an empty team does not name the operator's id")
 	}
 	a, b := teamScheduleID("team-a", repo, pipeline, "default"), teamScheduleID("team-b", repo, pipeline, "default")
-	if a == b || a == ScheduleID(repo, pipeline, "default") {
+	if a == b || a == scheduleID(repo, pipeline, "default") {
 		t.Errorf("two teams arm one schedule under ids %s and %s", a, b)
 	}
 }

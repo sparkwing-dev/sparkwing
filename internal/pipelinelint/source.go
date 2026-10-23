@@ -181,7 +181,7 @@ func (a *analysis) checkPlanIO(call *ast.CallExpr) {
 	}
 	name := sel.Sel.Name
 	flag := func() {
-		a.add(RulePlanIO, call.Pos(),
+		a.add(rulePlanIO, call.Pos(),
 			"Plan() must be pure-declarative: "+pkg.Name+"."+name+" is I/O and runs while the DAG is built. Move it into a Job or Step body (which runs at dispatch).")
 	}
 	switch {
@@ -216,7 +216,7 @@ func (a *analysis) checkRuntimeBranch(call *ast.CallExpr) {
 		return
 	}
 	if sel.Sel.Name == "IsLocal" {
-		a.add(RulePlanRuntimeBranch, call.Pos(),
+		a.add(rulePlanRuntimeBranch, call.Pos(),
 			"Plan() must be deterministic: IsLocal() branches the DAG on where it runs. Use a job-level SkipIf / Requires or a pipeline guard instead.")
 		return
 	}
@@ -225,7 +225,7 @@ func (a *analysis) checkRuntimeBranch(call *ast.CallExpr) {
 		return
 	}
 	if a.imports[pkg.Name] == "os" && (sel.Sel.Name == "Getenv" || sel.Sel.Name == "LookupEnv") {
-		a.add(RulePlanRuntimeBranch, call.Pos(),
+		a.add(rulePlanRuntimeBranch, call.Pos(),
 			"Plan() must be deterministic: "+pkg.Name+"."+sel.Sel.Name+" reads the host environment while building the DAG. Move the condition to a job-level SkipIf / Requires or a pipeline guard.")
 	}
 }
@@ -236,7 +236,7 @@ func (a *analysis) checkRuntimeSelector(sel *ast.SelectorExpr) {
 		return
 	}
 	if a.imports[pkg.Name] == "runtime" && (sel.Sel.Name == "GOOS" || sel.Sel.Name == "GOARCH") {
-		a.add(RulePlanRuntimeBranch, sel.Pos(),
+		a.add(rulePlanRuntimeBranch, sel.Pos(),
 			"Plan() must be deterministic: runtime."+sel.Sel.Name+" branches the DAG on the build host. Express host targeting via a job-level Requires label instead.")
 	}
 }
@@ -248,7 +248,7 @@ func (a *analysis) checkAssign(as *ast.AssignStmt) {
 	if allBlank(as.Lhs) {
 		for _, rhs := range as.Rhs {
 			if refCall := findRefCall(rhs); refCall != nil {
-				a.add(RuleUnusedRef, refCall.Pos(),
+				a.add(ruleUnusedRef, refCall.Pos(),
 					"a Ref created here is discarded into _; wire it into a downstream job or drop the producing edge.")
 			}
 		}
@@ -258,7 +258,7 @@ func (a *analysis) checkAssign(as *ast.AssignStmt) {
 func (a *analysis) checkExprStmt(es *ast.ExprStmt) {
 	a.checkChain(es.X)
 	if call, ok := es.X.(*ast.CallExpr); ok && a.isRefCall(call) {
-		a.add(RuleUnusedRef, call.Pos(),
+		a.add(ruleUnusedRef, call.Pos(),
 			"a Ref is created as a bare statement and its result is unused; wire it into a downstream job or drop the producing edge.")
 	}
 }
@@ -295,7 +295,7 @@ func (a *analysis) checkChain(expr ast.Expr) {
 	for _, lc := range labelCalls {
 		for _, arg := range lc.Args {
 			if lit, ok := stringLit(arg); ok && strings.TrimSpace(lit) == "" {
-				a.add(RuleRunnerLabel, lc.Pos(),
+				a.add(ruleRunnerLabel, lc.Pos(),
 					methodName(lc)+" was given a blank runner label: an empty string is dropped and a "+
 						"whitespace label matches no runner, so the term either vanishes or can never be "+
 						"satisfied. Drop it or supply a real label.")
@@ -303,7 +303,7 @@ func (a *analysis) checkChain(expr ast.Expr) {
 		}
 	}
 	if inline && len(placementCalls) > 0 {
-		a.add(RuleRunnerLabel, placementCalls[0].Pos(),
+		a.add(ruleRunnerLabel, placementCalls[0].Pos(),
 			"job is Inline() (in-process) yet declares "+methodName(placementCalls[0])+"; a runner label can never be honored on an inline job.")
 	}
 	a.checkGroupCache(constructor, methods)
@@ -327,7 +327,7 @@ func (a *analysis) checkDynamicGroup(methods []*ast.CallExpr) {
 		if name == "Requires" || name == "Prefers" || name == "WhenRunner" {
 			msg += " That Workable can declare its own labels through the " + name + "Provider interface."
 		}
-		a.add(RuleDynamicGroupInert, m.Pos(), msg)
+		a.add(ruleDynamicGroupInert, m.Pos(), msg)
 	}
 }
 
@@ -341,7 +341,7 @@ func (a *analysis) checkGroupCache(constructor string, methods []*ast.CallExpr) 
 		if methodName(m) != "Memoize" {
 			continue
 		}
-		a.add(RuleGroupCacheShared, m.Pos(),
+		a.add(ruleGroupCacheShared, m.Pos(),
 			"Memoize() here applies one key to every member of "+constructor+
 				", so the members share a cache entry and replay each other's results; "+
 				"key them individually by ranging over the group's Members().")

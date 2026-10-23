@@ -114,8 +114,3 @@ func Validate(in Config) (Config, error) {
 	out.Labels = clean
 	return out, nil
 }
-
-// DefaultPath is the config.yaml a runner reads when it is given no --config.
-func DefaultPath() (string, error) {
-	return userconfig.Path()
-}

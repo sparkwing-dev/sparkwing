@@ -27,7 +27,7 @@ func lockTick(path string) (func(), error) {
 	}
 	if !held {
 		closeLockFile(f)
-		return nil, ErrTickRunning
+		return nil, errTickRunning
 	}
 	return func() {
 		if err := flockUnlock(f); err != nil {

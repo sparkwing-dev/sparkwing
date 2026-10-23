@@ -60,8 +60,8 @@ func (e *UsageError) Error() string {
 	return binary + ": " + command + ": " + e.Message
 }
 
-// ExitCode separates parser failures from command failures.
-func (e *UsageError) ExitCode() ExitCode { return ExitUsage }
+// exitCode separates parser failures from command failures.
+func (e *UsageError) exitCode() ExitCode { return ExitUsage }
 
 func (i Invocation) invalid(format string, args ...any) error {
 	return &UsageError{Path: i.Command.Path, Message: fmt.Sprintf(format, args...)}

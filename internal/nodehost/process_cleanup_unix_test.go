@@ -19,19 +19,19 @@ func TestProcessCleanupsReportFailuresAndContinueInReverseOrder(t *testing.T) {
 		{"/missing-program", "private-argument"},
 		{"/bin/sh", "-c", `printf newest >> order`},
 	} {
-		if _, err := cleanups.Register(argv, ""); err != nil {
+		if _, err := cleanups.register(argv, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
 	scope := CleanupScope{Dir: t.TempDir(), Env: procenv.Env{}}
-	if err := cleanups.Run(t.Context(), scope); err == nil || strings.Contains(err.Error(), "private-argument") {
+	if err := cleanups.run(t.Context(), scope); err == nil || strings.Contains(err.Error(), "private-argument") {
 		t.Fatalf("cleanup failure became success or exposed arguments: %v", err)
 	}
 	written, err := os.ReadFile(filepath.Join(scope.Dir, "order"))
 	if err != nil || string(written) != "newestoldest" {
 		t.Fatalf("cleanup order=%q error=%v", written, err)
 	}
-	if err := cleanups.Run(t.Context(), scope); err != nil {
+	if err := cleanups.run(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
 	again, err := os.ReadFile(filepath.Join(scope.Dir, "order"))

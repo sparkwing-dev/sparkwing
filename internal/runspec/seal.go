@@ -184,8 +184,8 @@ func CheckSeal(existing, proposed Spec) (bool, error) {
 	return true, nil
 }
 
-// Project derives every indexed input from its immutable owner.
-func Project(s Spec) Projections {
+// project derives every indexed input from its immutable owner.
+func project(s Spec) projections {
 	r := s.Request.Request
 	branch := ""
 	if s.Resolved.DefaultBranch.Set {
@@ -193,7 +193,7 @@ func Project(s Spec) Projections {
 	} else if r.Git.DefaultBranch.Set {
 		branch = r.Git.DefaultBranch.Value
 	}
-	return Projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, AllowedPools: append([]string(nil), s.Request.AllowedPools...), RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
+	return projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, AllowedPools: append([]string(nil), s.Request.AllowedPools...), RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
 }
 
 // CarryRetry keeps the source envelope immutable; destination lineage is separate.
@@ -232,8 +232,8 @@ func CarryRetry(input RetryInput) (RetrySnapshot, error) {
 	return snapshot, nil
 }
 
-// RunContext uses sealed winners and returns a detached copy for executable consumers.
-func (s Spec) RunContext() Context {
+// runContext uses sealed winners and returns a detached copy for executable consumers.
+func (s Spec) runContext() Context {
 	r := s.Request.Request
 	git := r.Git
 	if s.Resolved.DefaultBranch.Set {
@@ -249,4 +249,4 @@ func (s Spec) RunContext() Context {
 }
 
 // GuardContext retains provenance; origin-HEAD discovery never adds App verification.
-func (s Spec) GuardContext() Context { return s.RunContext() }
+func (s Spec) GuardContext() Context { return s.runContext() }

@@ -14,7 +14,7 @@ type planValidator struct {
 	jobs         map[string]JobSpec
 	closures     map[string]string
 	generators   map[string]string
-	capabilities map[PlanCapability]bool
+	capabilities map[planCapability]bool
 	concurrency  map[string]concurrencyDefinition
 	newJobs      []string
 }
@@ -68,10 +68,10 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 	v := &planValidator{
 		context: context, paths: map[string]string{}, jobs: map[string]JobSpec{},
 		closures: map[string]string{}, generators: map[string]string{},
-		capabilities: map[PlanCapability]bool{},
+		capabilities: map[planCapability]bool{},
 		concurrency:  map[string]concurrencyDefinition{},
 	}
-	for _, row := range CapabilityTable() {
+	for _, row := range capabilityTable() {
 		if _, exists := v.capabilities[row.Feature]; exists {
 			return PlanDoc{}, planInvalid("plan", "duplicate capability row")
 		}
@@ -138,7 +138,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 	return plan, nil
 }
 
-func (v *planValidator) feature(feature PlanCapability, path string) error {
+func (v *planValidator) feature(feature planCapability, path string) error {
 	supported, known := v.capabilities[feature]
 	if !known || !supported {
 		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: fmt.Sprintf("plan feature %s is unsupported at %s", feature, path), Details: map[string]any{"feature": feature, "placement": v.context.Placement}}
@@ -225,11 +225,11 @@ func (v *planValidator) registerClosures(c ClosureSpec, path, jobID string) erro
 }
 
 func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
-	if err := v.feature(CapabilityJobs, "plan.jobs"); err != nil {
+	if err := v.feature(capabilityJobs, "plan.jobs"); err != nil {
 		return err
 	}
 	if len(plan.Concurrency) > 0 {
-		if err := v.feature(CapabilityPlanConcurrency, "plan.concurrency"); err != nil {
+		if err := v.feature(capabilityPlanConcurrency, "plan.concurrency"); err != nil {
 			return err
 		}
 	}
@@ -238,13 +238,13 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 	}
 	for _, item := range []struct {
 		used bool
-		name PlanCapability
+		name planCapability
 		path string
 	}{
-		{plan.Priority != nil, CapabilityPriority, "plan.priority"},
-		{plan.ClaimWaitMS != nil, CapabilityClaimWait, "plan.claim_wait_ms"},
-		{plan.AdmissionClass != nil, CapabilityAdmissionClass, "plan.admission_class"},
-		{plan.Source != nil, CapabilitySource, "plan.source"},
+		{plan.Priority != nil, capabilityPriority, "plan.priority"},
+		{plan.ClaimWaitMS != nil, capabilityClaimWait, "plan.claim_wait_ms"},
+		{plan.AdmissionClass != nil, capabilityAdmissionClass, "plan.admission_class"},
+		{plan.Source != nil, capabilitySource, "plan.source"},
 	} {
 		if item.used {
 			if err := v.feature(item.name, item.path); err != nil {
@@ -289,7 +289,7 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path, level
 			return planInvalid(at+".on_limit", "unknown limit policy")
 		}
 		if spec.Scope != nil && *spec.Scope == "box" {
-			if err := v.feature(CapabilityBoxConcurrency, at+".scope"); err != nil {
+			if err := v.feature(capabilityBoxConcurrency, at+".scope"); err != nil {
 				return err
 			}
 		}

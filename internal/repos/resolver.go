@@ -12,11 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
+var errNotFound = errors.New("repos: no registered repo provides that pipeline")
 
-// DescribeRepo builds the pipeline binary a repository declares, or installs
+// describeRepo builds the pipeline binary a repository declares, or installs
 // its TypeScript pipeline's dependencies, and returns gated discovery.
-func DescribeRepo(absPath string) (*runspec.DeclarationGate, error) {
+func describeRepo(absPath string) (*runspec.DeclarationGate, error) {
 	sparkwingDir := filepath.Join(absPath, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
@@ -56,7 +56,7 @@ func DescribeRepo(absPath string) (*runspec.DeclarationGate, error) {
 }
 
 func PipelineNamesForRepo(absPath string) ([]string, error) {
-	schemas, err := DescribeRepo(absPath)
+	schemas, err := describeRepo(absPath)
 	if err != nil {
 		return nil, err
 	}
@@ -129,31 +129,6 @@ func pipelineNames(schemas []runspec.PipelinePresentation) []string {
 		}
 	}
 	return names
-}
-
-func ResolveRepoForPipelineCached(name string) (string, error) {
-	if name == "" {
-		return "", errors.New("ResolveRepoForPipelineCached: empty name")
-	}
-	cands, err := CandidatePaths()
-	if err != nil {
-		return "", err
-	}
-	for _, pass := range []bool{false, true} {
-		for _, c := range cands {
-			if c.Worktree != pass {
-				continue
-			}
-			doc, ok := describeIfBuilt(c.Path)
-			if !ok {
-				continue
-			}
-			if _, found := doc.Declarations().Pipeline(name); found {
-				return c.Path, nil
-			}
-		}
-	}
-	return "", ErrNotFound
 }
 
 func installVerified(lease *bincache.Lease) (bincache.VerifiedBinary, func(), error) {

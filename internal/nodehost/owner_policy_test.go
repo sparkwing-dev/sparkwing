@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput, *executorStore, EvaluationDependencies, *[]*executorProcess) {
+func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput, *executorStore, evaluationDependencies, *[]*executorProcess) {
 	t.Helper()
 	in, st, deps, _ := evaluationFixture(t)
 	job := in.Accepted.Plan.Jobs[0]

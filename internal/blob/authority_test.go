@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"errors"
@@ -6,16 +6,15 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestReferenceEdges(t *testing.T) {
 	i := identity()
-	a := blob.Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Attempt: i.Attempt}
-	r := blob.Receipt{Identity: i, Digest: digest("bytes")}
-	request := blob.EdgeRequest{TargetKind: blob.KindManifest, Authority: a, Digest: r.Digest, OwnReceipt: runspec.Optional[blob.Receipt]{Set: true, Value: r}}
-	if err := blob.AuthorizeEdge(request); err != nil {
+	a := Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Attempt: i.Attempt}
+	r := Receipt{Identity: i, Digest: digest("bytes")}
+	request := EdgeRequest{TargetKind: KindManifest, Authority: a, Digest: r.Digest, OwnReceipt: runspec.Optional[Receipt]{Set: true, Value: r}}
+	if err := AuthorizeEdge(request); err != nil {
 		t.Fatal(err)
 	}
 	for _, field := range []string{"team", "run", "job", "attempt", "generation", "principal", "capability", "digest"} {
@@ -39,20 +38,20 @@ func TestReferenceEdges(t *testing.T) {
 			case "digest":
 				bad.OwnReceipt.Value.Digest = digest("other")
 			}
-			if err := blob.AuthorizeEdge(bad); !errors.Is(err, blob.ErrDigestNotReadable) {
+			if err := AuthorizeEdge(bad); !errors.Is(err, ErrDigestNotReadable) {
 				t.Fatalf("unauthorized edge: %v", err)
 			}
 		})
 	}
 	request.OwnReceipt.Set = false
-	for _, kind := range []blob.EdgeKind{blob.EdgeDependency, blob.EdgeDeclaredReference, blob.EdgeMemoHit, blob.EdgeMemoScope, blob.EdgeOwnUpload} {
-		request.ReadSet = blob.ReadSet{Reader: i.Attempt.Value, Edges: []blob.ReadEdge{{Kind: kind, Reader: i.Attempt.Value, Digest: r.Digest}}}
-		if err := blob.AuthorizeEdge(request); err != nil {
+	for _, kind := range []EdgeKind{EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope, EdgeOwnUpload} {
+		request.ReadSet = ReadSet{Reader: i.Attempt.Value, Edges: []ReadEdge{{Kind: kind, Reader: i.Attempt.Value, Digest: r.Digest}}}
+		if err := AuthorizeEdge(request); err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
 	}
 	request.ReadSet.Reader.NodeID = "unrelated"
-	if err := blob.AuthorizeEdge(request); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if err := AuthorizeEdge(request); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("foreign read set accepted")
 	}
 }
@@ -60,38 +59,38 @@ func TestReferenceEdges(t *testing.T) {
 func TestRemoteCacheReferenceEdges(t *testing.T) {
 	property := func(seed [16]byte, choice uint8) bool {
 		nonce := fmt.Sprintf("%x", seed)
-		kinds := []blob.Kind{blob.KindOutput, blob.KindManifest, blob.KindMemo, blob.KindDepcache}
+		kinds := []Kind{KindOutput, KindManifest, KindMemo, KindDepcache}
 		kind := kinds[int(choice)%len(kinds)]
-		request := blob.EdgeRequest{
+		request := EdgeRequest{
 			TargetKind: kind, Digest: digest(nonce),
-			Authority: blob.Authority{CapabilityRef: "reader-" + nonce, Principal: "user-" + blob.Principal(nonce), Repo: "gh:1"},
-			ReadSet: blob.ReadSet{Edges: []blob.ReadEdge{{
-				Kind: blob.EdgeMemoScope, Digest: digest(nonce),
-				Record: blob.RecordKey{Team: "team-" + nonce, Kind: kind, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main", Verified: true}}},
+			Authority: Authority{CapabilityRef: "reader-" + nonce, Principal: "user-" + Principal(nonce), Repo: "gh:1"},
+			ReadSet: ReadSet{Edges: []ReadEdge{{
+				Kind: EdgeMemoScope, Digest: digest(nonce),
+				Record: RecordKey{Team: "team-" + nonce, Kind: kind, Scope: Scope{Repo: "gh:1", Ref: RefScope{Ref: "main", Verified: true}}},
 			}}},
 		}
-		if blob.AuthorizeEdge(request) != nil {
+		if AuthorizeEdge(request) != nil {
 			return false
 		}
-		for _, mutate := range []func(*blob.EdgeRequest){
-			func(q *blob.EdgeRequest) { q.Authority.Principal = "" },
-			func(q *blob.EdgeRequest) { q.Authority.CapabilityRef = "" },
-			func(q *blob.EdgeRequest) { q.Authority.Repo = "gh:2" },
-			func(q *blob.EdgeRequest) { q.Authority.Upload.Set = true },
-			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Record.Team = "" },
-			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Record.Scope.Ref.Verified = false },
-			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Record.Kind = blob.KindBinary },
-			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Kind = blob.EdgeDependency },
-			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Digest = digest("other-" + nonce) },
-			func(q *blob.EdgeRequest) { q.ReadSet.Reader = identity().Attempt.Value },
-			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Reader = identity().Attempt.Value },
-			func(q *blob.EdgeRequest) { q.TargetKind = blob.KindBinary },
-			func(q *blob.EdgeRequest) { q.TargetKind = blob.KindSourceBundle },
+		for _, mutate := range []func(*EdgeRequest){
+			func(q *EdgeRequest) { q.Authority.Principal = "" },
+			func(q *EdgeRequest) { q.Authority.CapabilityRef = "" },
+			func(q *EdgeRequest) { q.Authority.Repo = "gh:2" },
+			func(q *EdgeRequest) { q.Authority.Upload.Set = true },
+			func(q *EdgeRequest) { q.ReadSet.Edges[0].Record.Team = "" },
+			func(q *EdgeRequest) { q.ReadSet.Edges[0].Record.Scope.Ref.Verified = false },
+			func(q *EdgeRequest) { q.ReadSet.Edges[0].Record.Kind = KindBinary },
+			func(q *EdgeRequest) { q.ReadSet.Edges[0].Kind = EdgeDependency },
+			func(q *EdgeRequest) { q.ReadSet.Edges[0].Digest = digest("other-" + nonce) },
+			func(q *EdgeRequest) { q.ReadSet.Reader = identity().Attempt.Value },
+			func(q *EdgeRequest) { q.ReadSet.Edges[0].Reader = identity().Attempt.Value },
+			func(q *EdgeRequest) { q.TargetKind = KindBinary },
+			func(q *EdgeRequest) { q.TargetKind = KindSourceBundle },
 		} {
 			changed := request
-			changed.ReadSet.Edges = append([]blob.ReadEdge(nil), request.ReadSet.Edges...)
+			changed.ReadSet.Edges = append([]ReadEdge(nil), request.ReadSet.Edges...)
 			mutate(&changed)
-			if !errors.Is(blob.AuthorizeEdge(changed), blob.ErrDigestNotReadable) {
+			if !errors.Is(AuthorizeEdge(changed), ErrDigestNotReadable) {
 				return false
 			}
 		}
@@ -103,110 +102,110 @@ func TestRemoteCacheReferenceEdges(t *testing.T) {
 }
 
 func TestNamespacesAndKeys(t *testing.T) {
-	key := blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: "build", Job: "compile", Hash: runspec.Hash(digest("key"))}
-	trusted, err := blob.MemoNamespace(key)
+	key := MemoKey{Repo: "gh:123", Ref: RefScope{Ref: "main", Verified: true}, Pipeline: "build", Job: "compile", Hash: runspec.Hash(digest("key"))}
+	trusted, err := MemoNamespace(key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key.Ref = blob.RefScope{Ref: "main", Writer: "account/a"}
-	manual, err := blob.MemoNamespace(key)
+	key.Ref = RefScope{Ref: "main", Writer: "account/a"}
+	manual, err := MemoNamespace(key)
 	if err != nil || manual == trusted {
 		t.Fatalf("manual/trusted collision: %s, %v", manual, err)
 	}
 	key.Ref.Writer = "account/b"
-	other, err := blob.MemoNamespace(key)
+	other, err := MemoNamespace(key)
 	if err != nil || other == manual {
 		t.Fatalf("one writer's scope reached another's: %s, %v", other, err)
 	}
 	key.Ref.Writer = ""
-	if _, err := blob.MemoNamespace(key); err == nil {
+	if _, err := MemoNamespace(key); err == nil {
 		t.Fatal("an unverified scope with no writer is the shared bucket")
 	}
 	key.Ref.Writer = "account/a"
-	key.Ref = blob.RefScope{Ref: "manual:main", Verified: true}
-	literal, err := blob.MemoNamespace(key)
+	key.Ref = RefScope{Ref: "manual:main", Verified: true}
+	literal, err := MemoNamespace(key)
 	if err != nil || literal == manual {
 		t.Fatalf("manual prefix collision: %s, %v", literal, err)
 	}
 	key.Pipeline = "build/compile"
 	key.Job = "job"
-	x, _ := blob.MemoNamespace(key)
+	x, _ := MemoNamespace(key)
 	key.Pipeline = "build"
 	key.Job = "compile/job"
-	y, _ := blob.MemoNamespace(key)
+	y, _ := MemoNamespace(key)
 	if x == y {
 		t.Fatal("namespace separator collision")
 	}
 	for _, team := range []string{"", ".", "..", "a/b", "a\\b", "a%2fb", "a\x00b"} {
-		if _, err := blob.ObjectKey(team, digest("a")); err == nil {
+		if _, err := ObjectKey(team, digest("a")); err == nil {
 			t.Fatalf("invalid team %q accepted", team)
 		}
 	}
-	got, err := blob.ObjectKey("team", digest("a"))
+	got, err := ObjectKey("team", digest("a"))
 	if err != nil || got != "teams/team/cas/"+string(digest("a")) {
 		t.Fatalf("ObjectKey=%q %v", got, err)
 	}
 }
 
 func TestBinaryProvenance(t *testing.T) {
-	record := blob.Record{Key: blob.RecordKey{Team: "team", Kind: blob.KindBinary}, Digest: digest("bin"), Provenance: blob.ProvenanceCloud}
-	exec := blob.BinaryExecution{Record: record, Digest: record.Digest, Trust: blob.BuildTrust{Team: "team"}}
-	if err := blob.CheckBinaryExecution(exec); err != nil {
+	record := Record{Key: RecordKey{Team: "team", Kind: KindBinary}, Digest: digest("bin"), Provenance: ProvenanceCloud}
+	exec := BinaryExecution{Record: record, Digest: record.Digest, Trust: BuildTrust{Team: "team"}}
+	if err := CheckBinaryExecution(exec); err != nil {
 		t.Fatal(err)
 	}
-	exec.Record.Provenance = blob.ProvenanceLocal
-	if err := blob.CheckBinaryExecution(exec); err == nil {
+	exec.Record.Provenance = ProvenanceLocal
+	if err := CheckBinaryExecution(exec); err == nil {
 		t.Fatal("local binary trusted without opt-in")
 	}
 	exec.Trust.TrustLocalBuilds = true
-	if err := blob.CheckBinaryExecution(exec); err != nil {
+	if err := CheckBinaryExecution(exec); err != nil {
 		t.Fatal(err)
 	}
 	exec.Digest = digest("changed")
-	if err := blob.CheckBinaryExecution(exec); !errors.Is(err, blob.ErrIntegrity) {
+	if err := CheckBinaryExecution(exec); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("changed binary: %v", err)
 	}
 }
 
 func TestResolveWriteKeyUsesSealedRef(t *testing.T) {
 	i := identity()
-	a := blob.Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Attempt: i.Attempt, Repo: "gh:123", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Writer: "account/a"}}}
-	intent := blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: "build", Job: "job", Key: string(digest("input"))}
-	manual, err := blob.ResolveWriteKey(a, intent)
+	a := Authority{Principal: i.Principal, CapabilityRef: i.CapabilityRef, Attempt: i.Attempt, Repo: "gh:123", Ref: RefFacts{Scope: RefScope{Ref: "main", Writer: "account/a"}}}
+	intent := WriteScopeIntent{Kind: KindMemo, Pipeline: "build", Job: "job", Key: string(digest("input"))}
+	manual, err := ResolveWriteKey(a, intent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if manual.Team != "team" || manual.Scope.Repo != "gh:123" || manual.Scope.Ref.Verified {
 		t.Fatalf("write key=%+v", manual)
 	}
-	a.Ref.Scope = blob.RefScope{Ref: "main", Verified: true}
-	if _, err := blob.ResolveWriteKey(a, intent); !errors.Is(err, blob.ErrDigestNotReadable) {
+	a.Ref.Scope = RefScope{Ref: "main", Verified: true}
+	if _, err := ResolveWriteKey(a, intent); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("typed main gained verified authority")
 	}
 	a.Ref.AppDeliveryKey = "delivery"
 	a.Ref.SHA = "sealed-sha"
-	verified, err := blob.ResolveWriteKey(a, intent)
+	verified, err := ResolveWriteKey(a, intent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	x, _ := blob.RecordNamespace(manual)
-	y, _ := blob.RecordNamespace(verified)
+	x, _ := RecordNamespace(manual)
+	y, _ := RecordNamespace(verified)
 	if x == y {
 		t.Fatal("manual write can overwrite verified write")
 	}
 	intent.Job = "sibling"
-	if _, err := blob.ResolveWriteKey(a, intent); !errors.Is(err, blob.ErrDigestNotReadable) {
+	if _, err := ResolveWriteKey(a, intent); !errors.Is(err, ErrDigestNotReadable) {
 		t.Fatal("job selected sibling namespace")
 	}
 }
 
 func TestLogSubjectIdentity(t *testing.T) {
 	a := identity().Attempt.Value
-	valid := []blob.LogSubject{
-		{Kind: blob.LogJobAttempt, Team: a.Team, RunID: a.RunID, Attempt: &a},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: 1}},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: 5, Source: &blob.LogSource{NodeID: "source", Generation: 2}}},
+	valid := []LogSubject{
+		{Kind: LogJobAttempt, Team: a.Team, RunID: a.RunID, Attempt: &a},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &LogUnit{Kind: LogPlan, Generation: 1}},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &LogUnit{Kind: LogTrigger, Generation: 1}},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &LogUnit{Kind: LogEval, Generation: 5, Source: &LogSource{NodeID: "source", Generation: 2}}},
 	}
 	for _, subject := range valid {
 		if err := subject.Validate(); err != nil {
@@ -215,14 +214,14 @@ func TestLogSubjectIdentity(t *testing.T) {
 	}
 	badAttempt := a
 	badAttempt.Attempt = 0
-	invalid := []blob.LogSubject{
+	invalid := []LogSubject{
 		{},
-		{Kind: blob.LogJobAttempt, Team: "foreign", RunID: a.RunID, Attempt: &a},
-		{Kind: blob.LogJobAttempt, Team: a.Team, RunID: a.RunID, Attempt: &badAttempt},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Attempt: &a, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: 1}},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 0}},
-		{Kind: blob.LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: 1, Source: &blob.LogSource{NodeID: "source", Generation: 1}}},
+		{Kind: LogJobAttempt, Team: "foreign", RunID: a.RunID, Attempt: &a},
+		{Kind: LogJobAttempt, Team: a.Team, RunID: a.RunID, Attempt: &badAttempt},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Attempt: &a, Unit: &LogUnit{Kind: LogPlan, Generation: 1}},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &LogUnit{Kind: LogEval, Generation: 1}},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &LogUnit{Kind: LogPlan, Generation: 0}},
+		{Kind: LogOwnerUnit, Team: a.Team, RunID: a.RunID, Unit: &LogUnit{Kind: LogTrigger, Generation: 1, Source: &LogSource{NodeID: "source", Generation: 1}}},
 	}
 	for _, subject := range invalid {
 		if err := subject.Validate(); err == nil {
@@ -236,21 +235,21 @@ func FuzzDepcacheNamespaceKeepsAbsentRefDistinct(f *testing.F) {
 	f.Add("manual:")
 	f.Add("../manual:%2F")
 	f.Fuzz(func(t *testing.T, name string) {
-		key := blob.DepcacheKey{Repo: "local:checkout", Name: "modules", Key: "key", Ref: blob.RefScope{Writer: "account/a"}}
-		absent, err := blob.DepcacheNamespace(key)
+		key := DepcacheKey{Repo: "local:checkout", Name: "modules", Key: "key", Ref: RefScope{Writer: "account/a"}}
+		absent, err := DepcacheNamespace(key)
 		if err != nil {
 			t.Fatal(err)
 		}
-		key.Ref = blob.RefScope{Verified: true}
-		if _, err := blob.DepcacheNamespace(key); err == nil {
+		key.Ref = RefScope{Verified: true}
+		if _, err := DepcacheNamespace(key); err == nil {
 			t.Fatal("empty verified ref accepted")
 		}
 		for _, verified := range []bool{true, false} {
-			key.Ref = blob.RefScope{Ref: name, Verified: verified}
+			key.Ref = RefScope{Ref: name, Verified: verified}
 			if !verified {
 				key.Ref.Writer = "account/a"
 			}
-			named, err := blob.DepcacheNamespace(key)
+			named, err := DepcacheNamespace(key)
 			if err == nil && (name != "" || verified) && named == absent {
 				t.Fatal("named ref collided with absent ref")
 			}

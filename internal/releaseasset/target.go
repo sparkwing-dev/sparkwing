@@ -11,13 +11,13 @@ type Binary string
 
 const (
 	Sparkwing           Binary = "sparkwing"
-	SparkwingController Binary = "sparkwing-controller"
+	sparkwingController Binary = "sparkwing-controller"
 	SparkwingRunner     Binary = "sparkwing-runner"
 )
 
 var supportedPlatforms = map[Binary]map[string]map[string]bool{
 	Sparkwing:           releasePlatforms(true),
-	SparkwingController: releasePlatforms(false),
+	sparkwingController: releasePlatforms(false),
 	SparkwingRunner:     releasePlatforms(true),
 }
 

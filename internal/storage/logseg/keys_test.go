@@ -1,26 +1,25 @@
-package logseg_test
+package logseg
 
 import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 func TestJobSubjectPrefixLayout(t *testing.T) {
-	got, err := blob.LogSubjectPrefix(logseg.ClassFree, keySubject("acme", "run-1", "build/linux", 2, 7))
+	got, err := blob.LogSubjectPrefix(classFree, keySubject("acme", "run-1", "build/linux", 2, 7))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := "logs/r30/teams/acme/runs/run-1/jobs/build_2flinux/a2-g7/"; got != want {
 		t.Fatalf("prefix %q, want %q", got, want)
 	}
-	other, err := blob.LogSubjectPrefix(logseg.ClassFree, keySubject("acme", "run-1", "build__linux", 2, 7))
+	other, err := blob.LogSubjectPrefix(classFree, keySubject("acme", "run-1", "build__linux", 2, 7))
 	if err != nil || other == got {
 		t.Fatalf("hierarchical and flat node IDs share a prefix: %q, %v", other, err)
 	}
-	if escaped, err := blob.LogSubjectPrefix(logseg.ClassFree, keySubject("acme", "r", ".hidden/a_b c", 1, 1)); err != nil || escaped != "logs/r30/teams/acme/runs/r/jobs/_2ehidden_2fa_5fb_20c/a1-g1/" {
+	if escaped, err := blob.LogSubjectPrefix(classFree, keySubject("acme", "r", ".hidden/a_b c", 1, 1)); err != nil || escaped != "logs/r30/teams/acme/runs/r/jobs/_2ehidden_2fa_5fb_20c/a1-g1/" {
 		t.Fatalf("escaped subject = %q: %v", escaped, err)
 	}
 	if key := blob.LogSegmentKey(got, 12); key != got+"seg-000012.ndjson.gz" {
@@ -40,16 +39,16 @@ func TestJobSubjectPrefixRefusesBadParts(t *testing.T) {
 		attempt                int64
 	}{
 		"class":   {"90", "acme", "r", "n", 1},
-		"team":    {logseg.ClassStandard, "Acme/../x", "r", "n", 1},
-		"run":     {logseg.ClassStandard, "acme", "../r", "n", 1},
-		"node":    {logseg.ClassStandard, "acme", "r", "a/../b", 1},
-		"attempt": {logseg.ClassStandard, "acme", "r", "n", 0},
+		"team":    {ClassStandard, "Acme/../x", "r", "n", 1},
+		"run":     {ClassStandard, "acme", "../r", "n", 1},
+		"node":    {ClassStandard, "acme", "r", "a/../b", 1},
+		"attempt": {ClassStandard, "acme", "r", "n", 0},
 	} {
 		if _, err := blob.LogSubjectPrefix(args.class, keySubject(args.team, args.run, args.node, args.attempt, 1)); err == nil {
 			t.Errorf("%s: accepted %+v", name, args)
 		}
 	}
-	if _, err := blob.LogSubjectPrefix(logseg.ClassStandard, keySubject("_", "r", "n", 1, 1)); err != nil {
+	if _, err := blob.LogSubjectPrefix(ClassStandard, keySubject("_", "r", "n", 1, 1)); err != nil {
 		t.Fatalf("teamless run refused: %v", err)
 	}
 }

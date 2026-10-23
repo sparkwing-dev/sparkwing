@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"fmt"
@@ -7,7 +7,6 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -29,20 +28,20 @@ func TestLogObjectKeysKeepEveryIdentityDistinct(t *testing.T) {
 	}
 }
 
-func generatedLogSubjects(seed [16]byte, ordinal, generation uint16) []blob.LogSubject {
+func generatedLogSubjects(seed [16]byte, ordinal, generation uint16) []LogSubject {
 	team, run := fmt.Sprintf("team-%x", seed[:4]), fmt.Sprintf("run-%x", seed[4:8])
 	job := fmt.Sprintf("parent/%x", seed[8:])
 	attempt := runspec.AttemptIdentity{Team: team, RunID: run, NodeID: job, Attempt: int64(ordinal) + 1, Generation: int64(generation) + 1}
-	return []blob.LogSubject{
-		{Kind: blob.LogJobAttempt, Team: team, RunID: run, Attempt: &attempt},
-		{Kind: blob.LogOwnerUnit, Team: team, RunID: run, Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: attempt.Generation}},
-		{Kind: blob.LogOwnerUnit, Team: team, RunID: run, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: attempt.Generation}},
-		{Kind: blob.LogOwnerUnit, Team: team, RunID: run, Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: attempt.Generation, Source: &blob.LogSource{NodeID: job, Generation: attempt.Generation}}},
+	return []LogSubject{
+		{Kind: LogJobAttempt, Team: team, RunID: run, Attempt: &attempt},
+		{Kind: LogOwnerUnit, Team: team, RunID: run, Unit: &LogUnit{Kind: LogTrigger, Generation: attempt.Generation}},
+		{Kind: LogOwnerUnit, Team: team, RunID: run, Unit: &LogUnit{Kind: LogPlan, Generation: attempt.Generation}},
+		{Kind: LogOwnerUnit, Team: team, RunID: run, Unit: &LogUnit{Kind: LogEval, Generation: attempt.Generation, Source: &LogSource{NodeID: job, Generation: attempt.Generation}}},
 	}
 }
 
-func logSubjectVariants(subject blob.LogSubject) []blob.LogSubject {
-	out := []blob.LogSubject{subject}
+func logSubjectVariants(subject LogSubject) []LogSubject {
+	out := []LogSubject{subject}
 	for field := range 5 {
 		other := subject
 		if subject.Attempt != nil {
@@ -63,7 +62,7 @@ func logSubjectVariants(subject blob.LogSubject) []blob.LogSubject {
 	return out
 }
 
-func changeLogSubject(subject *blob.LogSubject, field int) bool {
+func changeLogSubject(subject *LogSubject, field int) bool {
 	switch field {
 	case 0:
 		subject.Team += "-other"
@@ -109,23 +108,23 @@ func changeLogSubject(subject *blob.LogSubject, field int) bool {
 	return true
 }
 
-func distinctLogKeys(seen map[string]bool, subject blob.LogSubject, index uint32) bool {
+func distinctLogKeys(seen map[string]bool, subject LogSubject, index uint32) bool {
 	for _, class := range []string{"r30", "r90"} {
-		prefix, err := blob.LogSubjectPrefix(class, subject)
+		prefix, err := LogSubjectPrefix(class, subject)
 		if err != nil {
 			return false
 		}
 		for _, n := range []int64{0, 1 + int64(index%uint32(limits.MaxLogSegmentNumber))} {
-			key, err := blob.LogObjectKey(subject, class, n)
+			key, err := LogObjectKey(subject, class, n)
 			if err != nil || !fs.ValidPath(key) || !strings.HasPrefix(key, prefix) || seen[key] {
 				return false
 			}
 			seen[key] = true
 			if n == 0 {
-				if key != blob.LogManifestKey(prefix) {
+				if key != LogManifestKey(prefix) {
 					return false
 				}
-			} else if parsed, ok := blob.LogSegmentNumber(prefix, key); !ok || int64(parsed) != n || key != blob.LogSegmentKey(prefix, int(n)) {
+			} else if parsed, ok := LogSegmentNumber(prefix, key); !ok || int64(parsed) != n || key != LogSegmentKey(prefix, int(n)) {
 				return false
 			}
 		}
@@ -135,13 +134,13 @@ func distinctLogKeys(seen map[string]bool, subject blob.LogSubject, index uint32
 
 func TestLogObjectKeysRejectInvalidSlotsAndPaths(t *testing.T) {
 	attempt := runspec.AttemptIdentity{Team: "acme", RunID: "run", NodeID: "build/linux", Attempt: 2, Generation: 7}
-	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}
+	subject := LogSubject{Kind: LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}
 	want := "logs/r30/teams/acme/runs/run/jobs/build_2flinux/a2-g7/seg-000001.ndjson.gz"
-	if got, err := blob.LogObjectKey(subject, "r30", 1); err != nil || got != want {
+	if got, err := LogObjectKey(subject, "r30", 1); err != nil || got != want {
 		t.Fatalf("object key = %q: %v", got, err)
 	}
 	for _, n := range []int64{-1, int64(limits.MaxLogSegmentNumber) + 1} {
-		if _, err := blob.LogObjectKey(subject, "r30", n); err == nil {
+		if _, err := LogObjectKey(subject, "r30", n); err == nil {
 			t.Fatalf("accepted slot %d", n)
 		}
 	}
@@ -149,12 +148,12 @@ func TestLogObjectKeysRejectInvalidSlotsAndPaths(t *testing.T) {
 		copy := attempt
 		copy.NodeID = path
 		subject.Attempt = &copy
-		if _, err := blob.LogObjectKey(subject, "r30", 1); err == nil {
+		if _, err := LogObjectKey(subject, "r30", 1); err == nil {
 			t.Fatalf("accepted job path %q", path)
 		}
 	}
 	for _, key := range []string{"seg-000000.ndjson.gz", "seg-0000001.ndjson.gz", fmt.Sprintf("seg-%06d.ndjson.gz", limits.MaxLogSegmentNumber+1)} {
-		if _, ok := blob.LogSegmentNumber("", key); ok {
+		if _, ok := LogSegmentNumber("", key); ok {
 			t.Fatalf("accepted noncanonical key %q", key)
 		}
 	}

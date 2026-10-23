@@ -58,7 +58,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	if _, err := teststore.Exec(t.Context(), f.Store, `UPDATE admission_work SET granted=0 WHERE team=? AND run_id=? AND node_id=?`, parent.Capability.Team, ref.RunID, ref.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	if issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
+	if issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service); err == nil || issued.Raw != "" || revoke != nil {
 		t.Fatalf("process delegation bypassed store permit: issued=%+v error=%v", issued, err)
 	}
 	if _, err := teststore.Exec(t.Context(), f.Store, `UPDATE admission_work SET granted=1 WHERE team=? AND run_id=? AND node_id=?`, parent.Capability.Team, ref.RunID, ref.NodeID); err != nil {
@@ -76,7 +76,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 		} {
 			child := spec
 			child.Repositories = scope.repositories
-			issued, revoke, err := registry.Delegate(t.Context(), lookup, child, service)
+			issued, revoke, err := registry.delegate(t.Context(), lookup, child, service)
 			if err != nil {
 				if scope.allowed {
 					return false
@@ -92,7 +92,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	if err := quick.Check(checkScope, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
 	}
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
+	issued, revoke, err := registry.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,7 @@ func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 	if prepared.Resolved.Entrypoint != "Deploy" {
 		t.Fatalf("resolved selection = %+v, cache = %+v", prepared.Resolved, prepared.Planning)
 	}
-	if _, err := PlanInitial(t.Context(), prepared.Planning, prepared.Plan); err != nil {
+	if _, err := planInitial(t.Context(), prepared.Planning, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	for _, process := range *processes {

@@ -1,4 +1,4 @@
-package logseg_test
+package logseg
 
 import (
 	"bytes"
@@ -12,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 type replayObject struct {
@@ -36,8 +35,8 @@ func TestLogUploadReplayVerifiesExactObject(t *testing.T) {
 			sum := sha256.Sum256(raw)
 			check := blob.LogUploadCheck{Subject: subject, Index: index, Size: int64(len(raw)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}
 			objects := &replayObject{body: &observedLogBody{Reader: bytes.NewReader(raw)}}
-			verifier := logseg.UploadVerifier{Objects: objects}
-			if err := verifier.Verify(t.Context(), check, "r90"); err != nil {
+			verifier := uploadVerifier{Objects: objects}
+			if err := verifier.verify(t.Context(), check, "r90"); err != nil {
 				t.Fatal(err)
 			}
 			prefix, err := blob.LogSubjectPrefix("r90", subject)
@@ -102,7 +101,7 @@ func TestLogUploadReplayRefusals(t *testing.T) {
 			case "cancelled":
 				cancel()
 			}
-			err := (logseg.UploadVerifier{Objects: objects}).Verify(ctx, check, class)
+			err := (uploadVerifier{Objects: objects}).verify(ctx, check, class)
 			if err == nil {
 				t.Fatal("invalid replay succeeded")
 			}

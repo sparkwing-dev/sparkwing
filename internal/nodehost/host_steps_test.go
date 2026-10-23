@@ -150,7 +150,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			attemptConfig.Environments = SDKEnvironment{Store: records, Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH")}}}
 			input.Entry.Command, input.Entry.Directory = cfg.Command, t.TempDir()
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-				process, err := attemptConfig.Start(ctx, in, activity)
+				process, err := attemptConfig.startNode(ctx, in, activity)
 				if process == nil {
 					return nil, err
 				}
@@ -298,7 +298,7 @@ func buildNativeSDKFixture(t *testing.T, ctx context.Context, name string) strin
 
 func planNativeSDKFixture(t *testing.T, ctx context.Context, bin, pipeline string, args map[string]string, run nodeproto.RunContext, runner nodeproto.RunnerIdentity) (nodeproto.HelloResult, nodeproto.PlanDoc) {
 	t.Helper()
-	process, err := StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH"))})
+	process, err := startProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH"))})
 	if err != nil {
 		t.Fatal(err)
 	}

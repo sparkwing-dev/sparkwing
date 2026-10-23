@@ -13,8 +13,8 @@ func TestPublicNodeIsIdempotent(t *testing.T) {
 		RunID: "run", NodeID: "node", ClaimedBy: "private-holder",
 		ClaimWorkerID: "desktop", ExecutorKind: "agent", ClaimGeneration: 9,
 	}
-	first := PublicNode(raw)
-	second := PublicNode(first)
+	first := publicNode(raw)
+	second := publicNode(first)
 	if !first.Claimed || !second.Claimed || second.ExecutorName != "desktop" {
 		t.Fatalf("projected node lost public attribution: first=%+v second=%+v", first, second)
 	}
@@ -38,7 +38,7 @@ func TestPublicNodeScrubsInternalExecutionIdentity(t *testing.T) {
 			HolderID: "private-holder", ReservationID: "reservation",
 		}},
 	}
-	got := PublicNode(raw)
+	got := publicNode(raw)
 	if !got.Claimed || got.ExecutorName != "desktop" {
 		t.Fatalf("projected node lost public execution attribution: %+v", got)
 	}

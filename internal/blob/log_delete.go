@@ -18,9 +18,9 @@ type LogDeleter interface {
 
 func logDeletionPrefix(class, team, run string) (string, error) {
 	if run != "" {
-		return LogRunPrefix(class, team, run)
+		return logRunPrefix(class, team, run)
 	}
-	prefix, err := LogRunPrefix(class, team, "scope")
+	prefix, err := logRunPrefix(class, team, "scope")
 	if err != nil {
 		return "", err
 	}

@@ -108,18 +108,18 @@ func validateHost(host string) error {
 	return nil
 }
 
-// HostPolicy is a deployment's own answer to whether a clone may go to host. It
+// cloneHostPolicy is a deployment's own answer to whether a clone may go to host. It
 // sees the lowercased host with any trailing dot removed, only after the
 // built-in checks have passed, and its error reaches the caller unchanged.
-type HostPolicy func(host string) error
+type cloneHostPolicy func(host string) error
 
-var hostPolicy atomic.Pointer[HostPolicy]
+var hostPolicy atomic.Pointer[cloneHostPolicy]
 
-// SetHostPolicy installs pol for every clone URL this process validates from
+// setHostPolicy installs pol for every clone URL this process validates from
 // here on, and a nil pol leaves only the built-in checks. A deployment that
 // bounds where clones go states that boundary by name, such as an allowlist
 // of forges.
-func SetHostPolicy(pol HostPolicy) {
+func setHostPolicy(pol cloneHostPolicy) {
 	if pol == nil {
 		hostPolicy.Store(nil)
 		return

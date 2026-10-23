@@ -20,7 +20,7 @@ func Inspect(ctx context.Context, h Host) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	body, exists, managed, err := unitfile.Read(path, Marker)
+	body, exists, managed, err := unitfile.Read(path, marker)
 	if err != nil {
 		return State{}, err
 	}
@@ -84,7 +84,7 @@ func agentRegistration(ctx context.Context, h Host) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("runner service: inspect launchd registration: %w: %s", err, strings.TrimSpace(out))
 	}
-	if err := unitfile.CheckAgentSource(out, PlistPath(h)); err != nil {
+	if err := unitfile.CheckAgentSource(out, plistPath(h)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -101,7 +101,7 @@ func registrationPath(h Host) (string, error) {
 		if !filepath.IsAbs(h.Home) {
 			return "", errors.New("runner service: Host.Home must be absolute")
 		}
-		return PlistPath(h), nil
+		return plistPath(h), nil
 	default:
 		return "", unsupported(h.GOOS)
 	}

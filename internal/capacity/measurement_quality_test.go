@@ -9,7 +9,7 @@ import (
 func TestResolveRequiresMeasuredResourceHistory(t *testing.T) {
 	for _, hash := range []string{"a", "b"} {
 		p := &store.PipelineProfile{PlanHash: "a", SampleCount: 3, PeakCores: 8, SustainedCores: 6, PeakMemoryBytes: 100, PrevPeakCores: 12, PrevSustainedCores: 10, PrevPeakMemoryBytes: 200, FloorCores: 20, FloorMemoryBytes: 300}
-		for _, resolve := range []func(*Pin, *store.PipelineProfile, int, string) Resolution{Resolve, ResolvePeak} {
+		for _, resolve := range []func(*Pin, *store.PipelineProfile, int, string) Resolution{Resolve, resolvePeak} {
 			got := resolve(nil, p, 8, hash)
 			if got.Cores != 4 || got.MemoryBytes != 0 || got.Source != store.CostSourceDefault {
 				t.Errorf("unknown resource history influenced charge: %+v", got)
@@ -20,7 +20,7 @@ func TestResolveRequiresMeasuredResourceHistory(t *testing.T) {
 			}
 		}
 		p.SampleCount = 0
-		if FloorPoisoned(p, 4) {
+		if floorPoisoned(p, 4) {
 			t.Error("unknown floor reported poisoned")
 		}
 	}
@@ -34,7 +34,7 @@ func TestResolveRequiresMeasuredResourceHistory(t *testing.T) {
 }
 
 func TestResolveRetainsMeasuredCarryAndFloor(t *testing.T) {
-	for _, resolve := range []func(*Pin, *store.PipelineProfile, int, string) Resolution{Resolve, ResolvePeak} {
+	for _, resolve := range []func(*Pin, *store.PipelineProfile, int, string) Resolution{Resolve, resolvePeak} {
 		p := &store.PipelineProfile{CPUMeasured: true, PrevPeakCores: 3, PrevSustainedCores: 3, PrevPeakMemoryBytes: 100}
 		got := resolve(nil, p, 8, "")
 		if got.Cores != 3 || got.MemoryBytes != 100 || got.Source != store.CostSourceMeasuring {

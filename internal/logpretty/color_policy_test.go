@@ -14,7 +14,7 @@ func TestDefaultRendererHonorsColorPolicy(t *testing.T) {
 	defer color.SetEnabled(old)
 	color.SetEnabled(false)
 	t.Setenv("NO_COLOR", "")
-	p := NewPrettyRenderer()
+	p := newPrettyRenderer()
 	var out bytes.Buffer
 	p.w = &out
 	p.errW = &out

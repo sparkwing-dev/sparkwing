@@ -2,7 +2,7 @@ package sparkwingruntime
 
 import "sort"
 
-func SortedUniqueRisks(slices ...[]string) []string {
+func sortedUniqueRisks(slices ...[]string) []string {
 	seen := map[string]bool{}
 	for _, sl := range slices {
 		for _, l := range sl {

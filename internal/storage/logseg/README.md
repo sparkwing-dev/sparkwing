@@ -36,7 +36,7 @@ overwrite. Index zero selects the final manifest. A 412 alone cannot
 establish a matching payload.
 
 The controller must authorize the current writer and resolve the run's persisted
-retention class before calling `UploadVerifier.Verify`. The verifier derives one
+retention class before calling `uploadVerifier.verify`. The verifier derives one
 key, reads bounded bytes and requires successful close, exact size and SHA-256.
 It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both

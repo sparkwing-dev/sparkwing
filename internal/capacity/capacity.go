@@ -16,17 +16,13 @@ const (
 
 	coldStartFraction = 0.5
 
-	MeasuredCoreFloor = 0.1
+	measuredCoreFloor = 0.1
 
 	WarmStartMultiple = 1.0
 
 	SafetyMultiple = 2.0
 
 	SustainedPercentile = 0.80
-
-	CeilingHitFraction = 0.9
-
-	CacheDominantFraction = 0.9
 )
 
 type Pin struct {
@@ -63,8 +59,8 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	return resolve(pin, profile, numCPU, planHash, cores, previous)
 }
 
-// ResolvePeak uses peak CPU demand for an enforced allocation.
-func ResolvePeak(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+// resolvePeak uses peak CPU demand for an enforced allocation.
+func resolvePeak(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
 	var cores, previous float64
 	if profile != nil {
 		cores, previous = profile.PeakCores, profile.PrevPeakCores
@@ -90,7 +86,7 @@ func resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
 	if !versionChanged && profile.SampleCount >= MinSamples {
-		res.Cores = math.Max(cores, MeasuredCoreFloor)
+		res.Cores = math.Max(cores, measuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 		return res
@@ -139,7 +135,7 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 			res.Source = store.CostSourceFloor
 		}
 	}
-	res.Cores = math.Max(cores, MeasuredCoreFloor)
+	res.Cores = math.Max(cores, measuredCoreFloor)
 
 	// safety: saturate unrepresentable demand before configured ceilings are applied.
 	floorMemory := int64(math.MaxInt64)
@@ -150,7 +146,7 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	return res
 }
 
-func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
+func applyHostCeiling(res Resolution, pipeline string, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
 	warning := ""
 	if res.Source == store.CostSourcePin {
 		if machineCores > 0 && res.Cores > machineCores {
@@ -160,7 +156,7 @@ func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCo
 		return res, warning
 	}
 	measuring := res.Source == store.CostSourceFloor || res.Source == store.CostSourceMeasuring
-	clamped := ApplyCeiling(res, grantableCores, grantableMemoryBytes)
+	clamped := applyCeiling(res, grantableCores, grantableMemoryBytes)
 	switch {
 	case measuring && clamped.Cores < res.Cores:
 		warning = fmt.Sprintf("measuring charge %.1f cores exceeds this machine's grantable %.1f, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
@@ -172,12 +168,12 @@ func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCo
 	return clamped, warning
 }
 
-// ApplyCeiling caps a resolution at a hard ceiling, whatever its source. A
+// applyCeiling caps a resolution at a hard ceiling, whatever its source. A
 // zero ceiling in either dimension leaves that dimension alone. Unlike
-// [ApplyHostCeiling], a pin is capped too: on a backend that turns the
+// [applyHostCeiling], a pin is capped too: on a backend that turns the
 // resolution into an enforced allocation, an operator ceiling outranks a
 // pipeline's own declaration.
-func ApplyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64) Resolution {
+func applyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64) Resolution {
 	if ceilingCores > 0 && res.Cores > ceilingCores {
 		res.Cores = ceilingCores
 	}
@@ -187,7 +183,7 @@ func ApplyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64
 	return res
 }
 
-func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
+func floorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
 	if profile == nil || !profile.CPUMeasured || grantableCores <= 0 {
 		return false
 	}
@@ -208,9 +204,9 @@ func coldStartCores(numCPU int) float64 {
 type DriftClass string
 
 const (
-	DriftUnderPinned DriftClass = "under_pinned"
+	driftUnderPinned DriftClass = "under_pinned"
 
-	DriftOverPinned DriftClass = "over_pinned"
+	driftOverPinned DriftClass = "over_pinned"
 )
 
 type Drift struct {
@@ -269,9 +265,9 @@ func memoryDrift(pinBytes, measuredBytes int64, samples int) *Drift {
 func classify(ratio float64) (DriftClass, bool) {
 	switch {
 	case ratio < 1-DriftFraction:
-		return DriftUnderPinned, true
+		return driftUnderPinned, true
 	case ratio > 1+DriftFraction:
-		return DriftOverPinned, true
+		return driftOverPinned, true
 	default:
 		return "", false
 	}

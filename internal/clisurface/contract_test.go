@@ -7,7 +7,7 @@ import (
 )
 
 func TestRegistryIntegrity(t *testing.T) {
-	if err := Validate(Registry()); err != nil {
+	if err := validate(Registry()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -54,7 +54,7 @@ func TestRegistryRejectsGrammarDrift(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := Validate(tt.change(Registry())); err == nil {
+			if err := validate(tt.change(Registry())); err == nil {
 				t.Fatal("accepted invalid grammar")
 			}
 		})
@@ -112,7 +112,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 		t.Error("Windows install must be refused")
 	}
 	for _, c := range Registry() {
-		if strings.HasPrefix(c.Path, "sparkwing operator ") && c.Authority != DeploymentAdmin {
+		if strings.HasPrefix(c.Path, "sparkwing operator ") && c.Authority != deploymentAdmin {
 			t.Errorf("%s crosses authority boundary", c.Path)
 		}
 	}

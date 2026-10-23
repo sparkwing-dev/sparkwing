@@ -6,21 +6,21 @@ import (
 )
 
 func (v *planValidator) validateJob(job JobSpec, path string) error {
-	if err := v.feature(CapabilityJobs, path); err != nil {
+	if err := v.feature(capabilityJobs, path); err != nil {
 		return err
 	}
 	for _, ids := range []struct {
 		values  []string
 		path    string
-		feature PlanCapability
+		feature planCapability
 	}{
-		{job.Needs, path + ".deps", CapabilityDependencies},
-		{job.NeedsIfPresent, path + ".deps_if_present", CapabilityOptionalDependencies},
-		{job.NeedsGenerated, path + ".needs_generated", CapabilityGeneratedDependencies},
-		{job.Groups, path + ".groups", CapabilityGroups},
-		{job.Requires, path + ".requires", CapabilityRequires},
-		{job.Prefers, path + ".prefers", CapabilityPrefers},
-		{job.Artifacts, path + ".artifacts", CapabilityArtifacts},
+		{job.Needs, path + ".deps", capabilityDependencies},
+		{job.NeedsIfPresent, path + ".deps_if_present", capabilityOptionalDependencies},
+		{job.NeedsGenerated, path + ".needs_generated", capabilityGeneratedDependencies},
+		{job.Groups, path + ".groups", capabilityGroups},
+		{job.Requires, path + ".requires", capabilityRequires},
+		{job.Prefers, path + ".prefers", capabilityPrefers},
+		{job.Artifacts, path + ".artifacts", capabilityArtifacts},
 	} {
 		if len(ids.values) > 0 {
 			if err := v.feature(ids.feature, ids.path); err != nil {
@@ -32,7 +32,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 	}
 	if job.OnFailureOf != "" {
-		if err := v.feature(CapabilityRecovery, path+".on_failure_of"); err != nil {
+		if err := v.feature(capabilityRecovery, path+".on_failure_of"); err != nil {
 			return err
 		}
 		if err := v.identifier(job.OnFailureOf, path+".on_failure_of"); err != nil {
@@ -40,7 +40,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 	}
 	if job.Retry != nil {
-		if err := v.feature(CapabilityRetry, path+".retry"); err != nil {
+		if err := v.feature(capabilityRetry, path+".retry"); err != nil {
 			return err
 		}
 		if job.Retry.Attempts < 0 || job.Retry.BackoffMS != nil && *job.Retry.BackoffMS < 0 {
@@ -50,11 +50,11 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 	for _, duration := range []struct {
 		value   *int64
 		path    string
-		feature PlanCapability
+		feature planCapability
 	}{
-		{job.TimeoutMS, path + ".timeout_ms", CapabilityTimeout},
-		{job.NoProgressTimeoutMS, path + ".no_progress_timeout_ms", CapabilityNoProgressTimeout},
-		{job.SkipIfBudgetMS, path + ".skip_if_budget_ms", CapabilitySkipBudget},
+		{job.TimeoutMS, path + ".timeout_ms", capabilityTimeout},
+		{job.NoProgressTimeoutMS, path + ".no_progress_timeout_ms", capabilityNoProgressTimeout},
+		{job.SkipIfBudgetMS, path + ".skip_if_budget_ms", capabilitySkipBudget},
 	} {
 		if duration.value != nil {
 			if err := v.feature(duration.feature, duration.path); err != nil {
@@ -66,7 +66,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 	}
 	if job.Memo != nil {
-		if err := v.feature(CapabilityMemo, path+".memo"); err != nil {
+		if err := v.feature(capabilityMemo, path+".memo"); err != nil {
 			return err
 		}
 		if job.Memo.TTLMS != nil && *job.Memo.TTLMS < 0 {
@@ -85,17 +85,17 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		return planInvalid(path+".memo", "memo policy and memo key must be declared together")
 	}
 	if len(job.Closures.Generate) > 0 {
-		if err := v.feature(CapabilityGenerators, path+".closures.generate"); err != nil {
+		if err := v.feature(capabilityGenerators, path+".closures.generate"); err != nil {
 			return err
 		}
 	}
 	if job.Closures.MemoKey != "" || job.Closures.Verify != "" || len(job.Closures.SkipIf)+len(job.Closures.BeforeRun)+len(job.Closures.AfterRun) > 0 {
-		if err := v.feature(CapabilityClosures, path+".closures"); err != nil {
+		if err := v.feature(capabilityClosures, path+".closures"); err != nil {
 			return err
 		}
 	}
 	if len(job.Caches) > 0 {
-		if err := v.feature(CapabilityCaches, path+".caches"); err != nil {
+		if err := v.feature(capabilityCaches, path+".caches"); err != nil {
 			return err
 		}
 	}
@@ -114,7 +114,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		cacheNames[cache.Name] = true
 	}
 	if len(job.Consumes) > 0 {
-		if err := v.feature(CapabilityConsumes, path+".consumes"); err != nil {
+		if err := v.feature(capabilityConsumes, path+".consumes"); err != nil {
 			return err
 		}
 	}
@@ -124,7 +124,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 	}
 	if len(job.References) > 0 {
-		if err := v.feature(CapabilityReferences, path+".pipeline_refs"); err != nil {
+		if err := v.feature(capabilityReferences, path+".pipeline_refs"); err != nil {
 			return err
 		}
 	}
@@ -146,7 +146,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		if job.Approval != nil {
 			return planInvalid(path+".concurrency", fmt.Sprintf("approval %q cannot declare concurrency groups; put them on the job after the approval", job.ID))
 		}
-		if err := v.feature(CapabilityJobConcurrency, path+".concurrency"); err != nil {
+		if err := v.feature(capabilityJobConcurrency, path+".concurrency"); err != nil {
 			return err
 		}
 	}
@@ -154,7 +154,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		return err
 	}
 	if job.Inline {
-		if err := v.feature(CapabilityInline, path+".inline"); err != nil {
+		if err := v.feature(capabilityInline, path+".inline"); err != nil {
 			return err
 		}
 	}
@@ -162,23 +162,23 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		if err := v.identifier(name, path+".env"); err != nil {
 			return err
 		}
-		feature := CapabilityBodyEnv
+		feature := capabilityBodyEnv
 		if env.Startup || planOneOf(name, "NODE_OPTIONS", "GODEBUG", "GOMAXPROCS") {
-			feature = CapabilityStartupEnv
+			feature = capabilityStartupEnv
 		}
 		if err := v.feature(feature, path+".env"); err != nil {
 			return err
 		}
 	}
 	if job.Approval != nil {
-		if err := v.feature(CapabilityApproval, path+".approval"); err != nil {
+		if err := v.feature(capabilityApproval, path+".approval"); err != nil {
 			return err
 		}
 		if len(job.Steps) != 0 || job.ResultStep != "" || job.OnFailureOf != "" || job.Retry != nil || job.Memo != nil || len(job.Caches)+len(job.Artifacts)+len(job.Consumes) > 0 || job.TimeoutMS != nil || job.NoProgressTimeoutMS != nil || job.Inline || job.FailurePolicy != "" || len(job.Closures.Generate) > 0 || len(job.Closures.BeforeRun)+len(job.Closures.AfterRun) > 0 || job.Closures.Verify != "" || job.Closures.MemoKey != "" {
 			return planInvalid(path+".approval", "approval conflicts with executable or recovery declarations")
 		}
 		if len(job.Closures.SkipIf) > 0 {
-			if err := v.feature(CapabilityApprovalCondition, path+".closures.skip_if"); err != nil {
+			if err := v.feature(capabilityApprovalCondition, path+".closures.skip_if"); err != nil {
 				return err
 			}
 		}
@@ -192,7 +192,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		return planInvalid(path+".steps", "body job requires a step")
 	}
 	if job.FailurePolicy != "" {
-		if err := v.feature(CapabilityFailurePolicy, path+".failure_policy"); err != nil {
+		if err := v.feature(capabilityFailurePolicy, path+".failure_policy"); err != nil {
 			return err
 		}
 		if !planOneOf(job.FailurePolicy, "fail_fast", "collect_all") {
@@ -204,7 +204,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 
 func (v *planValidator) validateSteps(job JobSpec, path string) error {
 	if len(job.Steps) > 0 {
-		if err := v.feature(CapabilitySteps, path+".steps"); err != nil {
+		if err := v.feature(capabilitySteps, path+".steps"); err != nil {
 			return err
 		}
 	}
@@ -225,17 +225,17 @@ func (v *planValidator) validateSteps(job JobSpec, path string) error {
 			return err
 		}
 		if len(step.Groups) > 0 {
-			if err := v.feature(CapabilityGroups, at+".groups"); err != nil {
+			if err := v.feature(capabilityGroups, at+".groups"); err != nil {
 				return err
 			}
 		}
 		if len(step.Risks) > 0 {
-			if err := v.feature(CapabilityRisk, at+".risks"); err != nil {
+			if err := v.feature(capabilityRisk, at+".risks"); err != nil {
 				return err
 			}
 		}
 		if step.HasDryRun || step.SafeWithoutDryRun {
-			if err := v.feature(CapabilityDryRun, at); err != nil {
+			if err := v.feature(capabilityDryRun, at); err != nil {
 				return err
 			}
 		}
@@ -243,7 +243,7 @@ func (v *planValidator) validateSteps(job JobSpec, path string) error {
 			return planInvalid(at+".closures", "step closure has an invalid kind")
 		}
 		if step.Closures.Verify != "" || len(step.Closures.SkipIf)+len(step.Closures.BeforeRun)+len(step.Closures.AfterRun) > 0 {
-			if err := v.feature(CapabilityClosures, at+".closures"); err != nil {
+			if err := v.feature(capabilityClosures, at+".closures"); err != nil {
 				return err
 			}
 		}

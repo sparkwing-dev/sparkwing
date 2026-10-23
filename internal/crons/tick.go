@@ -11,10 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// ErrTickRunning is returned when another tick already holds the lock. It is
+// errTickRunning is returned when another tick already holds the lock. It is
 // the ordinary answer on a busy host, not a failure: the tick that holds the
 // lock is resolving the same minute.
-var ErrTickRunning = errors.New("crons: another tick is already running")
+var errTickRunning = errors.New("crons: another tick is already running")
 
 // TickReport is what one tick did. Decisions carry one entry per schedule that
 // resolved an instant, and Errors one sentence per schedule or repository that
@@ -80,7 +80,7 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 
 	tick := func(svc *Service) error {
 		if !dryRun {
-			refreshed, err := svc.Refresh(ctx)
+			refreshed, err := svc.refresh(ctx)
 			if err != nil {
 				return err
 			}
@@ -183,7 +183,7 @@ func (s *Service) minIntervalRefusal(ctx context.Context, sched store.CronSchedu
 		return nil, err
 	}
 	d := sched.Effective()
-	return RefuseBelowMinInterval(d.Cron, d.TZ, limits.CronSeconds), nil
+	return refuseBelowMinInterval(d.Cron, d.TZ, limits.CronSeconds), nil
 }
 
 // safety: a host's override can break a cadence the config validated, and such

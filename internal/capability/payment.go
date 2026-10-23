@@ -53,16 +53,16 @@ const (
 	PaymentPageCompleted   PaymentEventKind = "page_completed"
 )
 
-// PaymentEventPolicy maps provider types to verified settlement outcomes.
-type PaymentEventPolicy struct {
+// paymentEventPolicy maps provider types to verified settlement outcomes.
+type paymentEventPolicy struct {
 	ProviderType string
 	Kind         PaymentEventKind
 	RequirePaid  bool
 }
 
-// PaymentEventPolicies is the complete accepted Stripe settlement-event inventory.
+// paymentEventPolicies is the complete accepted Stripe settlement-event inventory.
 // Completed sessions without paid status remain pending until an asynchronous success event.
-var paymentEventPolicies = []PaymentEventPolicy{
+var paymentEventPolicies = []paymentEventPolicy{
 	{"checkout.session.completed", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_succeeded", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_failed", PaymentCheckoutFailed, false},
@@ -278,7 +278,7 @@ func (a *paymentAuthenticator) validSignature(p PaymentPresentation) bool {
 	return false
 }
 
-func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, body []byte, policy PaymentEventPolicy) (*VerifiedPaymentEvent, error) {
+func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, body []byte, policy paymentEventPolicy) (*VerifiedPaymentEvent, error) {
 	var session struct {
 		ID            string           `json:"id"`
 		Object        string           `json:"object"`

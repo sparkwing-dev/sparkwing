@@ -1,4 +1,4 @@
-package objectguard_test
+package objectguard
 
 import (
 	"testing"

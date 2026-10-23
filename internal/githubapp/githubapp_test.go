@@ -31,27 +31,23 @@ func fixture(t *testing.T) (*githubapptest.GitHub, *githubapp.Client) {
 	return gh, githubapp.New(gh.Config())
 }
 
-func TestInstallationToken_CoversOnlyTheNamedRepository(t *testing.T) {
+func TestResolveCommitRestrictsTheTokenToTheNamedRepository(t *testing.T) {
 	gh, c := fixture(t)
-	tok, err := c.InstallationToken(context.Background(), 7, []string{"widgets"}, map[string]string{"contents": "read"})
-	if err != nil {
-		t.Fatalf("InstallationToken: %v", err)
-	}
-	if !gh.TokenCovers(tok.Token, "acme/widgets") {
-		t.Fatal("the token does not read the repository it was minted for")
-	}
-	if gh.TokenCovers(tok.Token, "acme/secret-plans") {
-		t.Fatal("a token minted for acme/widgets reads acme/secret-plans")
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	gh.SetCommit("acme/widgets", "heads/main", sha)
+	got, err := c.ResolveCommit(context.Background(), 7, "acme", "widgets", "refs/heads/main")
+	if err != nil || got != sha {
+		t.Fatalf("ResolveCommit = %q, %v, want %q", got, err, sha)
 	}
 	minted := gh.Minted()
-	if len(minted) != 1 || len(minted[0].Repositories) != 1 || minted[0].Permissions["contents"] != "read" || len(minted[0].Permissions) != 1 {
+	if len(minted) != 1 || len(minted[0].Repositories) != 1 || minted[0].Repositories[0] != "widgets" || len(minted[0].RepositoryIDs) != 0 || minted[0].Permissions["contents"] != "read" || len(minted[0].Permissions) != 1 {
 		t.Fatalf("the token request asked for %+v, want one repository and contents:read only", minted)
 	}
 }
 
-func TestInstallationToken_RepositoryOutsideTheInstallationIsNotInstalled(t *testing.T) {
+func TestResolveCommitRefusesARepositoryOutsideTheInstallation(t *testing.T) {
 	_, c := fixture(t)
-	_, err := c.InstallationToken(context.Background(), 7, []string{"elsewhere"}, map[string]string{"contents": "read"})
+	_, err := c.ResolveCommit(context.Background(), 7, "acme", "elsewhere", "refs/heads/main")
 	if !errors.Is(err, githubapp.ErrNotInstalled) {
 		t.Fatalf("err = %v, want ErrNotInstalled", err)
 	}
@@ -74,16 +70,20 @@ func TestAppJWT_AnotherKeyIsRejected(t *testing.T) {
 	}
 }
 
-func TestVerifyWebhook(t *testing.T) {
-	_, c := fixture(t)
+func TestWebhookMAC(t *testing.T) {
+	c := githubapp.New(githubapp.Config{WebhookSecret: "current"})
 	body := []byte(`{"action":"opened"}`)
-	if !c.VerifyWebhook(githubapptest.Sign(body), body) {
+	mac := c.WebhookMAC()
+	_, _ = mac.Write(body)
+	if !mac.Verify(githubapptest.SignWith("current", body)) {
 		t.Fatal("a delivery signed with the webhook secret did not verify")
 	}
-	if c.VerifyWebhook(githubapptest.SignWith("other", body), body) {
+	if mac.Verify(githubapptest.SignWith("other", body)) {
 		t.Fatal("a delivery signed with another secret verified")
 	}
-	if c.VerifyWebhook(githubapptest.Sign(body), []byte(`{"action":"closed"}`)) {
+	mac = c.WebhookMAC()
+	_, _ = mac.Write([]byte(`{"action":"closed"}`))
+	if mac.Verify(githubapptest.SignWith("current", body)) {
 		t.Fatal("a signature verified a body it did not cover")
 	}
 }
@@ -115,7 +115,7 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	ctx := context.Background()
 	run := githubapp.CheckRun{Name: "sparkwing/build", HeadSHA: "0123456789abcdef0123456789abcdef01234567", Status: "queued"}
 
-	statuses, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"statuses": "write"})
+	statuses, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"statuses": "write"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,15 +124,15 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	}
 
 	gh.SetChecksGranted(7, false)
-	if _, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"checks": "write"}); !errors.Is(err, githubapp.ErrPermissionMissing) {
+	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"checks": "write"}); !errors.Is(err, githubapp.ErrPermissionMissing) {
 		t.Fatalf("checks token on an installation without the permission = %v, want ErrPermissionMissing", err)
 	}
-	if _, err := c.InstallationToken(ctx, 7, []string{"elsewhere"}, map[string]string{"statuses": "write"}); !errors.Is(err, githubapp.ErrNotInstalled) {
+	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{999}, map[string]string{"statuses": "write"}); !errors.Is(err, githubapp.ErrNotInstalled) {
 		t.Fatalf("control: a repository outside the installation = %v, want ErrNotInstalled", err)
 	}
 
 	gh.SetChecksGranted(7, true)
-	checks, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"checks": "write"})
+	checks, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"checks": "write"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,9 +145,9 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 	gh.FailCheckRuns(1)
-	var apiErr *githubapp.APIError
+	var apiErr interface{ Temporary() bool }
 	if err := c.UpdateCheckRun(ctx, checks.Token, "acme", "widgets", id, run); !errors.As(err, &apiErr) || !apiErr.Temporary() {
-		t.Fatalf("update GitHub answered 502 = %v, want a temporary APIError", err)
+		t.Fatalf("update GitHub answered 502 = %v, want a temporary error", err)
 	}
 	calls := gh.CheckRunCalls()
 	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != id || calls[1].Conclusion != "success" {
@@ -196,21 +196,20 @@ func TestFileAtCommit_ReadsAtMostOneByteBeyondTheConfigurationLimit(t *testing.T
 	}
 }
 
-func TestVerifyWebhook_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
-	gh, _ := fixture(t)
+func TestWebhookMAC_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
 	body := []byte(`{"action":"opened"}`)
 	for _, previous := range []string{"", "rotated-out-secret"} {
-		cfg := gh.Config()
-		cfg.PreviousWebhookSecret = previous
-		c := githubapp.New(cfg)
-		if !c.VerifyWebhook(githubapptest.Sign(body), body) {
+		c := githubapp.New(githubapp.Config{WebhookSecret: "current", PreviousWebhookSecret: previous})
+		mac := c.WebhookMAC()
+		_, _ = mac.Write(body)
+		if !mac.Verify(githubapptest.SignWith("current", body)) {
 			t.Fatal("the current secret did not verify")
 		}
-		if got := c.VerifyWebhook(githubapptest.SignWith("rotated-out-secret", body), body); got != (previous != "") {
+		if got := mac.Verify(githubapptest.SignWith("rotated-out-secret", body)); got != (previous != "") {
 			t.Fatalf("previous secret %q verified = %v", previous, got)
 		}
 		for _, other := range []string{"", "other"} {
-			if c.VerifyWebhook(githubapptest.SignWith(other, body), body) {
+			if mac.Verify(githubapptest.SignWith(other, body)) {
 				t.Fatalf("a delivery signed with %q verified", other)
 			}
 		}

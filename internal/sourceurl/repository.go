@@ -67,21 +67,21 @@ func hasDotSegment(p string) bool {
 
 var githubSlugRE = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
 
-// GitHubIdentity is the Identity of the GitHub repository an "owner/name" slug
+// gitHubIdentity is the Identity of the GitHub repository an "owner/name" slug
 // names.
-func GitHubIdentity(slug string) (string, error) {
+func gitHubIdentity(slug string) (string, error) {
 	if !githubSlugRE.MatchString(slug) {
 		return "", fmt.Errorf("GitHub repository %q is not an owner/name slug", slug)
 	}
 	return Identity("https://github.com/" + slug)
 }
 
-// TriggerRepository is the one repository a trigger names, as an Identity, or
+// triggerRepository is the one repository a trigger names, as an Identity, or
 // "" when it names none. A trigger can name its repository three ways -- the
 // clone URL, GITHUB_REPOSITORY and github_owner/github_repo -- and the run page,
 // the commit status and the runner's fetch each read a different one, so every
 // one given must name the same repository or the trigger is refused.
-func TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo string) (string, error) {
+func triggerRepository(repoURL, githubRepository, githubOwner, githubRepo string) (string, error) {
 	type named struct{ field, identity string }
 	var names []named
 	if repoURL != "" {
@@ -92,14 +92,14 @@ func TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo string
 		names = append(names, named{"git.repo_url", id})
 	}
 	if githubRepository != "" {
-		id, err := GitHubIdentity(githubRepository)
+		id, err := gitHubIdentity(githubRepository)
 		if err != nil {
 			return "", fmt.Errorf("GITHUB_REPOSITORY: %w", err)
 		}
 		names = append(names, named{"GITHUB_REPOSITORY", id})
 	}
 	if githubOwner != "" || githubRepo != "" {
-		id, err := GitHubIdentity(githubOwner + "/" + githubRepo)
+		id, err := gitHubIdentity(githubOwner + "/" + githubRepo)
 		if err != nil {
 			return "", fmt.Errorf("github_owner/github_repo: %w", err)
 		}
@@ -122,8 +122,7 @@ func TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo string
 // "github.com/acme/*" admits github.com/acme/app but not github.com/acme/app/sub
 // or github.com/other/app. The zero value admits nothing.
 type RepoAllowlist struct {
-	patterns    []string
-	workingTree bool
+	patterns []string
 }
 
 var repoPatternRE = regexp.MustCompile(`^[a-z0-9._*/:-]+$`)
@@ -172,19 +171,6 @@ func ParseRepoAllowlist(patterns []string) (RepoAllowlist, error) {
 	return out, nil
 }
 
-// AcceptingWorkingTree returns the list with the owner's consent to build
-// working-tree snapshots the controller supplies. A snapshot carries
-// uncommitted code no repository holds, so the list cannot vouch for it.
-func (a RepoAllowlist) AcceptingWorkingTree() RepoAllowlist {
-	a.patterns = append([]string{}, a.patterns...)
-	a.workingTree = true
-	return a
-}
-
-// AcceptsWorkingTree reports whether the owner consented to build
-// controller-supplied working-tree snapshots; see [RepoAllowlist.AcceptingWorkingTree].
-func (a RepoAllowlist) AcceptsWorkingTree() bool { return a.workingTree }
-
 // Empty reports an allowlist that admits nothing.
 func (a RepoAllowlist) Empty() bool { return len(a.patterns) == 0 }
 
@@ -214,7 +200,7 @@ func (a RepoAllowlist) Admits(identity string) bool {
 // store that reads those fields. Fields that disagree or do not parse name one
 // the list refuses.
 func (a RepoAllowlist) AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool) {
-	id, err := TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo)
+	id, err := triggerRepository(repoURL, githubRepository, githubOwner, githubRepo)
 	if err != nil {
 		return true, false
 	}

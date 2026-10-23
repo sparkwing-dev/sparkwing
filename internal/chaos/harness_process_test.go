@@ -232,7 +232,7 @@ func TestWatchActorBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 
 func TestManagedDaemonBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 	requireProcessGroups(t)
-	h := &Harness{cfg: Config{Settle: time.Second}, t: t, daemons: map[int]*daemonProcess{}}
+	h := &harness{cfg: config{Settle: time.Second}, t: t, daemons: map[int]*daemonProcess{}}
 	const daemonCount = 20
 	daemons := make([]*daemonProcess, 0, daemonCount)
 	for range daemonCount {
@@ -267,7 +267,7 @@ func TestManagedDaemonBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 }
 
 func TestReadStateCancelsAStalledQueueExchange(t *testing.T) {
-	h := &Harness{cfg: Config{OracleTimeout: 25 * time.Millisecond}}
+	h := &harness{cfg: config{OracleTimeout: 25 * time.Millisecond}}
 	h.stateReader = func(ctx context.Context) (wingwire.QueueState, error) {
 		<-ctx.Done()
 		return wingwire.QueueState{}, ctx.Err()
@@ -289,8 +289,8 @@ func TestProcessGuardRunsWhileQueueStateIsStalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Harness{
-		cfg:           Config{OracleTimeout: 100 * time.Millisecond, MaxOwnedProcesses: 1},
+	h := &harness{
+		cfg:           config{OracleTimeout: 100 * time.Millisecond, MaxOwnedProcesses: 1},
 		guardInterval: 5 * time.Millisecond,
 		actors:        map[string]*actor{"guarded": {group: group}},
 	}
@@ -370,7 +370,7 @@ func TestActorCleanupFailureRetainsOwnershipForRetry(t *testing.T) {
 
 func TestDaemonCleanupFailureRetainsLedgerForRetry(t *testing.T) {
 	requireProcessGroups(t)
-	h := &Harness{cfg: Config{Settle: time.Second}, t: t, daemons: map[int]*daemonProcess{}}
+	h := &harness{cfg: config{Settle: time.Second}, t: t, daemons: map[int]*daemonProcess{}}
 	group, err := procgroup.Start(helperCommand("hang", 0))
 	if err != nil {
 		t.Fatal(err)
@@ -575,7 +575,7 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 	}
 }
 
-func awaitGuardViolation(t *testing.T, h *Harness, bound time.Duration, fired <-chan []string) string {
+func awaitGuardViolation(t *testing.T, h *harness, bound time.Duration, fired <-chan []string) string {
 	t.Helper()
 	guard := newProcessGuard(h)
 	var got string
@@ -625,22 +625,22 @@ func helperCommand(mode string, children int) *exec.Cmd {
 	return cmd
 }
 
-func newProcessHarness(t *testing.T) (*Harness, *Journal) {
-	journal, err := NewJournal(filepath.Join(t.TempDir(), "journal.jsonl"))
+func newProcessHarness(t *testing.T) (*harness, *journal) {
+	journal, err := newJournal(filepath.Join(t.TempDir(), "journal.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Harness{cfg: Config{Settle: time.Second}, t: t, jr: journal}, journal
+	return &harness{cfg: config{Settle: time.Second}, t: t, jr: journal}, journal
 }
 
-func soakScaleHarness(t *testing.T) (*Harness, *Journal) {
+func soakScaleHarness(t *testing.T) (*harness, *journal) {
 	t.Helper()
-	journal, err := NewJournal(filepath.Join(t.TempDir(), "journal.jsonl"))
+	journal, err := newJournal(filepath.Join(t.TempDir(), "journal.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Harness{
-		cfg:     SoakConfig(20260801, 30*time.Minute),
+	h := &harness{
+		cfg:     soakConfig(20260801, 30*time.Minute),
 		t:       t,
 		jr:      journal,
 		actors:  map[string]*actor{},
@@ -649,7 +649,7 @@ func soakScaleHarness(t *testing.T) (*Harness, *Journal) {
 	return h, journal
 }
 
-func startGuardedActor(t *testing.T, h *Harness, runID, mode string, children int) *actor {
+func startGuardedActor(t *testing.T, h *harness, runID, mode string, children int) *actor {
 	t.Helper()
 	cmd := helperCommand(mode, children)
 	stdout, group, err := startActorCommand(cmd)

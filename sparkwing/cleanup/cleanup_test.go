@@ -16,12 +16,12 @@ func TestRegisterWritesACommandRecordAndReleaseRemovesIt(t *testing.T) {
 	t.Setenv("SPARKWING_JOB_ID", "build")
 	ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
 
-	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}, Description: "docker run x"})
+	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}, Description: "cleanup helper"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, _ := ledger.List()
-	if len(got) != 1 || got[0].Handle.Kind != "command" || got[0].Command != "docker run x" {
+	if len(got) != 1 || got[0].Handle.Kind != "command" || got[0].Description != "cleanup helper" {
 		t.Fatalf("record = %+v", got)
 	}
 	if got[0].Handle.Argv[0] != "docker" || got[0].Handle.ID == "" {
@@ -78,9 +78,8 @@ func TestRegisterWithNoArgvIsANoOp(t *testing.T) {
 	}
 }
 
-// A tool a step starts has no masker, so a cleanup it registers without a
-// description is recorded by its program name alone, never its arguments.
-func TestRegisterWithoutADescriptionRecordsOnlyTheProgram(t *testing.T) {
+// An absent label leaves diagnostics to use a fixed description.
+func TestRegisterWithoutADescriptionDoesNotDeriveOneFromArgv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "run-1")
@@ -91,7 +90,7 @@ func TestRegisterWithoutADescriptionRecordsOnlyTheProgram(t *testing.T) {
 	}
 	defer release()
 	got, _ := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List()
-	if len(got) != 1 || got[0].Command != "vault" {
-		t.Fatalf("record = %+v, want the command named by its program alone", got)
+	if len(got) != 1 || got[0].Description != "" {
+		t.Fatalf("record = %+v, want no argv-derived description", got)
 	}
 }
