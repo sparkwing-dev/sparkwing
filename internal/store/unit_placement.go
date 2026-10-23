@@ -17,6 +17,14 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 		return len(preferences)
 	}
 	profile.Labels = match.AuthenticatedLabels(profile)
+	if profile.Class == match.ClassCloud {
+		size, err := match.CloudSizeForProfile(demand.Selector, profile)
+		if err != nil {
+			return len(preferences)
+		}
+		profile.Labels = slices.DeleteFunc(profile.Labels, func(label string) bool { return strings.HasPrefix(label, "sparkwing-") })
+		profile.Labels = append(profile.Labels, size.Label)
+	}
 	for i, preference := range preferences {
 		if len(preference.Prefers) == 0 || slices.ContainsFunc(preference.Prefers, func(term string) bool {
 			return strings.TrimSpace(term) != "" && match.TermSatisfied(profile, term)

@@ -16,22 +16,34 @@ import (
 )
 
 func TestCloudSizePreferenceIsRecordedOnAward(t *testing.T) {
-	s, demand, _ := meteredUnitFixture(t, true)
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["sparkwing-16cpu"]},"prefers":{"value":["sparkwing-16cpu"]}}`))
-	indexFixtureUnit(t, s, "a", *demand.Target)
-	rates := CreditRateTable{{Cores: 16, MicroPerSecond: 40}}
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
-		t.Fatal(err)
-	}
-	var reason string
-	if err := s.db.QueryRow(`SELECT placement_reason FROM nodes`).Scan(&reason); err != nil {
-		t.Fatal(err)
-	}
-	if reason != PlacementPreferred {
-		t.Fatalf("Cloud size preference recorded %q, want %q", reason, PlacementPreferred)
+	for _, tc := range []struct{ prefers, want string }{
+		{"sparkwing-4cpu", PlacementFallback},
+		{"sparkwing-16cpu", PlacementPreferred},
+	} {
+		t.Run(tc.prefers, func(t *testing.T) {
+			s, demand, _ := meteredUnitFixture(t, true)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(fmt.Sprintf(`{"requires":{"value":["sparkwing-16cpu"]},"prefers":{"value":[%q]}}`, tc.prefers)))
+			indexFixtureUnit(t, s, "a", *demand.Target)
+			rates := CreditRateTable{{Cores: 16, MicroPerSecond: 40}}
+			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
+				t.Fatal(err)
+			}
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resources, err := s.AsOperator().CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+			if err != nil || resources == nil || resources.Cores != 16 {
+				t.Fatalf("Cloud allocation = %+v, %v; want 16 CPUs", resources, err)
+			}
+			var reason string
+			if err := s.db.QueryRow(`SELECT placement_reason FROM nodes`).Scan(&reason); err != nil {
+				t.Fatal(err)
+			}
+			if reason != tc.want {
+				t.Fatalf("Cloud size preference recorded %q, want %q", reason, tc.want)
+			}
+		})
 	}
 }
 
