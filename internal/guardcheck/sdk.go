@@ -9,6 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
+var supportedPlatforms = []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"}
+
 // Include subpackages, but keep similarly named wire and value packages separate.
 var sdkDeniedPackages = []string{
 	"internal/admission", "internal/artifacts", "internal/backend",
@@ -24,20 +26,23 @@ var sdkDeniedPackages = []string{
 }
 
 func sdkDependencyFindings(repo string) ([]string, error) {
-	cmd := procenv.ControlCommand(os.Environ(), "go", "list", "-deps", "-f", "{{.ImportPath}}", "./sparkwing/...")
-	cmd.Dir = repo
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("SDK production dependencies: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
 	var problems []string
-	for dependency := range strings.FieldsSeq(string(out)) {
-		for _, denied := range sdkDeniedPackages {
-			prefix := modulePath + "/" + denied
-			if dependency == prefix || strings.HasPrefix(dependency, prefix+"/") {
-				problems = append(problems, "SDK production dependency closure reaches server package "+dependency)
+	for _, target := range supportedPlatforms {
+		goos, goarch, _ := strings.Cut(target, "/")
+		cmd := procenv.ControlCommand(append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch), "go", "list", "-deps", "-f", "{{.ImportPath}}", "./sparkwing/...")
+		cmd.Dir = repo
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("SDK production dependencies (%s): %w: %s", target, err, strings.TrimSpace(stderr.String()))
+		}
+		for dependency := range strings.FieldsSeq(string(out)) {
+			for _, denied := range sdkDeniedPackages {
+				prefix := modulePath + "/" + denied
+				if dependency == prefix || strings.HasPrefix(dependency, prefix+"/") {
+					problems = append(problems, "SDK production dependency closure ("+target+") reaches server package "+dependency)
+				}
 			}
 		}
 	}

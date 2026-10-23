@@ -1,8 +1,9 @@
 # Guard scope
 
 Both guard modes check the production dependency closure of `sparkwing/` with
-`go list -deps`. Tests are excluded. The denied server package roots are named
-in sdk.go. Paths through public packages and internal leaves are checked too.
+`go list -deps` for Linux, macOS and Windows on amd64 and arm64. Tests are
+excluded. The denied server package roots are named in sdk.go. Paths through
+public packages and internal leaves are checked too.
 
 Run `go run ./internal/guardcheck .` for the repository guards. The spawn
 guard has no allow-list. It checks typed references because aliases, dot

@@ -18,6 +18,7 @@ func TestSDKDependencyClosure(t *testing.T) {
 		{name: "server subpackage", sdkImport: "internal/controller/client", wantServer: true},
 		{name: "wire prefix is distinct", sdkImport: "internal/controllerwire"},
 		{name: "SDK subpackage", sdkImport: "internal/store", wantServer: true},
+		{name: "platform-only import", sdkImport: "internal/store", wantServer: true},
 		{name: "tests excluded"},
 		{name: "dependency load failure", sdkImport: "internal/missing", wantError: true},
 	} {
@@ -27,8 +28,14 @@ func TestSDKDependencyClosure(t *testing.T) {
 			if tt.name == "SDK subpackage" {
 				production = "sparkwing/docker/sdk.go"
 			}
+			if tt.name == "platform-only import" {
+				t.Setenv("GOOS", "linux")
+				t.Setenv("GOARCH", "amd64")
+				production = "sparkwing/sdk_windows_arm64.go"
+			}
 			files := map[string]string{
 				"go.mod":                               "module " + modulePath + "\n\ngo 1.26.0\n",
+				"sparkwing/base.go":                    "package sdk\n",
 				production:                             "package sdk\n",
 				"sparkwing/sdk_test.go":                "package sdk\nimport _ \"" + modulePath + "/internal/store\"\n",
 				"internal/store/store.go":              "package store\n",
@@ -67,6 +74,9 @@ func TestSDKDependencyClosure(t *testing.T) {
 			}
 			if (len(findings) > 0) != tt.wantServer {
 				t.Fatalf("server dependency = %v, want %v: %s", findings, tt.wantServer, strings.Join(findings, "\n"))
+			}
+			if tt.name == "platform-only import" && (len(findings) != 1 || !strings.Contains(findings[0], "windows/arm64")) {
+				t.Fatalf("expected only a Windows arm64 dependency finding, got %v", findings)
 			}
 		})
 	}
