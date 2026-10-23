@@ -154,7 +154,7 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 					logs.WriteString(line + "\n")
 					if strings.Contains(line, "controller listening") {
 						_, addr, _ := strings.Cut(line, "addr=")
-						listening <- strings.Fields(addr)[0]
+						listening <- strings.Trim(strings.Fields(addr)[0], `"`)
 					}
 				}
 				_ = cmd.Wait()
