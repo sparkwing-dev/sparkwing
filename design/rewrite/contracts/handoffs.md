@@ -1063,4 +1063,4 @@ separate operations; no database transaction stays open across a provider call.
 
 ## 2026-10-23 Korey decision 57: short secrets are accepted but not masked
 
-- Amends decisions 43 and 49. A secret value shorter than 4 characters is accepted, stored and access-controlled like any secret, but is not registered for masking. Wherever it is stored or declared (CLI, API, console, SDK declaration), the user is told plainly that values shorter than 4 characters cannot be masked in logs. Matches CircleCI, which accepts such values without masking them.
+- Amends decisions 43 and 49. A secret value shorter than 4 characters is accepted, stored and access-controlled like any secret, but is not registered for masking. When it is saved from the CLI or the console, the user sees a one-time warning that values shorter than 4 characters cannot be masked in logs; the docs state the rule. No persistent UI callouts and no warnings elsewhere. Matches CircleCI, which accepts such values without masking them.
