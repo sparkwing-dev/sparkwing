@@ -161,10 +161,10 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 	default:
 		return nil, invalidEngineBody("unsupported node command")
 	}
-	command, err := (store.NodeCommandPayload{
+	command, err := store.NodeCommandFromPayload(runstate.NodeCommandPayload{
 		To: runstate.NodeState(body.To), Cause: runstate.TransitionCause(body.Cause), SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt),
 		Extra: runstate.NodeCommandExtra{Result: resultForStore, RetryAt: body.RetryAt, Publication: body.Publication},
-	}).NodeCommand(ref, actor)
+	}, ref, actor)
 	if err != nil {
 		return nil, invalidEngineBody(err.Error())
 	}

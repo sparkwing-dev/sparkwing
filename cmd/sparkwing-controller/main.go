@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
@@ -472,7 +473,7 @@ func run(args []string) error {
 	}
 	st, serr := openControllerStore(ctx, cfg, p.StateDB(), store.WithCredentialEpoch(epoch), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		var err error
-		srv, err = newControllerServer(st, cfg, p.Root, readProvenance().Version, nil)
+		srv, err = newControllerServer(st, cfg, p.Root, readProvenance().Version, engine.Config{})
 		if err != nil {
 			return store.Policies{}, err
 		}

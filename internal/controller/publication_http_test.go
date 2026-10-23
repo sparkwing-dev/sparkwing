@@ -93,7 +93,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		t.Fatal(err)
 	}
 	request := runspec.Request{LocalForeground: true, Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{}}
-	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{ID: "local-run", Team: "local", Pipeline: "ci", State: runstate.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
+	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{Team: "local", Execution: runstate.Execution{ID: "local-run", Pipeline: "ci", State: runstate.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}}, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
 	values := map[string]string{}
 	for _, name := range shellNames {
 		values[name] = "private shell value"
@@ -135,7 +135,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		}
 		state.Records = append(state.Records, record)
 	}
-	run, err := client.PublishLocalRun(t.Context(), options, client.PublicationInput{State: runstate.LocalPublication{RunSnapshot: hostSnapshot(state.RunSnapshot), Records: state.Records, Results: state.Results}, Logs: publicationLogReader{}, OpenBlob: func(_ context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
+	run, err := client.PublishLocalRun(t.Context(), options, client.PublicationInput{State: runstate.LocalPublication{RunSnapshot: state.RunSnapshot.ExecutionSnapshot(), Records: state.Records, Results: state.Results}, Logs: publicationLogReader{}, OpenBlob: func(_ context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
 		body, ok := content[digest]
 		if !ok {
 			return nil, 0, fmt.Errorf("unselected digest %s", digest)

@@ -11,6 +11,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -22,7 +24,7 @@ import (
 func secretClaim(t *testing.T, f *browserFixture, team store.Team, pipeline string, names ...string) string {
 	t.Helper()
 	id := string(team) + "-" + pipeline
-	if err := teststore.SeedRun(f.st, t.Context(), team, store.Run{ID: id, Pipeline: pipeline, Status: "running"}); err != nil {
+	if err := teststore.SeedRun(f.st, t.Context(), team, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	tenant := teststore.ForTeam(t, f.st, team)

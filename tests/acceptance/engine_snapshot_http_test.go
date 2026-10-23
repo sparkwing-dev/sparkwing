@@ -47,7 +47,7 @@ func (f *snapshotTransactions) ReadOwnerSnapshot(ctx context.Context, _ capabili
 func snapshotFixture(b *credentialBoundary) *snapshotTransactions {
 	return &snapshotTransactions{
 		snapshot: store.RunSnapshot{
-			Run: store.RunRow{ID: "run", Team: "team"}, StoreNow: b.snapshot.Now,
+			Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run"}}, StoreNow: b.snapshot.Now,
 			Nodes: []runstate.NodeRow{
 				{Ref: runspec.NodeRef{RunID: "run", NodeID: "first"}, Status: "pending", Generation: 2, Spec: json.RawMessage(`{"id":"first"}`)},
 				{Ref: runspec.NodeRef{RunID: "run", NodeID: "generated"}, Status: "running", Generation: 4, Attempt: 2, StateSeq: 9, Spec: json.RawMessage(`{"id":"generated","deps":["first"]}`), CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder"},

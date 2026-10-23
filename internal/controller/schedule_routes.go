@@ -258,9 +258,5 @@ func (s *Server) withScheduleLock(r *http.Request, a capability.Authorized, edit
 }
 
 func scheduleRequestForStore(body controllerwire.ScheduleRepoRequest) store.ScheduleRepoRequest {
-	out := store.ScheduleRepoRequest{Mode: store.ScheduleWriteMode(body.Mode), RepoURL: body.RepoURL, Branch: body.Branch, SHA: body.SHA, Follow: body.Follow}
-	for _, entry := range body.Schedules {
-		out.Schedules = append(out.Schedules, store.ScheduleDeclaration(entry))
-	}
-	return out
+	return store.ScheduleRepoRequest{Mode: store.ScheduleWriteMode(body.Mode), RepoURL: body.RepoURL, Branch: body.Branch, SHA: body.SHA, Follow: body.Follow, Schedules: body.Schedules}
 }

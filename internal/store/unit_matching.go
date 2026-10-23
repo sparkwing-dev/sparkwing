@@ -134,7 +134,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
 	}
 	if sealed := run.spec; sealed != nil {
-		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Spec: sealed}) != "" {
+		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Execution: runstate.Execution{Spec: sealed}}) != "" {
 			return profile, match.Demand{}, authorityError(apierr.Forbidden, "run guard refused execution")
 		}
 		options = sealed.Resolved.Settings.Options

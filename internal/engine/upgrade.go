@@ -510,7 +510,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 		return update, err
 	}
 	if ok {
-		update.Release, err = readCachedRelease(version, target, cached.Executable)
+		update.Release, err = readCachedRelease(version, target, cached.Executable, r.config.TrustedKeys)
 		return update, err
 	}
 	update.Release, err = r.fetchRelease(ctx, version, target)

@@ -79,7 +79,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	body, _ := json.Marshal(plan)
 	jobBody, _ := json.Marshal(job)
 	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 0, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
-	s := newExecutionHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []runstate.NodeRow{row}})
+	s := newExecutionHostStore(store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}}, Nodes: []runstate.NodeRow{row}})
 	if mode == "artifact_retry" {
 		producer, _ := json.Marshal(plan.Jobs[1])
 		producerHash, _ := runspec.CanonicalHash(plan.Jobs[1])

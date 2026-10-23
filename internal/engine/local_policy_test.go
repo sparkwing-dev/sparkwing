@@ -18,7 +18,7 @@ func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.10.2"}
 	bundle := signedBundle(t, key, pin.Version, target, fixtureExecutable(t, pin.Version, target))
-	release, err := VerifyRelease(pin.Version, target, bundle)
+	release, err := VerifyRelease(pin.Version, target, bundle, signingKeys(key))
 	if err != nil {
 		t.Fatal(err)
 	}

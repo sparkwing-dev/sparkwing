@@ -80,7 +80,7 @@ func TestOwnerExpansion(t *testing.T) {
 			spec := runspec.Spec{Request: request, Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 			rawPlan, _ := json.Marshal(plan)
 			rawJob, _ := json.Marshal(job)
-			s := newExpansionHostStore(store.RunRow{ID: "run", State: runstate.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "source"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: 4, Expansion: runstate.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
+			s := newExpansionHostStore(store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "source"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: 4, Expansion: runstate.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
 			var mu sync.Mutex
 			changed := make(chan struct{}, 1)
 			readSnapshot, acceptExpansion := s.readSnapshot, s.acceptExpansion

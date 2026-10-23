@@ -234,7 +234,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}}
+			snapshot := store.RunSnapshot{Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Request: request, Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}}}
 			if unit.Accepted != nil {
 				snapshot.Run.Spec, snapshot.Run.Plan = &unit.Accepted.Spec, unit.Accepted.Plan
 				snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
@@ -493,7 +493,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 			group := runspec.Concurrency{Group: "serial", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}
 			row := runstate.NodeRow{Execution: runspec.JobExecutionSettings{Concurrency: []runspec.Concurrency{group}}, Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: "job"}, Status: runstate.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}`)}
 			row.OwnerExecution = &runstate.OwnerExecution{Owner: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Team: "team", Generation: unit.Binding.Generation, Node: row.Ref, NodeGeneration: int64(row.Generation), SpecHash: row.SpecHash, Allowed: true}
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: unit.RunID, Team: "team", State: runstate.RunRunning, Request: unit.Request, Spec: &unit.Accepted.Spec, Plan: unit.Accepted.Plan, PlanHash: string(unit.Accepted.PlanHash), Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}, Nodes: []runstate.NodeRow{row}}
+			snapshot := store.RunSnapshot{Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: unit.RunID, State: runstate.RunRunning, Request: unit.Request, Spec: &unit.Accepted.Spec, Plan: unit.Accepted.Plan, PlanHash: string(unit.Accepted.PlanHash), Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}}, Nodes: []runstate.NodeRow{row}}
 			scheduled := make(chan struct{})
 			var once sync.Once
 			var capacity sync.Mutex
@@ -507,7 +507,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				case "POST /api/v1/claims/unit/heartbeat":
 					response = controllerwire.RenewalResponse{ExpiresAt: unit.LeaseExpiresAt}
 				case "POST /api/v1/runs/run/local-host/nodes/job/transition":
-					var change store.NodeCommandPayload
+					var change runstate.NodeCommandPayload
 					if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
 						return nil, err
 					}

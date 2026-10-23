@@ -18,6 +18,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -398,9 +400,7 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	setup := context.Background()
-	if err := teststore.SeedRun(st, setup, store.DefaultTeam, store.Run{
-		ID: "run-reaper-sweep", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.SeedRun(st, setup, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-reaper-sweep", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := teststore.SeedNode(st, setup, store.Node{

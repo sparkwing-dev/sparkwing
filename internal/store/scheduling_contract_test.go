@@ -188,7 +188,7 @@ func scheduleFixture(t *testing.T, jobs ...nodeproto.JobSpec) RunSnapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := RunSnapshot{Run: RunRow{ID: "run", Plan: plan}}
+	snapshot := RunSnapshot{Run: RunRow{Execution: runstate.Execution{ID: "run", Plan: plan}}}
 	for _, job := range jobs {
 		spec, err := json.Marshal(job)
 		if err != nil {

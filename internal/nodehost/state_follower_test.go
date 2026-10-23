@@ -124,7 +124,7 @@ func TestStateFollowerReadsCommittedChangeAfterNotification(t *testing.T) {
 
 func followerSnapshot() store.RunSnapshot {
 	return store.RunSnapshot{
-		Run: store.RunRow{ID: "run", StateSeq: 3},
+		Run: store.RunRow{Execution: runstate.Execution{ID: "run", StateSeq: 3}},
 		Nodes: []runstate.NodeRow{
 			{Ref: runspec.NodeRef{RunID: "run", NodeID: "build"}, StateSeq: 5},
 			{Ref: runspec.NodeRef{RunID: "run", NodeID: "test"}, StateSeq: 1},

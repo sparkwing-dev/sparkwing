@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -271,7 +273,9 @@ func TestRunLogsSearch_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
 func TestRunsGrep_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
 	content := []byte("{\"msg\":\"needle first\"}\n" + strings.Repeat("x", 2<<20) + "\n{\"msg\":\"needle last\"}\n")
 	b := &fakeBackend{
-		listRuns:    func(store.RunFilter) ([]*store.Run, error) { return []*store.Run{{ID: "r"}}, nil },
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{RunSummary: runstate.RunSummary{ID: "r"}}}, nil
+		},
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return content, nil },
 	}
@@ -297,7 +301,7 @@ func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
 	var read []string
 	b := &fakeBackend{
 		listRuns: func(store.RunFilter) ([]*store.Run, error) {
-			return []*store.Run{{ID: "included"}, {ID: "filtered-out"}}, nil
+			return []*store.Run{{RunSummary: runstate.RunSummary{ID: "included"}}, {RunSummary: runstate.RunSummary{ID: "filtered-out"}}}, nil
 		},
 		listNodes: func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
 		readNodeLog: func(runID, _ string, _ backend.ReadOpts) ([]byte, error) {
@@ -325,11 +329,11 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	base := time.Now().Add(-time.Hour)
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", GitSHA: "deadbeef1234", StartedAt: base}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", GitSHA: "deadbeef1234", StartedAt: base}}); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 201 {
-		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", GitSHA: "cafebabe1234", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", GitSHA: "cafebabe1234", StartedAt: base.Add(time.Duration(i+1) * time.Second)}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -376,7 +380,7 @@ func TestRunsGrep_StopsAtMatchLimitInRunOrder(t *testing.T) {
 	var read []string
 	b := &fakeBackend{
 		listRuns: func(store.RunFilter) ([]*store.Run, error) {
-			return []*store.Run{{ID: "newest"}, {ID: "older"}}, nil
+			return []*store.Run{{RunSummary: runstate.RunSummary{ID: "newest"}}, {RunSummary: runstate.RunSummary{ID: "older"}}}, nil
 		},
 		listNodes: func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
 		readNodeLog: func(runID, _ string, _ backend.ReadOpts) ([]byte, error) {
@@ -397,7 +401,9 @@ func TestRunsGrep_StopsAtMatchLimitInRunOrder(t *testing.T) {
 func TestRunsGrep_StopsAtItsByteBoundAndSaysSo(t *testing.T) {
 	content := []byte("{\"msg\":\"needle\"}\n")
 	b := &fakeBackend{
-		listRuns:    func(store.RunFilter) ([]*store.Run, error) { return []*store.Run{{ID: "r1"}, {ID: "r2"}}, nil },
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{RunSummary: runstate.RunSummary{ID: "r1"}}, {RunSummary: runstate.RunSummary{ID: "r2"}}}, nil
+		},
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return content, nil },
 	}
@@ -429,7 +435,7 @@ func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *t
 		if i%2 == 1 {
 			branch = "noise"
 		}
-		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: fmt.Sprintf("run-%03d", i), Pipeline: "build", Status: "success", GitBranch: branch, StartedAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("run-%03d", i), Pipeline: "build", Status: "success", GitBranch: branch, StartedAt: base.Add(time.Duration(i) * time.Second)}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -488,7 +494,7 @@ func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *t
 func TestRunsGrep_ResumesAfterTheRunWhereTheMatchLimitStopped(t *testing.T) {
 	b := &fakeBackend{
 		listRuns: func(store.RunFilter) ([]*store.Run, error) {
-			return []*store.Run{{ID: "newest", StartedAt: time.Unix(0, 3_000_000_000_000_000_123)}, {ID: "older"}}, nil
+			return []*store.Run{{RunSummary: runstate.RunSummary{ID: "newest", StartedAt: time.Unix(0, 3_000_000_000_000_000_123)}}, {RunSummary: runstate.RunSummary{ID: "older"}}}, nil
 		},
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte(`{"msg":"needle"}` + "\n"), nil },

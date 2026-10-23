@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -29,7 +31,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 						teststore.SeedTeam(t, st, team)
 					}
 					if scope != "pruned" {
-						if err := teststore.SeedRun(st, t.Context(), team, store.Run{ID: "selected", Pipeline: "ci", Status: "pending"}); err != nil {
+						if err := teststore.SeedRun(st, t.Context(), team, store.Run{RunSummary: runstate.RunSummary{ID: "selected", Pipeline: "ci", Status: "pending"}}); err != nil {
 							t.Fatal(err)
 						}
 					}

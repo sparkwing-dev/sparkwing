@@ -98,10 +98,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					actor := runstate.Actor{Kind: runstate.ActorRunHost, Owner: runstate.OwnerLeaseRef{
 						Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
 					}}
-					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{
-						ID: award.RunID, State: runstate.RunRunning, Request: award.Request, Spec: &spec,
-						Plan: plan, PlanHash: string(spec.PlanHash), Owner: &actor.Owner,
-					}}}
+					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: award.RunID, State: runstate.RunRunning, Request: award.Request, Spec: &spec, Plan: plan, PlanHash: string(spec.PlanHash), Owner: &actor.Owner}}}}
 					if failCompletion {
 						state.failure = errors.New("completion was not committed")
 					}

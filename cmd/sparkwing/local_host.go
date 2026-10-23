@@ -7,10 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -26,11 +27,11 @@ func (s localOwnerState) ReadSnapshot(ctx context.Context, run string) (store.Ru
 	return s.Tenant.ReadOwnerSnapshot(ctx, s.owner, run)
 }
 
-func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions) (nodehost.NativeServices, error) {
+func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding localcontroller.StoreBinding, options client.EngineOptions) (nodehost.NativeServices, error) {
 	return localNativeServices(ctx, home, owned, binding, options, nodehost.NewNativeServices)
 }
 
-func localNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions, build func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error)) (_ nodehost.NativeServices, err error) {
+func localNativeServices(ctx context.Context, home string, owned *store.Store, binding localcontroller.StoreBinding, options client.EngineOptions, build func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error)) (_ nodehost.NativeServices, err error) {
 	options.Bearer = binding.Bearer
 	var private *client.LocalHostClient
 	fence := binding.Principal.Capability.Binding

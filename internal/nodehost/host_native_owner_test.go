@@ -57,7 +57,7 @@ func TestNativeClosureFailures(t *testing.T) {
 			}
 			spec.Resolved.Settings.Options.NoMemo.Value = id == "memo_no_read"
 			accepted := AcceptedRun{RunID: "run", Spec: marshalEventFixture(t, spec), SpecHash: string(spec.Hash), Plan: plan, PlanHash: string(planHash)}
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: runstate.StatusPending})
+			st := newExpansionHostStore(store.RunRow{Execution: runstate.Execution{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: runstate.StatusPending})
 			if id == "source" {
 				st.node.Status, st.node.Outcome, st.node.Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionExpected
 			}

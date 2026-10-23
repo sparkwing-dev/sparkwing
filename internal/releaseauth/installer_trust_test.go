@@ -45,14 +45,14 @@ func installerTrustedKeys(t *testing.T) []string {
 }
 
 // The installer cannot import this package, so its trust root is a second copy
-// of TrustedPublicKeys. This is what stops the copies drifting apart.
+// of TrustedPublicKeys(). This is what stops the copies drifting apart.
 func TestInstallerTrustRootMatchesReleaseAuth(t *testing.T) {
 	got := installerTrustedKeys(t)
-	if len(got) != len(TrustedPublicKeys) {
+	if len(got) != len(TrustedPublicKeys()) {
 		t.Fatalf("%s trusts %d key(s), releaseauth trusts %d; update both together",
-			installerPath, len(got), len(TrustedPublicKeys))
+			installerPath, len(got), len(TrustedPublicKeys()))
 	}
-	for i, want := range TrustedPublicKeys {
+	for i, want := range TrustedPublicKeys() {
 		if got[i] != want {
 			t.Fatalf("%s trusted key %d is %q, releaseauth has %q; update both together",
 				installerPath, i, got[i], want)

@@ -200,7 +200,7 @@ func (r Resolved) verifyInstalledEngine() error {
 	if version != r.Identity.Version || !validDigest(r.Identity.ManifestDigest) || !validDigest(r.AssetDigest) || !filepath.IsAbs(r.Executable) || r.Target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return integrity(errors.New("SDK installation requires this machine's exact verified Sparkwing engine"))
 	}
-	release, err := readCachedRelease(version, r.Target, r.Executable)
+	release, err := readCachedRelease(version, r.Target, r.Executable, r.trustedKeys)
 	if err != nil {
 		return integrity(err)
 	}

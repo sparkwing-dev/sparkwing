@@ -33,7 +33,7 @@ func consentedScheduleFixture(t *testing.T) (*Tenant, capability.Authorized, Sch
 	})}
 	actor := authorityMember(t, tenant.s, "schedule-owner", RoleEditor)
 	a := teamAuthorization(t, tenant.s, actor, tenant.team, "PUT", "/api/v1/schedules/repos")
-	body := ScheduleRepoRequest{Mode: ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
+	body := ScheduleRepoRequest{Mode: ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []runspec.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
 	return tenant, a, body, now
 }
 
@@ -145,7 +145,7 @@ func TestScheduleReplacementCapsAndOverrideRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 20; i++ {
-		body.Schedules = append(body.Schedules, ScheduleDeclaration{Pipeline: fmt.Sprintf("extra-%d", i), Cron: "* * * * *"})
+		body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("extra-%d", i), Cron: "* * * * *"})
 	}
 	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err == nil {
 		t.Fatal("schedule cap accepted")

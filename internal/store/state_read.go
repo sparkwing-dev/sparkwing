@@ -15,7 +15,7 @@ import (
 )
 
 func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, error) {
-	v := RunRow{ID: id, Team: team}
+	v := RunRow{Team: team, Execution: runstate.Execution{ID: id}}
 	var request, spec, lineage, pools, actor, plan []byte
 	var cancel, start, finish sql.NullInt64
 	var created int64

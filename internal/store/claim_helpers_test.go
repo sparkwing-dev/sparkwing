@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -18,10 +20,7 @@ func createRetryRunAndReadyNode(t *testing.T, s *store.Store, runID string, retr
 		"pipeline": "p", "run_id": runID,
 		"nodes": []any{map[string]any{"id": "build", "deps": []string{}, "modifiers": map[string]any{"retry": retries}}},
 	})
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
-		ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(), PlanSnapshot: plan,
-		RepoURL: "https://example.com/acme/repo.git", GitSHA: strings.Repeat("a", 40),
-	}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{PlanSnapshot: plan, RunSummary: runstate.RunSummary{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(), RepoURL: "https://example.com/acme/repo.git", GitSHA: strings.Repeat("a", 40)}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(s, context.Background(), store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
@@ -49,10 +48,7 @@ func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 	}); err != nil {
 		t.Fatalf("seed trigger %s: %v", id, err)
 	}
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-		ID: id, Pipeline: pipeline, Status: "pending",
-		TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now,
-	}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "pending", TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now}}); err != nil {
 		t.Fatalf("seed run %s: %v", id, err)
 	}
 }

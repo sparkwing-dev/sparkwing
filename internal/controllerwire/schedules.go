@@ -236,23 +236,12 @@ const (
 
 // ScheduleRepoRequest proposes declarations within an explicit reconciliation scope.
 type ScheduleRepoRequest struct {
-	Mode      ScheduleWriteMode     `json:"mode"`
-	RepoURL   string                `json:"repo_url"`
-	Branch    string                `json:"branch,omitempty"`
-	SHA       string                `json:"sha,omitempty"`
-	Follow    bool                  `json:"follow"`
-	Schedules []ScheduleDeclaration `json:"schedules"`
-}
-
-// ScheduleDeclaration carries author cadence and arguments without granting repository authority.
-type ScheduleDeclaration struct {
-	Pipeline string            `json:"pipeline"`
-	Name     string            `json:"name,omitempty"`
-	Cron     string            `json:"cron"`
-	TZ       string            `json:"tz,omitempty"`
-	Overlap  string            `json:"overlap,omitempty"`
-	CatchUp  string            `json:"catch_up,omitempty"`
-	Args     map[string]string `json:"args,omitempty"`
+	Mode      ScheduleWriteMode             `json:"mode"`
+	RepoURL   string                        `json:"repo_url"`
+	Branch    string                        `json:"branch,omitempty"`
+	SHA       string                        `json:"sha,omitempty"`
+	Follow    bool                          `json:"follow"`
+	Schedules []runspec.ScheduleDeclaration `json:"schedules"`
 }
 
 // ScheduleRepoWritten returns the complete installed set and names withdrawn by replacement.
@@ -275,13 +264,13 @@ type ScheduleRepositoryManager interface {
 
 // LocalScheduleRegistration selects checkout declarations and host-captured inputs.
 type LocalScheduleRegistration struct {
-	Mode        ScheduleWriteMode     `json:"mode"`
-	RepoPath    string                `json:"repo_path"`
-	Project     *projectconfig.Config `json:"project"`
-	Schedules   []ScheduleDeclaration `json:"schedules"`
-	Environment []string              `json:"environment"`
-	Follow      bool                  `json:"follow"`
-	Prove       bool                  `json:"prove"`
+	Mode        ScheduleWriteMode             `json:"mode"`
+	RepoPath    string                        `json:"repo_path"`
+	Project     *projectconfig.Config         `json:"project"`
+	Schedules   []runspec.ScheduleDeclaration `json:"schedules"`
+	Environment []string                      `json:"environment"`
+	Follow      bool                          `json:"follow"`
+	Prove       bool                          `json:"prove"`
 }
 
 // LocalScheduleManager controls schedules on a verified local connection.

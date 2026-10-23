@@ -63,7 +63,7 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 			}
 			ancestors := generatorSources(snapshot.Expansions, string(node.Ref.NodeID))
 			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row runstate.NodeRow) bool { return row.Ref != node.Ref && !ancestors[string(row.Ref.NodeID)] })
-			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: hostSnapshot(snapshot), ArtifactSources: sources})
+			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot.ExecutionSnapshot(), ArtifactSources: sources})
 			return nil
 		}
 	}
@@ -100,7 +100,7 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 		if err != nil {
 			return engineLookupError(err)
 		}
-		writeJSON(w, http.StatusOK, runstate.LocalPublication{RunSnapshot: hostSnapshot(publication.RunSnapshot), Records: publication.Records, Results: publication.Results})
+		writeJSON(w, http.StatusOK, runstate.LocalPublication{RunSnapshot: publication.RunSnapshot.ExecutionSnapshot(), Records: publication.Records, Results: publication.Results})
 		return nil
 	} else {
 		snapshot, err = tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
@@ -108,7 +108,7 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, hostSnapshot(snapshot))
+	writeJSON(w, http.StatusOK, snapshot.ExecutionSnapshot())
 	return nil
 }
 
@@ -178,7 +178,7 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 }
 
 func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body store.NodeCommandPayload
+	var body runstate.NodeCommandPayload
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
-	change, err := body.NodeCommand(runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a))
+	change, err := store.NodeCommandFromPayload(body, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a))
 	if err != nil {
 		return invalidEngineBody(err.Error())
 	}

@@ -193,7 +193,7 @@ func fakeEngine(t *testing.T, f *engineTransactions) *controller.EngineControlle
 func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 	a := expansionAuthority()
 	f := &engineTransactions{
-		run:      store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run", Hash: "persisted-first-seal"}},
+		run:      store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Request: runspec.SealedRequest{RunID: "run", Hash: "persisted-first-seal"}}},
 		accepted: store.AcceptedPlan{PlanHash: "second-seal", Plan: json.RawMessage(`{"jobs":[]}`), Replayed: true},
 		expanded: store.AcceptedExpansion{
 			SourceGeneration: 4, State: runstate.ExpansionAccepted, BodyHash: "expansion-seal", Replayed: true,
@@ -240,7 +240,7 @@ func TestEnginePlanPublisherKeepsSessionAuthority(t *testing.T) {
 	a.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "run"}
 	a.Principal.Capability.Binding = a.Binding
 	a.Access = capability.AccessRule{Credential: capability.CredentialPublisher, Grants: []capability.Grant{capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveCredential}
-	f := &engineTransactions{run: store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run"}}}
+	f := &engineTransactions{run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Request: runspec.SealedRequest{RunID: "run"}}}}
 	_, err := fakeEngine(t, f).AcceptPlan(t.Context(), a, controllerwire.PlanSubmission{Plan: json.RawMessage(`{"jobs":[]}`)})
 	if err != nil || f.plan.Actor.Kind != runstate.ActorOperator || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.CapabilityPrefix != "" || f.plan.Actor.Owner != (runstate.OwnerLeaseRef{}) {
 		t.Fatalf("publisher actor = %+v, %v", f.plan.Actor, err)
@@ -257,7 +257,7 @@ func TestEngineRetryPlanKeepsSourceSeal(t *testing.T) {
 	a.Principal.Capability.Unit = capability.UnitPlan
 	a.Target.RunID = "retry"
 	a.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "retry", Holder: "runner", Generation: 4}
-	f := &engineTransactions{run: store.RunRow{ID: "retry", Team: "team", Request: runspec.SealedRequest{RunID: "source", Hash: "original-seal"}}}
+	f := &engineTransactions{run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "retry", Request: runspec.SealedRequest{RunID: "source", Hash: "original-seal"}}}}
 	if _, err := fakeEngine(t, f).AcceptPlan(t.Context(), a, controllerwire.PlanSubmission{Plan: json.RawMessage(`{"jobs":[]}`)}); err != nil {
 		t.Fatal(err)
 	}

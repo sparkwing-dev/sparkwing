@@ -38,7 +38,7 @@ func TestFoldRunProfilesPartialSamplesRaiseOnly(t *testing.T) {
 			})
 			ctx := t.Context()
 			start := time.Now().Add(-time.Minute)
-			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}}); err != nil {
 				t.Fatal(err)
 			}
 			if err := teststore.SeedNode(st, ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {

@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
@@ -203,7 +205,7 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 func seedRun(t *testing.T, st *store.Store, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
 	now := time.Now()
-	if err := teststore.SeedRun(st, t.Context(), tn.Team(), store.Run{ID: id, Pipeline: pipeline, Status: "running", CreatedAt: now, StartedAt: now}); err != nil {
+	if err := teststore.SeedRun(st, t.Context(), tn.Team(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running", CreatedAt: now, StartedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
 }

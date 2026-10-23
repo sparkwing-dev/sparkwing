@@ -10,6 +10,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -28,7 +30,7 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 		if classified {
 			request.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"secret"}}
 		}
-		view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{ID: "run", Team: "a", Request: request, PlanHash: secret + "-plan"}}}
+		view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "run", Request: request, PlanHash: secret + "-plan"}}}}
 		if sealed {
 			view.Snapshot.Run.Spec = &runspec.Spec{Request: request, Hash: runspec.Hash(secret + "-spec"), Resolved: runspec.Resolved{Args: map[string]string{"secret": secret, "public": "visible"}}}
 			if classified {
@@ -56,7 +58,7 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 func TestEngineRunDetailUsesCurrentInvocationLineage(t *testing.T) {
 	request := runspec.SealedRequest{RunID: "original", Request: runspec.Request{Team: "a", Lineage: runspec.Lineage{RetryOf: "earlier"}}}
 	lineage := runspec.Lineage{RetryOf: "original", Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "retrier"}}}
-	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{ID: "retry", Team: "a", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "retry", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}}
 	got, err := runDetailResponse(capability.Target{Team: "a", RunID: "retry"}, RunStatusFacts{Snapshot: view.Snapshot})
 	if err != nil || got.ID != "retry" || !reflect.DeepEqual(got.Inputs.Lineage, lineage) || request.RunID != "original" || request.Request.Lineage.RetryOf != "earlier" {
 		t.Fatalf("retry lineage: %+v", got)

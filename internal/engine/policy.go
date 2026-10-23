@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 	"golang.org/x/mod/semver"
@@ -19,11 +18,7 @@ import (
 )
 
 // VerifyIndex checks signature and policy invariants before accepting authority.
-func VerifyIndex(signed SignedIndex, now time.Time) (VerifiedIndex, error) {
-	keys, err := releaseauth.PublicKeys()
-	if err != nil {
-		return VerifiedIndex{}, integrity(err)
-	}
+func VerifyIndex(signed SignedIndex, now time.Time, keys []ed25519.PublicKey) (VerifiedIndex, error) {
 	if !releaseasset.ManifestSignedBy(keys, signed.Body, signed.Signature) {
 		return VerifiedIndex{}, integrity(fmt.Errorf("version index signature is invalid"))
 	}

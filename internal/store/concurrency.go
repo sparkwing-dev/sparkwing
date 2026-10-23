@@ -63,23 +63,8 @@ type acquireSlotRequest struct {
 
 // ConcurrencyHolder mirrors the concurrency_holders row.
 type ConcurrencyHolder struct {
-	Key            string
-	HolderID       string
-	RunID          string
-	NodeID         string
-	ClaimedAt      time.Time
-	QueueArrivedAt time.Time
-	LeaseExpiresAt time.Time
-	Superseded     bool
-
-	// Cost is the admission weight this holder draws from the key's
-	// budget; DeclaredCapacity is the capacity it declared. Both are loaded
-	// for admission and the operator budget view.
-	Cost             int
-	DeclaredCapacity int
-
-	// safety: the store derives keys from accepted declarations and placement.
-	// The fleet-wide reaper retains the team privately to delete the right row.
+	runstate.ConcurrencyHolder
+	// The fleet reaper retains the team privately to delete the right row.
 	team Team
 }
 
@@ -1057,11 +1042,7 @@ func nodeIDOrDash(nodeID string) string {
 func admissionHolders(rows []ConcurrencyHolder) []runstate.ConcurrencyHolder {
 	var holders []runstate.ConcurrencyHolder
 	for _, h := range rows {
-		holders = append(holders, runstate.ConcurrencyHolder{
-			Key: h.Key, HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
-			ClaimedAt: h.ClaimedAt, QueueArrivedAt: h.QueueArrivedAt, LeaseExpiresAt: h.LeaseExpiresAt,
-			Superseded: h.Superseded, Cost: h.Cost, DeclaredCapacity: h.DeclaredCapacity,
-		})
+		holders = append(holders, h.ConcurrencyHolder)
 	}
 	return holders
 }

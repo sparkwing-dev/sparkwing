@@ -36,7 +36,7 @@ func TestOwnerSeals(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := newOwnerSealStore(store.RunRow{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner})
+			s := newOwnerSealStore(store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner}})
 			if mode == "resume" {
 				s.row.Spec = &runspec.Spec{Request: s.row.Request, Hash: "spec", PlanHash: ownerPlanHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 				s.row.Plan, s.row.PlanHash = json.RawMessage(`{"jobs":[]}`), ownerPlanHash

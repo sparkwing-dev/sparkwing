@@ -59,7 +59,7 @@ type Config struct {
 
 	Budget userconfig.Budget
 
-	BudgetSource BudgetSource
+	BudgetSource wingwire.BudgetSource
 	BudgetOrigin string
 
 	AdmissionPolicy *AdmissionPolicy

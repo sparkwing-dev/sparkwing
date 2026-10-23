@@ -338,7 +338,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 		t.Fatal(err)
 	}
 	unit := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 4}}
-	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}
+	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}}
 	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: unit}}
 	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	selected := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}}

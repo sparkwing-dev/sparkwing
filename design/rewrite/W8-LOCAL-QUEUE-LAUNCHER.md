@@ -2,7 +2,7 @@
 
 ## Implemented
 
-`localcontroller.Config.Open` constructs `runners.NewStoreRunner` over its owned
+`localcontroller.Config.Open` constructs `localcontroller.NewStoreRunner` over its owned
 store and controller before returning. The binder supplies `StoreRunnerConfig`,
 state and shared HTTP handlers. The injectable `Queue` interface is deleted.
 Missing native services or signed policy, and a changed controller store, fail

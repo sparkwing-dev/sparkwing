@@ -206,7 +206,7 @@ func TestCommittedDashboardLogResumeUsesAttemptOrder(t *testing.T) {
 	f.add(t, jobLogSubject(2, 4), "second\n", true)
 	f.add(t, jobLogSubject(1, 3), "first\n", true)
 	now := time.Unix(100, 0)
-	f.view.Snapshot = store.RunSnapshot{Run: store.RunRow{FinishedAt: &now}, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess}}}
+	f.view.Snapshot = store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{FinishedAt: &now}}, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess}}}
 	reader := f.reader()
 	var out bytes.Buffer
 	if err := reader.streamNode(t.Context(), "run", "job", logCursor{attempt: 0, off: 3}, &out); err != nil {

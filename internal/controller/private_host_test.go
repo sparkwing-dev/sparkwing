@@ -464,5 +464,5 @@ func transitionLocalNode(ctx context.Context, host *client.LocalHostClient, comm
 	if err != nil {
 		return runstate.Applied{}, err
 	}
-	return host.TransitionNode(ctx, ref, actor, runstate.NodeCommandPayload(payload))
+	return host.TransitionNode(ctx, ref, actor, payload)
 }

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -13,12 +15,7 @@ import (
 func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-		ID:        runID,
-		Pipeline:  "demo",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := teststore.SeedNode(s, ctx, store.Node{
@@ -69,9 +66,7 @@ func expireNodeClaim(t *testing.T, s *store.Store, runID, nodeID string) {
 func seedNodeWithLabels(t *testing.T, s *store.Store, runID, nodeID string, labels []string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := teststore.SeedNode(s, ctx, store.Node{

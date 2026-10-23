@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
@@ -47,7 +49,7 @@ func (f *fakeLauncher) Launch(ctx context.Context, s store.CronSchedule, due tim
 		id = f.runIDs[f.nextRun]
 	}
 	if f.store != nil {
-		if err := teststore.SeedRun(f.store, ctx, s.Team, store.Run{ID: id, Pipeline: s.Pipeline, Status: "pending", CreatedAt: f.now()}); err != nil {
+		if err := teststore.SeedRun(f.store, ctx, s.Team, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: s.Pipeline, Status: "pending", CreatedAt: f.now()}}); err != nil {
 			return "", err
 		}
 	}

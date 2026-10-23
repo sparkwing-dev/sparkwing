@@ -79,7 +79,7 @@ func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDep
 	spec.Request.Request.Git.Repository.Key = "example.com/acme/repo"
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	plan, _ := json.Marshal(input.Accepted.Plan)
-	s := &acquiredClaimStore{executorStore: st, run: store.RunRow{ID: input.Accepted.RunID, Spec: &spec, Plan: plan, PlanHash: input.Accepted.PlanHash}}
+	s := &acquiredClaimStore{executorStore: st, run: store.RunRow{Execution: runstate.Execution{ID: input.Accepted.RunID, Spec: &spec, Plan: plan, PlanHash: input.Accepted.PlanHash}}}
 	s.renew = func(context.Context) (runstate.LeaseBeat, error) { return runstate.LeaseBeat{}, nil }
 	deps.Store = s
 	executor, err := NewNodeExecutor(deps)

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -143,7 +145,7 @@ func TestScheduleRepositoryManagement(t *testing.T) {
 		t.Fatal("extra request")
 		return nil, io.EOF
 	})
-	got, err := c.WriteSchedules(t.Context(), controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: row.RepoPath, Branch: "main", SHA: "original-sha", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "check", Cron: "0 3 * * *", CatchUp: "0s"}}})
+	got, err := c.WriteSchedules(t.Context(), controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: row.RepoPath, Branch: "main", SHA: "original-sha", Schedules: []runspec.ScheduleDeclaration{{Pipeline: "check", Cron: "0 3 * * *", CatchUp: "0s"}}})
 	if err != nil || len(got.Schedules) != 1 || !reflect.DeepEqual(got.Withdrawn, []string{"check/old"}) {
 		t.Fatalf("replace: %+v %v", got, err)
 	}

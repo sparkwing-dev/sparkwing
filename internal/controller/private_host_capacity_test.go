@@ -69,7 +69,7 @@ func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *s
 
 func seedOtherCapacityHolder(t *testing.T, server *serverFixture, key string) {
 	t.Helper()
-	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{ID: "other", Pipeline: "ci", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{RunSummary: runstate.RunSummary{ID: "other", Pipeline: "ci", Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, server.store, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE team='a' AND id='other'`)

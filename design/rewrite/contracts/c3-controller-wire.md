@@ -19,8 +19,9 @@ No new route or grant is introduced.
 
 <!-- design:begin -->
 
-Team machine enrollment settings share controllerwire.TeamSettings with the
-store, HTTP routes and concrete client.TeamSettingsClient. ReadTeamSettings
+Team machine enrollment settings use [`controllerwire.TeamSettings`](../../../internal/controllerwire/team_settings.go)
+at HTTP and client boundaries. Persistence uses [`store.TeamSettings`](../../../internal/store/controller_requests.go).
+Controller handlers project between the two representations. ReadTeamSettings
 uses GET `/api/v1/team/settings` under `runs.read`; SetTeamSettings uses PUT
 under current `team.admin` with an explicit `members_can_add_machines` boolean.
 The default is true. Personal issuance still needs an independent account
@@ -756,7 +757,7 @@ replay. `DeleteSchedule` deletes `/{schedule}` and returns canonical
 
 `ScheduleRepositoryManager` puts `/schedules/repos` using `ScheduleRepoRequest`:
 repository URL, branch, original SHA or follow policy, and the complete array of
-`ScheduleDeclaration` entries for the selected `replace` or `upsert` mode.
+[`runspec.ScheduleDeclaration`](../../../internal/runspec/schedule.go) entries for the selected `replace` or `upsert` mode.
 `ScheduleRepoWritten` retains rows and withdrawn
 display names. Delete uses `repo_url` and returns the same URL and nonnegative
 removed count. These are proposals. C2 derives team/repository authority.

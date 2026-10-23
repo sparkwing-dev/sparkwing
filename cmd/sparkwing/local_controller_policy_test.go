@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -28,9 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 
-	enginepolicy "github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -215,35 +209,6 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	if requests != 0 {
 		t.Fatalf("local controller fetched policy %d times", requests)
 	}
-}
-
-func signedLocalPolicy(t *testing.T) {
-	t.Helper()
-	public, private, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousKeys, previousHTTP := releaseauth.TrustedPublicKeys, http.DefaultClient
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys, http.DefaultClient = previousKeys, previousHTTP })
-	now := time.Now().UTC().Add(-time.Minute)
-	body, err := json.Marshal(enginepolicy.VersionIndex{Format: 1, PublishedAt: now, Latest: "v1.2.3", Versions: []engineid.VersionInfo{{Version: "v1.2.3", PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	signature := ed25519.Sign(private, body)
-	http.DefaultClient = &http.Client{Transport: queueHostTransport(func(r *http.Request) (*http.Response, error) {
-		var data []byte
-		switch r.URL.String() {
-		case enginepolicy.VersionIndexURL:
-			data = body
-		case enginepolicy.VersionIndexSignatureURL:
-			data = signature
-		default:
-			return nil, fmt.Errorf("unexpected policy request %s", r.URL)
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
-	})}
 }
 
 func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted controllerwire.CreateRunResponse, expected ...runspec.Request) {

@@ -109,7 +109,7 @@ func (r *Resolver) fetchIndex(ctx context.Context, now time.Time) (VerifiedIndex
 	if err != nil {
 		return VerifiedIndex{}, err
 	}
-	return VerifyIndex(SignedIndex{Body: body, Signature: signature}, now)
+	return VerifyIndex(SignedIndex{Body: body, Signature: signature}, now, r.config.TrustedKeys)
 }
 
 func checkPolicyAdvance(previous, next VerifiedIndex) error {
@@ -157,7 +157,7 @@ func (r *Resolver) loadIndex(now time.Time) (VerifiedIndex, error) {
 		if err := json.Unmarshal(body, &signed); err != nil {
 			continue
 		}
-		candidate, err := VerifyIndex(signed, now)
+		candidate, err := VerifyIndex(signed, now, r.config.TrustedKeys)
 		if err != nil {
 			continue
 		}

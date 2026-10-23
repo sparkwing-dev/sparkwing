@@ -204,10 +204,7 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID: "run_old", Pipeline: "nightly", Status: "pending",
-		CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour),
-	}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run_old", Pipeline: "nightly", Status: "pending", CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour)}}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	launcher := cronLauncher{server: New(st, nil)}

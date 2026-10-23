@@ -96,7 +96,7 @@ func addControllerCapacityRun(t *testing.T, server *serverFixture, tenant *store
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{ID: "other", Pipeline: "ci", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{RunSummary: runstate.RunSummary{ID: "other", Pipeline: "ci", Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	run.Request.RunID = "other"

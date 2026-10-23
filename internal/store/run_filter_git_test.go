@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -22,9 +24,9 @@ func TestListRunsFiltersGitIdentityBeforeLimit(t *testing.T) {
 
 	ctx := context.Background()
 	for i, run := range []store.Run{
-		{ID: "wanted", Pipeline: "push", Status: "failed", GitSHA: "abc123ffff", GitBranch: "topic", RepoURL: "https://example.com/acme/app.git"},
-		{ID: "newer-a", Pipeline: "push", Status: "failed", GitSHA: "def456", GitBranch: "other", RepoURL: "https://example.com/acme/app.git"},
-		{ID: "newer-b", Pipeline: "push", Status: "failed", GitSHA: "fed654", GitBranch: "topic", RepoURL: "https://example.com/other/app.git"},
+		{RunSummary: runstate.RunSummary{ID: "wanted", Pipeline: "push", Status: "failed", GitSHA: "abc123ffff", GitBranch: "topic", RepoURL: "https://example.com/acme/app.git"}},
+		{RunSummary: runstate.RunSummary{ID: "newer-a", Pipeline: "push", Status: "failed", GitSHA: "def456", GitBranch: "other", RepoURL: "https://example.com/acme/app.git"}},
+		{RunSummary: runstate.RunSummary{ID: "newer-b", Pipeline: "push", Status: "failed", GitSHA: "fed654", GitBranch: "topic", RepoURL: "https://example.com/other/app.git"}},
 	} {
 		run.StartedAt = time.Unix(int64(i+1), 0)
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, run); err != nil {
@@ -103,12 +105,7 @@ func TestListRunsClampsLimitToOneRowAboveTheCap(t *testing.T) {
 
 	ctx := context.Background()
 	for i := range store.MaxRunListLimit + 5 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-			ID:        "run-" + strconv.Itoa(i),
-			Pipeline:  "push",
-			Status:    "success",
-			StartedAt: time.Unix(int64(i+1), 0),
-		}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: "run-" + strconv.Itoa(i), Pipeline: "push", Status: "success", StartedAt: time.Unix(int64(i+1), 0)}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,7 +154,7 @@ func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: "run-1", Pipeline: "push", Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	for range store.MaxRunListLimit + 5 {

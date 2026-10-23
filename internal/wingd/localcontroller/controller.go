@@ -38,7 +38,7 @@ type Services struct {
 	Policies store.Policies
 	State    State
 	HTTP     localhostwire.LocalHTTP
-	Runner   runners.StoreRunnerConfig
+	Runner   StoreRunnerConfig
 	Close    func() error
 	Maintain func(context.Context)
 	Complete func(context.Context) error
@@ -97,7 +97,7 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
 		return nil, errors.New("wingd: local services require state and shared HTTP handlers")
 	}
-	queue, err := runners.NewStoreRunner(binding.Controller, services.Runner)
+	queue, err := NewStoreRunner(binding.Controller, services.Runner)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -55,7 +57,7 @@ func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {
 		now := time.Now()
 		seedRetry := func(tn *store.Tenant, id, retryOf string) {
 			t.Helper()
-			if err := teststore.SeedRun(f.st, ctx, tn.Team(), store.Run{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now}); err != nil {
+			if err := teststore.SeedRun(f.st, ctx, tn.Team(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now}}); err != nil {
 				t.Fatal(err)
 			}
 		}

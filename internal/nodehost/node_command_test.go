@@ -10,7 +10,7 @@ type capturedNodeCommand struct {
 	Command store.NodeCommand
 	Ref     runspec.NodeRef
 	Actor   runstate.Actor
-	store.NodeCommandPayload
+	runstate.NodeCommandPayload
 	Extra capturedCommandExtra
 }
 type capturedCommandExtra struct {

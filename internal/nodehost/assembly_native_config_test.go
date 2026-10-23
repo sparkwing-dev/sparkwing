@@ -71,10 +71,7 @@ func nativeConfigFixture(t testing.TB) (NativeConfig, *nativeState) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := &nativeState{snapshot: store.RunSnapshot{Run: store.RunRow{
-		ID: "run", Team: store.DefaultTeam,
-		Request: runspec.SealedRequest{Request: runspec.Request{Team: string(store.DefaultTeam), Env: seal}},
-	}}}
+	state := &nativeState{snapshot: store.RunSnapshot{Run: store.RunRow{Team: store.DefaultTeam, Execution: runstate.Execution{ID: "run", Request: runspec.SealedRequest{Request: runspec.Request{Team: string(store.DefaultTeam), Env: seal}}}}}}
 	return NativeConfig{
 		Local: func(runstate.NodeRow) bool { return true }, Home: home, Admission: ComposeStartGate(nil, &LocalAdmission{}, false), Store: state, Parent: authority, Bindings: authority,
 		Principal: principal, Refresh: func(context.Context) (capability.Principal, error) { return principal, nil },

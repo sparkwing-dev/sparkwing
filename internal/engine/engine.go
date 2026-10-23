@@ -3,6 +3,7 @@ package engine
 
 import (
 	"context"
+	"crypto/ed25519"
 	"net/http"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type Resolved struct {
 	AssetDigest string
 	Executable  string
 	Notices     []engineid.Notice
+	trustedKeys []ed25519.PublicKey
 }
 
 // ReleaseBundle is untrusted until VerifyRelease checks the shared release trust roots.
@@ -51,6 +53,8 @@ type Config struct {
 	HTTPClient     *http.Client
 	BuildVersion   string
 	LocalOnly      bool
+	// TrustedKeys defaults to releaseauth.PublicKeys when nil. NewResolver copies every key.
+	TrustedKeys []ed25519.PublicKey
 }
 
 // Resolver owns the version-index cache and verified executable cache for one machine.

@@ -84,7 +84,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 	}
 	unit := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	sealed := runspec.SealedRequest{RunID: "run", Request: request, Hash: "request"}
-	s := newOwnerSealStore(store.RunRow{ID: "run", State: runstate.RunPending, Request: sealed, Owner: &unit})
+	s := newOwnerSealStore(store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunPending, Request: sealed, Owner: &unit}})
 	var processes []*scriptedSDK
 	defaultArg, secretArg := "provided-by-sdk", "private-default"
 	planner := SDKPlanner{

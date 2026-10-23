@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -126,7 +128,7 @@ func TestListRunsHandler_AppliesParseRunFilter(t *testing.T) {
 	b := &fakeBackend{
 		listRuns: func(f store.RunFilter) ([]*store.Run, error) {
 			observed = f
-			return []*store.Run{{ID: "r1", Pipeline: "p"}}, nil
+			return []*store.Run{{RunSummary: runstate.RunSummary{ID: "r1", Pipeline: "p"}}}, nil
 		},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs?pipeline=p,q&status=succeeded&limit=7", nil)
@@ -150,7 +152,7 @@ func TestGetRunHandler_IncludeNodes(t *testing.T) {
 	t.Parallel()
 	b := &fakeBackend{
 		getRun: func(id string) (*store.Run, error) {
-			return &store.Run{ID: id, Pipeline: "p"}, nil
+			return &store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "p"}}, nil
 		},
 		listNodes: func(string) ([]*store.Node, error) {
 			return []*store.Node{{
@@ -228,7 +230,7 @@ func TestEventsStreamUsesCanonicalPublicProjection(t *testing.T) {
 	}
 	b := &fakeBackend{
 		getRun: func(string) (*store.Run, error) {
-			return &store.Run{ID: "run-private-event", Status: "success"}, nil
+			return &store.Run{RunSummary: runstate.RunSummary{ID: "run-private-event", Status: "success"}}, nil
 		},
 		listEvents: func(_ string, after int64, _ int) ([]store.Event, error) {
 			if after > 0 {

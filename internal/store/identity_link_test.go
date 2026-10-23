@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -554,7 +556,7 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	runCtx := store.FixtureWithCreatingPrincipal(ctx, "holder@example.com")
 	if err := space.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-h", Pipeline: "build", CreatedAt: now, TriggerUser: "holder@example.com"},
-		store.Run{ID: "run-h", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
+		store.Run{RunSummary: runstate.RunSummary{ID: "run-h", Pipeline: "build", Status: "pending", StartedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })

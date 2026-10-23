@@ -86,7 +86,7 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 			id := "private-" + strconv.FormatUint(value, 16) + "-" + strconv.Itoa(serial)
 			pipeline := "pipeline-" + id
 			private := "argument-" + id
-			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{ID: id, Pipeline: pipeline, Status: "running", Args: map[string]string{"private": private}}); err != nil {
+			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running", Args: map[string]string{"private": private}}}); err != nil {
 				t.Fatal(err)
 			}
 			path := "/api/v1/runs/" + id
@@ -134,7 +134,7 @@ func TestTeamBoundaryOutputHidesRunExistenceProperty(t *testing.T) {
 		property := func(value uint64) bool {
 			serial++
 			id := "output-private-" + strconv.FormatUint(value, 16) + "-" + strconv.Itoa(serial)
-			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{ID: id, Pipeline: "private-pipeline-" + id, Status: "running"}); err != nil {
+			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "private-pipeline-" + id, Status: "running"}}); err != nil {
 				t.Fatal(err)
 			}
 			for _, auth := range []string{f.ownerB, f.everyScopeB} {

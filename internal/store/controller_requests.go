@@ -2,6 +2,8 @@ package store
 
 import (
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // TeamSettings reads the persisted enrollment policy and claim ranking.
@@ -34,23 +36,12 @@ type OperatorRefund struct {
 
 // ScheduleRepoRequest reconciles one repository’s schedule declarations.
 type ScheduleRepoRequest struct {
-	Mode      ScheduleWriteMode     `json:"mode"`
-	RepoURL   string                `json:"repo_url"`
-	Branch    string                `json:"branch,omitempty"`
-	SHA       string                `json:"sha,omitempty"`
-	Follow    bool                  `json:"follow"`
-	Schedules []ScheduleDeclaration `json:"schedules"`
-}
-
-// ScheduleDeclaration specifies author cadence and arguments without granting authority.
-type ScheduleDeclaration struct {
-	Pipeline string            `json:"pipeline"`
-	Name     string            `json:"name,omitempty"`
-	Cron     string            `json:"cron"`
-	TZ       string            `json:"tz,omitempty"`
-	Overlap  string            `json:"overlap,omitempty"`
-	CatchUp  string            `json:"catch_up,omitempty"`
-	Args     map[string]string `json:"args,omitempty"`
+	Mode      ScheduleWriteMode             `json:"mode"`
+	RepoURL   string                        `json:"repo_url"`
+	Branch    string                        `json:"branch,omitempty"`
+	SHA       string                        `json:"sha,omitempty"`
+	Follow    bool                          `json:"follow"`
+	Schedules []runspec.ScheduleDeclaration `json:"schedules"`
 }
 
 // ScheduleWriteMode selects complete replacement or declaration upserts.

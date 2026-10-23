@@ -54,10 +54,10 @@ func serviceFixture(b Binding) Services {
 	return Services{
 		State: &stateFixture{},
 		HTTP:  localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
-		Runner: runners.StoreRunnerConfig{
+		Runner: StoreRunnerConfig{
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
 			Bearer: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() },
-			Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+			Bind: func(context.Context, StoreBinding) (nodehost.NativeServices, error) {
 				return nodehost.NativeServices{}, errors.New("unexpected host")
 			},
 		},

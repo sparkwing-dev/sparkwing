@@ -8,11 +8,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// RunRow is the execution projection sent to a host.
+// RunRow binds execution facts to the host's team identity.
 type RunRow struct {
+	Team string
+	Execution
+}
+
+// Execution contains the shared run facts used by persistence and hosts.
+type Execution struct {
 	ID                string
 	Number            int64
-	Team              string
 	Pipeline          string
 	State             RunState
 	Request           runspec.SealedRequest

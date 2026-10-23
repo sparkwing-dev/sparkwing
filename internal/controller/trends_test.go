@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -37,12 +39,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 	for i := range 3 {
 		id := "r-succ-" + string(rune('a'+i))
 		start := now.Add(-10 * time.Minute).Add(time.Duration(i) * time.Minute)
-		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-			ID:        id,
-			Pipeline:  "demo",
-			Status:    "running",
-			StartedAt: start,
-		}); err != nil {
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "demo", Status: "running", StartedAt: start}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "success", ""); err != nil {
@@ -52,12 +49,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 
 	{
 		id := "r-fail-1"
-		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-			ID:        id,
-			Pipeline:  "demo",
-			Status:    "running",
-			StartedAt: now.Add(-2 * time.Hour),
-		}); err != nil {
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "demo", Status: "running", StartedAt: now.Add(-2 * time.Hour)}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "failed", "nope"); err != nil {
@@ -98,13 +90,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 	start := now.Add(-5 * time.Minute)
 	for i, waitMs := range []int{500, 1500} {
 		id := "r-wait-" + string(rune('a'+i))
-		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-			ID:        id,
-			Pipeline:  "demo",
-			Status:    "running",
-			CreatedAt: start.Add(-time.Duration(waitMs) * time.Millisecond),
-			StartedAt: start,
-		}); err != nil {
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "demo", Status: "running", CreatedAt: start.Add(-time.Duration(waitMs) * time.Millisecond), StartedAt: start}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "success", ""); err != nil {
@@ -138,24 +124,13 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	now := time.Now()
 	start := now.Add(-5 * time.Minute)
 
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID:        "r-real",
-		Pipeline:  "demo",
-		Status:    "running",
-		CreatedAt: start.Add(-2 * time.Second),
-		StartedAt: start,
-	}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "r-real", Pipeline: "demo", Status: "running", CreatedAt: start.Add(-2 * time.Second), StartedAt: start}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "r-real", "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID:        "r-legacy",
-		Pipeline:  "demo",
-		Status:    "running",
-		StartedAt: start,
-	}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "r-legacy", Pipeline: "demo", Status: "running", StartedAt: start}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "r-legacy", "success", ""); err != nil {
@@ -191,12 +166,7 @@ func TestTrends_PipelineFilter(t *testing.T) {
 	now := time.Now()
 	for i, p := range []string{"alpha", "beta", "alpha"} {
 		id := "r-" + p + "-" + string(rune('a'+i))
-		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-			ID:        id,
-			Pipeline:  p,
-			Status:    "running",
-			StartedAt: now.Add(-5 * time.Minute),
-		}); err != nil {
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: p, Status: "running", StartedAt: now.Add(-5 * time.Minute)}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "success", ""); err != nil {
@@ -235,7 +205,7 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer st.Close()
-			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
+			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
 			raw, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})

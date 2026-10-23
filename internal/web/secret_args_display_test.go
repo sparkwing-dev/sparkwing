@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -17,16 +19,11 @@ const (
 )
 
 func webSecretRun(id string) *store.Run {
-	return &store.Run{
-		ID:       id,
-		Pipeline: "deploy",
-		Args:     map[string]string{"token": runspec.RedactedArgValue, "env": webVisibleValue},
-		Invocation: map[string]any{
-			"args":                        map[string]string{"token": runspec.RedactedArgValue, "env": webVisibleValue},
-			"reproducer":                  "sparkwing run deploy --env=" + webVisibleValue + " --token=" + runspec.RedactedArgValue,
-			store.InvocationSecretArgsKey: []string{"token"},
-		},
-	}
+	return &store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "deploy", Args: map[string]string{"token": runspec.RedactedArgValue, "env": webVisibleValue}, Invocation: map[string]any{
+		"args":                        map[string]string{"token": runspec.RedactedArgValue, "env": webVisibleValue},
+		"reproducer":                  "sparkwing run deploy --env=" + webVisibleValue + " --token=" + runspec.RedactedArgValue,
+		store.InvocationSecretArgsKey: []string{"token"},
+	}}}
 }
 
 func assertWebRedacted(t *testing.T, surface, body string) {

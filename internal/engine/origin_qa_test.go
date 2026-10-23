@@ -11,8 +11,8 @@ import (
 )
 
 func TestQATrustBuildAddsOnlyTheQAKeyAndOrigin(t *testing.T) {
-	if !slices.Equal(releaseauth.TrustedPublicKeys, []string{releaseauth.ProductionPublicKey, releaseauth.QAPublicKey}) {
-		t.Fatalf("qatrust build trusts %v, want the production and QA keys", releaseauth.TrustedPublicKeys)
+	if !slices.Equal(releaseauth.TrustedPublicKeys(), []string{releaseauth.ProductionPublicKey, releaseauth.QAPublicKey}) {
+		t.Fatalf("qatrust build trusts %v, want the production and QA keys", releaseauth.TrustedPublicKeys())
 	}
 	if _, err := releaseauth.PublicKeys(); err != nil {
 		t.Fatalf("QA public key does not decode: %v", err)

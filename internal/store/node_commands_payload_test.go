@@ -33,7 +33,7 @@ func TestNodeCommandPayloadRejectsConflictingPayload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rebuilt, err := body.NodeCommand(ref, actor)
+		rebuilt, err := NodeCommandFromPayload(body, ref, actor)
 		if err != nil {
 			t.Fatalf("%T round trip: %v", command, err)
 		}
@@ -45,18 +45,18 @@ func TestNodeCommandPayloadRejectsConflictingPayload(t *testing.T) {
 		} else {
 			body.Extra.Materialize = &runstate.MaterializeSource{}
 		}
-		if _, err := body.NodeCommand(ref, actor); err == nil {
+		if _, err := NodeCommandFromPayload(body, ref, actor); err == nil {
 			t.Fatalf("%T accepted another command's payload", command)
 		}
 	}
 	body, _ := NodeCommandPayloadFor(StartNode{SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	body.To = runstate.NodeSuccess
-	if _, err := body.NodeCommand(ref, actor); err == nil {
+	if _, err := NodeCommandFromPayload(body, ref, actor); err == nil {
 		t.Fatal("start accepted a terminal destination")
 	}
 	body, _ = NodeCommandPayloadFor(CancelNode{})
 	body.Extra.RetryAt = new(time.Time)
-	if _, err := body.NodeCommand(ref, actor); err == nil {
+	if _, err := NodeCommandFromPayload(body, ref, actor); err == nil {
 		t.Fatal("cancel accepted retry scheduling")
 	}
 }

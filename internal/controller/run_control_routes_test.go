@@ -10,6 +10,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -31,7 +33,7 @@ type runControlWriterFake struct {
 func (f *runControlWriterFake) Team() store.Team { return f.team }
 
 func (f *runControlWriterFake) ReadRun(_ context.Context, id string) (store.RunRow, error) {
-	return store.RunRow{ID: id, Team: f.team}, nil
+	return store.RunRow{Team: f.team, Execution: runstate.Execution{ID: id}}, nil
 }
 
 func (f *runControlWriterFake) ResumeAuthorizedDebugPause(_ context.Context, a capability.Authorized) error {

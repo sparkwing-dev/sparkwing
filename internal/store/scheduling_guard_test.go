@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -27,7 +29,7 @@ func TestSchedulingGuardRefusalNeverReleasesWork(t *testing.T) {
 }
 
 func TestSchedulingProjectsSealedGuardRefusal(t *testing.T) {
-	snapshot := RunSnapshot{Run: RunRow{ID: "run", Plan: []byte(`{"jobs":[]}`), Spec: &runspec.Spec{Resolved: runspec.Resolved{Guards: runspec.Guards{When: []string{"git:branch=default"}, Passed: false}}}}}
+	snapshot := RunSnapshot{Run: RunRow{Execution: runstate.Execution{ID: "run", Plan: []byte(`{"jobs":[]}`), Spec: &runspec.Spec{Resolved: runspec.Resolved{Guards: runspec.Guards{When: []string{"git:branch=default"}, Passed: false}}}}}}
 	graph, err := snapshot.Scheduling()
 	if err != nil || graph.GuardRefusal == "" || Decide(graph).Outcome != "failed" {
 		t.Fatalf("sealed refusal: %+v, %v", graph, err)

@@ -50,15 +50,10 @@ func runStatusFacts(b *credentialBoundary) controller.RunStatusFacts {
 	identity := runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 2, Generation: 4}
 	return controller.RunStatusFacts{
 		Snapshot: store.RunSnapshot{
-			Run: store.RunRow{
-				ID: "run", Team: "team", Number: 17, State: runstate.RunRunning, StateSeq: 9, Request: request,
-				StartedAt: &b.snapshot.Now, CancelRequestedAt: &b.snapshot.Now,
-				Spec: &runspec.Spec{Request: request, Hash: "private-second-seal", PlanHash: "private-plan-hash", Resolved: runspec.Resolved{
-					Args: map[string]string{"token": "private-secret", "count": "42"}, SecretArgs: []string{"token"},
-					Engine: engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"},
-				}},
-				Plan: json.RawMessage(`{"env":{"TOKEN":"private-secret"}}`), StateDigest: "private-state-digest",
-			},
+			Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Number: 17, State: runstate.RunRunning, StateSeq: 9, Request: request, StartedAt: &b.snapshot.Now, CancelRequestedAt: &b.snapshot.Now, Spec: &runspec.Spec{Request: request, Hash: "private-second-seal", PlanHash: "private-plan-hash", Resolved: runspec.Resolved{
+				Args: map[string]string{"token": "private-secret", "count": "42"}, SecretArgs: []string{"token"},
+				Engine: engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"},
+			}}, Plan: json.RawMessage(`{"env":{"TOKEN":"private-secret"}}`), StateDigest: "private-state-digest"}},
 			Nodes: []runstate.NodeRow{{
 				Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusRunning, Attempt: 2, Generation: 4, StateSeq: 8,
 				ClaimedBy: "private-holder", CapabilityPrefix: "private-prefix", SpecHash: "private-spec-hash",

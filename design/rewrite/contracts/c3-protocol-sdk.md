@@ -1126,7 +1126,8 @@ describe, planning and atomic acceptance. It returns after acceptance transfers
 scheduling to the controller. It cannot start or finish the run as its owner.
 `OwnerHost.Evaluate` keeps an independent eval lease and submits only the awarded
 source's expansion or structured failure. Source generation zero is retained for
-memoized results. Neither path invents a node attempt. `Hosting` and `StoreHosting`
+memoized results. Neither path invents a node attempt. [`runners.Hosting`](../../../internal/runners/hosting.go) and
+[`localcontroller.StoreHosting`](../../../internal/wingd/localcontroller/store_host.go)
 dispatch all four unit kinds through these shared hosts after award validation.
 
 Private plan/eval reads use the existing local-host snapshot, authentication and

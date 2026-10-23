@@ -139,7 +139,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			{ID: "sibling", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		}
 		state := &executorStore{nodes: map[string]runstate.NodeRow{}}
-		snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run"}}
+		snapshot := store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run"}}}
 		for _, job := range append([]nodeproto.JobSpec{source}, jobs...) {
 			raw, err := json.Marshal(job)
 			if err != nil {

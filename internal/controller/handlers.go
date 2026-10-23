@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
@@ -86,9 +88,9 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authoriz
 		return engineLookupError(err)
 	}
 
-	out := make([]controllerwire.RunSummary, len(runs))
+	out := make([]runstate.RunSummary, len(runs))
 	for i, row := range runs {
-		out[i] = runSummary(*row)
+		out[i] = row.RunSummary
 	}
 	w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
 	writeJSON(w, http.StatusOK, map[string]any{"runs": out})
@@ -133,7 +135,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, runSummary(*run))
+	writeJSON(w, http.StatusOK, run.RunSummary)
 	return nil
 }
 

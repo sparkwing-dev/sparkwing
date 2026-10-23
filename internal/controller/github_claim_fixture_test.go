@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -36,7 +38,7 @@ func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) 
 func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {
 	t.Helper()
 	now := teststore.Now(st)
-	if err := teststore.SeedRun(st, t.Context(), store.Team(team), store.Run{ID: run, Pipeline: "build", Status: "pending", CreatedAt: now, RepoURL: remote, GitBranch: ref, GitSHA: sha}); err != nil {
+	if err := teststore.SeedRun(st, t.Context(), store.Team(team), store.Run{RunSummary: runstate.RunSummary{ID: run, Pipeline: "build", Status: "pending", CreatedAt: now, RepoURL: remote, GitBranch: ref, GitSHA: sha}}); err != nil {
 		t.Fatal(err)
 	}
 	seal := runspec.SealedRequest{Version: 1, RunID: run, AdmittedAt: now, Request: runspec.Request{

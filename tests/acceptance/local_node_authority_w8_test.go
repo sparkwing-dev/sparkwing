@@ -6,11 +6,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -57,7 +58,7 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitNode)
 	finished := errors.New("binding finished")
 	refreshed, closed := false, false
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+	host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 		p := binding.Principal
 		admitStoredUnitW8(t, s, unit)
 		attempt := int64(0)
@@ -92,7 +93,7 @@ func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
 		defer cancelHost()
 		var retained func(context.Context) (string, error)
 		finalized := false
-		host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+		host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 			retained = binding.Bearer
 			if retained == nil {
 				t.Fatal("embedded services have no awarded credential transport")

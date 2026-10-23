@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -285,9 +287,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
 	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-already", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-already", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("seed a run: %v", err)
 	}
 	if _, err := f.store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {

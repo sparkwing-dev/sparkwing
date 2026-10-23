@@ -154,7 +154,7 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := receipt.BuildReceipt(&store.Run{ID: "target"}, nodes, 0, "")
+	rec := receipt.BuildReceipt(&store.Run{RunSummary: runstate.RunSummary{ID: "target"}}, nodes, 0, "")
 	if got := rec.Identity.OutputsHash["job"]; got != "sha256:"+string(digest) {
 		t.Fatalf("materialized receipt output = %q", got)
 	}

@@ -23,7 +23,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			ctx := t.Context()
 			start := time.Unix(1700000000, 0)
 			finish := start.Add(time.Minute)
-			run := store.Run{ID: "r", Pipeline: "aggregate", Status: "success", StartedAt: start, FinishedAt: &finish}
+			run := store.Run{RunSummary: runstate.RunSummary{ID: "r", Pipeline: "aggregate", Status: "success", StartedAt: start, FinishedAt: &finish}}
 			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}

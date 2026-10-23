@@ -31,7 +31,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 			rawSpec, _ := json.Marshal(spec)
 			rawJob, _ := json.Marshal(job)
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "gate"}, Status: runstate.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
+			st := newExpansionHostStore(store.RunRow{Execution: runstate.Execution{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "gate"}, Status: runstate.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
 			value := json.RawMessage("false")
 			if mode == "skip" {
 				value = json.RawMessage("true")

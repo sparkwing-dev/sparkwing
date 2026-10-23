@@ -93,11 +93,7 @@ func TestRunReportingSeedUsesSealedSchemaWithoutExecutableWork(t *testing.T) {
 		}
 	})
 	at := time.Unix(1700000000, 123).UTC()
-	seed := store.Run{
-		ID: "report", Pipeline: "build", Status: "success", CreatedAt: at, StartedAt: at,
-		Args: map[string]string{"target": "release"}, DeclaredRepo: "acme/widgets", RepoURL: "https://github.com/acme/widgets",
-		GitBranch: "main", GitSHA: "abc123", TriggerSource: "schedule", TriggerUser: "alice", Error: "fixture failure",
-	}
+	seed := store.Run{RunSummary: runstate.RunSummary{ID: "report", Pipeline: "build", Status: "success", CreatedAt: at, StartedAt: at, Args: map[string]string{"target": "release"}, DeclaredRepo: "acme/widgets", RepoURL: "https://github.com/acme/widgets", GitBranch: "main", GitSHA: "abc123", TriggerSource: "schedule", TriggerUser: "alice", Error: "fixture failure"}}
 	if err := teststore.SeedRun(s, t.Context(), store.DefaultTeam, seed); err != nil {
 		t.Fatal(err)
 	}

@@ -134,31 +134,7 @@ var _ NativeHostStore = (*RemoteHostStore)(nil)
 
 func (s *RemoteHostStore) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
 	snapshot, err := s.PrivateHostState.ReadSnapshot(ctx, run)
-	row := snapshot.Run
-	return store.RunSnapshot{Run: store.RunRow{
-		ID:                row.ID,
-		Number:            row.Number,
-		Team:              store.Team(row.Team),
-		Pipeline:          row.Pipeline,
-		State:             row.State,
-		Request:           row.Request,
-		Lineage:           row.Lineage,
-		Retry:             row.Retry,
-		Spec:              row.Spec,
-		Plan:              row.Plan,
-		PlanHash:          row.PlanHash,
-		Dispatch:          row.Dispatch,
-		AllowedPools:      row.AllowedPools,
-		Owner:             row.Owner,
-		CreatedAt:         row.CreatedAt,
-		CancelRequestedAt: row.CancelRequestedAt,
-		CancelReason:      row.CancelReason,
-		StartedAt:         row.StartedAt,
-		FinishedAt:        row.FinishedAt,
-		StateSeq:          row.StateSeq,
-		StateDigest:       row.StateDigest,
-		StateActor:        row.StateActor,
-	}, Nodes: snapshot.Nodes, Expansions: snapshot.Expansions, StoreNow: snapshot.StoreNow}, err
+	return store.RunSnapshot{Run: store.RunRow{Execution: snapshot.Run.Execution, Team: store.Team(snapshot.Run.Team)}, Nodes: snapshot.Nodes, Expansions: snapshot.Expansions, StoreNow: snapshot.StoreNow}, err
 }
 
 func (s *RemoteHostStore) TransitionNode(ctx context.Context, command store.NodeCommand) (runstate.Applied, error) {
@@ -167,5 +143,5 @@ func (s *RemoteHostStore) TransitionNode(ctx context.Context, command store.Node
 	if err != nil {
 		return runstate.Applied{}, err
 	}
-	return s.PrivateHostState.TransitionNode(ctx, ref, actor, runstate.NodeCommandPayload(payload))
+	return s.PrivateHostState.TransitionNode(ctx, ref, actor, payload)
 }

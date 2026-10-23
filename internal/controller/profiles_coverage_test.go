@@ -20,7 +20,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close() })
 			start := time.Now()
-			run := store.Run{ID: "r", Pipeline: "coverage", Status: "running", StartedAt: start}
+			run := store.Run{RunSummary: runstate.RunSummary{ID: "r", Pipeline: "coverage", Status: "running", StartedAt: start}}
 			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}

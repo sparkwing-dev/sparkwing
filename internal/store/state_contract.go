@@ -12,30 +12,10 @@ import (
 
 // RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts.
 type RunRow struct {
-	expansions        []runstate.AcceptedExpansionRow
-	ID                string
-	Number            int64
-	Team              Team
-	Pipeline          string
-	State             runstate.RunState
-	Request           runspec.SealedRequest
-	Lineage           runspec.Lineage
-	admission         admissionIdentity
-	Retry             *runstate.RetrySelection
-	Spec              *runspec.Spec
-	Plan              json.RawMessage
-	PlanHash          string
-	Dispatch          string
-	AllowedPools      []string
-	Owner             *runstate.OwnerLeaseRef
-	CreatedAt         time.Time
-	CancelRequestedAt *time.Time
-	CancelReason      string
-	StartedAt         *time.Time
-	FinishedAt        *time.Time
-	StateSeq          int64
-	StateDigest       string
-	StateActor        runstate.Actor
+	runstate.Execution
+	Team       Team
+	expansions []runstate.AcceptedExpansionRow
+	admission  admissionIdentity
 }
 
 // RunSnapshot contains one consistent read, including accepted expansions in insertion order.
@@ -44,6 +24,11 @@ type RunSnapshot struct {
 	Nodes      []runstate.NodeRow
 	Expansions []runstate.AcceptedExpansionRow
 	StoreNow   time.Time
+}
+
+// ExecutionSnapshot omits persistence-only metadata at the host boundary.
+func (s RunSnapshot) ExecutionSnapshot() runstate.RunSnapshot {
+	return runstate.RunSnapshot{Run: runstate.RunRow{Execution: s.Run.Execution, Team: string(s.Run.Team)}, Nodes: s.Nodes, Expansions: s.Expansions, StoreNow: s.StoreNow}
 }
 
 // ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit.
@@ -129,7 +114,6 @@ func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (r
 	return t.reconcileNode(ctx, request)
 }
 
-// RenewOwner also renews self-claimed jobs and continuously live plan and job concurrency holders atomically.
 // StateEventRule makes every lifecycle event name store-owned on customer surfaces.
 type StateEventRule struct {
 	RequestOnly bool

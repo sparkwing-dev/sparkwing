@@ -10,11 +10,11 @@ import (
 // ProductionPublicKey verifies every official release; install/install.sh carries the same key.
 const ProductionPublicKey = "whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI="
 
-// TrustedPublicKeys is the production key, plus the QA key only in a qatrust build.
-var TrustedPublicKeys = append([]string{ProductionPublicKey}, qaPublicKeys...)
+// TrustedPublicKeys returns the production key and any build-selected QA key.
+func TrustedPublicKeys() []string { return append([]string{ProductionPublicKey}, qaPublicKeys()...) }
 
 func TrustedPublicKey(encoded string) bool {
-	for _, trusted := range TrustedPublicKeys {
+	for _, trusted := range TrustedPublicKeys() {
 		if encoded == trusted {
 			return true
 		}
@@ -23,8 +23,8 @@ func TrustedPublicKey(encoded string) bool {
 }
 
 func PublicKeys() ([]ed25519.PublicKey, error) {
-	keys := make([]ed25519.PublicKey, 0, len(TrustedPublicKeys))
-	for _, encoded := range TrustedPublicKeys {
+	keys := make([]ed25519.PublicKey, 0, len(TrustedPublicKeys()))
+	for _, encoded := range TrustedPublicKeys() {
 		key, err := PublicKey(encoded)
 		if err != nil {
 			return nil, err

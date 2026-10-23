@@ -45,7 +45,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 4, SpecHash: "job-spec"}
-				s := newClaimedHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: ownerPlanHash, Plan: body}, Nodes: []runstate.NodeRow{row}}, mode)
+				s := newClaimedHostStore(store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", Spec: &spec, PlanHash: ownerPlanHash, Plan: body}}, Nodes: []runstate.NodeRow{row}}, mode)
 				input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: ownerPlanHash, Plan: plan}, row, engine.Resolved{Identity: identity}, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
 				if err != nil {
 					t.Fatal(err)

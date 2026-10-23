@@ -2,7 +2,6 @@ package engine
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
@@ -42,7 +40,7 @@ func FuzzSignedPolicyRejectsDuplicateKeys(f *testing.F) {
 				}
 			}
 			candidate := append(append([]byte(nil), body[:len(body)-1]...), []byte(`,"extension":`+extension+`}`)...)
-			_, err := VerifyIndex(SignedIndex{Body: candidate, Signature: ed25519.Sign(key, candidate)}, now)
+			_, err := VerifyIndex(SignedIndex{Body: candidate, Signature: ed25519.Sign(key, candidate)}, now, signingKeys(key))
 			if duplicate {
 				requireCode(t, err, apierr.IntegrityFailure)
 			} else if err != nil {
@@ -54,13 +52,10 @@ func FuzzSignedPolicyRejectsDuplicateKeys(f *testing.F) {
 
 func testSigningKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
-	pub, key, err := ed25519.GenerateKey(nil)
+	_, key, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(pub)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = old })
 	return key
 }
 
@@ -92,7 +87,7 @@ func requireCode(t *testing.T, err error, want apierr.Code) {
 func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 	key := testSigningKey(t)
 	policy, now := policyFixture()
-	index, err := VerifyIndex(signPolicy(t, key, policy), now)
+	index, err := VerifyIndex(signPolicy(t, key, policy), now, signingKeys(key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +97,7 @@ func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 	}
 	restriction := Restriction{Version: "v0.10.2", Reason: "critical fixture vulnerability", Security: true, AnnouncedAt: now, EffectiveAt: now}
 	policy.Revoked = []Restriction{restriction}
-	index, err = VerifyIndex(signPolicy(t, key, policy), now)
+	index, err = VerifyIndex(signPolicy(t, key, policy), now, signingKeys(key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +114,7 @@ func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 	policy.Revoked = nil
 	restriction.Version = "v0.20.0"
 	policy.Minimum = restriction
-	index, err = VerifyIndex(signPolicy(t, key, policy), now)
+	index, err = VerifyIndex(signPolicy(t, key, policy), now, signingKeys(key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,20 +127,38 @@ func TestSignedPolicyRejectsMalformedAndUnverifiedAuthority(t *testing.T) {
 	policy, now := policyFixture()
 	good := signPolicy(t, key, policy)
 	for _, body := range [][]byte{[]byte(`{"format":1,"format":1}`), []byte(`{"format":2}`), append(good.Body, []byte(` {}`)...)} {
-		_, err := VerifyIndex(SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now)
+		_, err := VerifyIndex(SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now, signingKeys(key))
 		if err == nil {
 			t.Fatal("invalid signed policy accepted")
 		}
 	}
 	good.Signature = nil
-	if _, err := VerifyIndex(good, now); err == nil {
+	if _, err := VerifyIndex(good, now, signingKeys(key)); err == nil {
 		t.Fatal("unsigned policy accepted")
 	}
 	if _, err := Evaluate(VerifiedIndex{}, "v0.10.2", now); err == nil {
 		t.Fatal("zero authority accepted")
 	}
 	policy.Versions[1].SupportUntil = now
-	if _, err := VerifyIndex(signPolicy(t, key, policy), now); err == nil {
+	if _, err := VerifyIndex(signPolicy(t, key, policy), now, signingKeys(key)); err == nil {
 		t.Fatal("shortened support accepted")
+	}
+}
+
+func signingKeys(key ed25519.PrivateKey) []ed25519.PublicKey {
+	return []ed25519.PublicKey{key.Public().(ed25519.PublicKey)}
+}
+
+func TestVerifyIndexUsesOnlySuppliedTrust(t *testing.T) {
+	key := testSigningKey(t)
+	policy, now := policyFixture()
+	signed := signPolicy(t, key, policy)
+	other := testSigningKey(t)
+	for _, keys := range [][]ed25519.PublicKey{nil, {}, signingKeys(other)} {
+		_, err := VerifyIndex(signed, now, keys)
+		requireCode(t, err, apierr.IntegrityFailure)
+	}
+	if _, err := VerifyIndex(signed, now, signingKeys(key)); err != nil {
+		t.Fatal(err)
 	}
 }

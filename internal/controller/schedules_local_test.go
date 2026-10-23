@@ -144,7 +144,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: checkout, Project: project, Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "ci", Name: "default", Cron: "0 1 * * *"}}, Environment: []string{"TOKEN=private\xff"}, Prove: true}
+	input := controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: checkout, Project: project, Schedules: []runspec.ScheduleDeclaration{{Pipeline: "ci", Name: "default", Cron: "0 1 * * *"}}, Environment: []string{"TOKEN=private\xff"}, Prove: true}
 	written, err := manager.RegisterLocalSchedules(t.Context(), input)
 	if err != nil || len(written.Schedules) != 1 {
 		t.Fatalf("register through verified peer transport: %+v %v", written, err)
@@ -226,7 +226,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	const remote = "https://192.0.2.1/acme/local.git"
 	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: remote, Branch: "main", SHA: sourcetest.FixedRemote(t, remote)}
 	for i := range 21 {
-		body.Schedules = append(body.Schedules, controllerwire.ScheduleDeclaration{Pipeline: fmt.Sprintf("local-%d", i), Cron: "0 1 * * *"})
+		body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("local-%d", i), Cron: "0 1 * * *"})
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -355,7 +355,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := manager.RegisterLocalSchedules(t.Context(), controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: checkout, Project: project, Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "ci", Cron: "* * * * *"}}, Environment: []string{"BUILD_CONTEXT=captured"}, Follow: true})
+	written, err := manager.RegisterLocalSchedules(t.Context(), controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: checkout, Project: project, Schedules: []runspec.ScheduleDeclaration{{Pipeline: "ci", Cron: "* * * * *"}}, Environment: []string{"BUILD_CONTEXT=captured"}, Follow: true})
 	if err != nil || len(written.Schedules) != 1 {
 		t.Fatalf("arm through real api.sock: %+v %v", written, err)
 	}

@@ -191,3 +191,36 @@ func checkContractInventory(t *testing.T, inventory, defaultOwner string, packag
 		}
 	}
 }
+
+func TestContractSourceSymbolLinks(t *testing.T) {
+	paths, err := filepath.Glob("../../design/rewrite/contracts/*.md")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("contracts: %v", err)
+	}
+	links := regexp.MustCompile("\\[`([A-Za-z][A-Za-z0-9_.]+)`\\]\\(([^)]+\\.go)\\)")
+	packages := map[string]map[string]string{}
+	checked := 0
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ref := range links.FindAllStringSubmatch(string(body), -1) {
+			checked++
+			source := filepath.Join(filepath.Dir(path), ref[2])
+			directory := filepath.Dir(source)
+			symbols, ok := packages[directory]
+			if !ok {
+				symbols = contractSymbols(t, directory)
+				packages[directory] = symbols
+			}
+			name := strings.TrimPrefix(ref[1], filepath.Base(directory)+".")
+			if symbols[name] != filepath.Base(source) {
+				t.Errorf("%s: %s is not declared in %s", path, ref[1], ref[2])
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no contract symbol references checked")
+	}
+}

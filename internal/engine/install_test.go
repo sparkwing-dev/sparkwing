@@ -43,11 +43,11 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	version := "v0.20.0"
 	bundle := signedBundle(t, key, version, target, fixtureExecutableSource(t, version, target, installerFixtureSource))
-	release, err := VerifyRelease(version, target, bundle)
+	release, err := VerifyRelease(version, target, bundle, signingKeys(key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := NewResolver(Config{CacheDirectory: t.TempDir()})
+	resolver, err := NewResolver(Config{TrustedKeys: signingKeys(key), CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,11 +138,11 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	version := "v0.20.0"
 	bundle := signedBundle(t, key, version, target, fixtureExecutableSource(t, version, target, installerFixtureSource))
-	release, err := VerifyRelease(version, target, bundle)
+	release, err := VerifyRelease(version, target, bundle, signingKeys(key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := NewResolver(Config{CacheDirectory: t.TempDir()})
+	resolver, err := NewResolver(Config{TrustedKeys: signingKeys(key), CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

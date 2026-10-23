@@ -8,12 +8,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
@@ -44,7 +45,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	var subject blob.LogSubject
 	var retired func(context.Context) (string, error)
 	var cleanupErr error
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+	host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 		retired, principal = binding.Bearer, binding.Principal
 		private, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: transport, Bearer: binding.Bearer}, unit.RunID)
 		if err != nil {

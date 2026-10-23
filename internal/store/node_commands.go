@@ -215,16 +215,8 @@ func nilNodeCommand(command NodeCommand) bool {
 	return value.Kind() == reflect.Pointer && value.IsNil()
 }
 
-// NodeCommandPayload carries an edge and its captured source attempt.
-type NodeCommandPayload struct {
-	To            runstate.NodeState        `json:"to"`
-	Cause         runstate.TransitionCause  `json:"cause"`
-	SourceAttempt *runspec.AttemptOrdinal   `json:"source_attempt,omitempty"`
-	Extra         runstate.NodeCommandExtra `json:"extra"`
-}
-
-// NodeCommand validates the payload and binds authenticated authority.
-func (body NodeCommandPayload) NodeCommand(ref runspec.NodeRef, actor runstate.Actor) (NodeCommand, error) {
+// NodeCommandFromPayload validates the payload and binds authenticated authority.
+func NodeCommandFromPayload(body runstate.NodeCommandPayload, ref runspec.NodeRef, actor runstate.Actor) (NodeCommand, error) {
 	var command NodeCommand
 	switch body.Cause {
 	case runstate.CauseStart:
@@ -273,12 +265,12 @@ func (body NodeCommandPayload) NodeCommand(ref runspec.NodeRef, actor runstate.A
 }
 
 // NodeCommandPayloadFor omits authenticated authority and server-owned attempt facts.
-func NodeCommandPayloadFor(command NodeCommand) (NodeCommandPayload, error) {
+func NodeCommandPayloadFor(command NodeCommand) (runstate.NodeCommandPayload, error) {
 	if nilNodeCommand(command) {
-		return NodeCommandPayload{}, fmt.Errorf("node command is required")
+		return runstate.NodeCommandPayload{}, fmt.Errorf("node command is required")
 	}
 	c := command.nodeChange()
-	return NodeCommandPayload{To: c.To, Cause: c.Cause, SourceAttempt: c.SourceAttempt, Extra: runstate.NodeCommandExtra{
+	return runstate.NodeCommandPayload{To: c.To, Cause: c.Cause, SourceAttempt: c.SourceAttempt, Extra: runstate.NodeCommandExtra{
 		OwnerPolicy: c.Extra.OwnerPolicy, Result: c.Extra.Result, Materialize: c.Extra.Materialize, Approval: c.Extra.Approval, RetryAt: c.Extra.RetryAt, Publication: c.Extra.Publication,
 	}}, nil
 }

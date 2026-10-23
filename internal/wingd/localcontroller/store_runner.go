@@ -1,4 +1,4 @@
-package runners
+package localcontroller
 
 import (
 	"context"
@@ -6,26 +6,25 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
 type StoreRunnerConfig struct {
 	Bearer  func(context.Context) (string, error)
-	Loop    LoopConfig
+	Loop    runners.LoopConfig
 	Bind    func(context.Context, StoreBinding) (nodehost.NativeServices, error)
 	OnError func(error)
 }
 
 // NewStoreRunner constructs the shared queue without a transport or another store opener.
-func NewStoreRunner(engine StoreEngine, cfg StoreRunnerConfig) (*Loop, error) {
-	if engine == nil || cfg.Bearer == nil || cfg.Bind == nil {
+func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*runners.Loop, error) {
+	if engine == nil || cfg.Bearer == nil || cfg.Bind == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil {
 		return nil, errors.New("embedded runner requires the owned controller, claimant, signed policy and native services")
-	}
-	if err := engine.ValidateEmbeddedRunner(); err != nil {
-		return nil, err
 	}
 	if cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
 		return nil, errors.New("embedded runner requires its release version and positive concurrency")
@@ -36,8 +35,8 @@ func NewStoreRunner(engine StoreEngine, cfg StoreRunnerConfig) (*Loop, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := StoreController{Engine: engine, Bearer: cfg.Bearer, Router: router}
-	loop := &Loop{
+	client := storeController{Engine: engine, Bearer: cfg.Bearer, Router: router}
+	loop := &runners.Loop{
 		Config: cfg.Loop, Controller: client,
 		Host:    StoreHosting{Controller: engine, Bind: cfg.Bind},
 		OnError: cfg.OnError,
@@ -48,14 +47,14 @@ func NewStoreRunner(engine StoreEngine, cfg StoreRunnerConfig) (*Loop, error) {
 	return loop, nil
 }
 
-// StoreController applies shared route policy to the embedded local queue.
-type StoreController struct {
+// storeController applies shared route policy to the embedded local queue.
+type storeController struct {
 	Router *routepolicy.Router
-	Engine StoreEngine
+	Engine *controller.EngineController
 	Bearer func(context.Context) (string, error)
 }
 
-func (c StoreController) checkVersion(ctx context.Context, version string, kinds []capability.UnitKind) error {
+func (c storeController) checkVersion(ctx context.Context, version string, kinds []capability.UnitKind) error {
 	ctx, authorized, err := c.authorize(ctx, "/api/v1/runners/claim", capability.Target{ClaimKinds: slices.Clone(kinds)})
 	if err != nil {
 		return err
@@ -65,7 +64,7 @@ func (c StoreController) checkVersion(ctx context.Context, version string, kinds
 }
 
 // Claim authorizes every selected kind before the controller issues an award.
-func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+func (c storeController) Claim(ctx context.Context, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	pattern := "/api/v1/runners/claim"
 	if body.RunID != "" && body.JobID == "" && len(body.Kinds) == 1 && body.Kinds[0] == capability.UnitTrigger {
 		pattern = "/api/v1/runs/{run}/claim"
@@ -78,7 +77,7 @@ func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimReq
 	return c.Engine.Claim(ctx, authorized, body)
 }
 
-func (c StoreController) authorize(ctx context.Context, pattern string, target capability.Target) (context.Context, capability.Authorized, error) {
+func (c storeController) authorize(ctx context.Context, pattern string, target capability.Target) (context.Context, capability.Authorized, error) {
 	if err := context.Cause(ctx); err != nil {
 		return ctx, capability.Authorized{}, err
 	}

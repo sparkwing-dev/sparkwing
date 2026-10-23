@@ -38,7 +38,7 @@ type executorStore struct {
 func (*executorStore) RecordStep(context.Context, store.StepReport) error { return nil }
 
 func (s *executorStore) ReadSnapshot(_ context.Context, runID string) (store.RunSnapshot, error) {
-	row := store.RunRow{ID: runID}
+	row := store.RunRow{Execution: runstate.Execution{ID: runID}}
 	if s.accepted != nil {
 		var spec runspec.Spec
 		if err := json.Unmarshal(s.accepted.Spec, &spec); err != nil {

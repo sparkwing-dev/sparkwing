@@ -54,7 +54,7 @@ func fixtureResolver(t *testing.T) (*Resolver, *fixtureTransport, ed25519.Privat
 	policy, now := policyFixture()
 	transport := &fixtureTransport{responses: map[string][]byte{}}
 	transport.policy(t, key, policy)
-	r, err := NewResolver(Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
+	r, err := NewResolver(Config{TrustedKeys: signingKeys(key), CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 		r.checkedAt = time.Time{}
 		_, err := r.Resolve(ctx, pin, target)
 		requireCode(t, err, code)
-		fresh, err := NewResolver(Config{CacheDirectory: t.TempDir(), HTTPClient: r.config.HTTPClient})
+		fresh, err := NewResolver(Config{TrustedKeys: signingKeys(key), CacheDirectory: t.TempDir(), HTTPClient: r.config.HTTPClient})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,8 +301,22 @@ func TestReleaseVerificationRejectsUntrustedBytesBeforeExecution(t *testing.T) {
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	body := fixtureExecutable(t, version, target)
 	bundle := signedBundle(t, key, version, target, body)
-	if _, err := VerifyRelease(version, target, bundle); err != nil {
+	if _, err := VerifyRelease(version, target, bundle, nil); err == nil {
+		t.Fatal("release accepted without trusted keys")
+	}
+	if _, err := VerifyRelease(version, target, bundle, signingKeys(key)); err != nil {
 		t.Fatal(err)
+	}
+	verified, err := VerifyRelease(version, target, bundle, signingKeys(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherResolver, err := NewResolver(Config{CacheDirectory: t.TempDir(), TrustedKeys: signingKeys(testSigningKey(t))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := otherResolver.StoreVerified(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: version}, verified); err == nil {
+		t.Fatal("resolver stored a release verified under another trust root")
 	}
 	for _, tc := range []struct {
 		name   string
@@ -333,12 +347,12 @@ func TestReleaseVerificationRejectsUntrustedBytesBeforeExecution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bad := bundle
 			tc.mutate(&bad)
-			if _, err := VerifyRelease(version, target, bad); err == nil {
+			if _, err := VerifyRelease(version, target, bad, signingKeys(key)); err == nil {
 				t.Fatal("invalid release accepted")
 			}
 		})
 	}
-	if _, err := VerifyRelease("v0.20.0", target, bundle); err == nil {
+	if _, err := VerifyRelease("v0.20.0", target, bundle, signingKeys(key)); err == nil {
 		t.Fatal("wrong embedded version accepted")
 	}
 	other := target
@@ -348,7 +362,7 @@ func TestReleaseVerificationRejectsUntrustedBytesBeforeExecution(t *testing.T) {
 		other.GOARCH = "amd64"
 	}
 	wrong := signedBundle(t, key, version, other, body)
-	if _, err := VerifyRelease(version, other, wrong); err == nil {
+	if _, err := VerifyRelease(version, other, wrong, signingKeys(key)); err == nil {
 		t.Fatal("wrong embedded architecture accepted")
 	}
 }
@@ -361,7 +375,7 @@ func TestEveryEnginePlatformCanBeInspectedWithoutExecution(t *testing.T) {
 				target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: goos, GOARCH: arch}
 				body := fixtureExecutable(t, "v0.10.2-rc.1", target)
 				bundle := signedBundle(t, key, "v0.10.2-rc.1", target, body)
-				if _, err := VerifyRelease("v0.10.2-rc.1", target, bundle); err != nil {
+				if _, err := VerifyRelease("v0.10.2-rc.1", target, bundle, signingKeys(key)); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -377,8 +391,33 @@ func TestDecodePolicyRejectsDuplicateKeysInUnknownFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	body = append(body[:len(body)-1], []byte(`,"optional":{"x":1,"x":2}}`)...)
-	_, err = VerifyIndex(SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now)
+	_, err = VerifyIndex(SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now, signingKeys(key))
 	if err == nil {
 		t.Fatal("duplicate unknown field accepted")
+	}
+}
+
+func TestResolverOwnsTrustAfterConstruction(t *testing.T) {
+	key := testSigningKey(t)
+	policy, now := policyFixture()
+	transport := &fixtureTransport{responses: map[string][]byte{}}
+	transport.policy(t, key, policy)
+	keys := signingKeys(key)
+	config := Config{CacheDirectory: t.TempDir(), TrustedKeys: keys, HTTPClient: &http.Client{Transport: transport}}
+	resolver, err := NewResolver(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys[0][0] ^= 0xff
+	keys[0] = signingKeys(testSigningKey(t))[0]
+	if _, err := resolver.Index(t.Context(), now); err != nil {
+		t.Fatalf("caller changed constructed resolver trust: %v", err)
+	}
+	other, err := NewResolver(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Index(t.Context(), now); err == nil {
+		t.Fatal("resolver accepted network or cached policy signed by another trust root")
 	}
 }

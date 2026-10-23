@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestSQLiteDSNEscapesURIMetacharactersInPath(t *testing.T) {
@@ -54,9 +56,7 @@ func TestOpenWritesTheStatDatabaseWhenPathHasURIMetacharacters(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
-			if err := st.defaultTenant().TestOnlySeedRun(t.Context(), Run{
-				ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-			}); err != nil {
+			if err := st.defaultTenant().TestOnlySeedRun(t.Context(), Run{RunSummary: runstate.RunSummary{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 				_ = st.Close()
 				t.Fatalf("CreateRun: %v", err)
 			}

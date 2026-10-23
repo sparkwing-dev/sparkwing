@@ -13,6 +13,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -40,7 +42,7 @@ func (f *teamWriteFake) ProcessGitHubDeliveryAgain(_ context.Context, a capabili
 
 func (f *teamWriteFake) Team() store.Team { return f.team }
 func (f *teamWriteFake) ReadRun(_ context.Context, id string) (store.RunRow, error) {
-	return store.RunRow{ID: id, Team: f.team}, nil
+	return store.RunRow{Team: f.team, Execution: runstate.Execution{ID: id}}, nil
 }
 
 func (f *teamWriteFake) record(a capability.Authorized, value string) error {

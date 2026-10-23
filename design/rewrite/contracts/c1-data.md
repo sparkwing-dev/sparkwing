@@ -616,8 +616,9 @@ object-purge contract. Tenant purge keeps its scoped inventory checks.
 
 Machine registration adds `teams.members_can_add_machines`, a checked 0/1
 column defaulting to 1. Baseline version 7 refuses older stores without migration.
-The native Tenant.TeamSettings and SetAuthorizedTeamSettings methods share
-controllerwire.TeamSettings with HTTP and CLI. Setting writes use the existing
+The native Tenant.TeamSettings and SetAuthorizedTeamSettings methods use
+[`store.TeamSettings`](../../../internal/store/controller_requests.go). HTTP and CLI
+use the controller wire projection. Setting writes use the existing
 team administration transaction and atomically record `team.settings_changed`.
 Root issuance checks the setting under the same team lock. Current administration
 is always required for shared-runner enrollment, rotation and revocation.
@@ -3395,7 +3396,7 @@ and committed output-record selector. The controller verifies the selected
 physical bytes through its configured blob store. The obsolete claim-input
 policy is removed with the retired C1 reader.
 
-Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefund
+Console.ConsoleRefund accepts capability.Authorized, [`store.OperatorRefund`](../../../internal/store/controller_requests.go)
 and the request key, returning CreditReversal. It runs through consoleWrite,
 resolves the persisted paid grant before any reversal and checks its team
 against the path. Its reference matches verified refund settlement. A receipt
@@ -4013,15 +4014,14 @@ Controller schedules reach the same sealed intake through the adapter below.
 
 ## Integration amendment: audited GitHub source release
 
-`Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
-returns a `source.Credential` only after the existing source-release audit commits.
-Its `ExtraRepositories` contains the approved extra repository names read in that
-transaction. The primary repository is excluded.
-The provider interface contains only `InstallationTokenByIDs`, matching the
-existing GitHub client and store test fake. A short transaction resolves and
-validates source authority and consent. Minting runs with no transaction open.
-A second short transaction repeats authority, enrollment, consent and fence
-checks, requires the same installation, approved IDs and names, and writes the audit.
+[`store.Tenant.PrepareGitHubSourceRelease`](../../../internal/store/github_source_release.go)
+resolves source authority and consent in a short transaction. The controller
+mints through [`controller.GitHubSourceProvider`](../../../internal/controller/source_controller.go)
+with no transaction open. [`store.Tenant.CommitGitHubSourceRelease`](../../../internal/store/github_source_release.go)
+rechecks authority, enrollment, consent and fences, requires the same installation,
+approved IDs and names, and commits the audit before the controller returns
+the token. The grant carries approved extra repository names, excluding the
+primary repository.
 GitHub verifies coverage while minting that ID set. Source release never lists
 installation repositories, so the listing's 1,000-repository bound cannot turn
 an authorized source into not_found. Refused coverage returns conflict; other
@@ -4445,7 +4445,7 @@ reads its verdict from the persisted policy. Each command exposes only its own
 payload. `BindNodeCommand` supplies authenticated transport authority without
 changing the operation. The private normalizer retains the transition table as
 the single state owner. Controller and local transports decode through
-`NodeCommandPayload`, which rejects fields that the selected command cannot
+[`store.NodeCommandFromPayload`](../../../internal/store/node_commands.go), which rejects fields that the selected command cannot
 carry. Materialization and publication command types remain private to the store.
 Node rows and execution inputs keep claim generations and
 attempt ordinals distinct. Actor generations and command source attempts use
@@ -4494,3 +4494,13 @@ pipeline require at least four characters, including each nonempty normalized
 list item. Empty and unselected defaults do not refuse a run. Short derived
 values are skipped. Secrets containing `***` are accepted. Plain config variables
 remain available for shorter values.
+
+## Shared execution and reporting projections
+
+[`store.RunRow`](../../../internal/store/state_contract.go) embeds
+[`runstate.Execution`](../../../internal/runstate/transport.go) beside private
+admission metadata. Host snapshots use that execution value directly.
+[`store.Run`](../../../internal/store/store.go) embeds
+[`runstate.RunSummary`](../../../internal/runstate/reporting.go) beside its
+private team and plan snapshot. Handlers serialize the summary, so persistence
+metadata cannot enter the response through a missing field mapping.

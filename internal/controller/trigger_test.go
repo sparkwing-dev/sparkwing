@@ -41,7 +41,7 @@ func TestEventListClampsItsLimit(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := t.Context()
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-1", Pipeline: "push", Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	for range store.MaxRunListLimit + 5 {
