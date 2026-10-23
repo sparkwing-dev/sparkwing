@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -212,28 +211,27 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 			var removal struct {
 				Removed []githubAppRepoRef `json:"repositories_removed"`
 			}
-			if decodeErr := json.Unmarshal(body, &removal); decodeErr != nil {
-				writeError(w, http.StatusBadRequest, decodeErr)
-				return
+			decodeErr := json.Unmarshal(body, &removal)
+			if decodeErr != nil {
+				removal.Removed = nil
 			}
+			removedIDs := make([]int64, 0, len(removal.Removed))
 			for _, removed := range removal.Removed {
-				stillCovered := false
-				for _, repo := range current {
-					if repo.ID == removed.ID {
-						stillCovered = true
-						break
-					}
-				}
-				if !stillCovered {
-					if revokeErr := tenant.WithdrawGitHubAppAutomation(ctx, env.Installation.ID, removed.ID); revokeErr != nil {
-						s.writeInternalError(w, r, "revoke unreadable removed repository automation", revokeErr)
-						return
-					}
-				}
+				removedIDs = append(removedIDs, removed.ID)
 			}
-			if !s.withdrawUnlistedGitHubRemoval(w, r, tenant, env.Installation.ID, body, current, err) {
+			if withdrawErr := tenant.WithdrawGitHubInstallationRepositories(ctx, env.Installation.ID, removedIDs); withdrawErr != nil {
+				if errors.Is(withdrawErr, store.ErrInvalidInput) {
+					if decodeErr != nil {
+						withdrawErr = decodeErr
+					}
+					writeError(w, http.StatusBadRequest, fmt.Errorf("%w; read installation repositories: %v", withdrawErr, err))
+				} else {
+					s.writeInternalError(w, r, "withdraw removed repository automation and schedules", withdrawErr)
+				}
 				return
 			}
+			writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
+			return
 		}
 		writeError(w, http.StatusBadGateway, fmt.Errorf("read installation repositories: %w", err))
 		return
@@ -247,42 +245,6 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 		return
 	}
 	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
-}
-
-// safety: an unreadable listing withdraws the whole installation's schedules, but a listing cut only
-// for its size withdraws just the repositories GitHub names as removed and keeps the rest; a named
-// repository the cut listing still shows was added back after the removal, so it keeps its schedules.
-func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
-	installation int64, body []byte, listed []githubapp.Repository, listErr error,
-) bool {
-	if !errors.Is(listErr, githubapp.ErrTooManyRepositories) {
-		if _, err := tenant.WithdrawGitHubCronInstallation(r.Context(), installation); err != nil {
-			s.writeInternalError(w, r, "withdraw unreadable installation schedules", err)
-			return false
-		}
-		return true
-	}
-	var p struct {
-		Removed []githubAppRepoRef `json:"repositories_removed"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("decode installation_repositories payload: %w", err))
-		return false
-	}
-	covered := make(map[int64]bool, len(listed))
-	for _, repo := range listed {
-		covered[repo.ID] = true
-	}
-	for _, repo := range p.Removed {
-		if covered[repo.ID] {
-			continue
-		}
-		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), installation, repo.ID); err != nil {
-			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
-			return false
-		}
-	}
-	return true
 }
 
 // safety: an installation event only removes or pauses a binding; creating one
@@ -847,8 +809,7 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 		return
 	}
 	repositories, err := s.githubApp.client.InstallationRepositories(r.Context(), env.Installation.ID)
-	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
-	if err != nil && !truncated {
+	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
@@ -858,10 +819,6 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 			matched = true
 			break
 		}
-	}
-	if !matched && truncated {
-		writeError(w, http.StatusBadGateway, err)
-		return
 	}
 	if !matched {
 		githubAppIgnored(w, "the installation no longer covers repository id")

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -15,8 +14,8 @@ import (
 )
 
 func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
-	for _, reconcile := range []bool{false, true} {
-		t.Run(fmt.Sprint(reconcile), func(t *testing.T) {
+	for _, fallbackFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(fallbackFirst), func(t *testing.T) {
 			s, tenant, in := appAdmissionFixture(t, true, "fixture")
 			defer s.Close()
 			ctx := t.Context()
@@ -34,26 +33,16 @@ func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
 			if err := op.EnqueueGitHubDelivery(ctx, "withdraw", "installation_repositories", []byte(`{"installation":{"id":7},"action":"removed"}`), now); err != nil {
 				t.Fatal(err)
 			}
-			apply := func(dc context.Context) int64 {
-				t.Helper()
-				if reconcile {
-					if err := tenant.ReconcileGitHubInstallationRepositories(dc, 7, nil); err != nil {
-						t.Fatal(err)
-					}
-					return 1
-				}
-				n, err := tenant.WithdrawGitHubCronInstallation(dc, 7)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return n
-			}
 			delivery, err := op.ClaimGitHubDelivery(ctx, now)
 			if err != nil || delivery == nil {
 				t.Fatalf("claim: %v %v", delivery, err)
 			}
-			if n := apply(delivery.Context(ctx)); n != 1 {
-				t.Fatalf("first withdrawal = %d, want 1", n)
+			if fallbackFirst {
+				if err := tenant.WithdrawGitHubInstallationRepositories(delivery.Context(ctx), 7, []int64{701}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, nil); err != nil {
+				t.Fatal(err)
 			}
 			if err := op.FinishGitHubDelivery(ctx, *delivery, "listing outage", now); err != nil {
 				t.Fatal(err)
@@ -65,15 +54,15 @@ func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
 			if err != nil || delivery == nil {
 				t.Fatalf("reclaim: %v %v", delivery, err)
 			}
-			if n := apply(delivery.Context(ctx)); n != 1 {
-				t.Fatalf("replayed result = %d, want original 1", n)
-			}
-			// A recovered or newly unavailable listing changes the handler's branch, not its effect.
-			if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, nil); err != nil {
+			if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, []int64{701}); err != nil {
 				t.Fatal(err)
 			}
-			if n, err := tenant.WithdrawGitHubCronInstallation(delivery.Context(ctx), 7); err != nil || n != 1 {
-				t.Fatalf("changed listing replay = %d: %v", n, err)
+			// A changed listing or an outage keeps the delivery's committed targets.
+			if err := tenant.WithdrawGitHubInstallationRepositories(delivery.Context(ctx), 7, []int64{702}); err != nil {
+				t.Fatal(err)
+			}
+			if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, nil); err != nil {
+				t.Fatal(err)
 			}
 			for _, want := range []struct {
 				id       string
@@ -238,16 +227,16 @@ func TestGitHubDeliveryRejectsEmptyEffect(t *testing.T) {
 	}
 }
 
-func TestGitHubInstallationWithdrawalFencesFirstPublication(t *testing.T) {
+func TestGitHubRepositoryWithdrawalFencesFirstPublication(t *testing.T) {
 	s, tenant, in := appAdmissionFixture(t, true, "fixture")
 	defer s.Close()
 	prepared := prepareAppPublication(t, tenant, 7, 701)
-	if _, err := tenant.WithdrawGitHubCronInstallation(t.Context(), 7); err != nil {
+	if _, err := tenant.WithdrawGitHubCronRepository(t.Context(), 7, 701); err != nil {
 		t.Fatal(err)
 	}
 	rows, requests := publicationRows(in)
 	if _, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepared, in.Request.Source.Location.RemoteURL, rows, requests); !errors.Is(err, ErrGitHubPublicationStale) {
-		t.Fatalf("installation withdrawal admitted previously prepared source: %v", err)
+		t.Fatalf("repository withdrawal admitted previously prepared source: %v", err)
 	}
 }
 

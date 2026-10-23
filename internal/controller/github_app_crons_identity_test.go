@@ -99,8 +99,8 @@ func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
 					"action": "removed", "installation": map[string]any{"id": 7},
 					"repositories_removed": removed,
 				}, "")
-				if action == "repository_removed_api_failure" && code != http.StatusBadGateway {
-					t.Fatalf("removal API failure = %d, want 502", code)
+				if action == "repository_removed_api_failure" && code != http.StatusOK {
+					t.Fatalf("explicit removal with API failure = %d, want 200", code)
 				}
 			case "transfer_unconnected":
 				f.app.SetRepos(7, githubRepo(702, "acme/plans"))
@@ -304,9 +304,7 @@ func TestGitHubAppWithdrawnRepoReleasesCapacity(t *testing.T) {
 	}
 }
 
-// An installation listing GitHub would cut short must not read as complete:
-// a repository past the cut is still installed and keeps its schedule.
-func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T) {
+func TestGitHubAppLargeInstallationListsAllRepositories(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -324,15 +322,15 @@ func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T)
 			"action": action, "installation": map[string]any{"id": 7},
 			"repositories_" + action: []any{map[string]any{"id": 10000, "full_name": "acme/r0"}},
 		}, "")
-		if code != http.StatusBadGateway {
-			t.Fatalf("%s on an installation past the listing cap = %d %v, want 502", action, code, out)
+		if code != http.StatusOK {
+			t.Fatalf("%s on a large installation = %d %v, want 200", action, code, out)
 		}
 		if rows := appCronRows(t, f, olga.team); len(rows) != 1 || !rows[0].Declared {
 			t.Fatalf("%s withdrew a schedule of a still-installed repository: %+v", action, rows)
 		}
 	}
-	if code := f.subscribe(olga, "acme/widgets", "deploy", nil); code != http.StatusServiceUnavailable {
-		t.Fatalf("subscribe past the listing cap = %d, want 503", code)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", nil); code != http.StatusOK {
+		t.Fatalf("subscribe beyond page ten = %d, want 200", code)
 	}
 	if code := f.subscribe(olga, "acme/r5", "deploy", nil); code != http.StatusOK {
 		t.Fatalf("subscribe within the listing cap = %d, want 200", code)
@@ -340,9 +338,10 @@ func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T)
 	if code, out := f.deliver("repository", map[string]any{
 		"action": "renamed", "installation": map[string]any{"id": 7},
 		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
-	}, ""); code != http.StatusBadGateway {
-		t.Fatalf("rename past the listing cap = %d %v, want 502", code, out)
+	}, ""); code != http.StatusOK {
+		t.Fatalf("rename beyond page ten = %d %v, want 200", code, out)
 	}
+	f.app.SetRepos(7, repos...)
 	f.deliver("installation_repositories", map[string]any{
 		"action": "removed", "installation": map[string]any{"id": 7},
 		"repositories_removed": []any{map[string]any{"id": 701, "full_name": "acme/widgets"}},
@@ -353,8 +352,8 @@ func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T)
 }
 
 // A removal delivered after its repository was added back must not withdraw
-// it: the cut listing still shows the repository as covered.
-func TestGitHubAppLateRemovalKeepsARepositoryTheCutListingShows(t *testing.T) {
+// it because the current listing shows the repository as covered.
+func TestGitHubAppLateRemovalKeepsACoveredRepository(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)

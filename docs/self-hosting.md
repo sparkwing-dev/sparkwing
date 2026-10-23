@@ -133,10 +133,13 @@ whatever host name the request used.
 `sparkwing-controller` reads every secret from one directory, named with
 `--credentials-dir`, holding one file per credential under a fixed name. A file
 that is absent leaves the feature it guards off, and a file that is present
-but empty or only whitespace stops startup, naming the file. A file whose name
+but empty or only whitespace stops startup, naming the file. GitHub App and
+GitHub OAuth credential errors instead disable those features and appear in
+health and doctor (see [GitHub App configuration](github-app.md#operator-configuration)). A file whose name
 is not in the table below also stops startup, so a misspelled `pg_url` cannot
 leave the controller on an empty SQLite store. A `.previous` or `.published`
-file without its current key stops startup too. There is no environment or
+file without its current key stops startup too, except for the optional GitHub
+App webhook secret, which disables the App. There is no environment or
 flag form of any of them. The chart projects its Secret values into this
 directory, and `controller.credentialsSecret` names a Secret whose keys are
 these file names, mounted whole.
