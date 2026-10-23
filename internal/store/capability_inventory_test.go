@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func inventoryAuthorization(t *testing.T, s *Store, actor runstate.Actor, team, prefix string) capability.Authorized {

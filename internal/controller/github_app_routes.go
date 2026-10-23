@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // GitHubAppWriter rechecks authority and installation ownership when committing App configuration.

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestSizingQueryUsesAuthorizedReadAndPreservesMeasurements(t *testing.T) {

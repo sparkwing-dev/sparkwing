@@ -11,13 +11,14 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/ssh"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"golang.org/x/crypto/ssh"
 )
 
 type credentialPutCapture struct {

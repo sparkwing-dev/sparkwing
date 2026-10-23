@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Decode validates the complete machine schema without filling defaults.

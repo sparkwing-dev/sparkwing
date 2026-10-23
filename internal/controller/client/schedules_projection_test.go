@@ -9,8 +9,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestScheduleManagerRetainsUpcomingAndEffectiveCadence(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // LauncherPreparation reports the committed authority bound for an acknowledged bootstrap fence.

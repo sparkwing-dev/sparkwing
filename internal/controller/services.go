@@ -3,8 +3,8 @@ package controller
 import (
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // ServicesResponse is the wire shape of GET /api/v1/services. Names

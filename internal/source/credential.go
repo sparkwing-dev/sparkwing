@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 )
 
 func credentialRemote(remote string, credential Credential) (string, error) {

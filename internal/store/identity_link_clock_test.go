@@ -10,8 +10,8 @@ import (
 
 	modernsqlite "modernc.org/sqlite"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestIdentityLinkRechecksExpiryAfterLockWait(t *testing.T) {

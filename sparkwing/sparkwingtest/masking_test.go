@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 )
 
 func TestTestHostMaskingConformance(t *testing.T) {

@@ -11,10 +11,10 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // PrepareCheckout acquires source without invoking an SDK or an engine. Its Entry

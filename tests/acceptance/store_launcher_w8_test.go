@@ -11,14 +11,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error)

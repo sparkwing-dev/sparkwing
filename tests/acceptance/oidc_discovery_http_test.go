@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestOIDCDiscoveryHTTPPublicPolicy(t *testing.T) {

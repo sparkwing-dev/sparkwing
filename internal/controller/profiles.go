@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

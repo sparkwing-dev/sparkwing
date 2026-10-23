@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 // NewBillingManager uses authenticated transport for the team's standing and automatic refill.

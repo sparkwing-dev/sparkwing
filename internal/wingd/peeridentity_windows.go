@@ -8,9 +8,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"golang.org/x/sys/windows"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 var impersonatePipeClient = windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateNamedPipeClient")

@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned.

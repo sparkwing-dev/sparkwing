@@ -8,9 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func capturedEnvironment() error {

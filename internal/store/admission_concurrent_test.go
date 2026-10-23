@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {

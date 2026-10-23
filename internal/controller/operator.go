@@ -10,10 +10,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // WithOperatorAccounts names accounts whose direct sign-in sessions may use the console.

@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // CheckIdentity authenticates a connection without requiring a team grant.

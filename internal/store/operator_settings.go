@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func operatorSettingsWrite(ctx context.Context, o *Operator, a capability.Authorized, grant capability.Grant, operation string, write func(*storeTx, capability.Principal) error) error {

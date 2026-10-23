@@ -6,10 +6,10 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // CredentialRotator rechecks team-admin authority and rotates one tenant's rows in one transaction.

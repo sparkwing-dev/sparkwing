@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Team reports the deployment scope.

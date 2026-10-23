@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, proof *capability.ConsoleProof) (capability.Principal, error) {

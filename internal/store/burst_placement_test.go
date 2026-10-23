@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDemand) {

@@ -9,11 +9,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {

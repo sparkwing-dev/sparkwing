@@ -5,8 +5,8 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // BuildSecretRegistration derives the accepted run's complete argument mask set.

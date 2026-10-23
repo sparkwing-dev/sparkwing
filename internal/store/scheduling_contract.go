@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // ScheduleNode is the immutable graph projection consumed by the shared decider.

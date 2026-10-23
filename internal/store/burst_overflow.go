@@ -8,8 +8,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // OverflowControl reports the authenticated user's monthly Cloud overflow budget.

@@ -10,8 +10,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {

@@ -8,10 +8,10 @@ import (
 	"io"
 	"net/url"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // UploadSourceSnapshot commits a private snapshot through the controller's shared storage binding.

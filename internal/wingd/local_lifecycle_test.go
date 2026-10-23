@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestLocalSubject(t *testing.T) {

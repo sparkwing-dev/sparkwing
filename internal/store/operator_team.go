@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // CreateOperatorTeam commits a new team, its first administrator and the operator audit together.

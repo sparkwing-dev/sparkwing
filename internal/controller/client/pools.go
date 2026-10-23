@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 var _ controllerwire.PoolManager = (*engineClient)(nil)
@@ -81,6 +81,7 @@ func validPoolRule(repos, branches []string, source string) bool {
 func sameOptionalStrings(a, b []string) bool {
 	return len(a) == 0 && len(b) == 0 || reflect.DeepEqual(a, b)
 }
+
 func poolProtocolError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }

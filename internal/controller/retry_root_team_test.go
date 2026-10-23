@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {

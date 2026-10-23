@@ -9,9 +9,9 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func teamAuthorization(t *testing.T, s *Store, actor runstate.Actor, team Team, method, path string) capability.Authorized {

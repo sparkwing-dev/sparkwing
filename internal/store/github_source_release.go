@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // GitHubSourceGrant captures the repositories authorized before a token is minted.

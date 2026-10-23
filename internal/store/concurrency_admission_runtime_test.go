@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func admissionGroup(capacity, cost int) nodeproto.ConcurrencySpec {
@@ -126,7 +126,6 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 					}
 					admissionFinishJob(t, f, oldest, oldAward)
 					admissionWant(t, f, later, laterAward, runstate.AcquireGranted)
-
 				})
 			}
 		})

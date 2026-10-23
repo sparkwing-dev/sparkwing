@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"golang.org/x/mod/semver"
 )
 
 // SoftwarePolicy is the engine resolver's signed runner-update boundary.

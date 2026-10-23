@@ -4,9 +4,9 @@ import (
 	"context"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // MembershipUpdate changes a member's role, or removes it when Role is nil.

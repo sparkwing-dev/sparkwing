@@ -18,11 +18,11 @@ import (
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 )
 
 func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {

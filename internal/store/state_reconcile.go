@@ -4,10 +4,10 @@ import (
 	"context"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (runstate.ReconciledNode, error) {

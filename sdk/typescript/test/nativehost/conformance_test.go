@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type corpusStep struct {

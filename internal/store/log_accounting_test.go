@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestLogPersistenceCompressedInventory(t *testing.T) {

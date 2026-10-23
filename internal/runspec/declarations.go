@@ -4,9 +4,9 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // DeclarationGate owns discovery completeness and the registration of declarations.

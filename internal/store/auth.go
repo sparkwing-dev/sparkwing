@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Session carries presentation, current authority and store time after a committed lookup.

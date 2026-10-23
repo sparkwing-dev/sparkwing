@@ -12,10 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // RunnerAdmissionPolicy checks server-owned software policy before a new award.
