@@ -292,8 +292,8 @@ func TestSecretSetWarnsForShortValues(t *testing.T) {
 			}
 			if format == "json" {
 				var result controllerwire.SecretWritten
-				if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Warning != secrets.ShortValueWarning {
-					t.Fatalf("invalid JSON warning: %s %v", &out, err)
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Warning != "" || strings.Contains(out.String(), `"warning"`) {
+					t.Fatalf("JSON receipt repeats warning: %s %v", &out, err)
 				}
 			}
 		}

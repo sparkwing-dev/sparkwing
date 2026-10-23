@@ -95,6 +95,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 			}
 		}
 		if format == "json" {
+			result.Warning = ""
 			return json.NewEncoder(out).Encode(result)
 		}
 		if format == "plain" {

@@ -96,6 +96,14 @@ func TestSecrets_SaveWarningAndWriteOnlyAccess(t *testing.T) {
 		if err != nil || !row.Masked || !secrets.IsBound(row.Value) {
 			t.Fatalf("short secret lost protection: %+v %v", row, err)
 		}
+		want := controllerwire.SecretMetadata{
+			Name: row.Name, Principal: row.Principal, Pipeline: row.Pipeline,
+			Masked: row.Masked, Shared: row.Shared, Bound: true,
+			CreatedAt: row.CreatedAt.Unix(), UpdatedAt: row.UpdatedAt.Unix(),
+		}
+		if response.Secret != want {
+			t.Fatalf("save receipt: %+v, committed metadata: %+v", response.Secret, want)
+		}
 		if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?pipeline=ci", "", nil); code != http.StatusForbidden {
 			t.Fatalf("member read: HTTP %d %s", code, body)
 		}

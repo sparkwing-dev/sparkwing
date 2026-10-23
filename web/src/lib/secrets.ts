@@ -32,8 +32,7 @@ export interface SecretWriteBody {
   shared?: boolean;
 }
 
-// "local" is the dashboard `sparkwing web` serves with no accounts, where
-// the one built-in team is this machine, so the page drops team wording.
+// Local mode drops team wording because its built-in team is this machine.
 export type SecretsAudience = "team" | "local";
 
 export const scopeHelp: Record<SecretsAudience, string> = {
@@ -49,10 +48,8 @@ export function scopeLabel(
   audience: SecretsAudience = "team",
 ) {
   if (row.pipeline) return `Pipeline: ${row.pipeline}`;
-  // Local runs read as this machine's admin, which reaches an unshared row too.
-  if (audience === "local") return row.shared ? "Every pipeline" : "Every pipeline (unshared)";
   if (!row.shared) return "No runs (operator reads only)";
-  return "Team";
+  return audience === "local" ? "Every pipeline" : "Team";
 }
 
 export function rowKey(row: Pick<StoredSecret, "name" | "pipeline">): string {
@@ -97,7 +94,6 @@ export function draftProblem(draft: SecretDraft): string | null {
   if (draft.scope === "pipeline" && draft.pipeline.trim() === "") {
     return "Enter the pipeline this row is scoped to.";
   }
-  if (draft.masked && draft.value === "") return "Enter the secret's value.";
   return null;
 }
 

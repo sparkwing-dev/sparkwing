@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **secrets:** Accept values shorter than four Unicode characters with the same encrypted storage and access controls. Short values and their encodings remain unmasked in logs. The CLI prints one warning line after saving a short secret, and the console shows a one-time success message using the API save response's optional `warning` field. Secret writes return HTTP 200 with metadata and the optional warning.
+- **secrets:** Accept values shorter than four Unicode characters with the same encrypted storage and access controls. Short values and their encodings remain unmasked in logs. The CLI prints one warning line after saving a short secret, and the console shows a one-time success message using the API save response's optional `warning` field. Secret writes return HTTP 200 with the committed row's metadata and the optional warning. The console accepts empty secret values on create and replacement.
 
 - **runner ranking:** Unnamed jobs wait up to 5 seconds for the best-ranked tier with a live, label-matching claimant on the same team and a free slot in its latest poll. Each award consumes one advertised slot until the runner polls again. Busy or offline higher tiers cause no wait. After the window, any eligible claimant can take the job. Recorded asks and the extra 2-second grace are removed. Explicit `Prefers` holds require an allowed claimant with a free slot; preference scores are removed. See [migration](docs/migrations/_unreleased.md#ranking-uses-available-claimants).
 

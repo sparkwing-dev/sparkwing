@@ -405,8 +405,7 @@ before execution. Stored secrets and OIDC tokens are registered before release.
 See [secret values](secrets.md#values-that-can-be-secrets) for the masking
 length rule. Empty supplied arguments and defaults carry no value.
 Secrets containing `***` are accepted.
-Defaults from unselected pipelines register when long enough. Short derived
-proxy credential parts are skipped.
+Defaults from unselected pipelines register when long enough.
 Stdout and stderr are masked before line splitting. Describe and generator output
 waits for declarations. Failed discovery withholds that output, including CLI
 help diagnostics and test-host planning output. Generator failures persist a

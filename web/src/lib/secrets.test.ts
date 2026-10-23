@@ -105,12 +105,12 @@ describe("draftProblem", () => {
     );
   });
 
-  it("needs a value for a secret but lets a variable be empty", () => {
-    assert.notEqual(secrets.draftProblem({ ...base, value: "" }), null);
-    assert.equal(
-      secrets.draftProblem({ ...base, value: "", masked: false }),
-      null,
-    );
+  it("accepts secrets and variables of any length", () => {
+    for (const masked of [true, false]) {
+      for (const value of ["", "abc", "ééé", "abcd"]) {
+        assert.equal(secrets.draftProblem({ ...base, value, masked }), null);
+      }
+    }
   });
 
   it("reports a bad name first", () => {
@@ -206,8 +206,7 @@ describe("listing", () => {
       secrets.scopeLabel({ pipeline: "deploy" }, "local"),
       "Pipeline: deploy",
     );
-    assert.doesNotMatch(secrets.scopeLabel({}, "local"), /No runs/);
-    assert.match(secrets.scopeLabel({}, "local"), /Every pipeline/);
+    assert.equal(secrets.scopeLabel({}, "local"), "No runs (operator reads only)");
   });
 
   it("finds the row a draft would replace", () => {

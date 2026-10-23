@@ -63,8 +63,7 @@ across published stream emissions. This rare marker-edge case is accepted.
 The old twelve-byte line/list fragment policy
 is removed. Remote environment values still use their separate twelve-byte
 registration threshold. Plain submitted config is preserved when it is too short
-to register a mask. Derived proxy credential parts shorter than four characters
-are skipped. Planning output waits until declarations are known.
+to register a mask. Planning output waits until declarations are known.
 Failed discovery withholds output. A healthy selected pipeline can still plan
 when a sibling fails discovery, with planning output withheld. Private
 declarations drive lookup, flag parsing and routing. Help, display and the

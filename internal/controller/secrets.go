@@ -63,14 +63,16 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return credentialWriteError(err)
 	}
-	if err := tn.WriteSecret(r.Context(), a, stored); err != nil {
+	committed, err := tn.WriteSecret(r.Context(), a, stored)
+	if err != nil {
 		return credentialWriteError(err)
 	}
 
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	response := controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{
-		Name: req.Name, Principal: a.Principal.Capability.Subject.ID,
-		Pipeline: req.Pipeline, Masked: masked, Shared: req.Shared, Bound: true,
+		Name: committed.Name, Principal: committed.Principal,
+		Pipeline: committed.Pipeline, Masked: committed.Masked, Shared: committed.Shared, Bound: true,
+		CreatedAt: committed.CreatedAt.Unix(), UpdatedAt: committed.UpdatedAt.Unix(),
 	}}
 	if masked && !secrets.Maskable(req.Value) {
 		response.Warning = secrets.ShortValueWarning
