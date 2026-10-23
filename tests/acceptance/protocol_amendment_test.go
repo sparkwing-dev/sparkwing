@@ -13,6 +13,7 @@ import (
 )
 
 func testGoSDKRefusesEmptyOIDCToken(t *testing.T) {
+	recordLeaf(t)
 	host := sparkwingtest.New(sparkwingtest.Options{
 		OIDCToken: func(context.Context, string) (string, error) { return "", nil },
 	})
@@ -33,6 +34,7 @@ func testGoSDKRefusesEmptyOIDCToken(t *testing.T) {
 func testGoSDKRefusesCollidingMasks(t *testing.T) {
 	for _, kind := range []string{"job", "step", "group", "concurrency", "approval", "short"} {
 		t.Run(kind, func(t *testing.T) {
+			recordLeaf(t)
 			host := sparkwingtest.New(sparkwingtest.Options{})
 			t.Cleanup(func() {
 				if err := host.Close(); err != nil {
@@ -83,6 +85,7 @@ func testGoSDKRefusesCollidingMasks(t *testing.T) {
 }
 
 func testGoSDKApprovalCondition(t *testing.T) {
+	recordLeaf(t)
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	t.Cleanup(func() {
 		if err := host.Close(); err != nil {
@@ -113,6 +116,7 @@ func (s maskStep) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 func testGoSDKMaskRegistryGuardsLaterDeclarations(t *testing.T) {
 	for _, registrationFirst := range []bool{true, false} {
 		t.Run(map[bool]string{true: "mask-first", false: "expansion-first"}[registrationFirst], func(t *testing.T) {
+			recordLeaf(t)
 			host := sparkwingtest.New(sparkwingtest.Options{})
 			t.Cleanup(func() {
 				if err := host.Close(); err != nil {

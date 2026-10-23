@@ -8,18 +8,21 @@ import (
 
 func TestStorage(t *testing.T) {
 	runCell(t, "storage-reference-edge-laundering/filesystem-store", "store-blob-components", func(t *testing.T) {
+		recordLeaf(t)
 		objects, _ := storageFilesystem(t)
 		if err := checkBlobUploadIsolation(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	runCell(t, "storage-reference-edge-laundering/s3-store", "store-blob-components", func(t *testing.T) {
+		recordLeaf(t)
 		objects, transport := storageS3(t)
 		if err := checkBlobUploadIsolation(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	runCell(t, "storage-local-remote-cache-opt-in/store-data-sqlite", "store-blob-components", func(t *testing.T) {
+		recordLeaf(t)
 		if err := checkBlobRemoteCacheEdges(t, t.Context(), t.TempDir()); err != nil {
 			t.Fatal(err)
 		}

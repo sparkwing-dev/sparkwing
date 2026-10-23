@@ -115,6 +115,7 @@ func storageS3(t *testing.T) (*blob.S3, collectionS3) {
 }
 
 func checkStorageS3Collection(t *testing.T) {
+	recordLeaf(t)
 	objects, transport := storageS3(t)
 	if err := checkBlobCollection(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)

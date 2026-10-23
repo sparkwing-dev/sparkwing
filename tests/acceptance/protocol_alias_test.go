@@ -12,6 +12,7 @@ import (
 )
 
 func testGoSDKEntrypointAlias(t *testing.T) {
+	recordLeaf(t)
 	const alias = "project-alias"
 	bin, cleanup, err := acceptance.BuildGoSDKFixture(t.Context())
 	if err != nil {

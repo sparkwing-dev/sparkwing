@@ -10,6 +10,7 @@ import (
 )
 
 func testGoSDKDependencyCacheKeys(t *testing.T) {
+	recordLeaf(t)
 	first, second := t.TempDir(), t.TempDir()
 	for _, dir := range []string{first, second} {
 		if err := os.WriteFile(filepath.Join(dir, "lock"), []byte("one"), 0o600); err != nil {

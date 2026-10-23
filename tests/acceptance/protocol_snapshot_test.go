@@ -33,6 +33,7 @@ func init() {
 }
 
 func testGoSDKFakeHostRunSnapshot(t *testing.T) {
+	recordLeaf(t)
 	opts := sparkwingtest.Options{Run: sparkwing.RunContext{
 		Git: sparkwing.NewGit("", "first-sha", "feature", "main", "owner/repo", "https://example.test/repo"),
 		Trigger: sparkwing.TriggerInfo{PullRequest: &sparkwing.PullRequest{

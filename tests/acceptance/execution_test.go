@@ -17,6 +17,7 @@ import (
 
 type execution struct {
 	Cell     string `json:"cell"`
+	Leaf     string `json:"leaf,omitempty"`
 	Revision string `json:"revision"`
 	Platform string `json:"platform"`
 	Driver   string `json:"driver"`
@@ -79,32 +80,78 @@ func revision(t *testing.T) string {
 	return sourceRevision.value
 }
 
+type cellResults struct {
+	mu     sync.Mutex
+	leaves []execution
+	want   execution
+}
+
+var activeCells sync.Map
+
+// recordLeaf belongs at the start of an assertion-bearing leaf so its result
+// includes every cleanup registered by the proof.
+func recordLeaf(t *testing.T) {
+	t.Helper()
+	name := t.Name()
+	for cell := name; cell != ""; {
+		if value, ok := activeCells.Load(cell); ok {
+			results := value.(*cellResults)
+			t.Cleanup(func() {
+				if t.Failed() || t.Skipped() {
+					t.Error("assertion leaf did not pass")
+					return
+				}
+				results.mu.Lock()
+				result := results.want
+				result.Leaf = name
+				results.leaves = append(results.leaves, result)
+				results.mu.Unlock()
+			})
+			return
+		}
+		index := strings.LastIndexByte(cell, '/')
+		if index < 0 {
+			break
+		}
+		cell = cell[:index]
+	}
+	t.Fatal("assertion leaf has no selected cell")
+}
+
 func runCell(t *testing.T, name, driver string, check func(*testing.T)) {
 	t.Helper()
-	want := execution{Cell: t.Name() + "/" + name, Revision: revision(t), Platform: runtime.GOOS + "/" + runtime.GOARCH, Driver: driver, Result: "pass"}
 	t.Run(name, func(t *testing.T) {
+		want := execution{Cell: t.Name(), Revision: revision(t), Platform: runtime.GOOS + "/" + runtime.GOARCH, Driver: driver, Result: "pass"}
+		results := &cellResults{want: want}
+		activeCells.Store(t.Name(), results)
 		t.Cleanup(func() {
-			var result execution
-			if !t.Failed() && !t.Skipped() {
-				result = want
-			}
-			if err := result.validate(want); err != nil {
-				t.Error(err)
+			defer activeCells.Delete(t.Name())
+			if t.Failed() || t.Skipped() || len(results.leaves) == 0 {
+				t.Error("cell has no successful assertion leaf execution")
 				return
 			}
-			raw, err := json.Marshal(result)
-			if err != nil {
-				t.Error(err)
-				return
+			for _, leaf := range results.leaves {
+				leafWant := want
+				leafWant.Leaf = leaf.Leaf
+				if err := leaf.validate(leafWant); err != nil {
+					t.Error(err)
+					return
+				}
 			}
-			t.Log(string(raw))
+			for _, result := range append(results.leaves, want) {
+				raw, err := json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Log(string(raw))
+			}
 		})
 		check(t)
 	})
 }
 
 func TestExecutionRequiresMatchingSuccessfulResult(t *testing.T) {
-	want := execution{"cell", "source-sha256", "linux/amd64", "go-sdk", "pass"}
+	want := execution{Cell: "cell", Revision: "source-sha256", Platform: "linux/amd64", Driver: "go-sdk", Result: "pass"}
 	if err := want.validate(want); err != nil {
 		t.Fatal(err)
 	}
@@ -133,21 +180,29 @@ func TestExecutionRequiresMatchingSuccessfulResult(t *testing.T) {
 }
 
 func TestExecutionRejectsSkippedFailedAndCleanupFailedCallbacks(t *testing.T) {
-	for _, mode := range []string{"skip", "fail", "cleanup", "pass"} {
+	for _, mode := range []string{"skip", "fail", "cleanup", "pass", "empty", "filtered", "nested", "nested-empty", "nested-cleanup"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
-			command := exec.Command(os.Args[0], "-test.v", "-test.run=^TestExecutionChild$")
+			selection := "^TestExecutionChild$"
+			if mode == "filtered" {
+				selection += "/^callback$/^absent$"
+			}
+			command := exec.Command(os.Args[0], "-test.v", "-test.run="+selection)
 			command.Env = append(os.Environ(), "SPARKWING_EXECUTION_TEST="+mode, "SPARKWING_TESTLEAK_HOST=", "TMPDIR="+root, "TMP="+root, "TEMP="+root)
 			output, err := command.CombinedOutput()
 			entries, readErr := os.ReadDir(root)
 			if readErr != nil || len(entries) != 0 {
 				t.Fatalf("child left sandbox resources: %v, %v", entries, readErr)
 			}
-			if (err == nil) != (mode == "pass") {
+			passed := mode == "pass" || mode == "nested"
+			if (err == nil) != passed {
 				t.Fatalf("callback %s: %v\n%s", mode, err, output)
 			}
-			if (mode == "pass") != strings.Contains(string(output), `"result":"pass"`) {
+			if passed != strings.Contains(string(output), `"result":"pass"`) {
 				t.Fatalf("failed callback emitted pass: %s", output)
+			}
+			if passed && !strings.Contains(string(output), `"leaf":"TestExecutionChild/callback`) {
+				t.Fatalf("cell passed without leaf evidence: %s", output)
 			}
 		})
 	}
@@ -159,7 +214,26 @@ func TestExecutionChild(t *testing.T) {
 		return
 	}
 	runCell(t, "callback", "test", func(t *testing.T) {
-		if err := os.MkdirAll(os.Getenv("HOME"), 0700); err != nil {
+		if mode == "empty" {
+			return
+		}
+		if mode == "filtered" || mode == "nested" || mode == "nested-empty" || mode == "nested-cleanup" {
+			t.Run("assertion", func(t *testing.T) {
+				if mode == "nested-empty" {
+					return
+				}
+				recordLeaf(t)
+				if t.Name() == "" {
+					t.Fatal("missing leaf identity")
+				}
+				if mode == "nested-cleanup" {
+					t.Cleanup(func() { t.Error("leaf cleanup failed") })
+				}
+			})
+			return
+		}
+		recordLeaf(t)
+		if err := os.MkdirAll(os.Getenv("HOME"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		switch mode {

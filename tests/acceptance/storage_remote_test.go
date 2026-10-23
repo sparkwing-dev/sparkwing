@@ -53,6 +53,7 @@ func (s storageCacheSigner) Download(ctx context.Context, q blob.GetRequest) (bl
 }
 
 func checkStorageRemoteCache(t *testing.T) {
+	recordLeaf(t)
 	storageProperty(t, func(seed [16]byte, ordinal uint8) bool {
 		objects, dir := storageFilesystem(t)
 		i, _ := storageIdentity(seed, uint32(ordinal))

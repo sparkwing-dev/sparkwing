@@ -10,6 +10,7 @@ import (
 )
 
 func checkStorageFilesystemDepcache(t *testing.T) {
+	recordLeaf(t)
 	storageProperty(t, func(seed [16]byte) bool {
 		objects, dir := storageFilesystem(t)
 		err := checkBlobDepcache(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}, func(key string) error {
@@ -29,6 +30,7 @@ func checkStorageFilesystemDepcache(t *testing.T) {
 }
 
 func checkStorageS3Depcache(t *testing.T) {
+	recordLeaf(t)
 	storageProperty(t, func(seed [16]byte) bool {
 		objects, transport := storageS3(t)
 		err := checkBlobDepcache(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}, func(key string) error {

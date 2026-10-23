@@ -94,6 +94,7 @@ func testProtocolAdditiveFrames(t *testing.T) {
 		"log":   `{"ts":"2026-10-14T00:00:00Z","level":"info","msg":"visible","future":{"nested":[1,null]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			recordLeaf(t)
 			frame, err := nodeproto.ParseFrame([]byte(raw))
 			if err != nil {
 				t.Fatal(err)

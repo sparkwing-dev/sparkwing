@@ -68,6 +68,7 @@ func (r *storageMaterializationRecords) LookupRecord(_ context.Context, q blob.R
 }
 
 func checkStorageFilesystemMaterialization(t *testing.T) {
+	recordLeaf(t)
 	objects, dir := storageFilesystem(t)
 	checkStorageMaterialization(t, objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}, func(key string, body []byte) {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(key)), body, 0o600); err != nil {
@@ -77,6 +78,7 @@ func checkStorageFilesystemMaterialization(t *testing.T) {
 }
 
 func checkStorageS3Materialization(t *testing.T) {
+	recordLeaf(t)
 	objects, transport := storageS3(t)
 	checkStorageMaterialization(t, objects, blob.TransferClient{Transport: transport}, func(key string, body []byte) {
 		transport.objects[key] = bytes.Clone(body)

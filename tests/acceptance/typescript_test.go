@@ -14,6 +14,7 @@ func TestTypeScriptBoundary(t *testing.T) {
 		t.Fatalf("TypeScript test files: %v", err)
 	}
 	runCell(t, "typescript-sdk-boundary", "node-test", func(t *testing.T) {
+		recordLeaf(t)
 		node, err := exec.LookPath("node")
 		if err != nil {
 			t.Fatal("TypeScript SDK acceptance requires Node.js 22.18 or later")
@@ -35,6 +36,7 @@ func TestTypeScriptBoundary(t *testing.T) {
 		}
 	})
 	runCell(t, "typescript-native-pipes", "go-nativehost", func(t *testing.T) {
+		recordLeaf(t)
 		root, err := filepath.Abs("../..")
 		if err != nil {
 			t.Fatal(err)

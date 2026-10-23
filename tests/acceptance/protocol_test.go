@@ -30,6 +30,7 @@ func TestProtocol(t *testing.T) {
 	runCell(t, "hello", "go-sdk", testGoSDKHelloAndHandles)
 	runCell(t, "mask-acknowledgement", "go-sdk", testGoSDKMaskAcknowledgement)
 	runCell(t, "sdk-linkage", "go-sdk", func(t *testing.T) {
+		recordLeaf(t)
 		linked, err := acceptance.GoSDKLinkage(t.Context())
 		if err != nil {
 			t.Fatalf("%v; linked=%v", err, linked)
@@ -71,6 +72,7 @@ func TestProtocol(t *testing.T) {
 }
 
 func testGoSDKProcessFailure(t *testing.T) {
+	recordLeaf(t)
 	actual, err := acceptance.RunGoSDKProcessFixture(t.Context(), "", "failure")
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +95,7 @@ func testGoSDKProcessFailure(t *testing.T) {
 }
 
 func testGoSDKProcessPlanOutput(t *testing.T) {
+	recordLeaf(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	actual, err := acceptance.RunGoSDKProcessFixture(ctx, "", "producer")
@@ -103,6 +106,7 @@ func testGoSDKProcessPlanOutput(t *testing.T) {
 }
 
 func testGoSDKProcessRoutes(t *testing.T) {
+	recordLeaf(t)
 	var outputReads, secretReads, plainReads atomic.Int32
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
@@ -194,6 +198,7 @@ func compareGoSDKResults(t *testing.T, ctx context.Context, actual acceptance.Go
 }
 
 func testGoSDKFakeHost(t *testing.T) {
+	recordLeaf(t)
 	host := sparkwingtest.New(sparkwingtest.Options{
 		Secrets: map[string]sparkwingtest.Secret{"TOKEN": {Value: "fake-host-secret", Masked: true}},
 	})

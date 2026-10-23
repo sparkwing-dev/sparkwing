@@ -21,6 +21,7 @@ func testGoSDKJobArguments(t *testing.T) {
 	}
 	defer cleanup()
 	t.Run("describe", func(t *testing.T) {
+		recordLeaf(t)
 		process := startProtocolProbe(t, bin)
 		sendProtocolProbe(t, process, probeHello())
 		protocolProbeReply(t, process, "hello")
@@ -56,6 +57,7 @@ func testGoSDKJobArguments(t *testing.T) {
 		{"invalid", "", map[string]string{"reason": "fixture", "mode": "invalid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			recordLeaf(t)
 			fake, err := host.Plan(t.Context(), protocolgo.ArgumentsName, tc.args)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()

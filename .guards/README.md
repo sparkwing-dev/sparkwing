@@ -19,10 +19,7 @@ applies, so both judge the whole tree.
 | `forbidigo-f2.allow` | F2: `(*license.License).Allows` outside `internal/deployment`, so the deployment kind is decided once at startup; it has no entries and should keep none | `<file><TAB><method>`, one line per call |
 | `unexport.allow` | exported identifiers in an `internal/` package that no other package uses, that satisfy no interface and that no used type exposes | `<package><TAB><count>` |
 
-`guardcheck` prints the identifiers behind a rising unexport count. The
-acceptance list is judged by the `tests/acceptance` package itself: a skipped
-cell missing from the list fails that cell, and an unfiltered run fails when a
-listed cell did not skip.
+`guardcheck` prints the identifiers behind a rising unexport count.
 
 Moving the controller, store and storage trees under `internal/` adds their
 existing exports to the unexport census. The move accepts those package counts

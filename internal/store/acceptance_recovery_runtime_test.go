@@ -56,7 +56,7 @@ func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.
 	now := time.Now().UTC()
 	f.s.SetTestClock(t, func() time.Time { return now })
 	var plan store.PlanAcceptance
-	f.tenant, plan, err = storePlanSealRequestFor(ctx, f.s, identity, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+	f.tenant, plan, err = storePlanSealRequestFor(ctx, f.s, identity, false, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}, Retry: &nodeproto.RetrySpec{Attempts: 2}}}
 		for _, edit := range edits {
 			edit(doc)
