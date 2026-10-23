@@ -656,7 +656,6 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`SplitJobEnv`](../../../internal/procenv/contracts.go#L117) | SplitJobEnv validates names and rejects engine-owned or credential transport names. |
 | [`Build`](../../../internal/procenv/contracts.go#L125) | Build excludes credential-class values from both local snapshots and remote inputs under the shared process policy. |
 | [`Lookup`](../../../internal/procenv/contracts.go#L128) | Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned. |
-| [`Validate`](../../../internal/procenv/contracts.go#L131) | Validate refuses invalid names and engine-owned assignments without exposing secret values in its errors. |
 | [`Registry`](../../../internal/procenv/registry.go#L5) | Registry is the single classification table for environment generation and reference documentation. |
 
 ### internal/limits
@@ -672,9 +671,6 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`Error`](../../../internal/limits/deadline.go#L40) | Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes. |
 | [`Record`](../../../internal/limits/deadline.go#L43) | Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note. |
 | [`Failure`](../../../internal/limits/deadline.go#L46) | Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes. |
-| [`Class`](../../../internal/limits/table.go#L4) | Class distinguishes author refusals, operator ceilings and internal coordination budgets. |
-| [`Limit`](../../../internal/limits/table.go#L14) | Limit carries a typed value (duration, int64 bytes, or int count) with its documented enforcement. |
-| [`Table`](../../../internal/limits/table.go#L22) | Table returns independent rows for every shared constant; documentation renders the typed values. |
 
 ### internal/settings
 
@@ -728,10 +724,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Command`](../../../internal/clisurface/grammar.go) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
 | [`GlobalFlags`](../../../internal/clisurface/grammar.go) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
 | [`ExitCode`](../../../internal/clisurface/grammar.go) | ExitCode keeps usage failures distinguishable from incomplete observations. |
-| [`ErrorFormat`](../../../internal/clisurface/grammar.go) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
-| [`Errors`](../../../internal/clisurface/grammar.go) | Errors keeps diagnostics on stderr even when stdout contains records. |
 | [`CommonRules`](../../../internal/clisurface/grammar.go) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
-| [`Validate`](../../../internal/clisurface/grammar.go) | Validate catches grammar drift before a parser or help generator consumes it. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
 | [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
 | [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |

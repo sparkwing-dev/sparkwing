@@ -3,9 +3,8 @@
 // config directory rather than in SPARKWING_HOME, so a copied or backed-up
 // state.db carries only ciphertext.
 //
-// Every local process that seals or opens a stored secret builds its cipher
-// here: the admission daemon's controller API, the dashboard (`sparkwing serve`), a run's
-// loopback controller, and a run that reads the store without a daemon.
+// The controller that owns the local store seals and opens its secrets through
+// this package. Clients use its API instead of opening the store.
 package localsecrets
 
 import (
@@ -64,8 +63,7 @@ var errNoKeyToCreate = errors.New("no local secrets key")
 // KeyringOptions choose how [LoadKeyring] treats this process.
 type KeyringOptions struct {
 	// Create lets the first seal create the key file. Only the process that
-	// owns the machine's store may: the daemon, or a run on a machine with
-	// no daemon at all.
+	// owns the machine's store may create it.
 	Create bool
 }
 

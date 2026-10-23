@@ -329,20 +329,20 @@ release resolver and need an explicit development workflow during implementation
 | [`Resolver`](../../../internal/engine/engine.go) | owns the version-index cache and verified executable cache for one machine. |
 | [`DefaultCacheDirectory`](../../../internal/engine/resolver.go) | Returns the shared OS-native machine cache path. |
 | [`NewResolver`](../../../internal/engine/resolver.go) | Uses the shared default unless the host or tests provide a private override. |
-| [`Resolve`](../../../internal/engine/resolver.go) | checks the current verified version policy, fetches the exact release only from GitHub Releases when absent, verifies it, and atomically publishes a reusable machine-cache entry. |
-| [`Ensure`](../../../internal/engine/resolver.go) | resolves a sealed identity on another executor and requires the same release manifest. |
-| [`Cached`](../../../internal/engine/resolver.go) | returns only an integrity-checked cache entry; absence or damage is a miss. |
-| [`StoreVerified`](../../../internal/engine/resolver.go) | publishes only verified bytes and retains signatures for future integrity checks. |
+| [`Resolver.Resolve`](../../../internal/engine/resolver.go) | checks the current verified version policy, fetches the exact release only from GitHub Releases when absent, verifies it, and atomically publishes a reusable machine-cache entry. |
+| [`Resolver.Ensure`](../../../internal/engine/resolver.go) | resolves a sealed identity on another executor and requires the same release manifest. |
+| [`Resolver.Cached`](../../../internal/engine/resolver.go) | returns only an integrity-checked cache entry; absence or damage is a miss. |
+| [`Resolver.StoreVerified`](../../../internal/engine/resolver.go) | publishes only verified bytes and retains signatures for future integrity checks. |
 | [`VersionInfo`](../../../internal/engine/engine.go) | retains every published release, including releases beyond their support window. |
 | [`Restriction`](../../../internal/engine/engine.go) | carries signed notice and enforcement dates; an empty Version means no restriction. |
 | [`VersionIndex`](../../../internal/engine/engine.go) | is signed as the exact JSON body bytes. |
 | [`SignedIndex`](../../../internal/engine/engine.go) | keeps the exact bytes and detached signature for verification and persistent fallback. |
 | [`VerifiedIndex`](../../../internal/engine/engine.go) | is obtainable only by checking the shared releaseauth trust roots. |
 | [`VerifyIndex`](../../../internal/engine/policy.go) | checks releaseauth.PublicKeys signatures, unique version identities, required fields, recognized format and restriction dates/reasons before decoding a usable policy. |
-| [`Offline`](../../../internal/engine/policy.go) | reports local execution without a cached verified policy. |
-| [`Policy`](../../../internal/engine/policy.go) | returns a copy for diagnostics and policy evaluation; callers cannot mutate verified state. |
+| [`VerifiedIndex.Offline`](../../../internal/engine/policy.go) | reports local execution without a cached verified policy. |
+| [`VerifiedIndex.Policy`](../../../internal/engine/policy.go) | returns a copy for diagnostics and policy evaluation; callers cannot mutate verified state. |
 | [`IndexResult`](../../../internal/engine/engine.go) | reports fallback explicitly so output and the dashboard can show the same notice. |
-| [`Index`](../../../internal/engine/index.go) | fetches only VersionIndexURL and its detached signature after the short refresh interval. |
+| [`Resolver.Index`](../../../internal/engine/index.go) | fetches only VersionIndexURL and its detached signature after the short refresh interval. |
 | [`NoticeKind`](../../../internal/engine/engine.go) | is stable presentation data shared by run output and controller API/dashboard readers. |
 | [`Notice`](../../../internal/engine/engine.go) | carries actionable policy text without turning a warning into an implicit revocation. |
 | [`EvaluateRunner`](../../../internal/engine/policy.go) | Applies the same restrictions to new runner claims with automatic-update guidance. |
@@ -357,12 +357,12 @@ release resolver and need an explicit development workflow during implementation
 | [`UpgradePlan`](../../../internal/engine/upgrade.go) | contains concrete pin edits and the matching verified engine selection. |
 | [`UpgradeVerifier`](../../../internal/engine/upgrade.go) | checks dependency resolution, Go compilation or TypeScript type checking, then describe/plan with the exact selected engine. |
 | [`UpgradeResult`](../../../internal/engine/upgrade.go) | reports verification separately from a dry-run preview. |
-| [`Upgrade`](../../../internal/engine/upgrade.go) | verifies the staged pin changes before applying them, rechecking BeforeDigest on each input. |
+| [`Resolver.Upgrade`](../../../internal/engine/upgrade.go) | verifies the staged pin changes before applying them, rechecking BeforeDigest on each input. |
 | [`SoftwareUpdate`](../../../internal/engine/upgrade.go) | keeps a verified runner replacement separate from an SDK-matched pipeline engine. |
-| [`PrepareRunnerUpdate`](../../../internal/engine/upgrade.go) | applies the signed minimum/revocation policy to the runner itself, then obtains the latest permitted runner asset through the same GitHub-only verification/cache owner. |
-| [`Version`](../../../internal/engine/release.go) | returns the release version whose embedded executable identity was verified. |
-| [`Target`](../../../internal/engine/release.go) | returns the exact platform and binary verified against the closed release matrix. |
-| [`Asset`](../../../internal/engine/release.go) | supplies immutable verified bytes to the native installer without bypassing verification. |
+| [`Resolver.PrepareRunnerUpdate`](../../../internal/engine/upgrade.go) | applies the signed minimum/revocation policy to the runner itself, then obtains the latest permitted runner asset through the same GitHub-only verification/cache owner. |
+| [`VerifiedRelease.Version`](../../../internal/engine/release.go) | returns the release version whose embedded executable identity was verified. |
+| [`VerifiedRelease.Target`](../../../internal/engine/release.go) | returns the exact platform and binary verified against the closed release matrix. |
+| [`VerifiedRelease.Asset`](../../../internal/engine/release.go) | supplies immutable verified bytes to the native installer without bypassing verification. |
 
 The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, `TypeScriptPackage`,
 `ReleaseBase`, `VersionIndexURL`, `VersionIndexSignatureURL` and

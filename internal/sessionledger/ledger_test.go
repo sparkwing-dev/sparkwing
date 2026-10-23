@@ -2,11 +2,51 @@ package sessionledger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestOrphanedSessionEventOmitsCommandArguments(t *testing.T) {
+	l := OpenWithProbe(filepath.Join(t.TempDir(), "sessions"), &fakeProbe{})
+	record(t, l, "run-orphan", "build", 4242)
+	records, err := l.List()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %+v, err = %v", records, err)
+	}
+	// Records written before command text was removed can still be swept.
+	const secret = "orphan-secret-argument"
+	data, err := os.ReadFile(records[0].filename())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy["command"] = "tool " + secret
+	data, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(records[0].filename(), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := l.Sweep(t.Context(), SweepOptions{})
+	if err != nil || len(outcomes) != 1 || outcomes[0].Verdict != verdictReaped {
+		t.Fatalf("outcomes = %+v, err = %v", outcomes, err)
+	}
+	events := &eventRecorder{}
+	if errs := RecordOutcomes(t.Context(), events, "doctor", outcomes); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if len(events.payloads) != 1 || strings.Contains(events.payloads[0], secret) {
+		t.Fatalf("events = %q, want one event without command arguments", events.payloads)
+	}
+}
 
 type fakeProbe struct {
 	alive      map[int]bool
@@ -29,7 +69,7 @@ func record(t *testing.T, l *Ledger, run, node string, owner int) func() {
 	release, err := l.Record(Record{
 		Run: run, Node: node, OwnerPID: owner, OwnerBirth: "b",
 		Handle:  Handle{Kind: "session", LeaderPID: owner + 100, SessionID: owner + 100, LeaderBirth: "lb"},
-		Command: "go build ./...",
+		Program: "go",
 	})
 	if err != nil {
 		t.Fatal(err)

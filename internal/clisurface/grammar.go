@@ -62,14 +62,6 @@ const (
 	ExitUsage ExitCode = 2
 )
 
-// errorFormat describes stderr framing owned by internal/apierr.
-type errorFormat struct {
-	Text        string
-	Hint        string
-	JSONOwner   string
-	JSONFraming string
-}
-
 // CommonRules fixes shared meanings so a new command cannot reinterpret a flag.
 func CommonRules() map[string]string {
 	return map[string]string{

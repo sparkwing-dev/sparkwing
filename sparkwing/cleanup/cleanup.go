@@ -35,8 +35,8 @@ type Spec struct {
 	// process whose environment may differ from the step's, and does not
 	// retry. Empty Argv makes Register a no-op.
 	Argv []string
-	// Description names the resource for the reaped event and for
-	// `sparkwing doctor`; defaults to the command's program name when empty.
+	// Description names the resource in host cleanup logs. Orphan sweeps
+	// identify the cleanup by its program alone because arguments can hold secrets.
 	Description string
 }
 
@@ -65,12 +65,6 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 	if err != nil {
 		return func() {}, err
 	}
-	// safety: a tool a step starts holds no masker, so an unnamed cleanup is
-	// recorded by its program, never by arguments that can quote a secret.
-	desc := spec.Description
-	if desc == "" {
-		desc = filepath.Base(spec.Argv[0])
-	}
 	var idb [8]byte
 	_, _ = rand.Read(idb[:])
 	rel, err := sessionledger.Open(p.SessionLedgerDir()).Record(sessionledger.Record{
@@ -79,7 +73,7 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 		OwnerPID:   os.Getpid(),
 		OwnerBirth: birth,
 		Handle:     sessionledger.Handle{Kind: "command", ID: hex.EncodeToString(idb[:]), Argv: spec.Argv},
-		Command:    sessionledger.MaskCommand(ctx, desc),
+		Program:    filepath.Base(spec.Argv[0]),
 	})
 	if err != nil {
 		return func() {}, err

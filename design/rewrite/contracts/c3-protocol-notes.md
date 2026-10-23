@@ -14,7 +14,6 @@ This inventory covers the process wire and the strict plan boundary in `internal
 | `HelloResult`, `SDKIdentity` | Selected major, SDK release/language and supported optional operations. |
 | `RunContext` | Sealed host-supplied inputs, including invoked pipeline name. |
 | `JobFailure` | Recovery source and canonical error payload. |
-| `ErrorUse`, `ErrorUses` | C2 code-consumer inventory; no definitions or HTTP policy. |
 | `Reply`, `Reply.Decode` | Correlated result or C2 error. |
 | `RunResult`, `EvalResult` | Step-body outcomes and closure values. |
 | `EvalResult.ValidateValue` | Checks a closure result against its declared kind before the host uses it. |
@@ -27,15 +26,13 @@ This inventory covers the process wire and the strict plan boundary in `internal
 | `ClosureSpec` | Opaque code references, never serialized functions. |
 | `EnvValue` | Explicit startup/body split. |
 | `ConcurrencySpec` | Shared plan/job declaration; no computed key. |
-| `ResourceSpec`, `SourceSpec` | Explicit-or-unset code settings, checked at seal point 2. |
+| `SourceSpec` | Explicit-or-unset code settings, checked at seal point 2. |
 | `RetrySpec`, `MemoSpec`, `CacheSpec` | Application retry, result memo and directory-cache declarations. |
 | `ApprovalSpec` | Approval message, timeout and timeout policy. |
 | `ArtifactInput`, `PipelineReference` | Declared dependency and cross-run read edges. |
 | `SecretMatcher` | Predicate over registered secrets without exporting values. |
 | `ValidationContext`, `ValidatePlan` | One strict plan/expansion validation boundary. |
 | `Placement` and its six constants | Local, local-triggered, runner-hosted, launcher, here and Actions topologies. |
-| `PlanCapability` and its 36 constants | Exhaustive declaration feature vocabulary for the matrix. |
-| `PlacementCapability`, `CapabilityTable` | Complete six-placement launch support matrix. |
 
 ## Wire invariants
 

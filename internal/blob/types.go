@@ -371,7 +371,7 @@ type RemoteCache interface {
 	Artifact(context.Context, Digest) (VerifiedReader, error)
 }
 
-// ErrBudget follows FailureRules instead of being treated as successful absence.
+// ErrBudget distinguishes exhausted reads from absent bytes.
 var ErrBudget = errors.New("blob budget exhausted")
 
 // ErrNotFound makes missing committed bytes loud at required-read boundaries.
@@ -411,7 +411,7 @@ func (r Record) VerifiedDefault() bool {
 }
 
 // safety: DepcacheHit records the winning fallback so provenance remains visible after a restore.
-// No hit, corrupt bytes and exhausted budget mean a cold cache under FailureRules.
+// No hit, corrupt bytes and exhausted budget mean a cold cache.
 type DepcacheHit struct {
 	Found   bool
 	Record  Record

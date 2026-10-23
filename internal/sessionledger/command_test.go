@@ -13,7 +13,7 @@ func TestCommandRecordsFromOneOwnerDoNotCollide(t *testing.T) {
 	mk := func(id string) {
 		if _, err := l.Record(Record{
 			Run: "run-1", Node: "build", OwnerPID: 4242, OwnerBirth: "b",
-			Handle: Handle{Kind: "command", ID: id, Argv: []string{"true"}}, Command: "cleanup",
+			Handle: Handle{Kind: "command", ID: id, Argv: []string{"true"}}, Program: "cleanup",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func TestSweepRunsTheCommandForADeadOwnerThenDropsTheRecord(t *testing.T) {
 	if _, err := l.Record(Record{
 		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
 		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"touch", marker}},
-		Command: "touch marker",
+		Program: "touch",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestSweepDropsAFailingCommandAfterOneAttempt(t *testing.T) {
 	if _, err := l.Record(Record{
 		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
 		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"false"}},
-		Command: "always fails",
+		Program: "false",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestAFailedCleanupEventQuotesNeitherArgvNorOutput(t *testing.T) {
 	if _, err := l.Record(Record{
 		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
 		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"sh", "-c", "echo " + secret + "; exit 3", secret}},
-		Command: "sh",
+		Program: "sh",
 	}); err != nil {
 		t.Fatal(err)
 	}

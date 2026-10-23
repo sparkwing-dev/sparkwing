@@ -1,7 +1,6 @@
 // Package backends defines the typed backend specs (secrets, state) a
 // storage profile resolves to. The specs are consumed by the storeurl
-// factories ([internal/storage/storeurl]) to open concrete stores and by
-// [internal/profile] to describe where a profile's runs persist.
+// factories ([internal/storage/storeurl]) to open concrete stores.
 package backends
 
 import (

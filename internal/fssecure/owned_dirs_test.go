@@ -16,7 +16,6 @@ import (
 var configDirPackages = map[string]bool{
 	"internal/fssecure":   true,
 	"internal/paths":      true,
-	"internal/profile":    true,
 	"internal/repos":      true,
 	"internal/secrets":    true,
 	"internal/userconfig": true,
@@ -28,7 +27,6 @@ var configDirProviders = map[string]bool{
 	"fssecure.ConfigFile":       true,
 	"fssecure.EnsureConfigDir":  true,
 	"fssecure.UnderConfigDir":   true,
-	"profile.DefaultPath":       true,
 	"repos.DefaultPath":         true,
 	"secrets.DefaultConfigPath": true,
 	"secrets.DefaultDotenvPath": true,
@@ -38,7 +36,6 @@ var configDirWriters = []string{
 	"cmd/sparkwing/versionhold.go",
 	"internal/configguard/configguard.go",
 	"internal/localsecrets/key.go",
-	"internal/profile/profile.go",
 	"internal/repos/repos.go",
 	"internal/userconfig/userconfig.go",
 }

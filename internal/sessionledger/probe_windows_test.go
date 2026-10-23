@@ -32,7 +32,7 @@ func TestPlatformProbeEndsAJobWhoseOwnerIsGone(t *testing.T) {
 	if _, err := l.Record(Record{
 		Run: "run-1", Node: "build", OwnerPID: gone.Process.Pid, OwnerBirth: "earlier",
 		Handle:  Handle{Kind: "job", LeaderPID: step.Process.Pid, JobName: job.Name},
-		Command: "ping",
+		Program: "ping",
 	}); err != nil {
 		t.Fatal(err)
 	}

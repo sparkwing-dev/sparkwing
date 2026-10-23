@@ -16,12 +16,12 @@ func TestRegisterWritesACommandRecordAndReleaseRemovesIt(t *testing.T) {
 	t.Setenv("SPARKWING_JOB_ID", "build")
 	ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
 
-	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}, Description: "docker run x"})
+	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}, Description: "docker run hunter2-description-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, _ := ledger.List()
-	if len(got) != 1 || got[0].Handle.Kind != "command" || got[0].Command != "docker run x" {
+	if len(got) != 1 || got[0].Handle.Kind != "command" || got[0].Program != "docker" {
 		t.Fatalf("record = %+v", got)
 	}
 	if got[0].Handle.Argv[0] != "docker" || got[0].Handle.ID == "" {
@@ -91,7 +91,7 @@ func TestRegisterWithoutADescriptionRecordsOnlyTheProgram(t *testing.T) {
 	}
 	defer release()
 	got, _ := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List()
-	if len(got) != 1 || got[0].Command != "vault" {
+	if len(got) != 1 || got[0].Program != "vault" {
 		t.Fatalf("record = %+v, want the command named by its program alone", got)
 	}
 }

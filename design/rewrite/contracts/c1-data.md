@@ -565,7 +565,7 @@ attempt.
 ## Unified trigger queue
 
 `Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed with their
-separate scan, cursor and candidate decoder. Queue claims use `Store.ClaimUnit`
+separate scan, cursor and candidate decoder. Queue claims use `Operator.ClaimUnit`
 with `UnitDemand.Kinds` containing `capability.UnitTrigger`. The live capability
 supplies tenant and repository authority. Named and queued claims share matching,
 issuance and billing in one transaction.
@@ -761,7 +761,7 @@ caller migrated.
 
 `Store.StartClaimExecution`, `HeartbeatClaim` and `ClaimBeat` are removed.
 Their legacy HTTP claim-token branches and client helpers are removed.
-`Store.RenewUnit` owns capability-derived unit renewal and owner compute.
+`Operator.RenewUnit` owns capability-derived unit renewal and owner compute.
 Job execution starts use `Tenant.TransitionNode` with `CauseStart` and the
 source attempt ordinal. The separate raw runner heartbeat/start paths still
 need retirement with their consumers.
@@ -1518,7 +1518,7 @@ attempt under the same claim generation. W9 must add the corresponding optional
 wire field and preserve its presence through the adapter. The store never derives
 an externally reported source ordinal from current authentication state.
 
-`Store.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
+`Operator.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
 current `controller.reaper` lease and rechecks it in each unit transaction.
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
 `Maintenance.ReapExpiredTriggers` and `AgentLossRecovery` are removed. Recovery
@@ -2172,7 +2172,7 @@ deadline before awarding work, even when reaping has not run yet.
 decider. Refused jobs become skipped and the run fails with the recorded reason.
 Cancellation still takes precedence. A refused seal cannot release or claim work.
 
-`Store.RenewUnit` is the controller adapter for a unit capability and the wire's
+`Operator.RenewUnit` is the controller adapter for a unit capability and the wire's
 `executing` flag. It derives team, unit, holder and generations from the live
 capability. Trigger and plan renewal share `Tenant.RenewOwner`'s transaction
 path. Job renewal shares `Tenant.RenewNodeClaim`'s path. Eval renewal checks its
@@ -3059,9 +3059,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `AttemptIdentity` | AttemptIdentity uses a node-wide positive Attempt that never resets. Generation is a fence attribute, not the attempt ordinal or its identity. |
 | `RepoInput` | RepoInput supplies independently resolved identity facts, never authorization. |
 | `Repository` | Repository retains a human spelling beside the canonical key. |
-| `RepoRule` | RepoRule makes case and machine-scope rules available to conformance tests. |
-| `RepoRules` | RepoRules enumerates every canonical identity form. |
-| `CaseInsensitiveProviders` | CaseInsensitiveProviders is the complete approved path-folding set. |
 | `CanonicalRepository` | CanonicalRepository strips URL credentials and trailing .git, preserves ports, and hashes cleaned absolute filesystem paths. Resolving a GitHub ID grants no access. |
 | `RepoUse` | RepoUse separates machine-local storage from controller authorization scopes. |
 | `ValidateRepoUse` | ValidateRepoUse refuses local keys in controller access rules and memo writes. |
@@ -3078,7 +3075,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Layer` | Layer names the source to report when an explicit setting is invalid. |
 | `SettingOrigin` | SettingOrigin allows C4 errors to name source, file and key. |
 | `Setting` | Setting retains presence and origin without resolving precedence in this package. |
-| `Resources` | Resources preserves explicit sizing through both seal points. |
 | `RunnerSelection` | Preserve the requested any/name/label/here route without granting identity or access. |
 | `RunnerSelectionKind` | Select the closed route vocabulary; here requests C2's run-bound Award. |
 | `Options` | Options carries request winners and resolved values without zero-as-default rules. |
@@ -3094,22 +3090,18 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `SealInput` | SealInput accepts raw plan bytes already validated by C3's ValidatePlan. The store performs that validation and C4 ceiling checks in its acceptance transaction. |
 | `SealSpec` | SealSpec binds the canonical spec and plan without owning plan validation. |
 | `CheckSeal` | CheckSeal permits an identical replay and refuses a different hash as spec_drift. |
-| `Projections` | Projections supplies write-once indexed fields derived only from the sealed spec. |
-| `Project` | Project prevents independently writable copies of sealed run inputs. |
 | `RetryInput` | RetryInput carries sealed state unchanged and records the new requester as lineage. |
 | `RetrySnapshot` | RetrySnapshot preserves source trust and seals while adding separate retry lineage. |
 | `CarryRetry` | CarryRetry does not consult branch head or reconstruct inputs from current settings. |
 | `Context` | Context provides trusted execution inputs on every placement. It may contain secret argument values and must not be rendered or logged. |
-| `Spec.RunContext` | RunContext refuses unsealed input through the Spec-only method boundary. |
 | `Spec.GuardContext` | GuardContext retains trusted default-branch provenance for fail-closed guards. |
-| `Spec.Reproducer` | Reproducer excludes secret argument values and all credentials. |
 | `CanonicalHash` | CanonicalHash excludes the hash field itself and nonsemantic seal timestamps. Sorted object keys, stable list ordering and explicit Optional presence prevent hash drift. |
 | `EnvironmentDigest` | EnvironmentDigest returns only sorted names and a digest of their captured values. Callers retain values in private host storage and never persist them in the spec. |
 | `Display` | Display is a separate safe projection, because serializing Spec exposes execution inputs. Hashes and env digests are omitted because deterministic hashes can reveal guessed secret values. |
 | `DisplayRequest` | DisplayRequest redacts all requested values until trusted describe supplies classification. A malformed classification fails closed. This copy never changes inputs retained for execution. |
 | `DisplaySpec` | DisplaySpec applies resolved secret classification to both requested and resolved args. Every dashboard, event, public API and CLI renderer uses this projection, never raw Spec JSON. |
 
-### internal/blob/contracts.go
+### internal/blob/types.go
 
 | Export | Purpose |
 |---|---|
@@ -3126,9 +3118,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Record` | Record binds source facts and provenance to immutable committed bytes. |
 | `Member` | Member makes every manifest edge independently subject to authority checks. |
 | `Receipt` | Receipt retains its tagged uploader and cannot become run-wide job authority. Job and imported-publication receipts keep the exact job, attempt and generation. |
-| `Tombstone` | Tombstone starts reachability GC's grace period, never an age-only object expiry. |
 | `EdgeKind` | EdgeKind enumerates the only admitted ways to make bytes reachable. |
-| `EdgeKinds` | EdgeKinds is complete so authorization tests cannot silently omit an edge. |
 | `ReadEdge` | ReadEdge records a server-derived ancestry or scoped-cache entitlement. |
 | `ReadSet` | ReadSet is a transaction snapshot and must never be decoded from caller JSON. |
 | `Authority` | Authority carries opaque C2 references for a transaction-time authorization recheck. Possession of this struct is not proof of authority; all values must be resolved server-side. |
@@ -3161,27 +3151,20 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `MemoHit` | MemoHit carries digests and authorized edges rather than relying on the source run's survival. |
 | `DepcacheKey` | DepcacheKey shares repo/ref isolation with memo while naming a file cache. |
 | `RestoreSource` | RestoreSource orders own-ref, PR-base and verified-default cache lookups. |
-| `RestoreRule` | RestoreRule makes the trusted fallback requirement explicit. |
-| `DepcacheRestoreOrder` | DepcacheRestoreOrder is the complete ordered restore policy. |
 | `DepcacheLookup` | DepcacheLookup never accepts a caller-selected repo outside its data grant. |
-| `FailureUse` | FailureUse distinguishes safe cold starts from missing required bytes. |
-| `FailureAction` | FailureAction prevents missing bytes or exhausted budgets from looking successful. |
-| `FailureRule` | FailureRule applies equally to missing, corrupt and over-budget reads. |
-| `FailureRules` | FailureRules is the complete per-use failure policy. |
 | `BuildTrust` | BuildTrust preserves the team-owned opt-in for local binary provenance. |
 | `BinaryExecution` | BinaryExecution binds cloud execution to the committed digest and provenance. |
 | `CheckBinaryExecution` | CheckBinaryExecution permits local provenance only with trust_local_builds. |
 | `RemoteCacheOptions` | RemoteCacheOptions uses the user's existing repo-bound read authority. |
 | `RemoteCache` | RemoteCache exposes reads only, with no binary fetch or shared-cache write method. Every returned record must originate in a verified default-branch run. |
 | `OpenRemoteCache` | OpenRemoteCache is opt-in by profile and never borrows a runner credential. |
-| `PublishPolicy` | PublishPolicy labels published results local and never creates an owner claim. Publication failure is reported separately from the completed local run's outcome. |
-| `ErrBudget` | ErrBudget follows FailureRules instead of being treated as successful absence. |
+| `ErrBudget` | ErrBudget distinguishes exhausted reads from absent bytes. |
 | `ErrNotFound` | ErrNotFound makes missing committed bytes loud at required-read boundaries. |
 | `ErrIntegrity` | ErrIntegrity prevents corrupt bytes from being accepted as a successful read. |
 | `ErrDigestNotReadable` | ErrDigestNotReadable maps through C2 to forbidden with reason digest_not_readable. |
 | `RecordLookup` | RecordLookup combines a logical key with authority instead of accepting a bare CAS digest. Local stores may use local repository keys. Controller lookups require repo-bound data authority. |
 | `RecordLookupResult` | RecordLookupResult distinguishes a cache miss from a record with required missing bytes. All returned members have passed existence and edge checks before their digests enter ReadSet. |
-| `DepcacheHit` | DepcacheHit records the winning fallback so provenance remains visible after a restore. No hit, corrupt bytes and exhausted budget mean a cold cache under FailureRules. |
+| `DepcacheHit` | DepcacheHit records the winning fallback so provenance remains visible after a restore. No hit, corrupt bytes and exhausted budget mean a cold cache. |
 | `WriteScopeIntent` | WriteScopeIntent omits repo, ref and trust because the authority supplies those facts. Pipeline/job choices still require membership checks against the sealed run at commit. |
 | `ResolveWriteKey` | ResolveWriteKey derives repository and vouched/manual ref scope from live authority. It rejects client-selected real-ref writes without server-verified facts. |
 | `RecordNamespace` | RecordNamespace encodes typed components without delimiter collisions. Memo namespaces preserve memo/<repo_key>/<ref_scope>/<pipeline>/<job>/<hash> semantics. |
@@ -3202,21 +3185,15 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
 | `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
-### internal/storage/state_contract.go
-
-| Export | Purpose |
-|---|---|
-| `StateStore` | StateStore is the tenant-scoped host contract; status writes use transitions and source inputs use the two seals. A host borrows this handle and does not close the shared store. Claims and deployment maintenance stay unscoped. |
-
 ### internal/store/claim_contract.go
 
 | Export | Purpose |
 |---|---|
 | `UnitDemand` | UnitDemand carries self-asserted labels only; granted identity, reservations and team come from C2's capability. |
 | `UnitClaim` | UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation. |
-| `Store.ClaimUnit` | ClaimUnit applies the shared matcher and C2 Award atomically; only launcher service scope can cross teams. |
+| `Operator.ClaimUnit` | ClaimUnit applies the shared matcher and C2 Award atomically; only launcher service scope can cross teams. |
 | `Store.ReleaseUnit` | ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions. |
-| `Store.RenewUnit` | Renews the capability-derived unit, records owner execution starts and delivers cancellation without accepting caller-selected fences. |
+| `Operator.RenewUnit` | Renews the capability-derived unit, records owner execution starts and delivers cancellation without accepting caller-selected fences. |
 | `OperatorStore` | OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store. |
 
 ### internal/store/controller_recovery.go
@@ -3252,7 +3229,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Operator.AcquireSingletonLease` | AcquireSingletonLease refuses a live foreign holder and advances the fence after a lapse. |
 | `Operator.RenewSingletonLease` | RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one. |
 | `ReapedUnit` | ReapedUnit reports recovery in the same run; application retry budgets are never consumed by a lapse. |
-| `Store.ReapUnits` | ReapUnits uses the store clock and cancellation precedence, settling billing and effects with each transition. |
+| `Operator.ReapUnits` | ReapUnits uses the store clock and cancellation precedence, settling billing and effects with each transition. |
 | `FinancialTables` | FinancialTables identifies records that never take a cascading run foreign key. |
 | `RetentionRequest` | RetentionRequest is executed only while the maintenance lease is live; settings are resolved inside the store. |
 | `RetentionResult` | RetentionResult reports committed removals and preserved pins; financial rows must always remain untouched. |
@@ -3279,8 +3256,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.LookupMemo` | LookupMemo applies the claim's repo/ref/pipeline scope and the verified default-branch fallback. |
 | `Tenant.LookupDepcache` | LookupDepcache follows the single restore-order table and runs cold on absent or invalid bytes. |
 
-### internal/store/schema.go
-
 ### internal/store/result_logs.go
 
 | Export | Purpose |
@@ -3291,7 +3266,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.RecordSegments` | Commits immutable segments and seals under the current writer fence. |
 | `Tenant.ReadLogSegments` | Rechecks authority for the exact subject before selecting byte ranges. |
 
-### internal/store/schema_contract.go
+### internal/store/schema.go
 
 | Export | Purpose |
 |---|---|
@@ -3340,7 +3315,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `OwnerLeaseKind` | OwnerLeaseKind selects the persisted liveness row; local hosts use a trigger lease too. |
 | `OwnerLeaseRef` | OwnerLeaseRef identifies a fence to re-read under the store clock, never a caller's liveness assertion. |
 | `Actor` | Actor carries references to authenticated authority; C2 resolves the capability inside each write transaction. |
-| `NodeRef` | NodeRef omits team because a Tenant supplies it; a wire encoder uses job_id. |
 | `NodeRow` | NodeRow contains the state facts consumed by the shared decision and reconciliation functions. |
 | `NodeAttempt` | NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal. |
 | `TransitionCause` | TransitionCause selects edge-specific validation rather than accepting arbitrary column updates. |

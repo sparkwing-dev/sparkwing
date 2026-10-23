@@ -41,7 +41,7 @@ func TestPlatformProbeEndsASessionWhoseOwnerIsGone(t *testing.T) {
 	if _, err := l.Record(Record{
 		Run: "run-1", Node: "build", OwnerPID: owner.Process.Pid, OwnerBirth: "gone",
 		Handle:  Handle{Kind: "session", LeaderPID: leader.LeaderPID, SessionID: leader.SessionID, LeaderBirth: leader.BirthToken},
-		Command: "sleep",
+		Program: "sleep",
 	}); err != nil {
 		t.Fatal(err)
 	}

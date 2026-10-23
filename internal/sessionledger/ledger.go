@@ -45,13 +45,14 @@ type Handle struct {
 
 // Record is one running step command and the node that owns it.
 type Record struct {
-	Run        string    `json:"run"`
-	Node       string    `json:"node"`
-	OwnerPID   int       `json:"owner_pid"`
-	OwnerBirth string    `json:"owner_birth"`
-	Handle     Handle    `json:"handle"`
-	Command    string    `json:"command"`
-	StartedAt  time.Time `json:"started_at"`
+	Run        string `json:"run"`
+	Node       string `json:"node"`
+	OwnerPID   int    `json:"owner_pid"`
+	OwnerBirth string `json:"owner_birth"`
+	Handle     Handle `json:"handle"`
+	// Program is the executable's base name, without its path or arguments.
+	Program   string    `json:"program,omitempty"`
+	StartedAt time.Time `json:"started_at"`
 
 	path string
 }
@@ -202,7 +203,7 @@ const (
 	// VerdictWouldReap is VerdictReaped under a dry run: nothing was killed.
 	VerdictWouldReap Verdict = "would-reap"
 	// verdictFailed means the owner is gone but the session could not be
-	// ended; the record stays for the next sweep.
+	// ended; session/job records stay for the next sweep.
 	verdictFailed Verdict = "failed"
 )
 

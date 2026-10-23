@@ -173,7 +173,7 @@ func (j stepJob) close() {
 // ends the job when this process's handle goes away, so the record mostly
 // tells doctor what happened; it still matters when the handle outlives
 // the node's usefulness.
-func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job stepJob) func() {
+func recordStepSession(ctx context.Context, cmd *exec.Cmd, program string, job stepJob) func() {
 	run := os.Getenv("SPARKWING_RUN_ID")
 	node := nodeFromContext(ctx)
 	if node == "" {
@@ -193,7 +193,7 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job s
 	release, err := sessionledger.Open(p.SessionLedgerDir()).Record(sessionledger.Record{
 		Run: run, Node: node, OwnerPID: os.Getpid(), OwnerBirth: ownerBirth,
 		Handle:  sessionledger.Handle{Kind: "job", LeaderPID: cmd.Process.Pid, JobName: job.job.Name},
-		Command: sessionledger.MaskCommand(ctx, display),
+		Program: filepath.Base(program),
 	})
 	if err != nil {
 		slog.Default().Debug("step session not recorded", "err", err)

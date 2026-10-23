@@ -41,8 +41,6 @@ internal/procenv	1
 internal/runners/launcher	2
 # Error.Error: implements error; callers use the error interface.
 internal/settings	1
-# missingSecretsError.Error: implements error; callers use the error interface.
-internal/sparkwingruntime	1
 internal/store	251
 internal/store/internal/storetest	1
 internal/store/teststore	4

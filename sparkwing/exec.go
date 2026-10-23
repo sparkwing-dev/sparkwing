@@ -432,7 +432,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	// safety: the child owns the write ends now; dropping the parent's copies
 	// is what lets the readers ever see EOF.
 	closeFiles(outW, errW)
-	unrecord := recordStepSession(ctx, cmd, display, job)
+	unrecord := recordStepSession(ctx, cmd, name, job)
 
 	var outBuf, errBuf strings.Builder
 	limiter := newDiagnosticOutputLimiter(ctx)

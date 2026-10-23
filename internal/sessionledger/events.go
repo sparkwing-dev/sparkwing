@@ -22,20 +22,9 @@ type eventPayload struct {
 	OwnerPID  int       `json:"owner_pid"`
 	LeaderPID int       `json:"leader_pid,omitempty"`
 	JobName   string    `json:"job_name,omitempty"`
-	Command   string    `json:"command"`
+	Program   string    `json:"program,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	Error     string    `json:"error,omitempty"`
-}
-
-type commandMaskKey struct{}
-
-// MaskCommand returns command with the context's secrets hidden, or
-// unchanged when the context carries no mask.
-func MaskCommand(ctx context.Context, command string) string {
-	if mask, ok := ctx.Value(commandMaskKey{}).(func(string) string); ok && mask != nil {
-		return mask(command)
-	}
-	return command
 }
 
 // RecordOutcomes appends one event per reaped or failed outcome. Live
@@ -50,7 +39,7 @@ func RecordOutcomes(ctx context.Context, st EventAppender, reaper string, outcom
 		p := eventPayload{
 			Reaper: reaper, Verdict: o.Verdict,
 			OwnerPID: o.Record.OwnerPID, LeaderPID: o.Record.Handle.LeaderPID, JobName: o.Record.Handle.JobName,
-			Command: o.Record.Command, StartedAt: o.Record.StartedAt,
+			Program: o.Record.Program, StartedAt: o.Record.StartedAt,
 		}
 		if o.Err != nil {
 			p.Error = o.Err.Error()
