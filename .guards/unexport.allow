@@ -39,7 +39,6 @@ internal/procenv	1
 # nodeFault.Error: implements error; callers use the error interface.
 # podMismatch.Error: implements error; callers use the error interface.
 internal/runners/launcher	2
-internal/secrets	1
 # Error.Error: implements error; callers use the error interface.
 internal/settings	1
 # missingSecretsError.Error: implements error; callers use the error interface.

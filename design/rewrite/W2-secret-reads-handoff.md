@@ -39,7 +39,6 @@ unavailable and persist no rows. Existing bound local-keyring tests pass.
 Startup resealing and LegacyCipher are removed. Plaintext and pre-team migration
 code no longer upgrades stored values. Explicit tenant key rotation remains.
 Three callers were migrated by deleting the removed method or interface use.
-The W6-owned OpenLegacy implementations remain outside this controller cut.
 
 ## Deletions and ports
 

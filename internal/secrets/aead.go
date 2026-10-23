@@ -13,21 +13,14 @@ import (
 )
 
 const (
-	envelopePrefix       = "enc:v1:"
-	envelopePrefixLegacy = "enc:v2:"
+	envelopePrefix = "enc:v1:"
 	// BoundPrefix starts every envelope sealed to the team that owns its row.
 	// A stored value without it is plaintext or predates team binding.
 	BoundPrefix = "enc:v3:"
 )
 
-// safety: the v3 binding opens with a label no v2 binding can spell, so an
-// envelope relabelled from one version to the other never authenticates.
+// safety: the label separates bound envelopes from other uses of the cipher.
 const boundAADLabel = "sparkwing/secret/v3\x00"
-
-// ErrLegacyEnvelope is what [Cipher.OpenBound] returns for an envelope sealed
-// before the owning team joined the binding. Only [Cipher.OpenLegacy] opens
-// one, and the controller calls that once, to reseal it at startup.
-var ErrLegacyEnvelope = errors.New("secrets cipher: envelope predates team binding and must be resealed")
 
 // ErrKeyRefused marks a seal that failed because the key's owner refused to
 // load or create the key for a reason the caller can act on, such as a key
@@ -130,26 +123,19 @@ func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
 }
 
 func (c *Cipher) Open(envelope string) (string, error) {
-	if strings.HasPrefix(envelope, BoundPrefix) || strings.HasPrefix(envelope, envelopePrefixLegacy) {
+	if strings.HasPrefix(envelope, BoundPrefix) {
 		return "", errors.New("secrets cipher: envelope is bound to a secret's row; open it with that binding")
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
 // OpenBound decrypts an envelope sealed by [Cipher.SealBound] for this
-// combination of purpose, team, name, scope, shared and masked. It refuses an
-// envelope sealed before team binding with [ErrLegacyEnvelope].
+// combination of purpose, team, name, scope, shared and masked.
 func (c *Cipher) OpenBound(purpose Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	if !purpose.valid() {
 		return "", fmt.Errorf("secrets cipher: unknown envelope purpose %q", purpose)
 	}
-	if strings.HasPrefix(envelope, BoundPrefix) {
-		return c.open(envelope, BoundPrefix, boundAAD(purpose, team, name, scope, shared, masked))
-	}
-	if IsEncrypted(envelope) {
-		return "", ErrLegacyEnvelope
-	}
-	return "", errors.New("secrets cipher: value is not sealed")
+	return c.open(envelope, BoundPrefix, boundAAD(purpose, team, name, scope, shared, masked))
 }
 
 // OpenBoundCurrent is [Cipher.OpenBound] under the current key alone.
@@ -161,30 +147,12 @@ func (c *Cipher) OpenBoundCurrent(purpose Purpose, team, name, scope string, sha
 	return current.OpenBound(purpose, team, name, scope, shared, masked, envelope)
 }
 
-// OpenLegacy decrypts an envelope sealed before the team joined the binding:
-// one bound to name, scope, shared and masked alone, or one bound to nothing.
-// Such an envelope can be moved between teams undetected, so its only caller
-// is the one that reseals it under [Cipher.SealBound].
-func (c *Cipher) OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error) {
-	if strings.HasPrefix(envelope, envelopePrefixLegacy) {
-		return c.open(envelope, envelopePrefixLegacy, legacyAAD(name, scope, shared, masked))
-	}
-	return c.open(envelope, envelopePrefix, nil)
-}
-
 // safety: length prefixes keep one field from spelling another, so the binding needs no name rule to hold.
 func boundAAD(purpose Purpose, team, name, scope string, shared, masked bool) []byte {
 	aad := make([]byte, 0, len(boundAADLabel)+34+len(purpose)+len(team)+len(name)+len(scope))
 	aad = append(aad, boundAADLabel...)
 	aad = appendBoundField(aad, string(purpose))
 	aad = appendBoundField(aad, team)
-	aad = appendBoundField(aad, name)
-	aad = appendBoundField(aad, scope)
-	return append(aad, boundFlag(shared), boundFlag(masked))
-}
-
-func legacyAAD(name, scope string, shared, masked bool) []byte {
-	aad := make([]byte, 0, 18+len(name)+len(scope))
 	aad = appendBoundField(aad, name)
 	aad = appendBoundField(aad, scope)
 	return append(aad, boundFlag(shared), boundFlag(masked))
@@ -234,13 +202,11 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 }
 
 func IsEncrypted(v string) bool {
-	return strings.HasPrefix(v, envelopePrefix) || strings.HasPrefix(v, envelopePrefixLegacy) || IsBound(v)
+	return strings.HasPrefix(v, envelopePrefix) || IsBound(v)
 }
 
 // IsBound reports whether v is an envelope sealed to the team and row it
-// belongs to. An encrypted value that is not bound predates team binding
-// and can be moved onto another team's row, so the controller reseals every
-// such row when it starts with a key.
+// belongs to.
 func IsBound(v string) bool {
 	return strings.HasPrefix(v, BoundPrefix)
 }
