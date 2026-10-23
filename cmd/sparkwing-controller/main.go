@@ -502,12 +502,18 @@ func run(args []string) error {
 			WithIdleClaimPoll(*idleClaimPoll).
 			WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 			WithEgressMeter(egress.New(egressCfg))
+		githubSignInID, githubSignInSecret := *githubClientID, creds.GitHubClientSecret
+		appRequested := *githubAppID != "" || *githubAppSlug != "" || creds.GitHubAppKey != "" || cfg.WebhookSecret().Current() != nil || cfg.WebhookSecret().Previous() != nil
+		if appRequested && (githubSignInID == "" || githubSignInSecret == "") {
+			// safety: incomplete shared OAuth credentials degrade only the App.
+			githubSignInID, githubSignInSecret = "", ""
+		}
 		if err := configureIdentity(srv, identityFlags{
 			MultiTeam:          cfg.MultiTeam(),
 			GoogleClientID:     *googleClientID,
 			GoogleClientSecret: creds.GoogleClientSecret,
-			GitHubClientID:     *githubClientID,
-			GitHubClientSecret: creds.GitHubClientSecret,
+			GitHubClientID:     githubSignInID,
+			GitHubClientSecret: githubSignInSecret,
 			RedirectURIs:       *oauthRedirectURIs,
 			SignUpGate:         *signUpGate,
 		}, slog.Default()); err != nil {
@@ -516,15 +522,13 @@ func run(args []string) error {
 		if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 			return store.Policies{}, err
 		}
-		if err := configureGitHubApp(srv, githubAppFlags{
+		configureGitHubApp(srv, githubAppFlags{
 			AppID:        *githubAppID,
 			Slug:         *githubAppSlug,
 			ClientID:     *githubClientID,
 			ClientSecret: creds.GitHubClientSecret,
 			PrivateKey:   creds.GitHubAppKey,
-		}, cfg.WebhookSecret()); err != nil {
-			return store.Policies{}, err
-		}
+		}, cfg.WebhookSecret())
 		oidcIssuer, oerr := loadOIDCIssuer(cfg, *oidcTokenTTL, os.Stderr)
 		if oerr != nil {
 			return store.Policies{}, fmt.Errorf("oidc issuer: %w", oerr)

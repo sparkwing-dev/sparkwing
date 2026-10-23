@@ -55,6 +55,7 @@ type coveringEntry struct {
 // App's private key; the controller hands out only tokens restricted to one
 // repository.
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
+	s.githubAppProblem = nil
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{
 		client: client, stateKey: client.StateKey(),
@@ -64,17 +65,41 @@ func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	return s
 }
 
+// WithGitHubAppUnavailable records a configuration failure while other controller features remain available.
+func (s *Server) WithGitHubAppUnavailable(reason error) *Server {
+	s.githubApp = nil
+	s.githubAppProblem = githubAppUnavailableError(reason.Error())
+	return s
+}
+
+// InstallationTokenByIDs refuses App source releases when its configuration is unavailable.
+func (s *Server) InstallationTokenByIDs(ctx context.Context, installation int64, ids []int64, permissions map[string]string) (githubapp.Token, error) {
+	if s.githubApp == nil {
+		return githubapp.Token{}, s.githubAppUnavailable()
+	}
+	return s.githubApp.client.InstallationTokenByIDs(ctx, installation, ids, permissions)
+}
+
+type githubAppUnavailableError string
+
+func (e githubAppUnavailableError) Error() string { return "GitHub App unavailable: " + string(e) }
+
+func (s *Server) githubAppUnavailable() error {
+	if s.githubAppProblem != nil {
+		return s.githubAppProblem
+	}
+	return githubAppUnavailableError("not configured")
+}
+
 func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {
 	if s.githubApp != nil {
 		return true
 	}
-	writeError(w, http.StatusNotFound, errNoGitHubApp)
+	writePolicyError(w, s.githubAppUnavailable())
 	return false
 }
 
 var errInvalidGitHubCompletion = errors.New("GitHub completion has invalid committed facts")
-
-var errNoGitHubApp = errors.New("this controller has no GitHub App configured")
 
 type githubConnectState struct {
 	Team     string `json:"t"`
@@ -464,7 +489,7 @@ type githubAppResp struct {
 
 func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -484,7 +509,7 @@ func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a c
 
 func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	writer, err := s.githubAppWriter(r, a)
 	if err != nil {
@@ -506,7 +531,7 @@ func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a
 // owner of the new team connects once the old binding is gone.
 func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
 	if err != nil || id <= 0 {
@@ -536,7 +561,7 @@ type githubAppRepositoryJSON struct {
 
 func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -550,9 +575,7 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 		return engineLookupError(err)
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), id)
-	// safety: a list cut at GitHub's listing bound only displays; nothing is
-	// refused or withdrawn for a repository missing from it.
-	if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+	if err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub could not list the installation's repositories"}, err)
 	}
 	out := []githubAppRepositoryJSON{}
@@ -625,7 +648,7 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 
 func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -648,7 +671,7 @@ func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Requ
 // it controls.
 func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -685,8 +708,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), inst.InstallationID)
-	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
-	if err != nil && !truncated {
+	if err != nil {
 		return githubAppRequestError(http.StatusBadGateway, fmt.Errorf("GitHub installation repositories: %w", err))
 	}
 	var match *githubapp.Repository
@@ -694,9 +716,6 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		if strings.EqualFold(repos[i].FullName, slug) {
 			match = &repos[i]
 		}
-	}
-	if match == nil && truncated {
-		return githubAppRequestError(http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so "+slug+" cannot be confirmed"))
 	}
 	if match == nil {
 		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
@@ -726,7 +745,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	writer, err := s.githubAppWriter(r, a)
 	if err != nil {

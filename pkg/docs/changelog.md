@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **github-app:** Invalid or incomplete App settings leave the controller running. App operations refuse with their configuration reason, reported by health and local doctor. Webhook signatures remain required. Repository-removal deliveries with a failed GitHub listing withdraw only explicitly named repositories. Ambiguous removals appear in the admin failed-delivery list. Installation repository listing reads every page, removing the 1,000-repository cutoff.
+
 - **runner ranking:** Unnamed jobs wait up to 5 seconds for the best-ranked tier with a live, label-matching claimant on the same team and a free slot in its latest poll. Each award consumes one advertised slot until the runner polls again. Busy or offline higher tiers cause no wait. After the window, any eligible claimant can take the job. Recorded asks and the extra 2-second grace are removed. Explicit `Prefers` holds require an allowed claimant with a free slot; preference scores are removed. See [migration](docs/migrations/_unreleased.md#ranking-uses-available-claimants).
 
 - **local execution:** Foreground local intake reserves its first trigger claim for the submitting OS account. The background queue cannot take it before the CLI, including when a controller is already running. Local intake also accepts an omitted dispatch, resolving it to host execution before checking the reservation. Detached intake and later lease recovery keep using the shared queue.

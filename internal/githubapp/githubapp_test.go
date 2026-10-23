@@ -6,9 +6,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -155,26 +159,31 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	}
 }
 
-func TestInstallationRepositories_NamesACutList(t *testing.T) {
-	for _, tc := range []struct {
-		count     int
-		truncated bool
-	}{{1000, false}, {1001, true}} {
-		gh, client := fixture(t)
-		repos := make([]githubapptest.Repo, tc.count)
-		for i := range repos {
-			repos[i] = githubapptest.Repo{ID: int64(10000 + i), FullName: fmt.Sprintf("acme/r%d", i)}
+func TestInstallationRepositoriesListsEveryPage(t *testing.T) {
+	for _, count := range []int{1000, 1001, 2100} {
+		key, err := rsa.GenerateKey(rand.Reader, 1024)
+		if err != nil {
+			t.Fatal(err)
 		}
-		gh.SetRepos(7, repos...)
-		got, err := client.InstallationRepositories(context.Background(), 7)
-		if tc.truncated {
-			if !errors.Is(err, githubapp.ErrTooManyRepositories) || len(got) != 1000 {
-				t.Fatalf("%d repositories = %d listed, %v; want 1000 with ErrTooManyRepositories", tc.count, len(got), err)
+		client := githubapp.New(githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: refTransport(func(r *http.Request) (*http.Response, error) {
+			body := `{"token":"metadata"}`
+			if r.URL.Path == "/installation/repositories" {
+				page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				repos := []githubapp.Repository{}
+				for i := (page - 1) * 100; i < min(page*100, count); i++ {
+					repos = append(repos, githubapp.Repository{ID: int64(10000 + i), FullName: fmt.Sprintf("acme/r%d", i)})
+				}
+				encoded, err := json.Marshal(map[string]any{"total_count": count, "repositories": repos})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = string(encoded)
 			}
-			continue
-		}
-		if err != nil || len(got) != tc.count || got[tc.count-1].ID != int64(10000+tc.count-1) {
-			t.Fatalf("%d repositories = %d listed, %v", tc.count, len(got), err)
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		})}})
+		got, err := client.InstallationRepositories(context.Background(), 7)
+		if err != nil || len(got) != count || got[count-1].ID != int64(10000+count-1) {
+			t.Fatalf("%d repositories = %d listed, %v", count, len(got), err)
 		}
 	}
 }

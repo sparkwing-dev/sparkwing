@@ -15,6 +15,9 @@ import (
 
 // ResolveScheduleSource derives checkout identity from stored schedule intent.
 func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedule, request runspec.Request) (runspec.Request, error) {
+	if row.GitHubInstallationID != 0 && s.githubApp == nil {
+		return request, s.githubAppUnavailable()
+	}
 	request.Version = 1
 	request.Pipeline = row.Pipeline
 	request.Mode = runspec.IntakeExecute

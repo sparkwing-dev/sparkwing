@@ -50,16 +50,15 @@ const (
 // stores lists every declared store.
 func stores() []Store { return []Store{StoreSQLite, StorePostgres} }
 
-// KeyPair is a current key and the previous one kept for reading values
-// written before a rotation. A previous key without a current one is
-// refused at construction, because it would read old values and leave
-// nothing to write new ones under.
+// KeyPair holds a current key and the previous one kept for reading values
+// written before a rotation.
 type KeyPair struct {
 	current, previous []byte
 }
 
 // NewKeyPair pairs current and previous. Names are the credential file
-// names an operator sees in the refusal.
+// names an operator sees in the refusal. It refuses a previous key without
+// a current one.
 func NewKeyPair(currentName, previousName string, current, previous []byte) (KeyPair, error) {
 	if current == nil && previous != nil {
 		return KeyPair{}, fmt.Errorf("the %s credential is present without %s; add the key in use now", previousName, currentName)
@@ -149,9 +148,8 @@ func Parse(in Inputs) (Config, error) {
 	if c.oidcKey, err = NewKeyPair("oidc-key", "oidc-key.published", in.OIDCKey, in.OIDCPublishedKey); err != nil {
 		return Config{}, err
 	}
-	if c.webhookSecret, err = NewKeyPair("github-app-webhook-secret", "github-app-webhook-secret.previous", in.WebhookSecret, in.PreviousWebhookSecret); err != nil {
-		return Config{}, err
-	}
+	// safety: the optional App validates credentials without blocking controller startup.
+	c.webhookSecret = KeyPair{current: in.WebhookSecret, previous: in.PreviousWebhookSecret}
 	return c, nil
 }
 

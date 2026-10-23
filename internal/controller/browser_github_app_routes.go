@@ -87,7 +87,7 @@ func (s *Server) verifyGitHubAppBrowser(r *http.Request) error {
 		}
 	}
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	if _, err := s.githubConnectWriter(r.Context(), a); err != nil {
 		return err
@@ -115,6 +115,9 @@ func (s *Server) readGitHubAppForm(r *http.Request, csrf string) error {
 }
 
 func (s *Server) verifyGitHubAppReturn(r *http.Request) error {
+	if s.githubApp == nil {
+		return s.githubAppUnavailable()
+	}
 	if len(r.Header.Values("Authorization")) != 0 {
 		return sessionUnavailable()
 	}
