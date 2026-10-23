@@ -55,10 +55,14 @@ func run(args []string) error {
 	if base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey)) != releaseauth.QAPublicKey {
 		return errors.New("signing key is not the QA release key")
 	}
+	keys, err := releaseauth.PublicKeys()
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	index := engine.VersionIndex{Format: engine.VersionIndexFormat}
 	if *previous != "" {
-		if index, err = readPrevious(*previous, now); err != nil {
+		if index, err = readPrevious(*previous, now, keys); err != nil {
 			return err
 		}
 	}
@@ -73,7 +77,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: signature}, now); err != nil {
+	if _, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: signature}, now, keys); err != nil {
 		return fmt.Errorf("refusing an index the client would reject: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(*out, "versions.json"), body, 0o644); err != nil {
@@ -82,7 +86,7 @@ func run(args []string) error {
 	return os.WriteFile(filepath.Join(*out, "versions.json.sig"), signature, 0o644)
 }
 
-func readPrevious(dir string, now time.Time) (engine.VersionIndex, error) {
+func readPrevious(dir string, now time.Time, keys []ed25519.PublicKey) (engine.VersionIndex, error) {
 	body, err := os.ReadFile(filepath.Join(dir, "versions.json"))
 	if err != nil {
 		return engine.VersionIndex{}, err
@@ -91,7 +95,7 @@ func readPrevious(dir string, now time.Time) (engine.VersionIndex, error) {
 	if err != nil {
 		return engine.VersionIndex{}, err
 	}
-	verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: signature}, now)
+	verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: signature}, now, keys)
 	if err != nil {
 		return engine.VersionIndex{}, fmt.Errorf("published QA index: %w", err)
 	}

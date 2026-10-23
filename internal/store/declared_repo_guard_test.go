@@ -13,13 +13,12 @@ import (
 // authorization may read it. Every file naming the field is listed with its
 // reason, because a new reader has to be argued for in a diff.
 var declaredRepoReaders = map[string]string{
-	"internal/controller/reporting_views.go": "the response projection copies repository display metadata without granting authority",
-	"internal/controllerwire/reporting.go":   "the response type exposes repository display metadata without granting authority",
-	"internal/store/latest_run.go":           "the tenant reporting query filters the sealed repository projection",
-	"internal/store/runfilter_http.go":       "the HTTP filter parser selects repository display metadata",
-	"internal/store/store.go":                "the sealed run reporting projection exposes repository metadata without granting authority",
-	"internal/store/teststore/run.go":        "the reporting fixture seeds sealed display metadata without admitting work or granting authority",
-	"internal/store/teststore/trigger.go":    "the trigger fixture copies repository display metadata into a reporting run without granting authority",
+	"internal/runstate/reporting.go":      "the shared response projection exposes repository display metadata without granting authority",
+	"internal/store/latest_run.go":        "the tenant reporting query filters the sealed repository projection",
+	"internal/store/runfilter_http.go":    "the HTTP filter parser selects repository display metadata",
+	"internal/store/store.go":             "the sealed run reporting projection exposes repository metadata without granting authority",
+	"internal/store/teststore/run.go":     "the reporting fixture seeds sealed display metadata without admitting work or granting authority",
+	"internal/store/teststore/trigger.go": "the trigger fixture copies repository display metadata into a reporting run without granting authority",
 }
 
 var declaredRepoPattern = regexp.MustCompile(`\bDeclaredRepos?\b|\bdeclared_repo\b`)

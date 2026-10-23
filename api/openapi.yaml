@@ -3302,32 +3302,6 @@ components:
         - runners
       type: object
       x-sparkwing-go-type: controllerwire.Runners
-    internal.controllerwire.ScheduleDeclaration:
-      additionalProperties: true
-      properties:
-        args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
-        catch_up:
-          type: string
-        cron:
-          type: string
-        name:
-          type: string
-        overlap:
-          type: string
-        pipeline:
-          type: string
-        tz:
-          type: string
-      required:
-        - pipeline
-        - cron
-      type: object
-      x-sparkwing-go-type: controllerwire.ScheduleDeclaration
     internal.controllerwire.ScheduleDeletion:
       additionalProperties: true
       properties:
@@ -3478,7 +3452,7 @@ components:
         schedules:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.ScheduleDeclaration'
+                $ref: '#/components/schemas/internal.runspec.ScheduleDeclaration'
               type: array
             - type: "null"
         sha:
@@ -5211,6 +5185,32 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.RunnerSelection
+    internal.runspec.ScheduleDeclaration:
+      additionalProperties: true
+      properties:
+        args:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
+        catch_up:
+          type: string
+        cron:
+          type: string
+        name:
+          type: string
+        overlap:
+          type: string
+        pipeline:
+          type: string
+        tz:
+          type: string
+      required:
+        - pipeline
+        - cron
+      type: object
+      x-sparkwing-go-type: runspec.ScheduleDeclaration
     internal.runspec.SealedRequest:
       additionalProperties: true
       properties:
@@ -6109,9 +6109,9 @@ components:
         Team:
           type: string
       required:
+        - Team
         - ID
         - Number
-        - Team
         - Pipeline
         - State
         - Request
