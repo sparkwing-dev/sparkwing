@@ -423,8 +423,10 @@ It holds only suffixes that could complete a registered spelling. Safe partial
 lines flush after 25 ms of idle output. Prefixes that could complete a secret
 stay private until more input or EOF. A stored secret read is masked even when
 its value occurs in an accepted job identifier, including subsequent steps.
-Size and idle flushes preserve complete UTF-8 boundaries. Output delivery
-failures stop the session even when a timer triggers the flush.
+Size and idle flushes preserve complete UTF-8 boundaries. Masking and protocol
+validation refusals stop the session, including during a timer flush. Log
+persistence failures preserve the execution result, report incomplete logs and
+alert the operator.
 
 A pipeline implements `Secrets() any` to declare a typed secrets struct. Fields
 use `sw:"NAME,required"` or `sw:"NAME,optional"`. Required is the default.

@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type completingUnitStore struct {
@@ -111,15 +112,12 @@ func FuzzLocalNativeLogsPreserveAuthorityAndMasking(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = logs.close(t.Context())
+		<-logs.finish(t.Context(), "")
 		if revoked {
-			if err == nil || len(records.objects) != 0 {
+			if len(records.objects) != 0 {
 				t.Fatal("refused writer reached storage")
 			}
 			return
-		}
-		if err != nil {
-			t.Fatal(err)
 		}
 		var body bytes.Buffer
 		read, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body)
@@ -151,7 +149,7 @@ func FuzzNativeServicesRejectMissingBindings(f *testing.F) {
 	})
 }
 
-func TestLogSetupFailureRetriesWithoutDiscardingBytes(t *testing.T) {
+func TestLogRegistrationFailureRemainsVisibleAfterRecovery(t *testing.T) {
 	records := &nativeLogRecords{objects: map[string][]byte{}}
 	calls := 0
 	logs := &localLogs{run: "run", masker: secrets.NewMasker(), principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitPlan, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
@@ -162,19 +160,20 @@ func TestLogSetupFailureRetriesWithoutDiscardingBytes(t *testing.T) {
 		records.view.Subject = subject
 		return records, nil
 	}}
+	if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "discarded"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "retained"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := logs.close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 2 || !records.view.Complete || len(records.objects) != 1 {
-		t.Fatalf("setup retry discarded logs: calls=%d view=%+v", calls, records.view)
+	<-logs.finish(t.Context(), "")
+	if calls != 2 || records.view.Complete || records.view.IncompleteReason == "" || len(records.objects) != 1 {
+		t.Fatalf("registration recovery hid lost bytes: calls=%d view=%+v", calls, records.view)
 	}
 }
 
-func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
-	for _, operation := range []string{"plan", "expansion", "finish", "report", "retry", "release"} {
+func TestLogLifecycleDetachesFlush(t *testing.T) {
+	for _, operation := range []string{"plan", "expansion", "finish", "release"} {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "team", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Generation: 1, Attempt: 1}}
@@ -206,10 +205,6 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 					_, err = state.AcceptExpansion(ctx, store.ExpansionSubmission{})
 				case "finish":
 					_, err = state.FinishRunAndUnit(ctx, store.FinishRunRequest{})
-				case "report":
-					_, err = state.TransitionNode(ctx, store.ReportNode{Ref: ref})
-				case "retry":
-					_, err = state.TransitionNode(ctx, store.RetryNode{Ref: ref})
 				case "release":
 					_, err = state.TransitionNode(ctx, store.ReleaseNode{Ref: ref})
 				}
@@ -273,9 +268,7 @@ func TestNativeLogsUseCommittedAttemptWithoutMetadataReads(t *testing.T) {
 	if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: "successful work"}); err != nil {
 		t.Fatalf("logging-only metadata failure escaped: %v", err)
 	}
-	if err := logs.close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	<-logs.finish(t.Context(), "")
 	want := runspec.AttemptIdentity{Team: "default", RunID: "run", NodeID: "job", Generation: 2, Attempt: 3}
 	if records.view.Subject.Attempt == nil || *records.view.Subject.Attempt != want || !records.view.Complete || reads.calls != 0 {
 		t.Fatalf("logs lost committed attempt or reread metadata: %+v reads=%d", records.view, reads.calls)
@@ -294,17 +287,10 @@ func (s *unavailableLogMetadata) ReadNode(context.Context, controllerwire.NodeRe
 
 func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		started := make(chan struct{})
-		logs := &localLogs{run: "run", masker: secrets.NewMasker(), upload: func(ctx context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+		up := &stalledLogUploader{done: make(chan struct{})}
+		logs := &localLogs{run: "run", masker: secrets.NewMasker(), upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
 			if subject.Attempt.NodeID == "slow" {
-				close(started)
-				timer := time.NewTimer(3 * time.Second)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
+				return up, nil
 			}
 			return &nativeLogRecords{view: store.LogSegments{Subject: subject}, objects: map[string][]byte{}}, nil
 		}}
@@ -315,11 +301,8 @@ func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 		if err := logs.write(t.Context(), "run", "slow", nodeproto.FrameLog{Message: "work"}); err != nil {
 			t.Fatal(err)
 		}
-		if time.Now() != before {
-			t.Fatal("stream registration delayed log delivery")
-		}
 		done := logs.finish(t.Context(), "slow")
-		<-started
+		synctest.Wait()
 		if err := logs.write(t.Context(), "run", "healthy", nodeproto.FrameLog{Message: "work"}); err != nil {
 			t.Fatal(err)
 		}
@@ -398,4 +381,134 @@ func (*cancelledLogUploader) PutSegment(ctx context.Context, _ logseg.Segment, _
 func (u *cancelledLogUploader) PutManifest(ctx context.Context, m logseg.Manifest) error {
 	u.manifest = m
 	return ctx.Err()
+}
+
+func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
+	for _, operation := range []string{"report", "retry"} {
+		t.Run(operation, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				now := time.Now()
+				f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
+				input := storedExecutionInput(t, f, &ClaimedNodeHost{})
+				ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
+				actor := executorActor(input)
+				if err := awaitStart(t.Context(), f.Tenant, store.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil {
+					t.Fatal(err)
+				}
+				started, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &input.Attempt})
+				if err != nil {
+					t.Fatal(err)
+				}
+				principal, err := f.Store.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
+				if err != nil {
+					t.Fatal(err)
+				}
+				gate := make(chan struct{})
+				var registered blob.LogSubject
+				var uploader *fencedLogUploader
+				logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(ctx context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+					commit := store.SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30"}
+					if err := f.Tenant.RecordSegments(ctx, commit); err != nil {
+						return nil, err
+					}
+					registered = subject
+					uploader = &fencedLogUploader{tenant: f.Tenant, commit: commit, gate: gate}
+					return uploader, nil
+				}}
+				defer func() {
+					select {
+					case <-gate:
+					default:
+						close(gate)
+					}
+					<-logs.finish(t.Context(), "")
+					logs.flushes.Wait()
+				}()
+				logs.bind(principal, int64(started.Attempt))
+				if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodeproto.FrameLog{Message: "attempt output"}); err != nil {
+					t.Fatal(err)
+				}
+				view, err := f.Tenant.ReadRunView(t.Context(), input.Accepted.RunID)
+				if err != nil || len(view.Logs) != 1 || view.Logs[0].Attempt == nil || view.Logs[0].Attempt.Attempt != int64(started.Attempt) {
+					t.Fatalf("spool has no persisted attempt stream: %+v %v", view.Logs, err)
+				}
+				state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
+				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+				defer cancel()
+				var command store.NodeCommand = store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}
+				if operation == "retry" {
+					command = store.RetryNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Result: &store.NodeResult{Outcome: store.NodeFailed}}
+				}
+				if _, err := state.TransitionNode(ctx, command); err != nil {
+					t.Fatalf("stalled logs blocked %s: %v", operation, err)
+				}
+				close(gate) // The flush cannot reach the store until the lifecycle write has committed.
+				logs.flushes.Wait()
+				row, err := f.Tenant.ReadNode(t.Context(), ref)
+				if err != nil || operation == "report" && row.Outcome != store.NodeSuccess || operation == "retry" && row.Attempt != started.Attempt+1 {
+					t.Fatalf("lifecycle result changed: %+v %v", row, err)
+				}
+				if operation == "report" {
+					if uploader.refused {
+						t.Fatal("current attempt's final tail was refused")
+					}
+					return
+				}
+				if !uploader.refused {
+					t.Fatal("retry permitted the older attempt's detached flush")
+				}
+				now = now.Add(limits.LogSealGrace + time.Second)
+				op := f.Store.AsOperator()
+				lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "logs", time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if count, err := op.SealAbandonedLogStreams(t.Context(), lease, 10); err != nil || count != 1 {
+					t.Fatalf("lost attempt stream was not sealed: %d %v", count, err)
+				}
+				_, reader, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "log-reader"}, Grants: []capability.Grant{capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				stream, err := f.Tenant.ReadLogSegments(t.Context(), store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: reader.Prefix}}, blob.LogReadRequest{Subject: registered})
+				if err != nil || stream.Complete || stream.IncompleteReason != "writer_lost" || len(stream.Segments) != 0 {
+					t.Fatalf("retry hid incomplete logs: %+v %v", stream, err)
+				}
+			})
+		})
+	}
+}
+
+type fencedLogUploader struct {
+	tenant  *store.Tenant
+	commit  store.SegmentCommit
+	gate    <-chan struct{}
+	refused bool
+}
+
+func (u *fencedLogUploader) PutSegment(ctx context.Context, segment logseg.Segment, _ []byte) error {
+	select {
+	case <-u.gate:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	time.Sleep(3 * time.Second)
+	key, err := blob.LogObjectKey(u.commit.Subject, u.commit.RetentionClass, int64(segment.N))
+	if err != nil {
+		return err
+	}
+	commit := u.commit
+	commit.Segments = []store.Segment{{Index: int64(segment.N), Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}}
+	err = u.tenant.RecordSegments(ctx, commit)
+	u.refused = err != nil
+	return err
+}
+
+func (u *fencedLogUploader) PutManifest(ctx context.Context, manifest logseg.Manifest) error {
+	commit := u.commit
+	commit.Final = true
+	if manifest.Status != logseg.StatusComplete {
+		commit.IncompleteReason = manifest.Reason
+	}
+	return u.tenant.RecordSegments(ctx, commit)
 }

@@ -2,8 +2,8 @@
 // object store.
 //
 // One Limiter per process counts PUT, GET, LIST and DELETE separately,
-// against a per-minute rate and a per-day budget each. Exceeding either
-// budget trips that class: every further request of that class is
+// against a per-minute rate and an optional per-day emergency budget.
+// Exceeding a configured budget trips that class: every further request is
 // refused with a *budgetError and nothing is queued. Classes are
 // independent, so a tripped PUT budget leaves reads working on their
 // own budget.
@@ -279,9 +279,8 @@ func (l *Limiter) limitFor(st *classCounters, w Window) int {
 	return st.limit.PerMinute
 }
 
-// safety: a minute trip always clears on the minute roll, because the day budget
-// still bounds the total and one burst must not fail writes closed until
-// midnight. A day trip clears on the day roll only when configured to.
+// A minute trip clears on the minute roll so one burst cannot stop writes until
+// midnight. An optional day trip clears on the day roll only when configured to.
 func (l *Limiter) rollWindows(st *classCounters, now time.Time) {
 	if st.minuteStart.IsZero() || now.Sub(st.minuteStart) >= time.Minute {
 		st.minuteStart = now.Truncate(time.Minute)

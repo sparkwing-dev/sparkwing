@@ -173,40 +173,19 @@ func (l *localLogs) subject(node string) (capability.Principal, blob.LogSubject,
 	return p, subject, subject.Validate()
 }
 
-// logUpload opens the authenticated stream on the sink's uploader, away from delivery and lifecycle calls.
-// Sink serializes these calls, including the final manifest.
+// logUpload bounds background segment uploads independently of lifecycle calls.
 type logUpload struct {
-	open func(context.Context) (logseg.Uploader, error)
-	up   logseg.Uploader
-}
-
-func (u *logUpload) uploader(ctx context.Context) (logseg.Uploader, error) {
-	if u.up == nil {
-		var err error
-		u.up, err = u.open(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return u.up, nil
+	up logseg.Uploader
 }
 
 func (u *logUpload) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, limits.LogSealGrace)
 	defer cancel()
-	up, err := u.uploader(ctx)
-	if err != nil {
-		return err
-	}
-	return up.PutSegment(ctx, segment, body)
+	return u.up.PutSegment(ctx, segment, body)
 }
 
 func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) error {
-	up, err := u.uploader(ctx)
-	if err != nil {
-		return err
-	}
-	return up.PutManifest(ctx, manifest)
+	return u.up.PutManifest(ctx, manifest)
 }
 
 func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
@@ -239,14 +218,11 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	}
 	sink := l.sinks[string(key)]
 	if sink == nil {
-		uploader := &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) {
-			up, err := l.upload(ctx, p, subject)
-			if err != nil {
-				l.alert(node, err)
-			}
-			return up, err
-		}}
-		sink, err = logseg.NewSink(ctx, uploader, logseg.Options{Subject: subject})
+		// Register while this attempt is current so a refused late flush stays visible.
+		uploader, err := l.upload(ctx, p, subject)
+		if err == nil {
+			sink, err = logseg.NewSink(ctx, &logUpload{up: uploader}, logseg.Options{Subject: subject})
+		}
 		if err != nil {
 			l.alert(node, err)
 			if l.failed == nil {
@@ -266,9 +242,4 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 		l.alert(node, err)
 	}
 	return nil
-}
-
-func (l *localLogs) close(ctx context.Context) error {
-	sinks, failed := l.take("")
-	return l.flush(ctx, sinks, failed)
 }

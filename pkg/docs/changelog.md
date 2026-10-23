@@ -22,7 +22,7 @@ unlock.
 
 - **storage:** Default shared daily object-request stops to off. Operators can opt into a daily emergency brake with `--object-store-budget`; per-team budgets and minute trips still apply
 
-- **logs:** Preserve job results, plan and expansion acceptance, completion and node reporting when log persistence stalls or fails. Flush independently within the existing log tail window and bind log subjects to committed attempts. Mark logs incomplete and emit a masked operator alert. Secret masking and required-output integrity remain strict
+- **logs:** Preserve job results, plan and expansion acceptance, completion and node reporting when log persistence stalls or fails. Flush independently within the existing log tail window and bind log subjects to committed attempts. Register streams before spooling so retries that refuse late uploads retain visible incomplete logs. Mark logs incomplete and emit a masked operator alert. Secret masking and required-output integrity remain strict
 
 - **launcher:** Isolate and report suspect nodes while healthy capacity keeps serving the team. Remove the fault-count team claim stop. Operators can explicitly stop new claims and waiting placements with `sparkwing-runner launch --stop-team=TEAM` on every launcher
 

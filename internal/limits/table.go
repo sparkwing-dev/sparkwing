@@ -42,6 +42,7 @@ func table() []limit {
 		{Name: "MaxFanOut", Value: maxFanOut, class: author, Doc: "Generated jobs per fan-out.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxLabels", Value: maxLabels, class: author, Doc: "Labels per job.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxPipelineRefs", Value: maxPipelineRefs, class: author, Doc: "Pipeline references per plan.", Refusal: "Refuse above the bound at validation or write."},
+		{Name: "MaxChildrenPerRoot", Value: MaxChildrenPerRoot, class: author, Doc: "Maximum team-settable descendants per root run; the team setting defaults to 50.", Refusal: "Refuse settings outside 1–1000 and children above the team ceiling."},
 		{Name: "MaxChildDepth", Value: MaxChildDepth, class: author, Doc: "Child-run chain length, counting the root run as one level.", Refusal: "Refuse a child that would exceed the bound at intake."},
 		{Name: "MaxAnnotations", Value: MaxAnnotations, class: author, Doc: "Annotations per run.", Refusal: "Refuse above the bound at validation or write."},
 		{Name: "MaxEvents", Value: MaxEvents, class: author, Doc: "Events per run.", Refusal: "Refuse above the bound at validation or write."},

@@ -59,8 +59,11 @@ Log storage runs independently of plan acceptance, expansion acceptance, run
 completion and node reporting. Those commits never wait for log uploads or closure.
 Flush effort is bounded by the existing one-minute log tail window. Uploads hold
 no lock shared across jobs. Log subjects use the committed attempt, without
-logging-only principal refreshes or node lookups. The host emits a
-`run logs incomplete` operator error with the run identity, node when known, and
+logging-only principal refreshes or node lookups. Each stream is registered before
+its spool opens. If a retry refuses the prior attempt's detached flush, that
+attempt's stream remains visible in run details and maintenance seals it incomplete.
+The host emits a `run logs incomplete` operator error with the run identity,
+node when known, and
 a masked error. A failed stream is recorded as incomplete. Streams that cannot publish
 their final manifest are sealed incomplete by log maintenance after the writer
 ends. If the controller cannot be reached, the host reports the loss in its

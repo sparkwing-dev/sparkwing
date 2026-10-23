@@ -64,8 +64,9 @@ type ExecutorActivity struct {
 // A bearer-bearing input requires Bind; unbound transports may omit it.
 // BindStorage refreshes byte/record authority after each start or retry commit.
 // Configured storage requires this factory; failed refresh suppresses finalizer writes.
-// Log receives masked host diagnostics with their committed attempt. Validation and fence refusals
-// stop work; persistence failures mark logs incomplete without changing the result.
+// Log receives masked host diagnostics with their committed attempt. Synchronous masking,
+// protocol and subject validation refusals stop work. Persistence failures, including asynchronous
+// fence refusals, leave the result intact and alert the operator about incomplete logs.
 type ExecutorDependencies struct {
 	memoEnvironment  func(context.Context, NodeInput) (procenv.Env, error)
 	Log              func(context.Context, NodeInput, nodeproto.FrameLog) error

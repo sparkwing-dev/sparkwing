@@ -369,7 +369,7 @@ are part of this contract.
 | `runspec.ConcurrencyKey`, `runspec.ParseConcurrencyKey`, `nodehost.ScopeLabelFromKey` | Share the persisted key codec and render its scope without separator collisions. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
-| `nodehost.ExecutorDependencies.Log` | Delivers masked host diagnostics under the committed attempt after step/retry writes. Validation and fence refusals stop further author code. Persistence failures mark logs incomplete and alert the operator. Flushes run independently of acceptance, completion and reporting with bounded effort. |
+| `nodehost.ExecutorDependencies.Log` | Delivers masked host diagnostics under the committed attempt after step/retry writes. Synchronous masking, protocol and subject validation refusals stop further author code. Persistence failures, including asynchronous fence refusals, leave the result intact and alert the operator about incomplete logs. Flushes run independently of acceptance, completion and reporting with bounded effort. |
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
 | `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
 | `nodehost.DepcacheRecords`, `DepcacheRecords.Prepare` | Restore declared directories once and save cold successful caches after retries through the current storage binding. |
@@ -1133,7 +1133,10 @@ eval/controller leases. Step and work writes still require a node award.
 submission route. The controller derives a narrower source capability and C1
 rechecks it transactionally. Direct store hosts retain `OwnerDelegator`.
 The adapter uses the existing award and authenticated transport without another
-bearer route. Plan/eval log manifests close before acceptance retires their leases.
+bearer route. Native hosts register each log stream before opening its spool.
+Plan/eval closure runs independently of acceptance and may finish after lease
+retirement. If retry or reacquisition fences a late flush, the registered stream
+remains visible and maintenance seals it incomplete.
 
 `source.Options.PreparedCheckout` selects the host-owned init checkout. Acquisition
 verifies its origin, sealed commit, clean tracked files, absent untracked and
