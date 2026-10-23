@@ -1040,3 +1040,9 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-23 Korey decision 53: SDK support packages stay internal
 
 - Packages the Go SDK needs (error codes, limits, the plan protocol, the SDK server and small helpers) stay under internal/, where Go keeps customers from importing them. The depguard "SDK imports no internal packages" rule becomes "the SDK imports only these named internal leaf packages", an explicit list whose members may never import the controller, the store or other server packages. pkg/ is not widened: it remains the deliberate public API with VERSIONING.md's stability promise.
+
+## 2026-10-23 Korey decision 54: a restore does not sign anyone out by default
+
+- Amends decision 47. A normal restore (corruption, bad migration) keeps every session, token, runner credential and schedule consent valid. Revocations made between the restore point and the incident are recovered by hand: the operator searches the controller's audit log stream (outside the database) and re-applies them, per the vault runbook. Logging everyone out is too harsh a default for a rare event with a manual recovery.
+- `sparkwing-controller restore prepare --sign-out-everyone` keeps the credential-epoch bump as a deliberate switch for security incidents (stolen database, leaked keys).
+- Principle for future designs: when a rare event needs recovery, prefer a targeted manual step from logs over a blanket mechanism that degrades every customer.
