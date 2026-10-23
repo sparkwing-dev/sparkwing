@@ -54,17 +54,27 @@ func TestReadCredentialsTrimsTokensAndLeavesAbsentFilesOff(t *testing.T) {
 	}
 }
 
-func TestReadCredentialsRefusesEveryPresentEmptyCredential(t *testing.T) {
+func TestReadCredentialsRefusesPresentEmptyCredentials(t *testing.T) {
 	for _, name := range []string{
 		credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
-		credBootstrapAdminToken, credLicense, credGitHubClientSecret, credGoogleClientSecret,
-		credGitHubAppKey, credGitHubAppWebhookSecret, credGitHubAppPreviousHook, credCloudFrontKey,
+		credBootstrapAdminToken, credLicense, credGoogleClientSecret, credCloudFrontKey,
 		credBillingToken,
 	} {
 		for _, body := range []string{"", " \n\t"} {
 			_, err := readCredentials(credentialsDir(t, map[string]string{name: body}))
 			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "empty") {
 				t.Errorf("%s = %q: error = %v, want a refusal naming the file", name, body, err)
+			}
+		}
+	}
+}
+
+func TestReadCredentialsIsolatesGitHubErrors(t *testing.T) {
+	for _, name := range []string{credGitHubClientSecret, credGitHubAppKey, credGitHubAppWebhookSecret, credGitHubAppPreviousHook} {
+		for _, body := range []string{"", " \n\t"} {
+			c, err := readCredentials(credentialsDir(t, map[string]string{name: body, credBootstrapAdminToken: "admin"}))
+			if err != nil || c.BootstrapAdminToken != "admin" || c.GitHubError == nil || !strings.Contains(c.GitHubError.Error(), name) || !strings.Contains(c.GitHubError.Error(), "empty") {
+				t.Fatalf("%s = %q: GitHub error = %v, startup error = %v", name, body, c.GitHubError, err)
 			}
 		}
 	}

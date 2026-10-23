@@ -292,7 +292,7 @@ func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testi
 					rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_triggers`)
 				}
 			}
-			provider.listErr = githubapp.ErrTooManyRepositories
+			provider.listErr = errors.New("repository listing unavailable")
 			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
 			if provider.lists != 0 {
 				t.Errorf("enumerated repository coverage %d times", provider.lists)

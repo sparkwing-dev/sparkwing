@@ -3,11 +3,11 @@
 The Sparkwing GitHub App connects a team to the GitHub repositories it controls. An installation proves control: GitHub lets only an account's owner install an App on it, so a binding from an installation to a team is something a team member cannot claim for a repository they do not administer. With an installation bound, a team gets:
 
 - push, pull request, release and branch runs from the App's webhook, for the pipelines the team subscribes to each repository;
-- source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`, plus the repositories a team owner listed for it ([extra repositories](git-credentials.md#extra-repositories));
+- source for cloud runners through a short-lived installation token restricted to `contents: read` for the primary repository ID and the extra repository IDs a team owner approved ([extra repositories](git-credentials.md#extra-repositories));
 - automatic controller cron arming from `on.schedule` declarations with `where: controller` on a pushed default branch after a team admin enables repository automation;
 - a check run on the commit each of those runs builds, and a re-run when someone re-runs it from GitHub.
 
-A deployment runs one App. Its private key stays in the controller, which mints every token it needs and hands out only tokens restricted to a single repository.
+A deployment runs one App. Its private key stays in the controller, which mints every token it needs and hands out source tokens restricted to the approved repository-ID set.
 
 ## Operator configuration
 
@@ -27,7 +27,7 @@ With the `sparkwing-full` chart, the flags are `controller.github.appID`, `contr
 
 To rotate the webhook secret, keep the old one as `github-app-webhook-secret.previous`, put the new one in `github-app-webhook-secret`, restart, change the secret in the App's settings, then remove the previous one. Deliveries signed with either verify meanwhile. The controller never retires the previous secret on its own, so it stays valid until you delete the credential and restart. A delivery body may be up to 25 MiB, GitHub's own cap; a larger one is refused with HTTP 413. A delivery up to 1 MiB is verified in memory. A larger one spools to disk until its signature verifies, and at most four large deliveries spool at once; a fifth is answered with HTTP 503 and `Retry-After`. GitHub does not retry it, so redeliver it from the App's advanced settings.
 
-The controller refuses to start with some of the App settings and not the others. `GET /api/v1/capabilities` reports `github_app.slug` when the App is configured.
+The controller starts even when the App settings are incomplete, its private key is malformed, an App credential file is empty or unreadable, or GitHub OAuth credentials or redirect URIs are invalid. App features and GitHub sign-in stay unavailable until their configuration validates. App routes and App-driven work refuse with `GitHub App unavailable: <reason>`. `GET /api/v1/health` reports degraded health with that reason, and local `sparkwing doctor` reports the unavailable App. Fix the settings and restart the controller to enable it. Other authenticated controller features, including run intake and inherited child runs that do not need App authority, remain available. Webhook signature verification stays strict: unsigned deliveries and invalid signatures are rejected. `GET /api/v1/capabilities` reports `github_app.slug` when the App is available.
 
 ### GitHub App settings
 
@@ -165,17 +165,22 @@ Each run a delivery creates spends one of the team's hourly runs (`--max-runs-pe
 
 The hourly run budget uses store-wide counters shared by controller replicas.
 
-`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route mints directly against the approved repository IDs, so the listing limit does not limit source releases. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery fails while withdrawing only those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
+`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, so adding or removing a repository on GitHub takes effect on the next delivery. Repository listing reads every page, including installations covering more than 1,000 repositories. The full listing, including token minting, has a one-minute deadline. Repeated repository IDs or a listing that stops before GitHub's reported total fail explicitly. The source credential route mints directly against the approved repository IDs.
+
+If GitHub's repository listing fails during a repository-removal delivery, Sparkwing withdraws automation consent and schedules only for the positive repository IDs in `repositories_removed`. Unrelated repositories keep their schedules and consent. If no receipt exists and the payload names no repositories or contains an invalid ID, Sparkwing preserves them all and records the delivery as failed for the admin's Process again action. A successful listing reconciles current coverage, so a late removal for a repository GitHub lists as covered leaves its schedules active.
 
 Schedule publication captures the repository's publication generation and original
 consent before fetching source. Its transaction checks both, then replaces the
 schedule set, advances the generation and records the result together.
 Withdrawals and consent changes advance the generation too. A worker holding an
 older source snapshot cannot restore declarations after a newer publication or
-withdrawal. Installation-wide withdrawal records its original repository targets
-and aggregate result in the same transaction. Reprocessing that delivery cannot
+withdrawal. Installation listing reconciliation and named-repository fallback
+share one withdrawal receipt, which records the original repository targets and
+aggregate result in the same transaction. Reprocessing that delivery cannot
 withdraw schedules or consent added later, even if the installation listing
-changes between attempts. These checks live in the store and apply across workers.
+changes or fails between attempts. A receipt that preserved a re-added repository
+keeps it active during a later listing outage. These checks live in the store and
+apply across workers.
 Disconnecting the installation during source preparation revokes the pending
 admission and publication. It cannot start a run or change schedules.
 

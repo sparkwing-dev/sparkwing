@@ -1,8 +1,8 @@
 // Package githubapp is the controller's client for its GitHub App: it signs
-// the App's own JWT, reads installations, mints installation tokens
-// restricted to one repository, redeems a user's authorization code, and
-// verifies webhook signatures. The App's private key never leaves this
-// package; callers receive only the short-lived tokens it mints.
+// the App's own JWT, reads installations, mints installation tokens, redeems a
+// user's authorization code, and verifies webhook signatures. Source-release
+// tokens are restricted to approved repository IDs. The App's private key never
+// leaves this package; callers receive only the short-lived tokens it mints.
 package githubapp
 
 import (
@@ -66,10 +66,6 @@ var (
 	// permission the request needs, as when its owner has not yet accepted
 	// one the App added.
 	ErrPermissionMissing = errors.New("githubapp: the installation has not granted the permission")
-	// ErrTooManyRepositories means an installation covers more repositories
-	// than [Client.InstallationRepositories] lists, so the list it returns
-	// confirms the repositories it names and says nothing of the others.
-	ErrTooManyRepositories = errors.New("githubapp: the installation covers more repositories than can be listed")
 )
 
 type apiError struct {
@@ -448,33 +444,41 @@ func (c *Client) mintToken(ctx context.Context, installation int64, request map[
 	return tok, nil
 }
 
-const maxRepositoryPages = 10
-
 // InstallationRepositories lists the repositories installation covers with a
-// token that can read nothing but metadata. For an installation covering more
-// than 1000 it returns the first 1000 with [ErrTooManyRepositories].
+// token that can read nothing but metadata. It reads every page.
 func (c *Client) InstallationRepositories(ctx context.Context, installation int64) ([]Repository, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	permissions := map[string]string{"metadata": "read"}
 	tok, err := c.mintToken(ctx, installation, map[string]any{"permissions": permissions}, permissions)
 	if err != nil {
 		return nil, err
 	}
 	var out []Repository
-	for page := 1; page <= maxRepositoryPages; page++ {
+	seen := make(map[int64]bool)
+	for page := 1; ; page++ {
 		var resp struct {
-			TotalCount   int          `json:"total_count"`
 			Repositories []Repository `json:"repositories"`
+			TotalCount   int          `json:"total_count"`
 		}
 		path := "/installation/repositories?per_page=100&page=" + strconv.Itoa(page)
 		if err := c.getJSON(ctx, path, "token "+tok.Token, &resp); err != nil {
 			return nil, err
 		}
+		for _, repo := range resp.Repositories {
+			if repo.ID <= 0 || seen[repo.ID] {
+				return nil, fmt.Errorf("githubapp: repository listing page %d did not advance: invalid or repeated repository ID %d", page, repo.ID)
+			}
+			seen[repo.ID] = true
+		}
 		out = append(out, resp.Repositories...)
-		if len(resp.Repositories) < 100 || len(out) >= resp.TotalCount {
+		if len(resp.Repositories) < 100 {
+			if len(out) < resp.TotalCount {
+				return nil, fmt.Errorf("githubapp: repository listing stopped at page %d with %d of %d repositories", page, len(out), resp.TotalCount)
+			}
 			return out, nil
 		}
 	}
-	return out, fmt.Errorf("%w: installation %d", ErrTooManyRepositories, installation)
 }
 
 // RepositoryByID resolves the current name under an already restricted token.

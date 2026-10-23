@@ -67,7 +67,7 @@ func (s *Server) deliverRunEffect(ctx context.Context, tenant *store.Tenant, eff
 	}
 	if relevant {
 		if s.githubApp == nil {
-			return errors.New("GitHub App is unavailable for completion")
+			return s.githubAppUnavailable()
 		}
 		ctx, cancel := context.WithTimeout(ctx, githubStatusTimeout)
 		defer cancel()
