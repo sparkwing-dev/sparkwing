@@ -2,13 +2,20 @@ package controller
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
@@ -103,5 +110,152 @@ func TestRevocationPathsEmitIdentifyingAuditLines(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAuditRejectsCredentialRequestIDsAndUncommittedRunnerTargets(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "owner")
+	var logs bytes.Buffer
+	s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	s.deployment = deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)
+	for _, prefix := range capability.CredentialPrefixes() {
+		t.Run(prefix, func(t *testing.T) {
+			logs.Reset()
+			credential := prefix + strings.Repeat("x", 43)
+			req := httptest.NewRequest("DELETE", "https://controller.test/api/v1/runners/"+credential, nil)
+			req.Header.Set(RequestIDHeader, credential)
+			req.Header.Set("Origin", "https://controller.test")
+			req.Header.Set(csrfHeaderName, csrf)
+			req.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+			req.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("delete: %d %s", w.Code, w.Body)
+			}
+			if strings.Contains(logs.String(), credential) {
+				t.Fatal("credential leaked in audit output")
+			}
+			records := auditLines(t, &logs, "audit")
+			if len(records) != 1 || records[0]["machine_id"] != nil {
+				t.Fatalf("invented revocation: %v", records)
+			}
+			id := w.Header().Get(RequestIDHeader)
+			if id == credential || !validRequestID(id) || records[0]["request_id"] != id {
+				t.Fatalf("unsafe request ID: %q", id)
+			}
+		})
+	}
+}
+
+func TestSessionRevocationAuditIdentifiesOnlyTheEndedSession(t *testing.T) {
+	for _, flow := range []string{"logout", "login", "oauth", "other-account-login"} {
+		t.Run(flow, func(t *testing.T) {
+			s, prior, csrf := reviewAccount(t, "owner")
+			account, team := "member", store.Team("a")
+			if flow == "other-account-login" {
+				account, team = "other", "b"
+				engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
+				engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('other','other@example.test',1,1)`)
+				engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','other','owner',1)`)
+			}
+			next, _, _, err := s.operator.CreateAccountSession(t.Context(), store.Account{ID: account}, team, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			session, err := s.operator.LookupSession(t.Context(), next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs *bytes.Buffer
+			if flow == "logout" {
+				logs = new(bytes.Buffer)
+				s.logger = slog.New(slog.NewJSONHandler(logs, nil))
+				s.deployment = deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)
+				reviewSessionRequest(t, s, prior, csrf, "POST", "/api/v1/auth/logout", "", http.StatusNoContent)
+			} else {
+				handler, output := auditHarness(t, "/login", func(w http.ResponseWriter, r *http.Request) {
+					notePolicyPrincipal(r.Context(), capability.Principal{Capability: capability.Capability{Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: account}}})
+					var err error
+					if flow == "oauth" {
+						r = r.WithContext(context.WithValue(r.Context(), oauthProofKey{}, oauthProof{raw: next, session: session}))
+						err = s.handleOAuthCallback(w, r, capability.Authorized{})
+					} else {
+						r = r.WithContext(context.WithValue(r.Context(), loginProofKey{}, loginProof{raw: next, session: session}))
+						err = s.handleLoginSubmit(w, r, capability.Authorized{})
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+				})
+				logs = output
+				req := httptest.NewRequest("POST", "https://controller.test/login", nil)
+				req.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: prior})
+				handler.ServeHTTP(httptest.NewRecorder(), req)
+			}
+			records := auditLines(t, logs, "audit")
+			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(prior)))
+			if len(records) != 1 || records[0]["session_digest"] != digest || records[0]["revoked_account_id"] != "member" || records[0]["revoked_team"] != "a" {
+				t.Fatalf("unrecoverable session revocation: %v", records)
+			}
+			if _, err := s.operator.LookupSession(t.Context(), prior); err == nil {
+				t.Fatal("ended session still works")
+			}
+			if _, err := s.operator.LookupSession(t.Context(), next); err != nil {
+				t.Fatalf("other session ended: %v", err)
+			}
+			if strings.Contains(logs.String(), prior) || strings.Contains(logs.String(), next) {
+				t.Fatal("raw session logged")
+			}
+		})
+	}
+}
+
+func TestRunnerRevocationAuditFingerprintsCredentialShapedMachineNames(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "owner")
+	s.deployment = deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)
+	response := reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/tokens", `{"grants":["runs.read"]}`, http.StatusCreated)
+	var token credentialResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &token); err != nil {
+		t.Fatal(err)
+	}
+	response = reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/runners", fmt.Sprintf(`{"name":%q,"repos":["github.com/acme/*"]}`, token.Capability), http.StatusCreated)
+	var runner credentialResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &runner); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	reviewSessionRequest(t, s, raw, csrf, "DELETE", "/api/v1/runners/"+token.Capability, "", http.StatusOK)
+	records := auditLines(t, &logs, "audit")
+	digest := sha256.Sum256([]byte(token.Capability))
+	fingerprint := fmt.Sprintf("[credential:%x]", digest[:8])
+	if len(records) != 1 || records[0]["machine_id"] != fingerprint || records[0]["token_prefixes"] != runner.Prefix || records[0]["team"] != "a" {
+		t.Fatalf("unrecoverable runner revocation: %v", records)
+	}
+	if strings.Contains(logs.String(), token.Capability) || strings.Contains(logs.String(), runner.Capability) {
+		t.Fatal("credential leaked in audit")
+	}
+}
+
+func TestRejectedRevocationsDoNotLogCommittedTargets(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "owner")
+	var logs bytes.Buffer
+	s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	s.deployment = deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)
+	for _, target := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"DELETE", "/api/v1/tokens/swk_abcdefghijkl", "", http.StatusUnauthorized},
+		{"DELETE", "/api/v1/team/members/0123456789abcdef", "", http.StatusNotFound},
+		{"PATCH", "/api/v1/team/members/member", `{"role":"reader"}`, http.StatusConflict},
+	} {
+		logs.Reset()
+		reviewSessionRequest(t, s, raw, csrf, target.method, target.path, target.body, target.status)
+		records := auditLines(t, &logs, "audit")
+		if len(records) != 1 || records[0]["token_prefix"] != nil || records[0]["member_id"] != nil || records[0]["role"] != nil {
+			t.Fatalf("uncommitted revocation target logged: %v", records)
+		}
 	}
 }

@@ -169,9 +169,12 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 			return
 		}
 	}
-	if err := s.operator.DeleteSession(prior); err != nil {
+	revoked, err := s.operator.DeleteSession(prior)
+	if err != nil {
 		s.logger.Warn("sign-in could not end the browser's earlier session", "err", err)
+		return
 	}
+	noteSessionRevocation(r.Context(), revoked)
 }
 
 const maxFormBody = 64 << 10

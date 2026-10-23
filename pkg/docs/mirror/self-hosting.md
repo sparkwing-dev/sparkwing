@@ -180,7 +180,9 @@ Declared restore preparation holds schedules until operator acknowledgment and
 cancels restored unfinished scheduled runs. A normal restore keeps sessions,
 tokens, runner credentials and schedule consent valid. Keep the controller's
 audit log stream outside the database so revocations, member removals and
-demotions since the backup can be reapplied by identifier and team.
+demotions since the backup can be reapplied by identifier and team. Session
+logout and replacement lines include the revoked session digest, account and
+team, independently of the account signing in.
 Use `restore prepare --sign-out-everyone` for security incidents such as a stolen
 database or leaked keys. It rotates the epoch, invalidates earlier credentials
 and API/local schedule consent, and requires a fresh `bootstrap-admin-token`

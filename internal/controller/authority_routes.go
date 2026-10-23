@@ -101,6 +101,7 @@ func (s *EngineController) handleRevokeAuthority(w http.ResponseWriter, r *http.
 	if err := revoker.RevokeAuthority(r.Context(), authorityActor(a), target); err != nil {
 		return authorityMutationError(err)
 	}
+	noteAuditTarget(r.Context(), "token_prefix", target.ID)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -118,7 +119,6 @@ func (s *EngineController) handleUpdateMembership(w http.ResponseWriter, r *http
 		if !body.Role.Valid() {
 			return invalidEngineBody("role must be owner, editor, or reader")
 		}
-		noteAuditTarget(r.Context(), "role", string(body.Role))
 		change.Role = &body.Role
 	}
 	tenant, err := s.runTransactions(r.Context(), a.Target.Team)
@@ -127,6 +127,10 @@ func (s *EngineController) handleUpdateMembership(w http.ResponseWriter, r *http
 	}
 	if err := tenant.UpdateMembership(r.Context(), authorityActor(a), change); err != nil {
 		return authorityMutationError(err)
+	}
+	noteAuditTarget(r.Context(), "member_id", change.AccountID)
+	if change.Role != nil {
+		noteAuditTarget(r.Context(), "role", string(*change.Role))
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil

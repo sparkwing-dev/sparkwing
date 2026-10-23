@@ -50,7 +50,7 @@ func TestLocalServerAcceptsBearerWithSessionAncestry(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("local session presentation: %d %s", w.Code, w.Body)
 	}
-	if err := s.store.AsOperator().DeleteSession(raw); err != nil {
+	if _, err := s.store.AsOperator().DeleteSession(raw); err != nil {
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, issued.Raw, "GET", "/api/v1/runs/run/jobs", "", http.StatusUnauthorized)

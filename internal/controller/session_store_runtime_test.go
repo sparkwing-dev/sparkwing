@@ -128,7 +128,7 @@ func TestMemberTokenHTTPSessionTimeoutAndLogout(t *testing.T) {
 				for _, issued := range []capability.Issued{token, child} {
 					engineClaimHTTP(t, handler, issued.Raw, "GET", "/api/v1/runs/run/jobs", "", http.StatusOK)
 				}
-				if err := s.AsOperator().DeleteSession(raw); err != nil {
+				if _, err := s.AsOperator().DeleteSession(raw); err != nil {
 					t.Fatal(err)
 				}
 			}

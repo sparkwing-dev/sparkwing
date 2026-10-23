@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
@@ -113,12 +114,15 @@ func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return engineLookupError(err)
 	}
-	deleted, err := tenant.DeleteRunner(r.Context(), engineActor(a), name)
+	revoked, err := tenant.DeleteRunner(r.Context(), engineActor(a), name)
 	if err != nil {
 		return engineLookupError(err)
 	}
-	noteAuditTarget(r.Context(), "machine_id", name)
-	writeJSON(w, http.StatusOK, map[string]any{"runner": name, "deleted": deleted})
+	if revoked != nil {
+		noteAuditTarget(r.Context(), "machine_id", revoked.MachineID)
+		noteAuditTarget(r.Context(), "token_prefixes", strings.Join(revoked.TokenPrefixes, ","))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runner": name, "deleted": revoked != nil})
 	return nil
 }
 

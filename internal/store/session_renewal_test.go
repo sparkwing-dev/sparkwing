@@ -32,7 +32,7 @@ func TestSessionRenewalKeepsLaterExpiryAndRefusesDeletedRow(t *testing.T) {
 	if !older.ExpiresAt.Equal(newer.ExpiresAt) || !older.LastUsedAt.Equal(*newer.LastUsedAt) {
 		t.Fatalf("out-of-order use moved session: %+v -> %+v", newer, older)
 	}
-	if err := s.AsOperator().DeleteSession(raw); err != nil {
+	if _, err := s.AsOperator().DeleteSession(raw); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AsOperator().LookupSessionAndRenew(t.Context(), raw, 7*24*time.Hour, 30*24*time.Hour); err == nil {

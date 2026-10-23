@@ -138,12 +138,16 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 	if !ok || proof.session == nil {
 		return missingEndpointPolicy()
 	}
-	if err := s.operator.DeleteSession(proof.session.ID); err != nil {
+	revoked, err := s.operator.DeleteSession(proof.session.ID)
+	if err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
-	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
-		Team: string(proof.session.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: proof.session.AccountID},
-	}})
+	if revoked != nil {
+		notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
+			Team: string(revoked.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: revoked.AccountID},
+		}})
+		noteSessionRevocation(r.Context(), revoked)
+	}
 	clearSessionCookies(w, s.cookiesSecure())
 	return nil
 }
@@ -157,4 +161,13 @@ func sessionFlowError(err error) error {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	return sessionUnavailable()
+}
+
+func noteSessionRevocation(ctx context.Context, revoked *store.SessionRevocation) {
+	if revoked == nil {
+		return
+	}
+	noteAuditTarget(ctx, "session_digest", revoked.Digest)
+	noteAuditTarget(ctx, "revoked_account_id", revoked.AccountID)
+	noteAuditTarget(ctx, "revoked_team", string(revoked.Team))
 }

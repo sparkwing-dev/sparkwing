@@ -154,6 +154,7 @@ func (s *Server) handleRotateCapability(w http.ResponseWriter, r *http.Request, 
 	if !validCapabilityRotation(a, rotation) {
 		return errors.New("invalid credential rotation")
 	}
+	noteAuditTarget(r.Context(), "token_prefix", rotation.Previous.Prefix)
 	c := rotation.Issued.Capability
 	writeJSON(w, http.StatusOK, capabilityRotationResponse{
 		Capability: rotation.Issued.Raw, OldPrefix: rotation.Previous.Prefix, OldRevokedAt: rotation.RevokesAt,

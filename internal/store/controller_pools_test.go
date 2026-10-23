@@ -69,7 +69,7 @@ func TestRunnerDeletionRevokesOnlyTheSelectedTeamAndIdentity(t *testing.T) {
 		authorityPersist(t, s, root)
 	}
 	deleted, err := tenant.DeleteRunner(t.Context(), actor, "runner")
-	if err != nil || !deleted {
+	if err != nil || deleted == nil || deleted.MachineID != "runner" {
 		t.Fatalf("deleted=%v: %v", deleted, err)
 	}
 	for _, prefix := range []string{"b-root", "other-root"} {

@@ -210,7 +210,7 @@ func TestSessionFlowHTTPRenewalCeilingProperty(t *testing.T) {
 	const maximum = 48 * time.Hour
 	h := f.server.WithSessionMaxLifetime(maximum).Handler()
 	property := func(age uint8) bool {
-		if err := f.store.AsOperator().DeleteSession(f.raw); err != nil {
+		if _, err := f.store.AsOperator().DeleteSession(f.raw); err != nil {
 			t.Fatal(err)
 		}
 		raw, csrf, session, err := f.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)

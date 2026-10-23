@@ -884,8 +884,10 @@ A normal database restore keeps sessions, API tokens, runner and machine
 credentials, and API/local schedule consent valid. Recover revocations, member
 removals and demotions since the backup from the controller's audit log stream,
 kept outside the database. Its revocation lines identify token prefixes,
-accounts, machines or GitHub repository IDs and the team; no bearer or session
-secret is logged. Follow the operator runbook kept outside this repository.
+accounts, machines or GitHub repository IDs and the team. Session logout and
+replacement identify the ended session by `session_digest`, `revoked_account_id`
+and `revoked_team`, including when the browser signs in as another account.
+No bearer or session secret is logged. Follow the operator runbook kept outside this repository.
 
 For a stolen database, leaked keys or another security incident,
 `sparkwing-controller restore prepare --sign-out-everyone` rotates the external

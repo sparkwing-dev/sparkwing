@@ -113,3 +113,35 @@ func TestClientClassNeverCarriesTheRawUserAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditFormatsEveryFieldBeforeClipping(t *testing.T) {
+	for _, prefix := range capability.CredentialPrefixes() {
+		credential := prefix + strings.Repeat("x", 43)
+		value := strings.Repeat("a", 110) + credential
+		h, logs := auditHarness(t, value, func(w http.ResponseWriter, r *http.Request) {
+			notePolicyPrincipal(r.Context(), capability.Principal{Capability: capability.Capability{Team: value, Subject: capability.Subject{Kind: capability.SubjectKind(value), ID: value}}})
+			noteAuditTarget(r.Context(), "machine_id", value)
+			w.WriteHeader(http.StatusOK)
+		})
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("DELETE", "/", nil))
+		records := auditLines(t, logs, "audit")
+		for _, key := range []string{"route", "principal_kind", "principal_id", "team", "machine_id"} {
+			got, _ := records[0][key].(string)
+			if strings.Contains(got, prefix+"x") || !strings.Contains(got, "[credential:") {
+				t.Errorf("%s contains unsanitized credential: %q", key, got)
+			}
+		}
+	}
+}
+
+func TestRequestIDUsesBoundedSafeCorrelationValues(t *testing.T) {
+	for _, id := range []string{"trace-1_A.b", strings.Repeat("a", 64), "", "bad id", "bad\nline", strings.Repeat("a", 65)} {
+		req := httptest.NewRequest("POST", "/", nil)
+		req.Header.Set(RequestIDHeader, id)
+		got := requestID(req)
+		wantKept := id == "trace-1_A.b" || id == strings.Repeat("a", 64)
+		if !validRequestID(got) || (got == id) != wantKept {
+			t.Errorf("request ID %q became %q", id, got)
+		}
+	}
+}

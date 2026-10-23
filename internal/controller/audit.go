@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 )
 
 // RequestIDHeader carries a request's correlation id. A caller's value is
-// kept when it is a short token and replaced otherwise, and every response
+// kept when it is a short safe correlation value and replaced otherwise. Every response
 // echoes the one the request was logged under.
 const RequestIDHeader = "X-Request-Id"
 
@@ -39,22 +40,15 @@ type auditTarget struct {
 }
 
 var (
-	memberTarget     = auditTarget{"member_id", opaqueID}
 	invitationTarget = auditTarget{"invitation_id", opaqueID}
 	tokenTarget      = auditTarget{"token_prefix", tokenPrefixTarget}
 )
 
-// safety: an identity route names its target so an investigation can follow one member, invitation or token. The path
-// is the caller's text, which can be a whole bearer pasted in place of a prefix, so each value passes its shape check
-// first: a token keeps only the prefix the store keys on, and an id must look like one the store mints.
+// safety: invitation and metering paths keep only shaped public identifiers.
+// Revocation targets come from successful store mutations instead of paths.
 var auditTargetIDs = map[string]map[string]auditTarget{
-	"/api/v1/team/members/{account}":            {"account": memberTarget},
 	"/api/v1/team/invitations/{id}":             {"id": invitationTarget},
 	"/api/v1/invitations/{id}/accept":           {"id": invitationTarget},
-	"/api/v1/tokens/{token}":                    {"token": tokenTarget},
-	"/api/v1/operator/tokens/{token}":           {"token": tokenTarget},
-	"/api/v1/tokens/{token}/rotate":             {"token": tokenTarget},
-	"/api/v1/operator/tokens/{token}/rotate":    {"token": tokenTarget},
 	"/api/v1/operator/runners/{runner}/metered": {"runner": tokenTarget},
 }
 
@@ -100,7 +94,7 @@ func withAuditRecord(ctx context.Context, id, route string) (context.Context, *a
 func notePolicyPrincipal(ctx context.Context, p capability.Principal) {
 	observeRequestPrincipal(string(p.Capability.Subject.Kind))
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
-		rec.principalID, rec.kind, rec.team = clip(p.Capability.Subject.ID), string(p.Capability.Subject.Kind), p.Capability.Team
+		rec.principalID, rec.kind, rec.team = p.Capability.Subject.ID, string(p.Capability.Subject.Kind), p.Capability.Team
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: clip(p.Capability.Subject.ID)})
 }
@@ -113,10 +107,10 @@ func noteAuditWrite(ctx context.Context) {
 	}
 }
 
-// safety: callers pass identifiers read back from a stored row or checked against a closed set, never request text.
+// safety: mutation handlers record revocation targets only after the store commits; the writer sanitizes every field.
 func noteAuditTarget(ctx context.Context, key, value string) {
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && value != "" {
-		rec.targets = append(rec.targets, key, clip(value))
+		rec.targets = append(rec.targets, key, value)
 	}
 }
 
@@ -125,9 +119,9 @@ func noteAuditTarget(ctx context.Context, key, value string) {
 func requestLogAttrs(r *http.Request) []any {
 	rec, ok := r.Context().Value(auditCtxKey{}).(*auditRecord)
 	if !ok {
-		return []any{"method", r.Method, "route", otherLabel}
+		return safeAuditAttrs([]any{"method", r.Method, "route", otherLabel})
 	}
-	return []any{"request_id", rec.id, "method", r.Method, "route", rec.route}
+	return safeAuditAttrs([]any{"request_id", rec.id, "method", r.Method, "route", rec.route})
 }
 
 var sparkwingAgent = regexp.MustCompile(`^(sparkwing-[a-z]{1,24})(?:/(v?[0-9][0-9A-Za-z.+-]{0,31}))?(?:[ ;(]|$)`)
@@ -162,7 +156,7 @@ func requestID(r *http.Request) string {
 }
 
 func validRequestID(id string) bool {
-	if id == "" || len(id) > maxRequestIDLen {
+	if id == "" || len(id) > maxRequestIDLen || pathCredential.MatchString(id) {
 		return false
 	}
 	for _, c := range id {
@@ -191,7 +185,7 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	}
 	if readOnlyMethod(r.Method) && !denied && !rec.write && !auditedRead(rec.route) {
 		attrs := []any{"request_id", rec.id, "method", r.Method, "route", rec.route, "status", status, "dur_ms", elapsed.Milliseconds()}
-		logger.InfoContext(ctx, "http", append(attrs, pathAttrs...)...)
+		logger.InfoContext(ctx, "http", safeAuditAttrs(append(attrs, pathAttrs...))...)
 		return
 	}
 	attrs := []any{
@@ -205,7 +199,28 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
 	attrs = append(attrs, rec.targets...)
 	attrs = append(attrs, pathAttrs...)
-	logger.InfoContext(ctx, "audit", attrs...)
+	logger.InfoContext(ctx, "audit", safeAuditAttrs(attrs)...)
+}
+
+// safety: formatting happens before clipping so a long field cannot expose a truncated credential.
+func safeAuditAttrs(attrs []any) []any {
+	for i, attr := range attrs {
+		if value, ok := attr.(string); ok {
+			attrs[i] = formatAuditValue(value)
+		}
+	}
+	return attrs
+}
+
+func formatAuditValue(value string) string {
+	return clip(pathCredential.ReplaceAllStringFunc(value, func(credential string) string {
+		// A stored capability prefix is a public identifier, not a bearer.
+		if len(credential) == 16 {
+			return credential
+		}
+		digest := sha256.Sum256([]byte(credential))
+		return "[credential:" + hex.EncodeToString(digest[:8]) + "]"
+	}))
 }
 
 var pathCredential = regexp.MustCompile(`(?:` + strings.Join(capability.CredentialPrefixes(), "|") + `)[A-Za-z0-9_-]+`)
@@ -251,7 +266,7 @@ func auditPathAttrs(route, path string) []any {
 		}
 		name = strings.TrimSuffix(name, "}")
 		key := auditPathIDs[name]
-		keep := clip
+		keep := func(value string) string { return value }
 		if target, ok := auditTargetIDs[route][name]; ok {
 			key, keep = target.key, target.keep
 		}

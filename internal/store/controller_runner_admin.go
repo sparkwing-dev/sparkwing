@@ -20,21 +20,37 @@ func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, acto
 	return p, nil
 }
 
+// RunnerRevocation identifies the machine whose roots were revoked by a committed transaction.
+type RunnerRevocation struct {
+	MachineID     string
+	TokenPrefixes []string
+}
+
 // DeleteRunner revokes every root registered under this tenant's machine identity.
-func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bool, error) {
+func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (*RunnerRevocation, error) {
 	if name == "" {
-		return false, authorityError(apierr.BadRequest, "runner name is required")
+		return nil, authorityError(apierr.BadRequest, "runner name is required")
 	}
-	var found bool
+	var revoked *RunnerRevocation
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		revoked = nil
 		var prefixes []string
+		var machineID string
 		if err := acquireLockSet(ctx, tx, func() lockSet {
-			rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL ORDER BY prefix`, t.team, name)
+			prefixes = nil
+			rows, err := tx.QueryContext(ctx, `SELECT prefix,subject_id FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL ORDER BY prefix`, t.team, name)
 			if err != nil {
 				return lockSet{err: err}
 			}
-			prefixes, err = scanPrefixes(rows)
-			if err != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var prefix string
+				if err := rows.Scan(&prefix, &machineID); err != nil {
+					return lockSet{err: err}
+				}
+				prefixes = append(prefixes, prefix)
+			}
+			if err := rows.Err(); err != nil {
 				return lockSet{err: err}
 			}
 			leaves := []capability.AuthorityRef{actor.Authority}
@@ -55,8 +71,13 @@ func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bo
 				return err
 			}
 		}
-		found = len(prefixes) > 0
+		if len(prefixes) > 0 {
+			revoked = &RunnerRevocation{MachineID: machineID, TokenPrefixes: prefixes}
+		}
 		return nil
 	})
-	return found, err
+	if err != nil {
+		return nil, err
+	}
+	return revoked, nil
 }

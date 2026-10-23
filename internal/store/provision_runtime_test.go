@@ -127,7 +127,7 @@ func TestProvisionedMemberTokenOutlivesSessionTimeoutAndDiesOnLogout(t *testing.
 					t.Fatalf("authentication shortened reported expiry: %+v, %v", principal, err)
 				}
 			}
-			if err := s.AsOperator().DeleteSession(raw); err != nil {
+			if _, err := s.AsOperator().DeleteSession(raw); err != nil {
 				t.Fatal(err)
 			}
 			for _, issued := range []capability.Issued{token, child} {
